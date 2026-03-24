@@ -13,7 +13,10 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.sequencing.{GrpcInternalSequencerConnectionX, SequencerSubscriptionX}
+import com.digitalasset.canton.sequencing.{
+  GrpcInternalSequencerConnectionX,
+  SequencerSubscriptionXImpl,
+}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
 
@@ -23,7 +26,6 @@ sealed trait SubscriptionExpirationIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.setConnectionPool(true),
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.publicApi.maxTokenExpirationInterval)
             .replace(config.NonNegativeFiniteDuration.ofSeconds(2))
@@ -61,7 +63,7 @@ sealed trait SubscriptionExpirationIntegrationTest
         loggerFactory.assertLogsSeq(
           SuppressionRule.LevelAndAbove(INFO) &&
             (SuppressionRule.forLogger[GrpcInternalSequencerConnectionX] ||
-              SuppressionRule.forLogger[SequencerSubscriptionX[?]])
+              SuppressionRule.forLogger[SequencerSubscriptionXImpl[?]])
         )(
           eventually() {
             Threading.sleep(500)

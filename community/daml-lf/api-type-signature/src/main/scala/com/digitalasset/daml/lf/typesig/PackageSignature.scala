@@ -3,20 +3,26 @@
 
 package com.digitalasset.daml.lf.typesig
 
-import java.{util => j}
+import com.digitalasset.daml.lf.archive.{ArchivePayload, DamlLf}
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, PackageName, PackageVersion, QualifiedName}
-import reader.Errors
-import com.digitalasset.daml.lf.archive.DamlLf
-import com.digitalasset.daml.lf.archive.ArchivePayload
-import scalaz.std.either._
-import scalaz.std.tuple._
-import scalaz.syntax.bifunctor._
-import scalaz.syntax.std.boolean._
+import com.digitalasset.daml.lf.data.Ref.{
+  Identifier,
+  PackageId,
+  PackageName,
+  PackageVersion,
+  QualifiedName,
+}
+import scalaz.std.either.*
+import scalaz.std.tuple.*
+import scalaz.syntax.bifunctor.*
+import scalaz.syntax.std.boolean.*
 
+import java.util as j
 import scala.collection.immutable.{Map, SeqOps}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
+
+import reader.Errors
 
 // Duplicate of the one in com.digitalasset.daml.lf.language to separate Ast and Iface
 final case class PackageMetadata(
@@ -24,10 +30,10 @@ final case class PackageMetadata(
     version: PackageVersion,
 )
 
-/** The interface of a single DALF archive.  Not expressive enough to
-  * represent a whole dar, as a dar can contain multiple DALF archives
-  * with separate package IDs and overlapping [[com.digitalasset.daml.lf.data.Ref.QualifiedName]]s; for a
-  * dar use [[EnvironmentSignature]] instead.
+/** The interface of a single DALF archive. Not expressive enough to represent a whole dar, as a dar
+  * can contain multiple DALF archives with separate package IDs and overlapping
+  * [[com.digitalasset.daml.lf.data.Ref.QualifiedName]]s; for a dar use [[EnvironmentSignature]]
+  * instead.
   */
 final case class PackageSignature(
     packageId: PackageId,
@@ -73,8 +79,8 @@ final case class PackageSignature(
     })
   }
 
-  /** Like [[EnvironmentSignature#resolveChoices]], but permits incremental
-    * resolution of newly-loaded interfaces, such as json-api does.
+  /** Like [[EnvironmentSignature#resolveChoices]], but permits incremental resolution of
+    * newly-loaded interfaces, such as json-api does.
     *
     * {{{
     *  // suppose
@@ -92,20 +98,19 @@ final case class PackageSignature(
       findInterface: PartialFunction[Ref.TypeConId, DefInterface.FWT]
   ): PackageSignature = resolveChoices(findInterface, failIfUnresolvedChoicesLeft = true)
 
-  /** Like resolveChoicesAndFailOnUnresolvableChoices, but simply discard
-    * unresolved choices from the structure.  Not wise to use on a receiver
-    * without a complete environment provided as the argument.
+  /** Like resolveChoicesAndFailOnUnresolvableChoices, but simply discard unresolved choices from
+    * the structure. Not wise to use on a receiver without a complete environment provided as the
+    * argument.
     */
   def resolveChoicesAndIgnoreUnresolvedChoices(
       findInterface: PartialFunction[Ref.TypeConId, DefInterface.FWT]
   ): PackageSignature = resolveChoices(findInterface, failIfUnresolvedChoicesLeft = false)
 
-  /** Update internal templates, as well as external templates via `setTemplates`,
-    * with retroactive interface implementations. Note retroactive interfaces are
-    * available only on LF 1.x
+  /** Update internal templates, as well as external templates via `setTemplates`, with retroactive
+    * interface implementations. Note retroactive interfaces are available only on LF 1.x
     *
-    * @param setTemplate Used to look up templates that can't be found in this
-    *                    interface
+    * @param setTemplate
+    *   Used to look up templates that can't be found in this interface
     */
   private def resolveRetroImplements[S](
       s: S
@@ -140,8 +145,8 @@ final case class PackageSignature(
 }
 
 object PackageSignature {
-  import Errors._
-  import reader.SignatureReader._
+  import Errors.*
+  import reader.SignatureReader.*
 
   sealed abstract class TypeDecl extends Product with Serializable {
     def `type`: DefDataType.FWT
@@ -154,14 +159,10 @@ object PackageSignature {
 
     /** Alias for `type`. */
     def getType: DefDataType.FWT = `type`
-    def getTemplate: j.Optional[_ <: DefTemplate.FWT] =
+    def getTemplate: j.Optional[? <: DefTemplate.FWT] =
       fold(
-        { _ =>
-          j.Optional.empty()
-        },
-        { (_, tpl) =>
-          j.Optional.of(tpl)
-        },
+        _ => j.Optional.empty(),
+        (_, tpl) => j.Optional.of(tpl),
       )
 
     private[typesig] def asInterfaceViewType: Option[DefInterface.ViewTypeFWT] = this match {
@@ -211,9 +212,9 @@ object PackageSignature {
     go
   }
 
-  /** Extend the set of interfaces represented by `s` and `findPackage` with
-    * `newSignatures`.  Produce the resulting `S` and a replacement copy of
-    * `newSignatures` with templates and interfaces therein resolved.
+  /** Extend the set of interfaces represented by `s` and `findPackage` with `newSignatures`.
+    * Produce the resulting `S` and a replacement copy of `newSignatures` with templates and
+    * interfaces therein resolved.
     *
     * Does not search members of `s` for fresh interfaces.
     */
@@ -242,8 +243,8 @@ object PackageSignature {
     }
   }
 
-  /** An argument for [[EnvironmentSignature#resolveChoices]] given a package database,
-    * such as json-api's `LedgerReader.PackageStore`.
+  /** An argument for [[EnvironmentSignature#resolveChoices]] given a package database, such as
+    * json-api's `LedgerReader.PackageStore`.
     */
   def findInterface(
       findPackage: PartialFunction[PackageId, PackageSignature]
@@ -253,9 +254,9 @@ object PackageSignature {
     Function unlift go
   }
 
-  /** Given a database of interfaces, return a function that will match a
-    * [[DefInterface#viewType]] with its record definition if present.
-    * The function will not match if the definition is missing or is not a record.
+  /** Given a database of interfaces, return a function that will match a [[DefInterface#viewType]]
+    * with its record definition if present. The function will not match if the definition is
+    * missing or is not a record.
     */
   def resolveInterfaceViewType(
       findPackage: PartialFunction[PackageId, PackageSignature]

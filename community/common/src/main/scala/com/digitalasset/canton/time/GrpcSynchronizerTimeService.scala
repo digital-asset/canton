@@ -24,8 +24,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param lookupTimeTracker
   *   Lookup the time tracker
   * @tparam SId
-  *   Participant nodes can serve requests for LSId and PSId but synchronizer nodes only serve
-  *   requests for PSId.
+  *   Participant nodes can serve requests for Lsid and Psid but synchronizer nodes only serve
+  *   requests for Psid.
   */
 private[time] class GrpcSynchronizerTimeService(
     lookupTimeTracker: Option[Synchronizer] => Either[String, SynchronizerTimeTracker],
@@ -159,10 +159,10 @@ object GrpcSynchronizerTimeService {
   ): GrpcSynchronizerTimeService =
     new GrpcSynchronizerTimeService(
       // allow none or the actual synchronizerId to return the time tracker
-      requestPSIdO =>
+      requestPsidO =>
         for {
           _ <- Either.cond(
-            requestPSIdO.forall(_.isCompatibleWith(psid)),
+            requestPsidO.forall(_.isCompatibleWith(psid)),
             (),
             "Provided synchronizer id does not match running synchronizer",
           )

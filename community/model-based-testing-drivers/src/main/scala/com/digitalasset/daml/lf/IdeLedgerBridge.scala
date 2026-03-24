@@ -3,13 +3,13 @@
 
 package com.digitalasset.daml.lf
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.preprocessing.CommandPreprocessor
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.script.{IdeLedger, IdeLedgerRunner}
-import com.digitalasset.daml.lf.speedy.Compiler
+import com.digitalasset.daml.lf.speedy.{Compiler, MachineLogger}
 import com.digitalasset.daml.lf.transaction.FatContractInstance
 
 /** Minimal bridge to access private[lf] APIs from the model-based-testing module.
@@ -64,7 +64,7 @@ object IdeLedgerBridge {
       apiCommands: ImmArray[ApiCommand],
       seed: crypto.Hash,
       disclosures: Iterable[FatContractInstance] = Iterable.empty,
-  )(implicit loggingContext: LoggingContext): SubmitResult = {
+  )(implicit loggingContext: NamedLoggingContext): SubmitResult = {
     val compiledPackages = handle.compiledPackages
     val preprocessor = new CommandPreprocessor(
       pkgInterface = compiledPackages.pkgInterface,
@@ -83,6 +83,7 @@ object IdeLedgerBridge {
       commands = sexpr,
       location = None,
       seed = seed,
+      machineLogger = MachineLogger(),
     )
 
     result.resolve() match {

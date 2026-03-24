@@ -10,6 +10,7 @@ import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.db.{
   DbLogicalSyncPersistentState,
   DbPhysicalSyncPersistentState,
@@ -46,6 +47,8 @@ class SyncPersistentState(
   override def acsInspection: AcsInspection = logical.acsInspection
   override def acsCommitmentStore: AcsCommitmentStore = logical.acsCommitmentStore
   override def reassignmentStore: ReassignmentStore = logical.reassignmentStore
+  override def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
+    logical.pendingOnboardingClearanceStore
 
   override def pureCryptoApi: CryptoPureApi = physical.pureCryptoApi
 
@@ -82,6 +85,7 @@ trait LogicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def acsInspection: AcsInspection
   def acsCommitmentStore: AcsCommitmentStore
   def reassignmentStore: ReassignmentStore
+  def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore
 
 }
 

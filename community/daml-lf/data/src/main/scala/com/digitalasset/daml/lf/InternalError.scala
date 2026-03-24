@@ -6,8 +6,7 @@ package com.digitalasset.daml.lf
 import org.slf4j.LoggerFactory
 
 private[lf] object InternalError {
-  private[this] val logger = LoggerFactory.getLogger("com.digitalasset.daml.lf")
-
+  private val logger = LoggerFactory.getLogger("com.digitalasset.daml.lf")
   def log(location: String, message: String, cause: Option[Throwable] = None): Unit = {
     logger.error(s"LF internal error in $location: $message")
     cause.foreach(err => logger.error(s"root cause: ${err.getMessage}", err))
@@ -38,5 +37,6 @@ trait InternalError {
   def message: String
   def cause: Option[Throwable]
 
-  InternalError.log(location, message, cause)
+  protected def logError(): Unit = InternalError.log(location, message, cause)
+  logError()
 }

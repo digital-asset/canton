@@ -233,7 +233,7 @@ object RepairServiceError extends RepairServiceErrorGroup {
         id = "MANUAL_LOGICAL_SYNCHRONIZER_UPGRADE_ERROR",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Error(successorPSId: PhysicalSynchronizerId, reason: String)(implicit
+    final case class Error(successorPsid: PhysicalSynchronizerId, reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = reason)
         with RepairServiceError

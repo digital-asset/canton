@@ -149,9 +149,7 @@ final case object SequencersOfSynchronizer extends GroupRecipient {
 final case class MediatorGroupRecipient(group: MediatorGroupIndex) extends GroupRecipient {
 
   override protected def pretty: Pretty[MediatorGroupRecipient] =
-    prettyOfClass(
-      param("group", _.group)
-    )
+    prettyOfClass(param("group", _.group))
 
   override def code: GroupRecipientCode = MediatorGroupRecipient.Code
 

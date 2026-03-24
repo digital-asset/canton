@@ -5,7 +5,7 @@ package com.digitalasset.canton.testing.modelbased.runner
 
 import cats.implicits.toTraverseOps
 import cats.instances.all.*
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.conversions.ConcreteToCommands
 import com.digitalasset.canton.testing.modelbased.conversions.ConcreteToCommands.*
@@ -15,6 +15,7 @@ import com.digitalasset.canton.testing.modelbased.runner.InterpretationErrors.{
   SubmitFailure,
   TranslationError,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.IdeLedgerBridge
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
@@ -37,10 +38,10 @@ object ReferenceInterpreter {
   }
 
   /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath. */
-  def apply()(implicit loggingContext: LoggingContext): ReferenceInterpreter = {
+  def apply(loggerFactory: NamedLoggerFactory): ReferenceInterpreter = {
     val url = getClass.getClassLoader.getResource("universal.dar")
     require(url != null, s"universal.dar not found on the classpath")
-    new ReferenceInterpreter(new File(url.toURI))
+    new ReferenceInterpreter(new File(url.toURI), loggerFactory)
   }
 }
 
@@ -49,7 +50,8 @@ object ReferenceInterpreter {
   * On initialization, loads the universal DAR and compiles it. The main entry point is
   * [[runAndProject]].
   */
-class ReferenceInterpreter(darFile: File)(implicit loggingContext: LoggingContext) {
+class ReferenceInterpreter(darFile: File, override val loggerFactory: NamedLoggerFactory)
+    extends NamedLogging {
   import ReferenceInterpreter.*
 
   // -- DAR loading and compilation --
@@ -79,7 +81,7 @@ class ReferenceInterpreter(darFile: File)(implicit loggingContext: LoggingContex
       readAs: Set[Ref.Party],
       commands: ImmArray[ApiCommand],
       disclosures: Iterable[FatContractInstance],
-  ): Either[String, (LedgerState, IdeLedger.CommitResult)] =
+  )(implicit traceContext: TraceContext): Either[String, (LedgerState, IdeLedger.CommitResult)] =
     IdeLedgerBridge.submitApiCommands(
       handle = compiledPackagesHandle,
       ledger = state.ledger,
@@ -133,6 +135,8 @@ class ReferenceInterpreter(darFile: File)(implicit loggingContext: LoggingContex
       partyIdMapping: PartyIdMapping,
       contractIdMapping: ContractIdMapping,
       commands: Concrete.Commands,
+  )(implicit
+      traceContext: TraceContext
   ): Either[InterpreterError, (LedgerState, ContractIdMapping)] =
     for {
       apiCommands <- commands.commands
@@ -178,6 +182,8 @@ class ReferenceInterpreter(darFile: File)(implicit loggingContext: LoggingContex
       partyIdMapping: PartyIdMapping,
       contractIdMapping: ContractIdMapping,
       commandsList: List[Concrete.Commands],
+  )(implicit
+      traceContext: TraceContext
   ): Either[InterpreterError, (LedgerState, ContractIdMapping)] =
     commandsList match {
       case Nil => Right((state, contractIdMapping))
@@ -214,6 +220,8 @@ class ReferenceInterpreter(darFile: File)(implicit loggingContext: LoggingContex
     */
   def runAndProject(
       scenario: Concrete.Scenario
+  )(implicit
+      traceContext: TraceContext
   ): Either[String, Map[Projections.PartyId, Projections.Projection]] =
     try {
       val allPartyIds: Set[Concrete.PartyId] =

@@ -5,9 +5,7 @@ package com.digitalasset.daml.lf.data
 
 import com.daml.scalautil.FoldableContravariant
 import com.daml.scalautil.Statement.discard
-
-import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
-import scalaz.syntax.applicative._
+import scalaz.syntax.applicative.*
 import scalaz.{Applicative, Equal, Foldable, Order, Traverse}
 
 import scala.annotation.tailrec
@@ -16,15 +14,17 @@ import scala.collection.immutable.{AbstractSeq, ArraySeq, IndexedSeqOps, StrictO
 import scala.collection.mutable.Builder
 import scala.reflect.ClassTag
 
-/** Simple immutable array. The intention is that all the operations have the "obvious"
-  * operational behavior (like Vector in haskell).
+import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
+
+/** Simple immutable array. The intention is that all the operations have the "obvious" operational
+  * behavior (like Vector in haskell).
   *
   * Functions that slice the `ImmArray` (including `head`, `tail`, etc) are all constant time --
   * they keep referring to the same underlying array.
   *
   * Note that we _very intentionally_ do _not_ make this an instance of any sorts of `Seq`, since
-  * using `Seq` encourages patterns where the performance of what you're doing is totally
-  * unclear. Use `toSeq` if you want a `Seq`, and think about what that means.
+  * using `Seq` encourages patterns where the performance of what you're doing is totally unclear.
+  * Use `toSeq` if you want a `Seq`, and think about what that means.
   */
 final class ImmArray[+A] private (
     private val start: Int,
@@ -89,9 +89,8 @@ final class ImmArray[+A] private (
   }
 
   /** O(n) */
-  def copyToArray[B >: A](xs: Array[B]): Int = {
+  def copyToArray[B >: A](xs: Array[B]): Int =
     copyToArray(xs, 0, xs.length)
-  }
 
   /** O(1), crashes on empty list */
   def head: A = this(0)
@@ -100,34 +99,29 @@ final class ImmArray[+A] private (
   def last: A = this(length - 1)
 
   /** O(1), crashes on empty list */
-  def tail: ImmArray[A] = {
+  def tail: ImmArray[A] =
     if (length < 1) {
       throw new RuntimeException("tail on empty ImmArray")
     } else {
       new ImmArray(start + 1, length - 1, array)
     }
-  }
 
   /** O(1), crashes on empty list */
-  def init: ImmArray[A] = {
+  def init: ImmArray[A] =
     if (length < 1) {
       throw new RuntimeException("init on empty ImmArray")
     } else {
       new ImmArray(start, length - 1, array)
     }
-  }
 
   /** O(1)
     *
     * Returns all the elements at indices `ix` where `from <= ix < until`.
     *
-    * Crashes if:
-    * * `from < 0 || from >= length`
-    * * `until < 0 || until > length`
+    * Crashes if: * `from < 0 || from >= length` * `until < 0 || until > length`
     *
-    * Note that this crashing behavior is _not_ consistent with Seq's behavior of not crashing
-    * but rather returning an empty array. If you want Seq's behavior,
-    * use `relaxedSlice`.
+    * Note that this crashing behavior is _not_ consistent with Seq's behavior of not crashing but
+    * rather returning an empty array. If you want Seq's behavior, use `relaxedSlice`.
     */
   def strictSlice(from: Int, until: Int): ImmArray[A] = {
     if (from < 0 || from >= length || until < 0 || until > length) {
@@ -139,8 +133,8 @@ final class ImmArray[+A] private (
     relaxedSlice(from, until)
   }
 
-  /** O(1), like `strictSlice`, but does not crash on out of bounds errors -- follows the same semantics
-    * as Seq's slice.
+  /** O(1), like `strictSlice`, but does not crash on out of bounds errors -- follows the same
+    * semantics as Seq's slice.
     */
   def relaxedSlice(from0: Int, until0: Int): ImmArray[A] = {
     val from = Math.max(Math.min(from0, length), 0)
@@ -174,8 +168,8 @@ final class ImmArray[+A] private (
 
   /** O(n+m)
     *
-    * If you find using this a lot, consider using another data structure (maybe FrontQueue or BackQueue),
-    * since to append ImmArray we must copy both of them.
+    * If you find using this a lot, consider using another data structure (maybe FrontQueue or
+    * BackQueue), since to append ImmArray we must copy both of them.
     */
   def slowAppend[B >: A](other: ImmArray[B]): ImmArray[B] = {
     val newArray: Array[Any] = new Array(length + other.length)
@@ -190,8 +184,8 @@ final class ImmArray[+A] private (
 
   /** O(n)
     *
-    * If you find yourself using this a lot, consider using another data structure,
-    * since to cons an ImmArray we must copy it.
+    * If you find yourself using this a lot, consider using another data structure, since to cons an
+    * ImmArray we must copy it.
     */
   def slowCons[B >: A](el: B): ImmArray[B] = {
     val newArray: Array[Any] = new Array(length + 1)
@@ -204,8 +198,8 @@ final class ImmArray[+A] private (
 
   /** O(n)
     *
-    * If you find yourself using this a lot, consider using another data structure,
-    * since to snoc an ImmArray we must copy it.
+    * If you find yourself using this a lot, consider using another data structure, since to snoc an
+    * ImmArray we must copy it.
     */
   def slowSnoc[B >: A](el: B): ImmArray[B] = {
     val newArray: Array[Any] = new Array(length + 1)
@@ -246,19 +240,17 @@ final class ImmArray[+A] private (
 
   /** O(1).
     *
-    * Note: very important that this is a `scala.collection.immutable.IndexedSeq`,
-    * and not a possibly mutable `scala.collection.IndexedSeq`, otherwise we could
-    * return the `array` as is and people would be able to break the original
-    * `ImmArray`.
+    * Note: very important that this is a `scala.collection.immutable.IndexedSeq`, and not a
+    * possibly mutable `scala.collection.IndexedSeq`, otherwise we could return the `array` as is
+    * and people would be able to break the original `ImmArray`.
     */
   def toIndexedSeq: ImmArray.ImmArraySeq[A] = new ImmArray.ImmArraySeq(this)
 
   /** O(1)
     *
-    * Note: very important that this is a `scala.collection.immutable.IndexedSeq`,
-    * and not a possibly mutable `scala.collection.IndexedSeq`, otherwise we could
-    * return the `array` as is and people would be able to break the original
-    * `ImmArray`.
+    * Note: very important that this is a `scala.collection.immutable.IndexedSeq`, and not a
+    * possibly mutable `scala.collection.IndexedSeq`, otherwise we could return the `array` as is
+    * and people would be able to break the original `ImmArray`.
     */
   def toSeq: ImmArray.ImmArraySeq[A] = toIndexedSeq
 
@@ -288,12 +280,11 @@ final class ImmArray[+A] private (
   /** O(n) */
   def foldLeft[B](z: B)(f: (B, A) => B): B = {
     @tailrec
-    def go(cursor: Int, acc: B): B = {
+    def go(cursor: Int, acc: B): B =
       if (cursor < length)
         go(cursor + 1, f(acc, uncheckedGet(cursor)))
       else
         acc
-    }
     go(0, z)
   }
 
@@ -330,11 +321,11 @@ final class ImmArray[+A] private (
   def indices: Range = 0 until length
 
   /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[ImmArray[_]]
+  def canEqual(that: Any) = that.isInstanceOf[ImmArray[?]]
 
   /** O(n) */
   override def equals(that: Any): Boolean = that match {
-    case thatArr: ImmArray[_] if length == thatArr.length =>
+    case thatArr: ImmArray[?] if length == thatArr.length =>
       indices forall { i =>
         uncheckedGet(i) == thatArr.uncheckedGet(i)
       }
@@ -371,15 +362,14 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
   def unapplySeq[T](arr: ImmArray[T]): Option[IndexedSeq[T]] = Some(arr.toIndexedSeq)
 
   /** This is unsafe because if you modify the Array you are passing in after creating the ImmArray
-    * you'll modify the ImmArray too, which is supposed to be immutable. If you're using it,
-    * you must guarantee that the provided `Array` is not modified for the entire lifetime
-    * of the resulting `ImmArray`.
+    * you'll modify the ImmArray too, which is supposed to be immutable. If you're using it, you
+    * must guarantee that the provided `Array` is not modified for the entire lifetime of the
+    * resulting `ImmArray`.
     */
-  def unsafeFromArray[T](arr: Array[Any]): ImmArray[T] = {
+  def unsafeFromArray[T](arr: Array[Any]): ImmArray[T] =
     // ArraySeq can be boxed or unboxed. By requiring an Array[Any] we enforce
     // that values are always boxed.
     new ImmArray(0, arr.length, ArraySeq.unsafeWrapArray(arr).asInstanceOf[ArraySeq[T]])
-  }
 
   def fromArraySeq[T](arr: ArraySeq[T]): ImmArray[T] =
     new ImmArray(0, arr.length, arr)
@@ -387,13 +377,12 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
   implicit val immArrayInstance: Traverse[ImmArray] = new Traverse[ImmArray] {
     override def traverseImpl[F[_]: Applicative, A, B](
         immArr: ImmArray[A]
-    )(f: A => F[B]): F[ImmArray[B]] = {
+    )(f: A => F[B]): F[ImmArray[B]] =
       immArr
         .foldLeft(BackStack.empty[B].point[F]) { (ys, x) =>
           ^(ys, f(x))(_ :+ _)
         }
         .map(_.toImmArray)
-    }
 
     override def foldLeft[A, B](fa: ImmArray[A], z: B)(f: (B, A) => B) =
       fa.foldLeft(z)(f)
@@ -403,14 +392,14 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
   }
 
   implicit def immArrayOrderInstance[A: Order]: Order[ImmArray[A]] = {
-    import scalaz.std.iterable._
+    import scalaz.std.iterable.*
     orderBy(ia => toIterableForScalazInstances(ia.iterator), true)
   }
 
   implicit def immArrayEqualInstance[A: Equal]: Equal[ImmArray[A]] =
     ScalazEqual.withNatural(Equal[A].equalIsNatural)(_ equalz _)
 
-  override def from[A](it: IterableOnce[A]): ImmArray[A] = {
+  override def from[A](it: IterableOnce[A]): ImmArray[A] =
     it match {
       case arraySeq: ImmArray.ImmArraySeq[A] =>
         arraySeq.toImmArray
@@ -421,7 +410,6 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
           .addAll(otherwise)
           .result()
     }
-  }
 
   override def newBuilder[A]: Builder[A, ImmArray[A]] =
     ArraySeq
@@ -431,9 +419,9 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
 
   /** Note: we define this purely to be able to write `toSeq`.
     *
-    * However, _do not_ use it for anything but defining interface where you need
-    * to expose a `Seq`, and you also need to use implicits that refer to the
-    * specific types, such as the traverse instance.
+    * However, _do not_ use it for anything but defining interface where you need to expose a `Seq`,
+    * and you also need to use implicits that refer to the specific types, such as the traverse
+    * instance.
     */
   final class ImmArraySeq[+A](array: ImmArray[A])
       extends AbstractSeq[A]
@@ -484,11 +472,10 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
 
       override def traverseImpl[F[_], A, B](
           immArr: ImmArraySeq[A]
-      )(f: A => F[B])(implicit F: Applicative[F]): F[ImmArraySeq[B]] = {
+      )(f: A => F[B])(implicit F: Applicative[F]): F[ImmArraySeq[B]] =
         F.map(immArr.foldLeft[F[BackStack[B]]](F.point(BackStack.empty)) { case (ys, x) =>
           F.apply2(ys, f(x))(_ :+ _)
         })(_.toImmArray.toSeq)
-      }
     }
 
     implicit def `immArraySeq Equal instance`[A: Equal]: Equal[ImmArraySeq[A]] =

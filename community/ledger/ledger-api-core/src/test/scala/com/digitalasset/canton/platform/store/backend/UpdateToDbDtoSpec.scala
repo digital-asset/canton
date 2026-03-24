@@ -101,6 +101,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         state.Update.CommandRejected.FinalReason(status),
         someSynchronizerId1,
         CantonTimestamp.ofEpochMicro(1234567),
+        isTransaction = true,
       )
       val dtos = updateToDtos(update)
 
@@ -138,6 +139,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         someSynchronizerId1,
         someRecordTime,
         messageUuid,
+        isTransaction = true,
       )
       val dtos = updateToDtos(update)
 
@@ -2226,37 +2228,41 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               expectedDeduplicationDurationSeconds,
               expectedDeduplicationDurationNanos,
             ) =>
-          val completionInfo = someCompletionInfo.copy(optDeduplicationPeriod = deduplicationPeriod)
-          val update = state.Update.SequencedCommandRejected(
-            completionInfo,
-            state.Update.CommandRejected.FinalReason(status),
-            someSynchronizerId1,
-            someRecordTime,
-          )
-          val dtos = updateToDtos(update)
-
-          dtos should contain theSameElementsInOrderAs List(
-            DbDto.CommandCompletion(
-              completion_offset = someOffset.unwrap,
-              record_time = someRecordTime.toMicros,
-              publication_time = 0,
-              user_id = someUserId,
-              submitters = Set(someParty),
-              command_id = someCommandId,
-              update_id = None,
-              rejection_status_code = Some(status.code),
-              rejection_status_message = Some(status.message),
-              rejection_status_details = Some(StatusDetails.of(status.details).toByteArray),
-              submission_id = Some(someSubmissionId),
-              deduplication_offset = expectedDeduplicationOffset,
-              deduplication_duration_seconds = expectedDeduplicationDurationSeconds,
-              deduplication_duration_nanos = expectedDeduplicationDurationNanos,
-              synchronizer_id = someSynchronizerId1,
-              message_uuid = None,
-              is_transaction = true,
-              trace_context = serializedEmptyTraceContext,
+          forAll(Table("isTransaction", true, false)) { isTransaction =>
+            val completionInfo =
+              someCompletionInfo.copy(optDeduplicationPeriod = deduplicationPeriod)
+            val update = state.Update.SequencedCommandRejected(
+              completionInfo,
+              state.Update.CommandRejected.FinalReason(status),
+              someSynchronizerId1,
+              someRecordTime,
+              isTransaction = isTransaction,
             )
-          )
+            val dtos = updateToDtos(update)
+
+            dtos should contain theSameElementsInOrderAs List(
+              DbDto.CommandCompletion(
+                completion_offset = someOffset.unwrap,
+                record_time = someRecordTime.toMicros,
+                publication_time = 0,
+                user_id = someUserId,
+                submitters = Set(someParty),
+                command_id = someCommandId,
+                update_id = None,
+                rejection_status_code = Some(status.code),
+                rejection_status_message = Some(status.message),
+                rejection_status_details = Some(StatusDetails.of(status.details).toByteArray),
+                submission_id = Some(someSubmissionId),
+                deduplication_offset = expectedDeduplicationOffset,
+                deduplication_duration_seconds = expectedDeduplicationDurationSeconds,
+                deduplication_duration_nanos = expectedDeduplicationDurationNanos,
+                synchronizer_id = someSynchronizerId1,
+                message_uuid = None,
+                is_transaction = isTransaction,
+                trace_context = serializedEmptyTraceContext,
+              )
+            )
+          }
       }
     }
 

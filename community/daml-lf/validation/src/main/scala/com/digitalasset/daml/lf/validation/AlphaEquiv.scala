@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 
 import scala.annotation.tailrec
 

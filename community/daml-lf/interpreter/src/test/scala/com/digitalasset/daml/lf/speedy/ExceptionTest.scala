@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
@@ -34,9 +35,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import scala.collection.immutable.ArraySeq
 
 // TEST_EVIDENCE: Integrity: Exceptions, throw/catch.
-class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
   val defaultPackageId = defaultParserParameters.defaultPackageId
@@ -104,6 +103,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         // we test only with contract key mode,
         // the state machine should no have any impact for this test.
         mode = ContractStateMachine.Mode.UCKWithRollback,
+        logger = MachineLogger(),
       )
     SpeedyTestLib
       .run(machine, getContract = getContract, getKeys = getKeys)
@@ -694,6 +694,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
             applyToParty(pkgs, expr, alice),
             Set(alice),
             packageResolution = Map(pkg.pkgName -> defaultParserParameters.defaultPackageId),
+            logger = MachineLogger()
           )
           .run()
         if (description.contains("can be caught"))
@@ -724,6 +725,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
           transactionSeed,
           applyToParty(pkgs, example, party),
           Set(party),
+          logger = MachineLogger(),
         )
         .run()
       inside(res) { case SResultFinal(SUnit) =>

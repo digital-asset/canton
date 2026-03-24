@@ -274,6 +274,7 @@ case object TransactionViewDecompositionFactory {
       confirmingParties.nonEmpty,
       "There must be at least one confirming party, as every node must have at least one signatory.",
     )
+
     val plainInformees = node.informeesOfNode -- confirmingParties
 
     val threshold = NonNegativeInt.tryCreate(confirmingParties.size)

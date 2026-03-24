@@ -6,8 +6,8 @@ package data
 
 import com.daml.scalautil.Statement.discard
 import scalaz.Scalaz.eitherMonad
-import scalaz.syntax.traverse._
-import scalaz.std.list._
+import scalaz.std.list.*
+import scalaz.syntax.traverse.*
 
 object Ref {
 
@@ -23,15 +23,15 @@ object Ref {
   type PackageName = IdString.PackageName
   val PackageName: IdString.PackageName.type = IdString.PackageName
 
-  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon, minus and,
-    * underscore. We use them to represent [Party] literals. In this way, we avoid
-    * empty identifiers, escaping problems, and other similar pitfalls.
+  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon,
+    * minus and, underscore. We use them to represent [Party] literals. In this way, we avoid empty
+    * identifiers, escaping problems, and other similar pitfalls.
     */
   type Party = IdString.Party
   val Party: IdString.Party.type = IdString.Party
 
-  /** Reference to a package via a package identifier. The identifier is the ascii7
-    * lowercase hex-encoded hash of the package contents found in the Daml-LF Archive.
+  /** Reference to a package via a package identifier. The identifier is the ascii7 lowercase
+    * hex-encoded hash of the package contents found in the Daml-LF Archive.
     */
   type PackageId = IdString.PackageId
   val PackageId: IdString.PackageId.type = IdString.PackageId
@@ -45,8 +45,8 @@ object Ref {
 
   /** Identifiers for participant node users, which act as clients to the Ledger API.
     *
-    * The concept of participant node users has been introduced after the concept
-    * of client applications, which is why the code contains both of them.
+    * The concept of participant node users has been introduced after the concept of client
+    * applications, which is why the code contains both of them.
     */
   type UserId = IdString.UserId
   val UserId: IdString.UserId.type = IdString.UserId
@@ -88,14 +88,14 @@ object Ref {
     val segments = ImmArray.newBuilder[String]
     val currentString = new java.lang.StringBuilder()
     s.codePoints()
-      .forEach(ch => {
+      .forEach { ch =>
         if (ch == splitCodepoint) {
           discard(segments += currentString.toString)
           currentString.setLength(0)
         } else {
           val _ = currentString.appendCodePoint(ch)
         }
-      })
+      }
     discard(segments += currentString.toString)
     segments.result()
   }
@@ -126,7 +126,7 @@ object Ref {
     override def compare(that: DottedName): Int = {
       import Name.ordering
 
-      import scala.math.Ordering.Implicits._
+      import scala.math.Ordering.Implicits.*
 
       implicitly[Ordering[Seq[Name]]].compare(segments.toSeq, that.segments.toSeq)
     }
@@ -179,12 +179,11 @@ object Ref {
     def assertFromNames(names: ImmArray[Name]): DottedName =
       assertRight(fromNames(names))
 
-    /** You better know what you're doing if you use this one -- specifically you need to comply
-      * to the lexical specification embodied by `fromStrings`.
+    /** You better know what you're doing if you use this one -- specifically you need to comply to
+      * the lexical specification embodied by `fromStrings`.
       */
-    def unsafeFromNames(segments: ImmArray[Name]): DottedName = {
+    def unsafeFromNames(segments: ImmArray[Name]): DottedName =
       new DottedName(segments)
-    }
   }
 
   final case class QualifiedName private[digitalasset] (module: ModuleName, name: DottedName)
@@ -400,15 +399,15 @@ object Ref {
       assertRight(fromString(s))
   }
 
-  /** Package versions are non-empty strings consisting of segments of digits (without leading zeros)
-    *      separated by dots: "(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*"
+  /** Package versions are non-empty strings consisting of segments of digits (without leading
+    * zeros) separated by dots: "(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*"
     */
   final case class PackageVersion private[data] (segments: ImmArray[Int])
       extends Ordered[PackageVersion] {
     override def toString: String = segments.toSeq.mkString(".")
 
     override def compare(that: PackageVersion): Int = {
-      import scala.math.Ordering.Implicits._
+      import scala.math.Ordering.Implicits.*
 
       implicitly[Ordering[Seq[Int]]].compare(segments.toSeq, that.segments.toSeq)
     }

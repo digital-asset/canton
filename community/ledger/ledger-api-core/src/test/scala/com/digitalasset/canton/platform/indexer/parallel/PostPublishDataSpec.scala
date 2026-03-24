@@ -62,27 +62,29 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
 
   behavior of "from"
 
-  it should "populate post PostPublishData correctly for TransactionAccepted" in {
+  it should "populate post PostPublishData correctly for sequenced TransactionAccepted" in {
+    val update = SequencedTransactionAccepted(
+      completionInfoO = Some(
+        CompletionInfo(
+          actAs = List(party),
+          userId = userId,
+          commandId = commandId,
+          optDeduplicationPeriod = None,
+          submissionId = submissionId,
+        )
+      ),
+      transactionMeta = transactionMeta,
+      transactionInfo =
+        TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
+      updateId = updateId,
+      synchronizerId = synchronizerId,
+      recordTime = cantonTime2,
+      acsChangeFactory = TestAcsChangeFactory(),
+      contractInfos = Map.empty,
+    )(TraceContext.empty)
+
     PostPublishData.from(
-      update = SequencedTransactionAccepted(
-        completionInfoO = Some(
-          CompletionInfo(
-            actAs = List(party),
-            userId = userId,
-            commandId = commandId,
-            optDeduplicationPeriod = None,
-            submissionId = submissionId,
-          )
-        ),
-        transactionMeta = transactionMeta,
-        transactionInfo =
-          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
-        updateId = updateId,
-        synchronizerId = synchronizerId,
-        recordTime = cantonTime2,
-        acsChangeFactory = TestAcsChangeFactory(),
-        contractInfos = Map.empty,
-      )(TraceContext.empty),
+      update = update,
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe Some(
@@ -101,27 +103,15 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         traceContext = TraceContext.empty,
       )
     )
-  }
 
-  it should "not populate post PostPublishData correctly for TransactionAccepted without completion info" in {
     PostPublishData.from(
-      update = SequencedTransactionAccepted(
-        completionInfoO = None,
-        transactionMeta = transactionMeta,
-        transactionInfo =
-          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
-        updateId = updateId,
-        synchronizerId = synchronizerId,
-        recordTime = cantonTime2,
-        acsChangeFactory = TestAcsChangeFactory(),
-        contractInfos = Map.empty,
-      )(TraceContext.empty),
+      update = update.copy(completionInfoO = None)(TraceContext.empty),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None
   }
 
-  it should "populate no post PostPublishData for TransactionAccepted without request sequencer counter" in {
+  it should "populate no post PostPublishData for repair transactions" in {
     PostPublishData.from(
       update = RepairTransactionAccepted(
         transactionMeta = transactionMeta,
@@ -138,20 +128,23 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
     ) shouldBe None
   }
 
-  it should "populate post PostPublishData correctly for CommandRejected for sequenced" in {
+  it should "populate post PostPublishData correctly for SequencedCommandRejected" in {
+    val update = SequencedCommandRejected(
+      completionInfo = CompletionInfo(
+        actAs = List(party),
+        userId = userId,
+        commandId = commandId,
+        optDeduplicationPeriod = None,
+        submissionId = submissionId,
+      ),
+      reasonTemplate = FinalReason(status),
+      synchronizerId = synchronizerId,
+      recordTime = cantonTime2,
+      isTransaction = true,
+    )(TraceContext.empty)
+
     PostPublishData.from(
-      update = SequencedCommandRejected(
-        completionInfo = CompletionInfo(
-          actAs = List(party),
-          userId = userId,
-          commandId = commandId,
-          optDeduplicationPeriod = None,
-          submissionId = submissionId,
-        ),
-        reasonTemplate = FinalReason(status),
-        synchronizerId = synchronizerId,
-        recordTime = cantonTime2,
-      )(TraceContext.empty),
+      update = update,
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe Some(
@@ -170,23 +163,32 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         traceContext = TraceContext.empty,
       )
     )
+
+    PostPublishData.from(
+      update = update.copy(isTransaction = false)(TraceContext.empty),
+      offset = offset,
+      publicationTime = cantonTime1,
+    ) shouldBe None
   }
 
-  it should "populate post PostPublishData correctly for CommandRejected for non-sequenced" in {
+  it should "populate post PostPublishData correctly for UnSequencedCommandRejected" in {
+    val update = UnSequencedCommandRejected(
+      completionInfo = CompletionInfo(
+        actAs = List(party),
+        userId = userId,
+        commandId = commandId,
+        optDeduplicationPeriod = None,
+        submissionId = submissionId,
+      ),
+      reasonTemplate = FinalReason(status),
+      synchronizerId = synchronizerId,
+      recordTime = cantonTime2,
+      messageUuid = messageUuid,
+      isTransaction = true,
+    )(TraceContext.empty)
+
     PostPublishData.from(
-      update = UnSequencedCommandRejected(
-        completionInfo = CompletionInfo(
-          actAs = List(party),
-          userId = userId,
-          commandId = commandId,
-          optDeduplicationPeriod = None,
-          submissionId = submissionId,
-        ),
-        reasonTemplate = FinalReason(status),
-        synchronizerId = synchronizerId,
-        recordTime = cantonTime2,
-        messageUuid = messageUuid,
-      )(TraceContext.empty),
+      update = update,
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe Some(
@@ -203,6 +205,10 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         traceContext = TraceContext.empty,
       )
     )
+    PostPublishData.from(
+      update = update.copy(isTransaction = false)(TraceContext.empty),
+      offset = offset,
+      publicationTime = cantonTime1,
+    ) shouldBe None
   }
-
 }

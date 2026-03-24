@@ -20,15 +20,15 @@ import scala.concurrent.Future
   * @param toApiResponse
   *   Convert a [[com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate]] to a
   *   specific API response while also filtering for visibility.
-  * @tparam QUERY_PARAM_TYPE
+  * @tparam QueryParamType
   *   The query parameter type.
-  * @tparam API_RESPONSE
+  * @tparam ApiResponse
   *   The Ledger API response type.
   */
-class BufferedUpdatePointwiseReader[QUERY_PARAM_TYPE, API_RESPONSE](
-    fetchFromPersistence: FetchUpdatePointwiseFromPersistence[QUERY_PARAM_TYPE, API_RESPONSE],
-    fetchFromBuffer: QUERY_PARAM_TYPE => Option[TransactionLogUpdate],
-    toApiResponse: ToApiResponse[QUERY_PARAM_TYPE, API_RESPONSE],
+class BufferedUpdatePointwiseReader[QueryParamType, ApiResponse](
+    fetchFromPersistence: FetchUpdatePointwiseFromPersistence[QueryParamType, ApiResponse],
+    fetchFromBuffer: QueryParamType => Option[TransactionLogUpdate],
+    toApiResponse: ToApiResponse[QueryParamType, ApiResponse],
 ) {
 
   /** Serves processed and filtered update from the buffer by the query parameter, with fallback to
@@ -41,9 +41,9 @@ class BufferedUpdatePointwiseReader[QUERY_PARAM_TYPE, API_RESPONSE](
     * @return
     *   A future wrapping the API response if found.
     */
-  def fetch(queryParam: QUERY_PARAM_TYPE)(implicit
+  def fetch(queryParam: QueryParamType)(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Option[API_RESPONSE]] =
+  ): Future[Option[ApiResponse]] =
     fetchFromBuffer(queryParam) match {
       case Some(value) => toApiResponse(value, queryParam, loggingContext)
       case None =>
@@ -52,18 +52,18 @@ class BufferedUpdatePointwiseReader[QUERY_PARAM_TYPE, API_RESPONSE](
 }
 
 object BufferedUpdatePointwiseReader {
-  trait FetchUpdatePointwiseFromPersistence[QUERY_PARAM_TYPE, API_RESPONSE] {
+  trait FetchUpdatePointwiseFromPersistence[QueryParamType, ApiResponse] {
     def apply(
-        queryParam: QUERY_PARAM_TYPE,
+        queryParam: QueryParamType,
         loggingContext: LoggingContextWithTrace,
-    ): Future[Option[API_RESPONSE]]
+    ): Future[Option[ApiResponse]]
   }
 
-  trait ToApiResponse[QUERY_PARAM_TYPE, API_RESPONSE] {
+  trait ToApiResponse[QueryParamType, ApiResponse] {
     def apply(
         transactionAccepted: TransactionLogUpdate,
-        queryParam: QUERY_PARAM_TYPE,
+        queryParam: QueryParamType,
         loggingContext: LoggingContextWithTrace,
-    ): Future[Option[API_RESPONSE]]
+    ): Future[Option[ApiResponse]]
   }
 }

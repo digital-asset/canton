@@ -67,7 +67,7 @@ object PostPublishData {
         )
 
       // but: we pass into deduplication and inflight tracking both the transactions and the reassignments upon rejection
-      case u: SequencedCommandRejected =>
+      case u: SequencedCommandRejected if u.isTransaction =>
         Some(
           from(
             synchronizerId = u.synchronizerId,
@@ -77,7 +77,7 @@ object PostPublishData {
           )
         )
 
-      case u: UnSequencedCommandRejected =>
+      case u: UnSequencedCommandRejected if u.isTransaction =>
         Some(
           from(
             synchronizerId = u.synchronizerId,

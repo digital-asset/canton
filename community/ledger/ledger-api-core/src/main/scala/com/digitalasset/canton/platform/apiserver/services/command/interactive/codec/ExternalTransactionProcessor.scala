@@ -32,7 +32,7 @@ import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.transaction.{SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -199,14 +199,14 @@ class ExternalTransactionProcessor(
       )
         .leftMap(CommandExecutionErrors.InteractiveSubmissionPreparationError.Reject(_))
       // The participant needs to be connected to this synchronizer ID for the transaction to be submitted successfully
-      synchronizerId = commandExecutionResult.synchronizerRank.synchronizerId
+      psid = commandExecutionResult.synchronizerRank.synchronizerId
       transactionData = PrepareTransactionData(
         submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
         transactionMeta = commandExecutionResult.commandInterpretationResult.transactionMeta,
         transaction = SubmittedTransaction(enrichedTransaction),
         globalKeyMapping = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
         inputContracts = inputContracts,
-        synchronizerId = synchronizerId.logical,
+        synchronizer = psid.forExternalTransactionHashing,
         mediatorGroup = 0,
         transactionUUID = UUID.randomUUID(),
         maxRecordTime = maxRecordTime,
@@ -282,6 +282,29 @@ class ExternalTransactionProcessor(
           decoder.decode(executeRequest)
         )
         .mapK(FutureUnlessShutdown.outcomeK)
+      // Check upfront if the synchronizerID format is correct for the PV of the target synchronizer
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        syncService
+          .physicalSynchronizerIdForSynchronizerId(decoded.synchronizer.logical)
+          .filter(_.forExternalTransactionHashing != decoded.synchronizer)
+          .map { physicalSynchronizerId =>
+            InteractiveSubmissionExecuteError.Reject(
+              {
+                val protocolVersionOfSelectedSync =
+                  s"The selected synchronizer $physicalSynchronizerId is on Protocol Version ${physicalSynchronizerId.protocolVersion}."
+                physicalSynchronizerId.protocolVersion match {
+                  case atOrBefore34 if atOrBefore34 <= ProtocolVersion.v34 =>
+                    protocolVersionOfSelectedSync +
+                      s" Please use a Logical Synchronizer ID in the prepared transaction metadata on PVs <= 34"
+                  case _ =>
+                    protocolVersionOfSelectedSync +
+                      s" Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
+                }
+              }
+            )
+          }
+          .toLeft(())
+      )
       _ <- decoded
         .verifySignature(routingSynchronizerState, logger)
         .leftMap(err => InteractiveSubmissionExecuteError.Reject(err))

@@ -385,6 +385,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -434,6 +435,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -471,6 +473,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("e"),
@@ -504,6 +507,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) shouldBe Nil
   }
@@ -514,6 +518,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         beginExclusive = 10,
         endInclusive = Some(15),
         updateFormat = None,
+        descendingOrder = false,
       )
     ) shouldBe Nil
   }
@@ -532,6 +537,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("e"),
@@ -562,6 +568,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = None,
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAsAnyParty()
@@ -586,6 +593,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = None,
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAsAnyParty()
@@ -606,6 +614,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
           )
         ),
+        descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAsAnyParty()
@@ -689,6 +698,7 @@ object ApiServicesRequiredClaimSpec {
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
       estimateTrafficCost = None,
+      tapsMaxPasses = None,
       hashingSchemeVersion = None,
     )
 

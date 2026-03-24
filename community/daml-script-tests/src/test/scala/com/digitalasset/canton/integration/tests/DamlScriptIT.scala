@@ -368,6 +368,7 @@ abstract class DamlScriptIT
         port = participant1.config.ledgerApi.port,
         skippedTests = ignoredTests ++ isolatedTests,
       )
+
       val actualIsolatedTestResults = isolatedTests.map { scriptId =>
         scriptId -> loggerFactory.assertLogs(
           within = {
@@ -518,6 +519,8 @@ class DamlScriptDevLegacyNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mod
     "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "ExceptionSemantics:duplicateKey" -> Ignored,
     "ExceptionSemantics:rollbackArchive" -> Success(),
+    "ExceptionSemantics:rollbackConsumingExercise" -> Success(),
+    "ExceptionSemantics:rollbackCreate" -> Success(),
     "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
     "FetchByKey:failLedger" -> Failure("couldn't find key"),
     "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
@@ -605,6 +608,8 @@ class DamlScriptDevUCKWithRollbackIT
     "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "ExceptionSemantics:duplicateKey" -> Ignored,
     "ExceptionSemantics:rollbackArchive" -> Success(),
+    "ExceptionSemantics:rollbackConsumingExercise" -> Success(),
+    "ExceptionSemantics:rollbackCreate" -> Success(),
     "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
     "FetchByKey:failLedger" -> Failure("couldn't find key"),
     "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
@@ -678,7 +683,7 @@ class DamlScriptDevUCKWithRollbackIT
 @RollbackTest
 class DamlScriptDevUCKWithoutRollbackIT
     extends DamlScriptDevIT(ContractStateMachine.Mode.UCKWithoutRollback) {
-  import DamlScriptIT.{contractIDsNotSupported, internalErrorOccurred}
+  import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
@@ -691,11 +696,19 @@ class DamlScriptDevUCKWithoutRollbackIT
     "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
     "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "ExceptionSemantics:duplicateKey" -> Ignored,
-    "ExceptionSemantics:rollbackArchive" -> internalErrorOccurred.withLogAssertions(
-      _.errorMessage should include("Rollback of consuming exercise node is not supported"),
-      _.errorMessage should include("Unhandled internal error"),
-      _.errorMessage should include("INTERNAL/An error occurred"),
-    ),
+    "ExceptionSemantics:rollbackArchive" -> Ignored,
+    "ExceptionSemantics:rollbackConsumingExercise" -> Ignored,
+    "ExceptionSemantics:rollbackCreate" -> Ignored,
+    // TODO(#31282) Replace the above three lines with the below three lines once Daml Script changes land
+    // "ExceptionSemantics:rollbackArchive" -> Failure(
+    //  "Tried to rollback side-effectful node\\(s\\): Consuming exercise of Archive on ExceptionSemantics:K"
+    // ),
+    // "ExceptionSemantics:rollbackConsumingExercise" -> Failure(
+    //  "Tried to rollback side-effectful node\\(s\\): Consuming exercise of ConsumingExercise on ExceptionSemantics:K"
+    // ),
+    // "ExceptionSemantics:rollbackCreate" -> Failure(
+    //  "Tried to rollback side-effectful node\\(s\\): Create of ExceptionSemantics:K"
+    // ),
     "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
     "FetchByKey:failLedger" -> Failure("couldn't find key"),
     "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
@@ -782,6 +795,9 @@ class DamlScriptDevUCKWithoutRollbackIT
 //    "DamlScriptTrySubmit:truncatedError" -> Success(),
 //    "ExceptionSemantics:duplicateKey" -> Success(),
 //    "ExceptionSemantics:rollbackArchive" -> Success(),
+//    "ExceptionSemantics:rollbackArchive" -> Success(),
+//    "ExceptionSemantics:rollbackConsumingExercise" -> Success(),
+//    "ExceptionSemantics:rollbackCreate" -> Success(),
 //    "ExceptionSemantics:tryContext" -> Success(),
 //    "FetchByKey:failLedger" -> Success(),
 //    "FetchByKey:failSpeedy" -> Success(),

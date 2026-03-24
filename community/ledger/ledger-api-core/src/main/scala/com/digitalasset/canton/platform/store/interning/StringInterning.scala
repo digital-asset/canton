@@ -14,6 +14,21 @@ import com.digitalasset.daml.lf.data.Ref.{
   UserId,
 }
 
+trait StringInterningBuilder {
+  def addTemplateId(templateId: NameTypeConRef): Unit
+  def addPackageId(packageId: PackageId): Unit
+  def addParty(party: Party): Unit
+  def addSynchronizerId(synchronizerId: SynchronizerId): Unit
+  def addUserId(userId: UserId): Unit
+  def addParticipantId(participantId: ParticipantId): Unit
+  def addChoiceName(choiceName: ChoiceName): Unit
+  def addInterfaceId(interfaceId: Identifier): Unit
+}
+
+trait StringInterningProvider {
+  def provideInternedStrings(builder: StringInterningBuilder): Unit
+}
+
 /** The facade for all supported string-interning domains
   *
   * @note

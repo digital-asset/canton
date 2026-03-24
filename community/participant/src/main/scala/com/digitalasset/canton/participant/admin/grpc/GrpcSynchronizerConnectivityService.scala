@@ -80,7 +80,7 @@ class GrpcSynchronizerConnectivityService(
           )
       )
       client <- EitherT.fromEither[FutureUnlessShutdown](
-        synchronizerConnectionConfig.configuredPSId.toOption
+        synchronizerConnectionConfig.configuredPsid.toOption
           .toRight(PhysicalSynchronizerIdNotConfigured(synchronizerAlias, "connectivity service"))
           .flatMap(
             sync.syncCrypto.ips
@@ -243,7 +243,7 @@ class GrpcSynchronizerConnectivityService(
             new v30.ListRegisteredSynchronizersResponse.Result(
               config = Some(cnf.config.toProtoV30),
               connected = connected.contains(cnf.config.synchronizerAlias),
-              physicalSynchronizerId = cnf.configuredPSId.toOption.map(_.toProtoPrimitive),
+              physicalSynchronizerId = cnf.configuredPsid.toOption.map(_.toProtoPrimitive),
             )
           )
       )

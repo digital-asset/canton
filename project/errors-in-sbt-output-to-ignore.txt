@@ -100,7 +100,7 @@ java\.lang\.RuntimeException: ProcessBuilder.start\(\) debug
 .*HttpMetricsInterseptorSpec.* Error during processing of request: 'an implementation is missing'.*\nscala.NotImplementedError.*(\n\s+at.*)*
 
 # Ignore expected warnings from jol while running VM for size calculations in CostModelV0Test
-\# WARNING: Unable to get Instrumentation. Dynamic Attach failed. You may add this JAR as -javaagent manually, or supply -Djdk.attach.allowAttachSelf
+\# WARNING: Unable to get Instrumentation. No instrumentation. Add this JAR as -javaagent manually.
 \# WARNING: Unable to attach Serviceability Agent. HotSpot Serviceability Agent attach skipped due to jol.skipHotspotSAAttach flag.
 
 # TODO(#30481) Ignore warnings from ZIO CodecCommonSpec test until it's rewritten to ScalaTest

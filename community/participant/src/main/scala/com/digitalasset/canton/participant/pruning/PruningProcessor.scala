@@ -241,7 +241,7 @@ class PruningProcessor(
       NonEmpty
         .from(configs.collect {
           case config if config.status != SynchronizerConnectionConfigStore.Inactive =>
-            (config.configuredPSId, config.status)
+            (config.configuredPsid, config.status)
         }.toSet)
         .toLeft(())
         .leftMap(PurgingOnlyAllowedOnInactiveSynchronizer(synchronizerId, _))

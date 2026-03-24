@@ -557,6 +557,22 @@ components:
             - filters_by_party is the filter.filters_by_party from this request
             - filters_for_any_party is the filter.filters_for_any_party from this request
             - verbose is the verbose field from this request
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token defining a position in the active contracts snapshot.
+            The prefix of the active contracts snapshot will be omitted up to and including the element from which
+            the continuation token was read.
+            To reuse the continuation token from a `GetActiveContractsPageResponse`:
+
+            - subsequent request must be executed on the same participant with the same version of canton,
+            - subsequent request must have the same active_at_offset,
+            - subsequent request must have the same event_format
+            - and the participant must not have been pruned after the active_at_offset.
+
+            If not specified, the whole active contracts snapshot will be returned.
+
+            Optional: can be empty
+          type: string
     TransactionFilter:
       title: TransactionFilter
       description: |-
@@ -800,6 +816,14 @@ components:
           type: string
         contractEntry:
           $ref: '#/components/schemas/JsContractEntry'
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+            of the active contracts snapshot.
+            Only populated for the streaming ``GetActiveContracts`` rpc call.
+
+            Optional: can be empty
+          type: string
     JsContractEntry:
       title: JsContractEntry
       oneOf:
@@ -1278,24 +1302,26 @@ components:
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
+      required:
+      - beginExclusive
       properties:
         beginExclusive:
           description: |-
-            Beginning of the requested ledger section (non-negative integer).
+            Exclusive lower bound offset of the requested ledger section (non-negative integer).
             The response will only contain transactions whose offset is strictly greater than this.
-            If not populated or set to zero, the stream will start from the beginning of the ledger.
-            If positive, the streaming will start after this absolute offset.
-            If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
-
-            Optional
+            If set to zero, the lower bound is set to the the beginning of the ledger.
+            If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
+            Required
           type: integer
           format: int64
         endInclusive:
           description: |-
-            End of the requested ledger section.
-            The response will only contain transactions whose offset is less than or equal to this.
-            If empty, the stream will not terminate.
-            If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+            Inclusive higher bound offset of the requested ledger section.
+            If specified the response will only contain transactions whose offset is less than or equal to this.
+            If not specified,
+
+            - the descending_order must not be selected,
+            - the stream will not terminate.
 
             Optional
           type: integer
@@ -1328,6 +1354,12 @@ components:
             - include_reassignments.filter = the same filter specified on this request
             - include_reassignments.verbose = the same flag specified on this request
             - include_topology_events.include_participant_authorization_events.parties = all the parties specified in filter
+        descendingOrder:
+          description: |-
+            If set, the stream will populate the elements in descending order.
+
+            Optional
+          type: boolean
     UpdateFormat:
       title: UpdateFormat
       description: A format specifying what updates to include and how to render them.

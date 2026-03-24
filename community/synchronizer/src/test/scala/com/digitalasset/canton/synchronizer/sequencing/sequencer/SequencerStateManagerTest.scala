@@ -364,12 +364,11 @@ class SequencerStateManagerTest
 
     val closeContext = CloseContext(cryptoApi)
     private val updateGenerator = new BlockUpdateGeneratorImpl(
-      testedProtocolVersion,
       cryptoApi,
       sequencer1,
       defaultRateLimiter,
       orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-      sequencingTimeLowerBoundExclusive = None,
+      lsuSequencingBounds = None,
       getAnnouncedLsu = None,
       producePostOrderingTopologyTicks = false,
       SequencerTestMetrics,

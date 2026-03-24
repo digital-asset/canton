@@ -5,11 +5,10 @@ package com.digitalasset.daml.lf.testing
 
 import com.digitalasset.daml.lf.language.Ast.{Expr, Kind, Module, Package, Type}
 
-/** The LF Parser library can be used to write Daml-LF Ast using a
-  * human-friendly syntax.
+/** The LF Parser library can be used to write Daml-LF Ast using a human-friendly syntax.
   *
-  * It is designed for testing only and provided without any guarantee.
-  * In particular future version may introduce breaking change without notice.
+  * It is designed for testing only and provided without any guarantee. In particular future version
+  * may introduce breaking change without notice.
   */
 package object parser {
 

@@ -853,7 +853,8 @@ private[apiserver] final class ApiPartyManagementService private (
             requirePhysicalSynchronizerId(request.synchronizer, "synchronizer").map(_.logical)
           )
         protocolVersion <- syncService
-          .protocolVersionForSynchronizerId(synchronizerId)
+          .physicalSynchronizerIdForSynchronizerId(synchronizerId)
+          .map(_.protocolVersion)
           .toRight(
             ValidationErrors.invalidArgument(
               s"This node is not connected to the requested synchronizer $synchronizerId."
@@ -1010,15 +1011,15 @@ private[apiserver] final class ApiPartyManagementService private (
         .fromProtoV30(publicKeyT)
         .leftMap(_.message)
       namespace = Namespace(pubKey.fingerprint)
-      synchronizerIdWithVersion <- UniqueIdentifier
+      protocolVersion <- UniqueIdentifier
         .fromProtoPrimitive_(synchronizerIdP)
         .map(SynchronizerId(_))
         .leftMap(_.message)
         .flatMap(synchronizerId =>
           syncService
-            .protocolVersionForSynchronizerId(synchronizerId)
+            .physicalSynchronizerIdForSynchronizerId(synchronizerId)
+            .map(_.protocolVersion)
             .toRight(s"Unknown or not connected synchronizer $synchronizerId")
-            .map((synchronizerId, _))
         )
       _ <- Either.cond(partyHint.nonEmpty, (), "Party hint is empty")
       _ <- UniqueIdentifier.verifyValidString(partyHint).leftMap(x => "party_hint: " + x)
@@ -1083,7 +1084,6 @@ private[apiserver] final class ApiPartyManagementService private (
         ),
       )
     } yield {
-      val (_synchronizerId, protocolVersion) = synchronizerIdWithVersion
       val transactions =
         NonEmpty
           .mk(List, p2p)

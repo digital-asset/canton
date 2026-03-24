@@ -5,28 +5,29 @@ package com.digitalasset.daml.lf
 package value
 package test
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   GlobalKeyWithMaintainers,
   Node,
   NodeId,
-  Transaction,
   SerializationVersion,
+  Transaction,
   Versioned,
   VersionedTransaction,
 }
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.value.Value._
-import org.scalacheck.{Arbitrary, Gen}
-import Arbitrary.arbitrary
+import com.digitalasset.daml.lf.value.Value.*
 import com.google.protobuf.ByteString
+import org.scalacheck.{Arbitrary, Gen}
+import scalaz.scalacheck.ScalaCheckBinding.*
+import scalaz.syntax.apply.*
 
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.collection.immutable.HashMap
-import scalaz.syntax.apply._
-import scalaz.scalacheck.ScalaCheckBinding._
+
+import Arbitrary.arbitrary
 
 object ValueGenerators {
 
@@ -158,7 +159,7 @@ object ValueGenerators {
       list <- Gen.listOf(for {
         k <- Gen.asciiPrintableStr; v <- valueGen()
       } yield k -> v)
-    } yield ValueTextMap(SortedLookupList(Map(list: _*)))
+    } yield ValueTextMap(SortedLookupList(Map(list*)))
 
   def valueGenMapGen: Gen[ValueGenMap] =
     Gen
@@ -274,17 +275,15 @@ object ValueGenerators {
   private val simpleChars =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ".toVector
 
-  def simpleStr: Gen[PackageId] = {
+  def simpleStr: Gen[PackageId] =
     Gen
       .nonEmptyListOf(Gen.oneOf(simpleChars))
       .map(s => PackageId.assertFromString(s.mkString))
-  }
 
-  def party: Gen[Party] = {
+  def party: Gen[Party] =
     Gen
       .nonEmptyListOf(Gen.oneOf(simpleChars))
       .map(s => Party.assertFromString(s.take(255).mkString))
-  }
 
   def versionedValueGen: Gen[VersionedValue] =
     for {
@@ -307,7 +306,7 @@ object ValueGenerators {
   def keyWithMaintainersGen(
       templateId: TypeConId,
       packageName: PackageName,
-  ): Gen[GlobalKeyWithMaintainers] = {
+  ): Gen[GlobalKeyWithMaintainers] =
     for {
       key <- valueGen()
       maintainers <- genNonEmptyParties
@@ -323,26 +322,24 @@ object ValueGenerators {
         .toOption
       if gkey.isDefined
     } yield GlobalKeyWithMaintainers(gkey.get, maintainers)
-  }
 
   /** Makes create nodes that violate the rules:
     *
-    * 1. stakeholders may not be a superset of signatories
-    * 2. key's maintainers may not be a subset of signatories
+    *   1. stakeholders may not be a superset of signatories 2. key's maintainers may not be a
+    *      subset of signatories
     */
   def malformedCreateNodeGen(
       minVersion: SerializationVersion = SerializationVersion.minVersion
-  ): Gen[Node.Create] = {
+  ): Gen[Node.Create] =
     for {
       version <- SerializationVersionGen(minVersion)
       node <- malformedCreateNodeGenWithVersion(version)
     } yield node
-  }
 
   /** Makes create nodes with the given version that violate the rules:
     *
-    * 1. stakeholders may not be a superset of signatories
-    * 2. key's maintainers may not be a subset of signatories
+    *   1. stakeholders may not be a superset of signatories 2. key's maintainers may not be a
+    *      subset of signatories
     */
   def malformedCreateNodeGenWithVersion(
       version: SerializationVersion
@@ -404,14 +401,13 @@ object ValueGenerators {
     )
 
   /** Makes rollback node with some random child IDs. */
-  val danglingRefRollbackNodeGen: Gen[Node.Rollback] = {
+  val danglingRefRollbackNodeGen: Gen[Node.Rollback] =
     for {
       children <- Gen
         .listOf(Arbitrary.arbInt.arbitrary)
         .map(_.map(NodeId(_)))
         .map(_.to(ImmArray))
     } yield Node.Rollback(children)
-  }
 
   /** Makes exercise nodes with the given version and some random child IDs. */
   val danglingRefExerciseNodeGen: Gen[Node.Exercise] =
@@ -491,7 +487,7 @@ object ValueGenerators {
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
     * `malformedGenTransaction` should they be incorporated into a transaction.
     */
-  def danglingRefGenActionNode: Gen[(NodeId, Node.Action)] = {
+  def danglingRefGenActionNode: Gen[(NodeId, Node.Action)] =
     for {
       id <- Arbitrary.arbInt.arbitrary.map(NodeId(_))
       version <- SerializationVersionGen()
@@ -500,7 +496,6 @@ object ValueGenerators {
       fetch = fetchNodeGenWithVersion(version)
       node <- Gen.oneOf(create, exe, fetch)
     } yield (id, node)
-  }
 
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
     * `malformedGenTransaction` should they be incorporated into a transaction.
@@ -516,9 +511,9 @@ object ValueGenerators {
       node <- g
     } yield (id, node)
 
-  /** Version of danglingRefGenNode that allows to set the version of the node.
-    *    Note that this only ensures that the node can be normalized to the given version.
-    *    It does not normalize the node itself.
+  /** Version of danglingRefGenNode that allows to set the version of the node. Note that this only
+    * ensures that the node can be normalized to the given version. It does not normalize the node
+    * itself.
     */
   def danglingRefGenActionNodeWithVersion(version: SerializationVersion): Gen[(NodeId, Node)] =
     refGenNode(
@@ -535,24 +530,21 @@ object ValueGenerators {
       1 -> refGenNode(danglingRefRollbackNodeGen),
     )
 
-  /** Aside from the invariants failed as listed under `malformedCreateNodeGen`,
-    * resulting transactions may be malformed in several other ways:
+  /** Aside from the invariants failed as listed under `malformedCreateNodeGen`, resulting
+    * transactions may be malformed in several other ways:
     *
-    * 1. The "exactly once" invariant of `node_id` is almost certain to fail.
-    *    roots won't match up with nodes' actual IDs, exercise nodes' children
-    *    will refer to nonexistent or duplicate nodes, or even the exercise node
-    *    itself.  Therefore most transaction folds will not terminate.
-    * 2. For fetch and exercise nodes, if the contract_id is relative, the
-    *    associated invariants will probably fail; a create node with that ID
-    *    may not exist, and even if it does, the stakeholders and signatories
-    *    may not match up.
+    *   1. The "exactly once" invariant of `node_id` is almost certain to fail. roots won't match up
+    *      with nodes' actual IDs, exercise nodes' children will refer to nonexistent or duplicate
+    *      nodes, or even the exercise node itself. Therefore most transaction folds will not
+    *      terminate. 2. For fetch and exercise nodes, if the contract_id is relative, the
+    *      associated invariants will probably fail; a create node with that ID may not exist, and
+    *      even if it does, the stakeholders and signatories may not match up.
     */
-  val malformedGenTransaction: Gen[Transaction] = {
+  val malformedGenTransaction: Gen[Transaction] =
     for {
       nodes <- Gen.listOf(danglingRefGenNode)
       roots <- Gen.listOf(Arbitrary.arbInt.arbitrary.map(NodeId(_)))
     } yield Transaction(nodes.toMap, roots.to(ImmArray))
-  }
 
   /*
    * Create a transaction without no dangling nodeId.
@@ -623,7 +615,7 @@ object ValueGenerators {
     }
   }
 
-  val noDanglingRefGenVersionedTransaction: Gen[VersionedTransaction] = {
+  val noDanglingRefGenVersionedTransaction: Gen[VersionedTransaction] =
     for {
       tx <- noDanglingRefGenTransaction
       txVer <- SerializationVersionGen()
@@ -633,8 +625,6 @@ object ValueGenerators {
         } yield hashMap.updated(nodeId, node)
       }
     } yield VersionedTransaction(txVer, nodes, tx.roots)
-
-  }
 
   def stringVersionGen: Gen[String] = {
     val g: Gen[String] = for {

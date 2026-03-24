@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
+import com.digitalasset.daml.lf.transaction.{TransactionError => TxErr}
 
 import scala.annotation.tailrec
 import scala.collection.immutable.HashMap
@@ -341,12 +342,14 @@ sealed abstract class HasTxNodes[Tx] {
     globalState
   }
 
-  final def localContracts[Cid2 >: ContractId]: Map[Cid2, (NodeId, Node.Create)] =
-    fold(Map.empty[Cid2, (NodeId, Node.Create)]) {
-      case (acc, (nid, create: Node.Create)) =>
-        acc.updated(create.coid, nid -> create)
+  lazy val localContractIds: Set[ContractId] = {
+    fold(Set.empty[ContractId]) {
+      case (acc, (_, create: Node.Create)) =>
+        acc + create.coid
       case (acc, _) => acc
     }
+  }
+
 
   /** Returns the IDs of all the consumed contracts.
     * This includes transient contracts but it does not include contracts
@@ -434,16 +437,18 @@ sealed abstract class HasTxNodes[Tx] {
 
   /** Returns the IDs of all input contracts that are used by this transaction.
     */
-  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] =
+  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] = {
+
     fold(Set.empty[Cid2]) {
-      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) =>
+      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) if !localContractIds.contains(coid)=>
         acc + coid
-      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _))) =>
+      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))  if !localContractIds.contains(coid)=>
         acc + coid
-      case (acc, (_, Node.LookupByKey(_, _, _, Some(coid), _))) =>
+      case (acc, (_, Node.LookupByKey(_, _, _, Some(coid), _)))  if !localContractIds.contains(coid)=>
         acc + coid
       case (acc, _) => acc
-    } -- localContracts.keySet
+    }
+  }
 
   /** Return all the contract keys referenced by this transaction.
     * This includes the keys created, exercised, fetched, or looked up, even those
@@ -495,8 +500,8 @@ sealed abstract class HasTxNodes[Tx] {
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
   )
-  def contractKeyInputs: ErrOr[Map[GlobalKey, KeyInput]] = {
-    foldInExecutionOrder[ErrOr[ContractStateMachine.State[NodeId]]](
+  def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyInput]] = {
+    foldInExecutionOrder[Either[TxErr, ContractStateMachine.State[NodeId]]](
       Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCKWithRollback))
     )(
       exerciseBegin = (acc, nid, exe) =>
@@ -505,7 +510,7 @@ sealed abstract class HasTxNodes[Tx] {
         acc,
       rollbackBegin =
         (acc, _, _) => (acc.map(_.beginRollback()), Transaction.ChildrenRecursion.DoRecurse),
-      rollbackEnd = (acc, _, _) => acc.map(_.endRollback()),
+      rollbackEnd = (acc, _, _) => acc.flatMap(_.endRollback().left.map(TxErr.EffectfulRollback(_))),
       leaf = (acc, nid, leaf) =>
         acc.flatMap(
           _.handleNode(nid, leaf, Vector.empty)

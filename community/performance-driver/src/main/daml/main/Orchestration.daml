@@ -2,6 +2,7 @@ module Orchestration where
 
 import DA.Foldable qualified as F
 import DA.Assert
+import DA.Action
 
 data Mode = PrepareIssuer | PrepareTrader | Throughput | Done deriving (Eq, Show)
 data ParticipantFlag = Initialising | Ready | Finished deriving (Eq, Show)
@@ -17,6 +18,11 @@ data RunType =
       withAcsGrowth: Int
       payloadSize: Int
       partyGrowth: PartyGrowth |
+  TransferRun
+    with
+      numAssetsPerIssuer: Int
+      transferBatchSize: Int
+      payloadSize: Int |
     NoRun
     deriving (Eq, Show)
 
@@ -29,11 +35,13 @@ validPartyGrowth a = case a of
 validRunType : RunType -> Bool
 validRunType a = case a of
   DvpRun numAssets acsGrowth payloadSize partyGrowth -> numAssets > 0 && acsGrowth > -1 && payloadSize >= 0 && validPartyGrowth partyGrowth
+  TransferRun numAssetsPerIssuer transferBatchSize payloadSize -> numAssetsPerIssuer > 0 && transferBatchSize > 0 && payloadSize >= 0
   NoRun -> False
 
 runTypeCode : RunType -> Int
 runTypeCode a =  case a of
   DvpRun {} -> 0
+  TransferRun {} -> 1
   NoRun -> -1
 
 template TestRun
@@ -70,6 +78,17 @@ template TestRun
           assertEq (runTypeCode newType) (runTypeCode runType)
           assert (validRunType newType)
           create this with runType = newType, totalCycles = newTotalCycles, reportFrequency = newReportFrequency
+
+    nonconsuming choice BulkAddParticipant : ContractId TestRun
+       with
+          requests : [ContractId ParticipationRequest]
+       controller master
+       do
+          foldlA (\currentRunCid reqCid -> do
+              (newRunCid, _participantCid) <- exercise reqCid Accept with
+                masterCid = currentRunCid
+              return newRunCid
+            ) self requests
 
     choice AddParticipant : (ContractId TestRun, ContractId TestParticipant)
        with

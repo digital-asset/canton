@@ -28,6 +28,7 @@ import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.topology.DefaultTestIdentities.{physicalSynchronizerId, sequencerId}
 import com.digitalasset.canton.topology.TestingIdentityFactory
@@ -103,12 +104,16 @@ class BlockUpdateGeneratorImplTest
 
         val blockUpdateGenerator =
           new BlockUpdateGeneratorImpl(
-            testedProtocolVersion,
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
-            sequencingTimeLowerBoundExclusive = Some(sequencingTimeLowerBoundExclusive),
+            lsuSequencingBounds = Some(
+              LsuSequencingBounds(
+                sequencingTimeLowerBoundExclusive,
+                sequencingTimeLowerBoundExclusive,
+              )
+            ),
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
@@ -219,12 +224,11 @@ class BlockUpdateGeneratorImplTest
 
         val blockUpdateGenerator =
           new BlockUpdateGeneratorImpl(
-            testedProtocolVersion,
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
-            sequencingTimeLowerBoundExclusive = None,
+            lsuSequencingBounds = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
@@ -268,7 +272,6 @@ class BlockUpdateGeneratorImplTest
 
         val blockUpdateGenerator =
           new BlockUpdateGeneratorImpl(
-            testedProtocolVersion,
             synchronizerSyncCryptoApi =
               TestingIdentityFactory(loggerFactory).forOwnerAndSynchronizer(
                 sequencerId,
@@ -278,7 +281,7 @@ class BlockUpdateGeneratorImplTest
             sequencerId,
             mock[SequencerRateLimitManager],
             OrderingTimeFixMode.ValidateOnly,
-            sequencingTimeLowerBoundExclusive = None,
+            lsuSequencingBounds = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
@@ -356,7 +359,6 @@ class BlockUpdateGeneratorImplTest
 
           val blockUpdateGenerator =
             new BlockUpdateGeneratorImpl(
-              testedProtocolVersion,
               synchronizerSyncCryptoApi =
                 TestingIdentityFactory(loggerFactory).forOwnerAndSynchronizer(
                   sequencerId,
@@ -366,7 +368,7 @@ class BlockUpdateGeneratorImplTest
               sequencerId,
               mock[SequencerRateLimitManager],
               OrderingTimeFixMode.ValidateOnly,
-              sequencingTimeLowerBoundExclusive = None,
+              lsuSequencingBounds = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
               SequencerTestMetrics,
@@ -428,7 +430,6 @@ class BlockUpdateGeneratorImplTest
           val epsilon = defaultStaticSynchronizerParameters.topologyChangeDelay.duration
           val blockUpdateGenerator =
             new BlockUpdateGeneratorImpl(
-              testedProtocolVersion,
               synchronizerSyncCryptoApi =
                 TestingIdentityFactory(loggerFactory).forOwnerAndSynchronizer(
                   sequencerId,
@@ -438,7 +439,7 @@ class BlockUpdateGeneratorImplTest
               sequencerId,
               mock[SequencerRateLimitManager],
               OrderingTimeFixMode.ValidateOnly,
-              sequencingTimeLowerBoundExclusive = None,
+              lsuSequencingBounds = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
               SequencerTestMetrics,

@@ -165,7 +165,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           lookup <- store
             .findAfter(
               requestAfter = Some(
-                reassignment2.unassignmentTs -> reassignment2.sourcePSId
+                reassignment2.unassignmentTs -> reassignment2.sourcePsid
               ),
               10,
             )
@@ -219,7 +219,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       val data = unassignmentData
       val assignmentData = AssignmentData(
         data.reassignmentId,
-        data.sourcePSId,
+        data.sourcePsid,
         data.contractsBatch,
       )
 
@@ -285,7 +285,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           modifiedUnassignmentData = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
             sourceMediator = mediator1,
             data.submitterMetadata.submitter,
-            data.sourcePSId,
+            data.sourcePsid,
             targetSynchronizer,
             contract,
           )
@@ -315,7 +315,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           entry1 shouldBe Right(
             ReassignmentEntry(
               data.reassignmentId,
-              data.sourcePSId,
+              data.sourcePsid,
               NonEmpty.mk(Seq, contract),
               None,
               None,
@@ -359,7 +359,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
         val data = (1L until 13).flatMap { i =>
           val reassignmentData =
-            unassignmentDataFor(unassignmentData.sourcePSId, ofEpochSecond(i), contract)
+            unassignmentDataFor(unassignmentData.sourcePsid, ofEpochSecond(i), contract)
 
           val mod = 4
 
@@ -715,7 +715,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val unassignmentOffset = 20L
         val assignmentData = AssignmentData(
           unassignmentData.reassignmentId,
-          unassignmentData.sourcePSId,
+          unassignmentData.sourcePsid,
           unassignmentData.contractsBatch,
         )
 

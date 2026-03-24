@@ -126,6 +126,8 @@ final case class TransactionSubmissionTrackingData(
       synchronizerId.logical,
       recordTime,
       messageUuid,
+      // TODO(i15875): Submission tracking is only enabled for transactions
+      isTransaction = true,
     )
   }
 

@@ -36,7 +36,9 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.store.ReassignmentStore.UnknownReassignmentId
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
@@ -51,9 +53,11 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
+  LfCommandId,
   ReassignmentCounter,
   SynchronizerAlias,
 }
+import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.Assertion
 
 import scala.collection.mutable
@@ -183,6 +187,18 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
               signatory.toLf,
               Some(participant1),
             )
+
+          participant1.testing.state_inspection
+            .lookupDeduplicationData(
+              ChangeIdHash(
+                ChangeId(
+                  userId = Ref.UserId.assertFromString(unassignmentCompletion.userId),
+                  commandId = LfCommandId.assertFromString(unassignmentCompletion.commandId),
+                  actAs = Set(signatory.toLf),
+                )
+              )
+            )
+            .futureValue shouldBe None
 
           val unassignmentTs = CantonTimestamp
             .fromProtoTimestamp(unassignmentCompletion.synchronizerTime.value.recordTime.value)

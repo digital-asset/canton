@@ -3,17 +3,13 @@
 
 package com.digitalasset.daml.lf.data
 
-import scala.collection.{IterableFactory, IterableFactoryDefaults}
 import scala.collection.immutable.{AbstractSet, HashSet, Queue, StrictOptimizedSetOps}
 import scala.collection.mutable.ReusableBuilder
+import scala.collection.{IterableFactory, IterableFactoryDefaults}
 
 /** Insert-ordered Set.
   *
-  * Implemented as (Queue[T], HashSet[T]).
-  * Asymptotics:
-  *  get: O(1)
-  *  insert: O(1)
-  *  remove: O(n)
+  * Implemented as (Queue[T], HashSet[T]). Asymptotics: get: O(1) insert: O(1) remove: O(n)
   */
 final class InsertOrdSet[T] private (_items: Queue[T], _hashSet: HashSet[T])
     extends AbstractSet[T]
@@ -51,12 +47,11 @@ object InsertOrdSet extends IterableFactory[InsertOrdSet] {
 
   def canBuildFrom[A]: Factory[A] = ()
 
-  def from[T](it: IterableOnce[T]): InsertOrdSet[T] = {
+  def from[T](it: IterableOnce[T]): InsertOrdSet[T] =
     it match {
       case s: InsertOrdSet[T] => s
       case _ => (newBuilder[T] ++= it).result()
     }
-  }
 
   def newBuilder[T]: ReusableBuilder[T, InsertOrdSet[T]] = new InsertOrdSetBuilder[T]
 
@@ -64,13 +59,12 @@ object InsertOrdSet extends IterableFactory[InsertOrdSet] {
   final def empty[T] = Empty.asInstanceOf[InsertOrdSet[T]]
 
   def fromSeq[T](s: Seq[T]): InsertOrdSet[T] =
-    new InsertOrdSet(Queue(s.reverse: _*), HashSet(s: _*))
+    new InsertOrdSet(Queue(s.reverse*), HashSet(s*))
 
   private final class InsertOrdSetBuilder[T] extends ReusableBuilder[T, InsertOrdSet[T]] {
     var m: InsertOrdSet[T] = empty
-    override def clear(): Unit = {
+    override def clear(): Unit =
       m = empty
-    }
     override def result(): InsertOrdSet[T] = m
     override def addOne(elem: T): this.type = {
       m = m.incl(elem)

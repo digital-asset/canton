@@ -222,10 +222,9 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
     ): Either[String, MetricValue] = check(FeatureFlag.Testing) {
       val candidates = consoleEnvironment.environment.configuredOpenTelemetry.onDemandMetricsReader
         .read()
+
       val res = candidates
-        .find { data =>
-          data.getName.equals(metricName)
-        }
+        .find(_.getName.equals(metricName))
         .toList
         .flatMap(MetricValue.fromMetricData)
         .filter(filterByNodeAndAttribute(attributes))
@@ -233,7 +232,8 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
         case one :: Nil => Right(one)
         case Nil =>
           Left(s"No metric of name $metricName with instance name $name found.")
-        case other => Left(s"Found ${other.length} matching metrics")
+        case other =>
+          Left(s"Found ${other.length} matching metrics")
       }
     }
 

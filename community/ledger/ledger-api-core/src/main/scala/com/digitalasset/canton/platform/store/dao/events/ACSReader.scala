@@ -14,6 +14,12 @@ import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.api.{
+  AcsContinuationToken,
+  AcsContinuationTokenActive,
+  AcsContinuationTokenIncomplete,
+  GetActiveContractsResponseFactory,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -95,9 +101,10 @@ class ACSReader(
       filteringConstraints: TemplatePartiesFilter,
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
+      continuationToken: Option[AcsContinuationToken],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponse, NotUsed] = {
+  ): Source[GetActiveContractsResponseFactory, NotUsed] = {
     val (activeAtOffset, activeAtLong) = activeAt
     val span =
       Telemetry.Updates.createSpan(tracer, activeAtOffset)(qualifiedNameOfCurrentFunc)
@@ -111,6 +118,7 @@ class ACSReader(
       filteringConstraints,
       activeAt,
       eventProjectionProperties,
+      continuationToken,
     )
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -119,9 +127,10 @@ class ACSReader(
       filter: TemplatePartiesFilter,
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
+      continuationToken: Option[AcsContinuationToken],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponse, NotUsed] = {
+  ): Source[GetActiveContractsResponseFactory, NotUsed] = {
     val (activeAtOffset, activeAtEventSeqId) = activeAt
     def withValidatedActiveAt[T](query: => Future[T]) =
       queryValidRange.withOffsetNotBeforePruning(
@@ -152,12 +161,14 @@ class ACSReader(
       loggerFactory = loggerFactory,
     )
 
-    def fetchActiveIds(filter: DecomposedFilter): Source[Long, NotUsed] =
+    def fetchActiveIds(initialFromIdExclusive: Long)(
+        filter: DecomposedFilter
+    ): Source[Long, NotUsed] =
       paginatingAsyncStream.streamIdsFromSeekPaginationWithIdFilter(
         idStreamName = s"ActiveContractIds $filter",
         idPageSizing = idQueryPageSizing,
         idPageBufferSize = config.maxPagesPerIdPagesBuffer,
-        initialFromIdExclusive = 0L,
+        initialFromIdExclusive = initialFromIdExclusive,
         initialEndInclusive = activeAtEventSeqId,
         descendingOrder = false,
       )(
@@ -412,8 +423,8 @@ class ACSReader(
     val inputBufferSize =
       Utils.largestSmallerOrEqualPowerOfTwo(config.maxParallelPayloadCreateQueries)
 
-    decomposedFilters
-      .map(fetchActiveIds)
+    def activeContractsStream(startSequentialIdExclusive: Long) = decomposedFilters
+      .map(fetchActiveIds(startSequentialIdExclusive))
       .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
       .batchN(
         maxBatchSize = config.maxPayloadsPerPayloadsPage,
@@ -425,71 +436,83 @@ class ACSReader(
       .mapAsync(config.contractProcessingParallelism)(
         toApiResponseActiveContract(eventProjectionProperties)
       )
-      .concatLazy(
-        // compute incomplete reassignments
-        Source.lazyFutureSource(() =>
-          incompleteOffsets(
-            activeAtOffset,
-            filter.allFilterParties,
-            loggingContext.traceContext,
-          ).map { offsets =>
-            def incompleteOffsetPages: () => Iterator[Vector[Offset]] =
-              () => offsets.sliding(config.maxIncompletePageSize, config.maxIncompletePageSize)
 
-            val incompleteAssigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
-              Source
-                .fromIterator(incompleteOffsetPages)
-                .mapAsync(config.maxParallelActiveIdQueries)(
-                  fetchAssignIdsForOffsets
-                )
-                .mapConcat(identity)
-                .grouped(config.maxIncompletePageSize)
-                .mapAsync(config.maxParallelPayloadCreateQueries)(
-                  fetchAssignPayloads
-                )
-                .mapConcat(_.filter(assignMeetsConstraints))
-                .mapAsync(config.contractProcessingParallelism)(
-                  toApiResponseIncompleteAssigned(eventProjectionProperties)
-                )
+    val activeContracts = continuationToken match {
+      case Some(AcsContinuationTokenIncomplete(_, _, _)) => Source.empty
+      case Some(AcsContinuationTokenActive(_, startSequentialIdExclusive)) =>
+        activeContractsStream(startSequentialIdExclusive)
+      case _ => activeContractsStream(0L)
+    }
+    val incompleteReassignments = Source.lazyFutureSource(() =>
+      incompleteOffsets(
+        activeAtOffset,
+        filter.allFilterParties,
+        loggingContext.traceContext,
+      ).map { allOffsets =>
+        val (sequentialIdLimit, offsetLimit) = continuationToken match {
+          case Some(AcsContinuationTokenIncomplete(_, sequentialId, offset)) =>
+            (sequentialId, Offset.tryFromLong(offset))
+          case _ => (0L, Offset.firstOffset)
+        }
+        val offsets = allOffsets.filter(_ >= offsetLimit)
+        def incompleteOffsetPages: () => Iterator[Vector[Offset]] =
+          () => offsets.sliding(config.maxIncompletePageSize, config.maxIncompletePageSize)
 
-            val incompleteUnassigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
-              Source
-                .fromIterator(incompleteOffsetPages)
-                .mapAsync(config.maxParallelActiveIdQueries)(
-                  fetchUnassignIdsForOffsets
-                )
-                .mapConcat(identity)
-                .grouped(config.maxIncompletePageSize)
-                .mapAsync(config.maxParallelPayloadCreateQueries)(
-                  fetchUnassignPayloads
-                )
-                .mapConcat(_.filter(unassignMeetsConstraints))
-                .grouped(config.maxIncompletePageSize)
-                .mapAsync(config.maxParallelPayloadCreateQueries)(
-                  fetchActivationEventsForUnassignedBatch
-                )
-                .mapConcat(identity)
-                .mapAsync(config.contractProcessingParallelism)(
-                  toApiResponseIncompleteUnassigned(eventProjectionProperties)
-                )
-
-            incompleteAssigned
-              .mergeSorted(incompleteUnassigned)(Ordering.by(_._1))
-              .map(_._2)
-          }.onShutdown {
-            Source.failed(
-              AbortedDueToShutdown.Error().asGrpcError
+        val incompleteAssigned: Source[(Long, GetActiveContractsResponseFactory), NotUsed] =
+          Source
+            .fromIterator(incompleteOffsetPages)
+            .mapAsync(config.maxParallelActiveIdQueries)(
+              fetchAssignIdsForOffsets
             )
-          }
+            .mapConcat(identity)
+            .dropWhile(_ <= sequentialIdLimit)
+            .grouped(config.maxIncompletePageSize)
+            .mapAsync(config.maxParallelPayloadCreateQueries)(
+              fetchAssignPayloads
+            )
+            .mapConcat(_.filter(assignMeetsConstraints))
+            .mapAsync(config.contractProcessingParallelism)(
+              toApiResponseIncompleteAssigned(eventProjectionProperties)
+            )
+
+        val incompleteUnassigned: Source[(Long, GetActiveContractsResponseFactory), NotUsed] =
+          Source
+            .fromIterator(incompleteOffsetPages)
+            .mapAsync(config.maxParallelActiveIdQueries)(
+              fetchUnassignIdsForOffsets
+            )
+            .mapConcat(identity)
+            .dropWhile(_ <= sequentialIdLimit)
+            .grouped(config.maxIncompletePageSize)
+            .mapAsync(config.maxParallelPayloadCreateQueries)(
+              fetchUnassignPayloads
+            )
+            .mapConcat(_.filter(unassignMeetsConstraints))
+            .grouped(config.maxIncompletePageSize)
+            .mapAsync(config.maxParallelPayloadCreateQueries)(
+              fetchActivationEventsForUnassignedBatch
+            )
+            .mapConcat(identity)
+            .mapAsync(config.contractProcessingParallelism)(
+              toApiResponseIncompleteUnassigned(eventProjectionProperties)
+            )
+
+        incompleteAssigned
+          .mergeSorted(incompleteUnassigned)(Ordering.by(_._1))
+          .map(_._2)
+      }.onShutdown {
+        Source.failed(
+          AbortedDueToShutdown.Error().asGrpcError
         )
-      )
+      }
+    )
+
+    activeContracts.concatLazy(incompleteReassignments)
   }
 
-  private def toApiResponseActiveContract(
-      eventProjectionProperties: EventProjectionProperties
-  )(
+  private def toApiResponseActiveContract(eventProjectionProperties: EventProjectionProperties)(
       rawActiveContract: RawFatActiveContract
-  )(implicit lc: LoggingContextWithTrace): Future[GetActiveContractsResponse] =
+  )(implicit lc: LoggingContextWithTrace): Future[GetActiveContractsResponseFactory] =
     Timed.future(
       future = Future.delegate(
         lfValueTranslation
@@ -505,7 +528,7 @@ class ACSReader(
             acsDelta = true,
           )
           .map(createdEvent =>
-            GetActiveContractsResponse(
+            AcsContinuationToken.activeContractsFactory(
               workflowId = rawActiveContract.commonEventProperties.workflowId.getOrElse(""),
               contractEntry = GetActiveContractsResponse.ContractEntry.ActiveContract(
                 ActiveContract(
@@ -515,6 +538,7 @@ class ACSReader(
                     rawActiveContract.fatCreatedEventProperties.thinCreatedEventProperties.reassignmentCounter,
                 )
               ),
+              sequentialId = rawActiveContract.eventSeqId,
             )
           )
       ),
@@ -523,7 +547,7 @@ class ACSReader(
 
   private def toApiResponseIncompleteAssigned(eventProjectionProperties: EventProjectionProperties)(
       rawFatAssign: RawFatAssignEvent
-  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponse)] =
+  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponseFactory)] =
     Timed.future(
       future = Future.delegate(
         lfValueTranslation
@@ -539,15 +563,18 @@ class ACSReader(
             acsDelta = true,
           )
           .map(createdEvent =>
-            rawFatAssign.reassignmentProperties.commonEventProperties.offset -> GetActiveContractsResponse(
-              workflowId =
-                rawFatAssign.reassignmentProperties.commonEventProperties.workflowId.getOrElse(""),
-              contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteAssigned(
-                IncompleteAssigned(
-                  Some(UpdateReader.toAssignedEvent(rawFatAssign, createdEvent))
-                )
-              ),
-            )
+            rawFatAssign.reassignmentProperties.commonEventProperties.offset -> AcsContinuationToken
+              .incompleteReassignmentsFactory(
+                workflowId = rawFatAssign.reassignmentProperties.commonEventProperties.workflowId
+                  .getOrElse(""),
+                contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteAssigned(
+                  IncompleteAssigned(
+                    Some(UpdateReader.toAssignedEvent(rawFatAssign, createdEvent))
+                  )
+                ),
+                sequentialId = rawFatAssign.eventSeqId,
+                offset = rawFatAssign.offset,
+              )
           )
       ),
       timer = dbMetrics.getActiveContracts.translationTimer,
@@ -557,7 +584,7 @@ class ACSReader(
       eventProjectionProperties: EventProjectionProperties
   )(
       rawUnassignEventWithActive: (RawUnassignEvent, RawFatActiveContract)
-  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponse)] = {
+  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponseFactory)] = {
     val (rawUnassignEvent, rawFatActiveContract) = rawUnassignEventWithActive
     Timed.future(
       future = lfValueTranslation
@@ -573,18 +600,21 @@ class ACSReader(
           acsDelta = true,
         )
         .map(createdEvent =>
-          rawUnassignEvent.reassignmentProperties.commonEventProperties.offset -> GetActiveContractsResponse(
-            workflowId = rawUnassignEvent.reassignmentProperties.commonEventProperties.workflowId
-              .getOrElse(""),
-            contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteUnassigned(
-              IncompleteUnassigned(
-                createdEvent = Some(createdEvent),
-                unassignedEvent = Some(
-                  UpdateReader.toUnassignedEvent(rawUnassignEvent)
-                ),
-              )
-            ),
-          )
+          rawUnassignEvent.reassignmentProperties.commonEventProperties.offset -> AcsContinuationToken
+            .incompleteReassignmentsFactory(
+              workflowId = rawUnassignEvent.reassignmentProperties.commonEventProperties.workflowId
+                .getOrElse(""),
+              contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteUnassigned(
+                IncompleteUnassigned(
+                  createdEvent = Some(createdEvent),
+                  unassignedEvent = Some(
+                    UpdateReader.toUnassignedEvent(rawUnassignEvent)
+                  ),
+                )
+              ),
+              rawUnassignEvent.eventSeqId,
+              rawUnassignEvent.offset,
+            )
         ),
       timer = dbMetrics.getActiveContracts.translationTimer,
     )

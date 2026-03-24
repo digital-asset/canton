@@ -91,10 +91,7 @@ final class LsuMinimumSequencingTimeIntegrationTest
 
           // advance the clock to the minimum sequencing time
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
-          eventually() {
-            waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
-          }
+          waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
         },
         LogEntry.assertLogSeq(
           Seq(

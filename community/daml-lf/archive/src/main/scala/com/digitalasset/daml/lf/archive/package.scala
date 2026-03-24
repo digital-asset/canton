@@ -3,9 +3,9 @@
 
 package com.digitalasset.daml.lf
 
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.daml.scalautil.Statement.discard
 
 import scala.util.Using
 import scala.util.Using.Releasable

@@ -46,6 +46,15 @@ object GrpcStreamingUtils {
   private final val defaultChunkSize: Int =
     1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
 
+  /** A blocking method that waits for a chunk of bytes from the input stream, or the end of the
+    * stream.
+    * @return
+    *   an array of bytes read from the input stream (with at most `chunkSize` bytes), or an empty
+    *   array if the end of the stream has been reached.
+    */
+  def readChunkBytes(inputStream: InputStream, chunkSize: Int = defaultChunkSize): Array[Byte] =
+    inputStream.readNBytes(chunkSize)
+
   def streamFromClient[Req, Resp, C](
       extractChunkBytes: Req => ByteString,
       extractContext: Req => C,

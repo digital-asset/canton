@@ -956,6 +956,7 @@ class ProtocolConverters(
           lapi.state_service.GetActiveContractsResponse(
             workflowId = v.workflowId,
             contractEntry = ce,
+            streamContinuationToken = v.streamContinuationToken,
           )
         )
   }

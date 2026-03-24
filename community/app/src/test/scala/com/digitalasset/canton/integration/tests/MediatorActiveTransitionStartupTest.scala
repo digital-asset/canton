@@ -54,7 +54,6 @@ abstract class MediatorActiveTransitionStartupTestSetup
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S1M1_Manual
       .addConfigTransform(mediator1NoFailFast)
-      .addConfigTransforms(ConfigTransforms.enableReplicatedMediators("mediator1"))
       .addConfigTransforms(
         _.focus(_.parameters.timeouts.processing.activeInitRetryDelay)
           .replace(NonNegativeDuration.ofMillis(2000)),

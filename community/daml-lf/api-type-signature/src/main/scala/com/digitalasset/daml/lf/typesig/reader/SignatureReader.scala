@@ -5,24 +5,22 @@ package com.digitalasset.daml.lf
 package typesig
 package reader
 
-import com.digitalasset.daml.lf.archive.DamlLf
-import com.digitalasset.daml.lf.archive.ArchivePayload
-import scalaz.{Enum => _, _}
-import scalaz.syntax.monoid._
-import scalaz.syntax.traverse._
-import scalaz.std.map._
-import scalaz.std.option._
-import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.daml.lf.archive.{ArchivePayload, DamlLf}
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref.{PackageId, QualifiedName}
-import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.language.{Util => AstUtil}
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
+import com.digitalasset.daml.lf.language.{Ast, Util as AstUtil}
+import scalaz.std.map.*
+import scalaz.std.option.*
+import scalaz.syntax.monoid.*
+import scalaz.syntax.traverse.*
+import scalaz.{Enum as _, *}
 
 import scala.collection.immutable.Map
 
 object SignatureReader {
-  import Errors._
+  import Errors.*
   import PackageSignature.TypeDecl
 
   sealed abstract class Error extends Product with Serializable
@@ -111,7 +109,7 @@ object SignatureReader {
         lfprintln(s"templateGroupId: $templateGroupId")
         lfprintln(s"package: $lfPackage")
         val s: State = {
-          import scalaz.std.iterable._
+          import scalaz.std.iterable.*
           lfPackage.modules.values.foldMap(foldModule)
         }
         val r = (
@@ -164,7 +162,7 @@ object SignatureReader {
       locate(Symbol("name"), rootErrOf[ErrorLoc](result)).toEither
     }
 
-    import scalaz.std.iterable._
+    import scalaz.std.iterable.*
     State(typeDecls = ddts, interfaces = astIfs.toMap, errors = (derrors ++ ierrors).suml)
   }
 
@@ -218,11 +216,10 @@ object SignatureReader {
       name: QualifiedName,
       tyVars: ImmArraySeq[Ast.TypeVarName],
       variant: Ast.DataVariant,
-  ) = {
+  ) =
     for {
       cons <- fieldsOrCons(name, variant.variants)
     } yield name -> (TypeDecl.Normal(DefDataType(tyVars, Variant(cons))): T)
-  }
 
   private[reader] def enumeration[T >: TypeDecl.Normal](
       name: QualifiedName,

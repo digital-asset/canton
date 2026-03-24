@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package engine
 
 import com.daml.nameof.NameOf.qualifiedNameOfMember
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiContractKey}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, PackageRef, PackageVersion, Party}
@@ -32,7 +33,8 @@ class PreprocessorSpec
     with Inside
     with Matchers
     with Inspectors
-    with TableDrivenPropertyChecks {
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   val helpers = new PreprocessorSpecHelpers
   import helpers._
@@ -41,7 +43,7 @@ class PreprocessorSpec
 
   "preprocessor" should {
     "returns correct result when resuming" in {
-      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
       val intermediaryResult = preprocessor
         .translateValue(
           Ast.TTyCon("Mod:WithoutKey"),
@@ -53,7 +55,7 @@ class PreprocessorSpec
     }
 
     "returns correct error when resuming" in {
-      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
       val intermediaryResult = preprocessor
         .translateValue(
           Ast.TTyCon("Mod:WithoutKey"),
@@ -108,7 +110,7 @@ class PreprocessorSpec
 
       val compiledPkgs = ConcurrentCompiledPackages(compilerConfig)
       compiledPkgs.addPackage(defaultPackageId, pkg)
-      val preprocessor = preprocessing.Preprocessor.forTesting(compiledPkgs)
+      val preprocessor = preprocessing.Preprocessor.forTesting(compiledPkgs, loggerFactory)
 
       val priority = Map(pkgName -> defaultPackageId)
 
@@ -136,7 +138,7 @@ class PreprocessorSpec
       val compiledPkgs = ConcurrentCompiledPackages(compilerConfig)
       compiledPkgs.addPackage(defaultPackageId, pkg)
 
-      val preprocessor = preprocessing.Preprocessor.forTesting(compiledPkgs)
+      val preprocessor = preprocessing.Preprocessor.forTesting(compiledPkgs, loggerFactory)
 
       forEvery(cmdsByPackageName)(cmd =>
         a[Error.Preprocessing.UnresolvedPackageName] shouldBe thrownBy(
@@ -153,7 +155,7 @@ class PreprocessorSpec
         packagePreferenceSet: Seq[String],
         expected: Result[Map[String, String]],
     ): Assertion = {
-      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+      val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
       val result: Result[Map[PackageName, PackageId]] = preprocessor.buildPackageResolution(
         packageMap = packageMap.map { case (pkgId, pkgName, pkgVersion) =>
@@ -207,20 +209,25 @@ class PreprocessorSpec
       }
 
       "provided with multiple package-ids referencing the same package-name" in {
-        testBuildPackageResolution(
-          packageMap = Seq(
-            ("pkgId1", "pkgName1", "1.0.0"),
-            ("pkgId2", "pkgName1", "1.1.0"),
-            ("pkgId3", "pkgName2", "1.0.0"),
-          ),
-          packagePreferenceSet = Seq("pkgId1", "pkgId2", "pkgId3"),
-          expected = ResultError(
-            Error.Preprocessing.Internal(
-              qualifiedNameOfMember[preprocessing.Preprocessor](_.buildPackageResolution()),
-              "package pkgId1 and pkgId2 have the same name pkgName1",
-              None,
+        val errorMessage = "package pkgId1 and pkgId2 have the same name pkgName1"
+        loggerFactory.assertLogs(
+          testBuildPackageResolution(
+            packageMap = Seq(
+              ("pkgId1", "pkgName1", "1.0.0"),
+              ("pkgId2", "pkgName1", "1.1.0"),
+              ("pkgId3", "pkgName2", "1.0.0"),
+            ),
+            packagePreferenceSet = Seq("pkgId1", "pkgId2", "pkgId3"),
+            expected = ResultError(
+              Error.Preprocessing.Internal(
+                qualifiedNameOfMember[preprocessing.Preprocessor](_.buildPackageResolution()),
+                errorMessage,
+                None,
+              )
             )
           ),
+          logEntry => logEntry.message should include(errorMessage),
+          logEntry => logEntry.message should include(errorMessage)
         )
       }
     }
@@ -245,7 +252,7 @@ class PreprocessorSpec
       )
 
       "extract the keys from ExerciseByKey commands" in {
-        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
         val commands = {
           val recordFields = Value.ValueRecord(
@@ -298,7 +305,7 @@ class PreprocessorSpec
       }
 
       "include explicitly specified keys" in {
-        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
         val prefetch = Seq(
           ApiContractKey(withKeyTmplRef, parties),
@@ -319,7 +326,7 @@ class PreprocessorSpec
       }
 
       "extract contract IDs from commands" in {
-        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
         val moreContractIds: Seq[ContractId] = (1 to 5).map(i =>
           Value.ContractId.V1.assertBuild(
@@ -333,11 +340,11 @@ class PreprocessorSpec
             None,
             ImmArray(
               None -> parties,
-              None -> Value.ValueList(FrontStack.from(ids.map(Value.ValueContractId))),
+              None -> Value.ValueList(FrontStack.from(ids.map(Value.ValueContractId.apply))),
             ),
           )
           def choiceArg(ids: Seq[ContractId]) =
-            Value.ValueList(FrontStack.from(ids.map(Value.ValueContractId)))
+            Value.ValueList(FrontStack.from(ids.map(Value.ValueContractId.apply)))
           ImmArray(
             ApiCommand.Create(
               templateRef = withContractIdTmplRef,
@@ -393,7 +400,7 @@ class PreprocessorSpec
       }
 
       "fail on contract IDs in keys" in {
-        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig)
+        val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
         val commands = ImmArray(
           ApiCommand.ExerciseByKey(

@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationCon
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
@@ -96,6 +97,7 @@ class TopologyComponentFactory(
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
       pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+      pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
         String,
@@ -122,6 +124,8 @@ class TopologyComponentFactory(
         ),
         synchronizerPredecessor = synchronizerPredecessor,
         pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
+        pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
+        onboardingClearanceScheduler = onboardingClearanceScheduler,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         loggerFactory,
       )
@@ -174,7 +178,7 @@ class TopologyComponentFactory(
       dispatchQueueBackpressureLimit: NonNegativeInt,
       disableUpgradeValidation: Boolean,
   ): SynchronizerTopologyManager = {
-    val synchronizerOutboxQueue = new SynchronizerOutboxQueue(loggerFactory)
+    val synchronizerOutboxQueue = new SynchronizerOutboxQueue(timeouts, loggerFactory)
     val topologyManager: SynchronizerTopologyManager = new SynchronizerTopologyManager(
       participantId.uid,
       clock = clock,

@@ -173,6 +173,7 @@ private class JdbcLedgerWriteDao(
               completionInfo = info,
               reasonTemplate = reason,
               synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
+              isTransaction = true,
             )
           ),
         )

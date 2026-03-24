@@ -220,7 +220,7 @@ class WriteThroughCacheTopologySnapshot(
       }.toSet
     }
 
-  override def sequencerConnectionSuccessors()(implicit
+  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
     // since the state lookup cannot look at the state just based on the type,
@@ -245,7 +245,7 @@ class WriteThroughCacheTopologySnapshot(
         FutureUnlessShutdown.pure(StoredTopologyTransactions.empty[TopologyChangeOp.Replace])
       )(sequencersNE =>
         findTransactionsByUids(
-          types = Seq(TopologyMapping.Code.SequencerConnectionSuccessor),
+          types = Seq(TopologyMapping.Code.LsuSequencerConnectionSuccessor),
           filterUid = sequencersNE,
         )
       )
@@ -253,7 +253,10 @@ class WriteThroughCacheTopologySnapshot(
       .collectOfMapping[LsuSequencerConnectionSuccessor]
       .result
       .view
-      .map(stored => stored.mapping.sequencerId -> stored.mapping)
+      .collect {
+        case stored if stored.mapping.successorPsid == successorPsid =>
+          stored.mapping.sequencerId -> stored.mapping
+      }
       .toMap
 
   // ===============================================

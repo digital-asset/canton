@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.speedy.SValue.{SValue => _, _}
@@ -17,7 +19,7 @@ import com.digitalasset.daml.lf.speedy.SBuiltinBigNumericTestHelpers._
 
 import scala.language.implicitConversions
 
-class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
+class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -330,8 +332,6 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
 
 object SBuiltinBigNumericTestHelpers {
 
-  import SpeedyTestLib.loggingContext
-
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
 
   private val pkg = p"""
@@ -384,6 +384,6 @@ object SBuiltinBigNumericTestHelpers {
       Compiler.Config.Default,
     )
 
-  def eval(e: Expr): Either[SError.SError, SValue] =
+  def eval(e: Expr)(implicit loggingContext: NamedLoggingContext): Either[SError.SError, SValue] =
     Speedy.Machine.runPureExpr(e, compiledPackages)
 }

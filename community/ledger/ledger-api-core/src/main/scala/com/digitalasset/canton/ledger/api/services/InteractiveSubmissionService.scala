@@ -43,7 +43,6 @@ object InteractiveSubmissionService {
       signatures: Map[PartyId, Seq[Signature]],
       preparedTransaction: PreparedTransaction,
       serializationVersion: HashingSchemeVersion,
-      synchronizerId: SynchronizerId,
       tentativeLedgerEffectiveTime: LfTimestamp,
   )
 }

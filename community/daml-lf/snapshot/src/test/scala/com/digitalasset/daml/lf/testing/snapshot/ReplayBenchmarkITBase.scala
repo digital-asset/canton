@@ -10,7 +10,13 @@ import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
-import com.digitalasset.canton.integration.{CommunityIntegrationTest, ConfigTransforms, EnvironmentDefinition, SharedEnvironment, TestConsoleEnvironment}
+import com.digitalasset.canton.integration.{
+  CommunityIntegrationTest,
+  ConfigTransforms,
+  EnvironmentDefinition,
+  SharedEnvironment,
+  TestConsoleEnvironment,
+}
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.SetupPackageVetting
@@ -90,9 +96,8 @@ abstract class ReplayBenchmarkITBase(
         )
       }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     Files.newDirectoryStream(snapshotDir).forEach(Files.delete)
-  }
 
   "Ledger submission" should {
     "with a create" should {

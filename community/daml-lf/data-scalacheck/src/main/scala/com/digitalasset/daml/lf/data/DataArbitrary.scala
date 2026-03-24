@@ -3,10 +3,11 @@
 
 package com.digitalasset.daml.lf.data
 
-import org.scalacheck.{Arbitrary, Gen}
-import Arbitrary.arbitrary
 import org.scalacheck.util.Buildable
+import org.scalacheck.{Arbitrary, Gen}
 import scalaz.{@@, Tag}
+
+import Arbitrary.arbitrary
 
 object DataArbitrary {
   implicit def `arb FrontStack`[A: Arbitrary]: Arbitrary[FrontStack[A]] =

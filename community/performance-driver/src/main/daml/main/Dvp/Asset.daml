@@ -1,5 +1,7 @@
 module Dvp.Asset where
 
+import DA.Foldable
+
 template Asset
   with
     registrar : Party -- may be a decentralized party
@@ -8,9 +10,17 @@ template Asset
     payload : Text
     owner : Party
     bystander: Party
+    location: Text -- pointer to the synchronizer we want this asset ultimately to reside to simulate sharding
   where
     signatory registrar, issuer, owner
     observer bystander
+
+    choice DirectTransfer : ContractId Asset
+      with
+        newOwner : Party
+      controller owner, newOwner
+      do
+        create this with owner = newOwner, bystander = newOwner
 
     choice UpdatePayload : ContractId Asset
       with
@@ -41,6 +51,7 @@ template AssetTransfer
     issuer : Party
     id : Text
     payload: Text
+    location: Text
     owner : Party
     newOwner : Party
     growthFactor : Int
@@ -111,13 +122,14 @@ template IssuanceProposal
         id : Text
         payload : Text
         quantity : Int
+        locations : [Text]
       controller requester
       do
         let
-          baseAsset = Asset with
-            owner = requester, bystander = requester
+          baseAsset = \loc -> Asset with
+            owner = requester, bystander = requester, location = loc
             ..
-        sequence (genAsset quantity baseAsset)
+        fmap Prelude.concat $ forA locations (\loc -> sequence (genAsset quantity (baseAsset loc)))
 
 -- free assets for everyone!
 template AssetRequest
@@ -127,6 +139,7 @@ template AssetRequest
     id : Text
     payload: Text
     quantity : Int
+    locations: [Text]
   where
     signatory requester
     observer issuer
@@ -163,3 +176,23 @@ template AcsGrowth
       controller owner
         do
           return ()
+
+
+template TransferPreapproval
+  with
+    owner : Party
+    counterparty: Party
+    location: Text
+  where
+
+    signatory owner
+    observer counterparty
+
+    nonconsuming choice Send: ()
+        with
+          assetCids : [ContractId Asset]
+          issuer: Party
+        observer issuer, owner, counterparty
+        controller counterparty
+        do
+          forA_ assetCids (\cid -> exercise cid DirectTransfer with newOwner = owner)

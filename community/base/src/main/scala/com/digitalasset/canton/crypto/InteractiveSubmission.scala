@@ -16,7 +16,7 @@ import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.protocol.hash.{HashTracer, TransactionHash}
 import com.digitalasset.canton.protocol.{LfContractId, LfHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{PartyId, Synchronizer}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.data.{Ref, Time}
@@ -54,7 +54,7 @@ object InteractiveSubmission {
         commandId: Ref.CommandId,
         transactionUUID: UUID,
         mediatorGroup: Int,
-        synchronizerId: SynchronizerId,
+        synchronizer: Synchronizer,
         timeBoundaries: LedgerTimeBoundaries,
         preparationTime: Time.Timestamp,
         maxRecordTime: Option[Time.Timestamp],
@@ -64,7 +64,7 @@ object InteractiveSubmission {
       commandId = commandId,
       transactionUUID = transactionUUID,
       mediatorGroup = mediatorGroup,
-      synchronizerId = synchronizerId,
+      synchronizer = synchronizer,
       timeBoundaries = timeBoundaries,
       preparationTime = preparationTime,
       maxRecordTime = maxRecordTime,
@@ -77,7 +77,7 @@ object InteractiveSubmission {
       commandId: Ref.CommandId,
       transactionUUID: UUID,
       mediatorGroup: Int,
-      synchronizerId: SynchronizerId,
+      synchronizer: Synchronizer,
       timeBoundaries: LedgerTimeBoundaries,
       preparationTime: Time.Timestamp,
       maxRecordTime: Option[Time.Timestamp],

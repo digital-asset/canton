@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Struct}
 import com.digitalasset.daml.lf.language.Ast._
@@ -15,14 +17,13 @@ import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
 import com.digitalasset.daml.lf.testing.parser.Implicits._
 import org.scalactic.Equality
 import org.scalatest.matchers.should.Matchers
-import SpeedyTestLib.loggingContext
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 
 import scala.collection.immutable.ArraySeq
 
-class SpeedyTest extends AnyFreeSpec with Matchers with Inside {
+class SpeedyTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
 
   import SpeedyTest._
 
@@ -515,11 +516,11 @@ object SpeedyTest {
 
   val alice: SParty = SParty(Party.assertFromString("Alice"))
 
-  def eval(e: Expr, packages: PureCompiledPackages): Either[SError, SValue] =
+  def eval(e: Expr, packages: PureCompiledPackages)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     evalSExpr(packages.compiler.unsafeCompile(e), packages)
 
-  def evalSExpr(e: SExpr, packages: PureCompiledPackages): Either[SError, SValue] = {
-    val machine = Speedy.Machine.fromPureSExpr(packages, e)
+  def evalSExpr(e: SExpr, packages: PureCompiledPackages)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] = {
+    val machine = Speedy.Machine.fromPureSExpr(packages, e, MachineLogger())
     machine.runPure()
   }
 
@@ -527,7 +528,7 @@ object SpeedyTest {
       e: Expr,
       args: ArraySeq[SValue],
       packages: PureCompiledPackages,
-  ): Either[SError, SValue] = {
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] = {
     val se = packages.compiler.unsafeCompile(e)
     evalSExpr(SEApp(se, args), packages)
   }

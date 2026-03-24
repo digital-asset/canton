@@ -26,7 +26,8 @@ import scala.concurrent.ExecutionContext
   *   [[com.digitalasset.canton.version.HasProtocolVersionedWrapper]] that contains the relevant
   *   data for executing the pending operation.
   */
-trait PendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer] {
+trait PendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer]
+    extends AutoCloseable {
 
   protected def opCompanion: VersioningCompanion[Op]
 
@@ -119,16 +120,22 @@ trait PendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchr
       operationName: NonEmptyString,
   )(implicit traceContext: TraceContext): OptionT[FutureUnlessShutdown, PendingOperation[Op, SId]]
 
-  /** Fetches all pending operations matching `operationName`.
+  /** Fetches all pending operations matching the given criteria.
     *
     * @param operationName
     *   The name of the operation to be executed.
+    * @param synchronizerId
+    *   Optional synchronizer id to filter by.
+    * @param operationKey
+    *   Optional operation key to filter by.
     * @return
     *   A future that completes with `Set(operations)` of operations matching the above criteria,
     *   fails with a `DbDeserializationException` if the stored data is corrupt.
     */
   def getAll(
-      operationName: NonEmptyString
+      operationName: NonEmptyString,
+      synchronizerId: Option[SId] = None,
+      operationKey: Option[String] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PendingOperation[Op, SId]]]
 }
 

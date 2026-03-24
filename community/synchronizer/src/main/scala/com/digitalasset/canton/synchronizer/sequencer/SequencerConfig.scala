@@ -36,9 +36,7 @@ import pureconfig.{ConfigCursor, ConfigReader, ConfigWriter}
 
 import scala.concurrent.ExecutionContext
 
-sealed trait SequencerConfig {
-  def supportsReplicas: Boolean
-}
+sealed trait SequencerConfig
 
 object SequencerConfig {
 
@@ -51,26 +49,20 @@ object SequencerConfig {
   ) extends SequencerConfig
       with DatabaseSequencerConfig {
     override def highAvailabilityEnabled: Boolean = highAvailability.exists(_.isEnabled)
-
-    override def supportsReplicas: Boolean = highAvailabilityEnabled
   }
 
   final case class External(
       sequencerType: String,
       block: BlockSequencerConfig,
       config: ConfigCursor,
-  ) extends SequencerConfig {
-    override def supportsReplicas: Boolean = false
-  }
+  ) extends SequencerConfig
 
   final case class BftSequencer(
       // To avoid having to include an empty "block" node if defaults are fine
       block: BlockSequencerConfig = BlockSequencerConfig(),
       // To avoid having to include an empty "config" node if defaults are fine
       config: BftBlockOrdererConfig = BftBlockOrdererConfig(),
-  ) extends SequencerConfig {
-    override def supportsReplicas: Boolean = false
-  }
+  ) extends SequencerConfig
 
   def default: SequencerConfig = {
     val driverFactory = new ReferenceSequencerDriverFactory
@@ -316,6 +308,7 @@ object BlockSequencerConfig {
       confirmationResponse: IndividualCircuitBreakerConfig = default3,
       verdict: IndividualCircuitBreakerConfig = default3,
       acknowledgement: IndividualCircuitBreakerConfig = default1,
+      lsuSequencingTest: IndividualCircuitBreakerConfig = default1,
       unexpected: IndividualCircuitBreakerConfig = default1,
   )
 

@@ -23,7 +23,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   MissingConfigForSynchronizer,
   SynchronizerIdAlreadyAdded,
   UnknownAlias,
-  UnknownPSId,
+  UnknownPsid,
 }
 import com.digitalasset.canton.participant.store.{
   StoredSynchronizerConnectionConfig,
@@ -60,11 +60,11 @@ class InMemorySynchronizerConnectionConfigStore(
       id: ConfigIdentifier
   ): Either[MissingConfigForSynchronizer, StoredSynchronizerConnectionConfig] = {
     def predicate(key: (SynchronizerAlias, ConfiguredPhysicalSynchronizerId)): Boolean = {
-      val (entryAlias, entryConfiguredPSId) = key
+      val (entryAlias, entryConfiguredPsid) = key
       id match {
-        case ConfigIdentifier.WithPSId(psid) => entryConfiguredPSId.toOption.contains(psid)
-        case ConfigIdentifier.WithAlias(alias, configuredPSID) =>
-          (alias, configuredPSID) == (entryAlias, entryConfiguredPSId)
+        case ConfigIdentifier.WithPsid(psid) => entryConfiguredPsid.toOption.contains(psid)
+        case ConfigIdentifier.WithAlias(alias, configuredPsid) =>
+          (alias, configuredPsid) == (entryAlias, entryConfiguredPsid)
       }
     }
 
@@ -76,7 +76,7 @@ class InMemorySynchronizerConnectionConfigStore(
   override def put(
       config: SynchronizerConnectionConfig,
       status: SynchronizerConnectionConfigStore.Status,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
@@ -87,9 +87,9 @@ class InMemorySynchronizerConnectionConfigStore(
     val res =
       lock.exclusive {
         for {
-          _ <- predecessorCompatibilityCheck(configuredPSId, synchronizerPredecessor)
+          _ <- predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
 
-          _ <- configuredPSId match {
+          _ <- configuredPsid match {
             case KnownPhysicalSynchronizerId(psid) =>
               for {
                 _ <- checkAliasConsistent(psid, alias)
@@ -99,15 +99,15 @@ class InMemorySynchronizerConnectionConfigStore(
             case UnknownPhysicalSynchronizerId => ().asRight
           }
 
-          _ <- checkStatusConsistent(configuredPSId, alias, status)
+          _ <- checkStatusConsistent(configuredPsid, alias, status)
 
           _ <- configuredSynchronizerMap
             .putIfAbsent(
-              (config.synchronizerAlias, configuredPSId),
+              (config.synchronizerAlias, configuredPsid),
               StoredSynchronizerConnectionConfig(
                 config,
                 status,
-                configuredPSId,
+                configuredPsid,
                 synchronizerPredecessor,
               ),
             )
@@ -115,7 +115,7 @@ class InMemorySynchronizerConnectionConfigStore(
               Either.cond(
                 config == existingConfig.config && synchronizerPredecessor == existingConfig.predecessor,
                 (),
-                ConfigAlreadyExists(config.synchronizerAlias, configuredPSId),
+                ConfigAlreadyExists(config.synchronizerAlias, configuredPsid),
               )
             )
         } yield ()
@@ -132,20 +132,20 @@ class InMemorySynchronizerConnectionConfigStore(
   ): Either[Error, Unit] =
     if (!status.isActive) Either.right(())
     else {
-      val existingPSId = configuredSynchronizerMap.collectFirst {
+      val existingPsid = configuredSynchronizerMap.collectFirst {
         case ((`alias`, configuredPsid), config) if config.status == Active =>
           configuredPsid
       }
-      existingPSId match {
+      existingPsid match {
         case Some(`psid`) | None => Either.right(())
-        case Some(otherConfiguredPSId) =>
+        case Some(otherConfiguredPsid) =>
           Either.left(
-            AtMostOnePhysicalActive(alias, Set(otherConfiguredPSId, psid)): Error
+            AtMostOnePhysicalActive(alias, Set(otherConfiguredPsid, psid)): Error
           )
       }
     }
 
-  // Check that a new PSId is consistent with stored IDs for that alias
+  // Check that a new psid is consistent with stored IDs for that alias
   private def checkLogicalIdConsistent(
       psid: PhysicalSynchronizerId,
       alias: SynchronizerAlias,
@@ -156,21 +156,21 @@ class InMemorySynchronizerConnectionConfigStore(
 
     configuredPsidsForAlias
       .collectFirst {
-        case KnownPhysicalSynchronizerId(existingPSId) if existingPSId.logical != psid.logical =>
-          existingPSId
+        case KnownPhysicalSynchronizerId(existingPsid) if existingPsid.logical != psid.logical =>
+          existingPsid
       }
       .map(existing =>
         InconsistentLogicalSynchronizerIds(
           alias = alias,
-          newPSId = psid,
-          existingPSId = existing,
+          newPsid = psid,
+          existingPsid = existing,
         )
       )
       .toLeft(())
       .leftWiden[Error]
   }
 
-  // Ensure this PSId is not already registered with another alias
+  // Ensure this psid is not already registered with another alias
   private def checkAliasConsistent(
       psid: PhysicalSynchronizerId,
       alias: SynchronizerAlias,
@@ -184,43 +184,43 @@ class InMemorySynchronizerConnectionConfigStore(
       .toLeft(())
 
   override def replace(
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       config: SynchronizerConnectionConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit] =
     EitherT.fromEither(
-      replaceInternal(config.synchronizerAlias, configuredPSId, _.copy(config = config))
+      replaceInternal(config.synchronizerAlias, configuredPsid, _.copy(config = config))
     )
 
   private def replaceInternal(
       alias: SynchronizerAlias,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       modifier: StoredSynchronizerConnectionConfig => StoredSynchronizerConnectionConfig,
   ): Either[MissingConfigForSynchronizer, Unit] =
     Either.cond(
       configuredSynchronizerMap
-        .updateWith((alias, configuredPSId))(_.map(modifier))
+        .updateWith((alias, configuredPsid))(_.map(modifier))
         .isDefined,
       (),
-      MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, configuredPSId)),
+      MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, configuredPsid)),
     )
 
   override def get(
       alias: SynchronizerAlias,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
   ): Either[MissingConfigForSynchronizer, StoredSynchronizerConnectionConfig] =
     configuredSynchronizerMap
-      .get((alias, configuredPSId))
-      .toRight(MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, configuredPSId)))
+      .get((alias, configuredPsid))
+      .toRight(MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, configuredPsid)))
 
   override def get(
       psid: PhysicalSynchronizerId
-  ): Either[UnknownPSId, StoredSynchronizerConnectionConfig] = {
+  ): Either[UnknownPsid, StoredSynchronizerConnectionConfig] = {
     val id = KnownPhysicalSynchronizerId(psid)
     configuredSynchronizerMap
       .collectFirst { case ((_, `id`), config) => config }
-      .toRight(UnknownPSId(psid))
+      .toRight(UnknownPsid(psid))
   }
 
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
@@ -250,7 +250,7 @@ class InMemorySynchronizerConnectionConfigStore(
 
   override def setStatus(
       alias: SynchronizerAlias,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       status: SynchronizerConnectionConfigStore.Status,
   )(implicit
       traceContext: TraceContext
@@ -260,10 +260,10 @@ class InMemorySynchronizerConnectionConfigStore(
       lock.exclusive {
         for {
           // ensure that there is an existing config in the store
-          _ <- get(alias, configuredPSId)
+          _ <- get(alias, configuredPsid)
           // check that there isn't already a different active configuration
-          _ <- checkStatusConsistent(configuredPSId, alias, status)
-          _ <- replaceInternal(alias, configuredPSId, _.copy(status = status)).leftWiden[Error]
+          _ <- checkStatusConsistent(configuredPsid, alias, status)
+          _ <- replaceInternal(alias, configuredPsid, _.copy(status = status)).leftWiden[Error]
         } yield ()
       }
 
@@ -274,7 +274,7 @@ class InMemorySynchronizerConnectionConfigStore(
       psid: PhysicalSynchronizerId,
       sequencerIds: Map[SequencerAlias, SequencerId],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
-    val id = ConfigIdentifier.WithPSId(psid)
+    val id = ConfigIdentifier.WithPsid(psid)
 
     val res =
       lock.exclusive {
@@ -318,9 +318,9 @@ class InMemorySynchronizerConnectionConfigStore(
     Fails if both (alias, None) (alias, physicalSynchronizerId) are unknown.
      */
     def changeNeeded(): Either[MissingConfigForSynchronizer, Boolean] = {
-      val psidOld = get(alias, UnknownPhysicalSynchronizerId).map(_.configuredPSId)
+      val psidOld = get(alias, UnknownPhysicalSynchronizerId).map(_.configuredPsid)
       val psidNew =
-        get(alias, KnownPhysicalSynchronizerId(psid)).map(_.configuredPSId)
+        get(alias, KnownPhysicalSynchronizerId(psid)).map(_.configuredPsid)
 
       // Check that there exist one entry for this alias without psid or the change is already applied
       (psidOld, psidNew) match {
@@ -357,7 +357,7 @@ class InMemorySynchronizerConnectionConfigStore(
           configuredSynchronizerMap.addOne(
             (
               (alias, KnownPhysicalSynchronizerId(psid)),
-              config.copy(configuredPSId = KnownPhysicalSynchronizerId(psid)),
+              config.copy(configuredPsid = KnownPhysicalSynchronizerId(psid)),
             )
           )
           configuredSynchronizerMap.remove((alias, UnknownPhysicalSynchronizerId)).discard

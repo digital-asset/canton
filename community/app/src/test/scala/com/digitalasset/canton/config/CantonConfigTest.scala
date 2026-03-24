@@ -18,8 +18,6 @@ import com.digitalasset.canton.config.ConfigErrors.{
 }
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
-import com.digitalasset.canton.crypto.SigningAlgorithmSpec.EcDsaSha256
-import com.digitalasset.canton.crypto.SigningKeySpec.EcP256
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
@@ -530,17 +528,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       participant.httpLedgerApi.requestTimeout.toMinutes shouldBe 105
 
       // verify that `crypto.sessionSigningKeys` is configured with the expected values
-      participant.crypto.sessionSigningKeys.enabled shouldBe true
-      participant.crypto.sessionSigningKeys.keyValidityDuration shouldBe PositiveFiniteDuration
-        .ofMinutes(5)
-      participant.crypto.sessionSigningKeys.toleranceShiftDuration shouldBe NonNegativeFiniteDuration
-        .ofMinutes(2)
-      participant.crypto.sessionSigningKeys.cutOffDuration shouldBe NonNegativeFiniteDuration
-        .ofSeconds(30)
-      participant.crypto.sessionSigningKeys.keyEvictionPeriod shouldBe PositiveFiniteDuration
-        .ofMinutes(15)
-      participant.crypto.sessionSigningKeys.signingAlgorithmSpec shouldBe EcDsaSha256
-      participant.crypto.sessionSigningKeys.signingKeySpec shouldBe EcP256
+      participant.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
     }
 
     // In this test case, both deprecated and new fields are set with opposite values, we make sure the new fields

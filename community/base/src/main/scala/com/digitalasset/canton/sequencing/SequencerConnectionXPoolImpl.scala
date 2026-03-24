@@ -378,7 +378,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       for {
         _ <- newConfig.validate
         _ <- Either.cond(
-          newConfig.expectedPSIdO == currentConfig.expectedPSIdO,
+          newConfig.expectedPsidO == currentConfig.expectedPsidO,
           (),
           SequencerConnectionXPoolError.InvalidConfigurationError(
             "The expected physical synchronizer ID can only be changed during a node restart."
@@ -561,7 +561,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
 
         bootstrapCell.get match {
           case None =>
-            if (currentConfig.expectedPSIdO.forall(_ == attributes.physicalSynchronizerId)) {
+            if (currentConfig.expectedPsidO.forall(_ == attributes.physicalSynchronizerId)) {
               markValidated(connection)
               getBootstrapIfThresholdReached(currentConfig.trustThreshold)
                 .valueOr(ErrorUtil.invalidState(_)) // We cannot reach the threshold multiple times
@@ -573,7 +573,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
             } else {
               logger.warn(
                 s"Connection ${connection.name} is not on expected synchronizer:" +
-                  s" expected ${currentConfig.expectedPSIdO}," +
+                  s" expected ${currentConfig.expectedPsidO}," +
                   s" got ${attributes.physicalSynchronizerId}. Closing connection."
               )
               connection.fatal(reason = "invalid synchronizer")
@@ -811,7 +811,7 @@ class GrpcSequencerConnectionXPoolFactory(
 
   override def createFromOldConfig(
       sequencerConnections: SequencerConnections,
-      expectedPSIdO: Option[PhysicalSynchronizerId],
+      expectedPsidO: Option[PhysicalSynchronizerId],
       tracingConfig: TracingConfig,
       name: String,
   )(implicit
@@ -823,7 +823,7 @@ class GrpcSequencerConnectionXPoolFactory(
     val poolConfig = SequencerConnectionXPoolConfig.fromSequencerConnections(
       sequencerConnections,
       tracingConfig,
-      expectedPSIdO,
+      expectedPsidO,
     )
     logger.debug(s"poolConfig = $poolConfig")
 

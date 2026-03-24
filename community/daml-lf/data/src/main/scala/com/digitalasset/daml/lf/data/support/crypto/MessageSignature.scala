@@ -12,17 +12,15 @@ object MessageSignature {
   @throws(classOf[NoSuchProviderException])
   @throws(classOf[InvalidKeyException])
   @throws(classOf[SignatureException])
-  def verify(signature: Ref.HexString, message: Ref.HexString, publicKey: PublicKey): Boolean = {
+  def verify(signature: Ref.HexString, message: Ref.HexString, publicKey: PublicKey): Boolean =
     MessageSignaturePrototype.Secp256k1.verify(
       Bytes.fromHexString(signature).toByteArray,
       Bytes.fromHexString(message).toByteArray,
       publicKey,
     )
-  }
 
   @throws(classOf[NoSuchProviderException])
   @throws(classOf[InvalidKeyException])
-  def validateKey(publicKey: PublicKey): Boolean = {
+  def validateKey(publicKey: PublicKey): Boolean =
     MessageSignaturePrototype.Secp256k1.validateKey(publicKey)
-  }
 }

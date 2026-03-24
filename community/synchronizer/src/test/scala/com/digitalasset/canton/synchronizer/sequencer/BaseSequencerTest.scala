@@ -107,6 +107,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
         testedProtocolVersion,
       )
       with FlagCloseable {
+
     val newlyRegisteredMembers =
       mutable
         .Set[Member]() // we're using the scalatest serial execution context so don't need a concurrent collection
@@ -115,7 +116,8 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
     ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
       EitherTUtil.unitUS
     override protected def sendAsyncSignedInternal(
-        signedSubmission: SignedContent[SubmissionRequest]
+        signedSubmission: SignedContent[SubmissionRequest],
+        skipLsuChecks: Boolean = false,
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
@@ -241,6 +243,10 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
     ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] = ???
 
     override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] = ???
+
+    override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] = ???
   }

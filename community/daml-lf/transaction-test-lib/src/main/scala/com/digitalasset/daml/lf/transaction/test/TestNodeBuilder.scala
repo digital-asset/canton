@@ -5,12 +5,12 @@ package com.digitalasset.daml.lf
 package transaction
 package test
 
+import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party, TypeConId}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
   CreateKey,
   CreateSerializationVersion,
 }
-import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party, TypeConId}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   Node,

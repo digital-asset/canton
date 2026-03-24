@@ -314,7 +314,7 @@ final class RepairServiceContractsImporter(
                     _ <-
                       if (nodeParameters.alphaMultiSynchronizerSupport) {
                         // Publish added contracts via the indexer to the ledger api.
-                        publishAddEvents(
+                        publishAssignedEvents(
                           synchronizer.psid.logical,
                           recordTime = synchronizer.currentRecordTime,
                           contractsToAddWithInternalIds,
@@ -424,7 +424,7 @@ final class RepairServiceContractsImporter(
             .mapAsync(1) { contractsToAddWithInternalContractIds =>
               if (nodeParameters.alphaMultiSynchronizerSupport) {
                 toFuture(
-                  publishAddEvents(
+                  publishAssignedEvents(
                     synchronizerId,
                     synchronizer.currentRecordTime,
                     contractsToAddWithInternalContractIds,
@@ -787,7 +787,7 @@ final class RepairServiceContractsImporter(
     })
   }
 
-  private def publishAddEvents(
+  private def publishAssignedEvents(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],

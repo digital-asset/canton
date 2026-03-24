@@ -3,11 +3,12 @@
 
 package com.digitalasset.daml.lf.data
 
-import BackStack.{BQ, BQAppend, BQEmpty, BQSnoc}
-
 import scala.annotation.tailrec
 
-/** A stack which allows to snoc, append, and pop in constant time, and generate an ImmArray in linear time.
+import BackStack.{BQ, BQAppend, BQEmpty, BQSnoc}
+
+/** A stack which allows to snoc, append, and pop in constant time, and generate an ImmArray in
+  * linear time.
   */
 final class BackStack[+A] private (fq: BQ[A], val length: Int) {
 
@@ -57,7 +58,7 @@ final class BackStack[+A] private (fq: BQ[A], val length: Int) {
   }
 
   /** O(1) */
-  def pop: Option[(BackStack[A], A)] = {
+  def pop: Option[(BackStack[A], A)] =
     if (length > 0) {
       fq match {
         case BQEmpty => throw new RuntimeException(s"BackQueue has length $length but BQEmpty.")
@@ -74,12 +75,10 @@ final class BackStack[+A] private (fq: BQ[A], val length: Int) {
     } else {
       None
     }
-  }
 
   /** O(n) */
-  def map[B](f: A => B): BackStack[B] = {
+  def map[B](f: A => B): BackStack[B] =
     BackStack(this.toImmArray.map(f))
-  }
 
   /** O(1) */
   def isEmpty: Boolean = length == 0
@@ -122,11 +121,11 @@ final class BackStack[+A] private (fq: BQ[A], val length: Int) {
   def reverseForeach(f: A => Unit): Unit = this.reverseIterator.foreach(f)
 
   /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[BackStack[_]]
+  def canEqual(that: Any) = that.isInstanceOf[BackStack[?]]
 
   /** O(n) */
   override def equals(that: Any) = that match {
-    case thatQueue: BackStack[_] =>
+    case thatQueue: BackStack[?] =>
       this.reverseIterator.sameElements[Any](thatQueue.reverseIterator)
     case _ => false
   }

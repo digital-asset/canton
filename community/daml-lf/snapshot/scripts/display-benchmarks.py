@@ -4,8 +4,8 @@
 import argparse
 import json
 import os
-import pandas as pd
-import plotly.express as px
+import pandas => pd
+import plotly.express => px
 from dash import Dash, html, dash_table, dcc
 from json.decoder import JSONDecodeError
 

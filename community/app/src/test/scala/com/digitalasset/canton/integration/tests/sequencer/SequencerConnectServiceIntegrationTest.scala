@@ -160,17 +160,6 @@ trait SequencerConnectServiceIntegrationTest
       bi shouldBe SynchronizerClientBootstrapInfo(daId, sequencer1.id)
     }
 
-    "respond to GetSynchronizerId requests" in { implicit env =>
-      import env.*
-
-      val grpcSequencerConnectClient = getSequencerConnectClient()
-
-      grpcSequencerConnectClient
-        .getSynchronizerId()
-        .futureValueUS
-        .value shouldBe daId
-    }
-
     "respond to isActive requests" in { implicit env =>
       import env.*
 

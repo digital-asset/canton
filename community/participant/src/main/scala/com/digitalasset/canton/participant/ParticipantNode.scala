@@ -26,6 +26,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.*
+import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.health.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -70,7 +71,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.time.admin.v30.SynchronizerTimeServiceGrpc
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.PSIdLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookup
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
@@ -147,8 +148,8 @@ class ParticipantNodeBootstrap(
   ): Option[SynchronizerTimeTracker] =
     cantonSyncService.get.flatMap(_.lookupSynchronizerTimeTracker(psid).toOption)
 
-  override protected lazy val lookupActivePSId: PSIdLookup =
-    synchronizerId => cantonSyncService.get.flatMap(_.activePSIdForLSId(synchronizerId))
+  override protected lazy val lookupActivePsid: PsidLookup =
+    synchronizerId => cantonSyncService.get.flatMap(_.activePsidForLsid(synchronizerId))
 
   override protected def customNodeStages(
       storage: Storage,
@@ -326,7 +327,10 @@ class ParticipantNodeBootstrap(
         topologyManager,
       ).map { participantServices =>
         if (cantonSyncService.putIfAbsent(participantServices.cantonSyncService).nonEmpty) {
-          sys.error("should not happen")
+          FatalError.exitOnFatalError(
+            "Canton sync service was already initialized, this should not happen",
+            logger,
+          )
         }
         val node = new ParticipantNode(
           participantId,
@@ -359,7 +363,7 @@ class ParticipantNodeBootstrap(
           timeouts = timeouts,
           futureSupervisor = futureSupervisor,
           topologyManagerO = psid => cantonSyncService.get.flatMap(_.lookupTopologyManager(psid)),
-          psidLookup = lookupActivePSId,
+          psidLookup = lookupActivePsid,
           topologyClientO = psid => cantonSyncService.get.flatMap(_.lookupTopologyClient(psid)),
           syncPersistentStateO = psid =>
             cantonSyncService.get.flatMap(_.syncPersistentStateManager.get(psid)),
@@ -601,7 +605,6 @@ class ParticipantNodeBootstrap(
           replaySequencerConfig,
           mutablePackageMetadataView,
           arguments.metrics.connectedSynchronizerMetrics,
-          sequencerInfoLoader,
           futureSupervisor,
           loggerFactory,
         )

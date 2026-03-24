@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import org.slf4j.event.Level
@@ -128,15 +129,28 @@ class ParticipantOffboardingIntegrationTest
 
       clue("check that pings that involve the off-boarded participant don't work") {
         forAll(Seq(participant1, participant3)) { sourceParticipant =>
-          loggerFactory.assertLogsSeqString(
-            SuppressionRule.LevelAndAbove(Level.WARN),
-            Seq("responder did not respond in time", "is disabled at the sequencer"),
-          ) {
+          loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
             a[CommandFailure] should be thrownBy sourceParticipant.health.ping(
               participant2,
-              timeout = 1.second,
-            )
-          }
+              timeout = 3.seconds,
+            ),
+            logs => {
+              forAtLeast(1, logs) { log =>
+                log.message should include("responder did not respond in time")
+              }
+              forAtLeast(1, logs) { log =>
+                log.message should include("is disabled at the sequencer")
+              }
+              forExactly(1, logs) { log =>
+                log.loggerName should include(classOf[CommandSubmitterWithRetry].getSimpleName)
+                // Wait for participant2 to also give up on responding to the ping
+                // to ensure the sequencer rejections on its responses are not logged after the suppression block ends
+                log.message should (include regex "failed non-retryable with.*Giving up" or include(
+                  "failed after reaching the deadline"
+                ))
+              }
+            },
+          )
         }
       }
     }

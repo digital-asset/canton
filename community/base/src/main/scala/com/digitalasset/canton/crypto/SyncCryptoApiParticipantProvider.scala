@@ -500,6 +500,14 @@ class SynchronizerSnapshotSyncCryptoApi(
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
     syncCryptoVerifier.verifySignature(ipsSnapshot, hash, signer, signature, usage)
 
+  override def verifyKeyUsage(
+      signer: Member,
+      signedBy: Fingerprint,
+      signatureDelegation: Option[SignatureDelegation],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    syncCryptoVerifier.verifyKeyUsage(ipsSnapshot, signer, signedBy, signatureDelegation, usage)
+
   override def verifySignatures(
       hash: Hash,
       signer: Member,

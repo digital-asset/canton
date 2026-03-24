@@ -66,6 +66,7 @@ import io.grpc.stub.StreamObserver
 import org.apache.pekko.actor.ActorSystem
 
 import java.io.{ByteArrayOutputStream, OutputStream}
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPOutputStream
 import scala.annotation.nowarn
@@ -523,18 +524,22 @@ final class GrpcParticipantRepairService(
               .fromProtoPrimitive(party, "excluded_stakeholder_ids")
               .map(PartyId(_).toLf)
           )
-        representativePackageIdOverrideO <- request.representativePackageIdOverride
+        representativePackageIdOverride <- request.representativePackageIdOverride
           .traverse(RepresentativePackageIdOverride.fromProtoV30)
+          .map(_.getOrElse(RepresentativePackageIdOverride.NoOverride))
         synchronizerId <- ProtoConverter.parseRequired(
           SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"),
           "synchronizer_id",
           request.synchronizerId,
         )
+        workflowIdPrefix = request.workflowIdPrefix
+          .flatMap(OptionUtil.emptyStringAsNone)
+          .orElse(Some(s"import-${UUID.randomUUID}"))
       } yield (
-        request.workflowIdPrefix,
+        workflowIdPrefix,
         contractImportMode,
         excludedStakeholders.toSet,
-        representativePackageIdOverrideO.getOrElse(RepresentativePackageIdOverride.NoOverride),
+        representativePackageIdOverride,
         synchronizerId,
       )
 
@@ -973,9 +978,9 @@ final class GrpcParticipantRepairService(
       )
 
       _ <- sync
-        .manuallyUpgradeSynchronizerTo(validatedRequest)
+        .performLateLsu(validatedRequest)
         .leftMap[RpcError](
-          RepairServiceError.SynchronizerUpgradeError.Error(validatedRequest.successorPSId, _)
+          RepairServiceError.SynchronizerUpgradeError.Error(validatedRequest.successorPsid, _)
         )
     } yield PerformLateLsuResponse()
 

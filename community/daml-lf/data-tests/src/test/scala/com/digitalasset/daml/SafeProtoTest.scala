@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml
 
-import com.google.protobuf._
+import com.google.protobuf.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -20,10 +20,10 @@ class SafeProtoTest extends AnyWordSpec with Inside with Matchers {
   private[this] lazy val values =
     LazyList.iterate(Value.newBuilder().setStringValue("a" * 1024).build())(tuple)
 
-  // values(19), and  values(20) are technically serializable, but their serialization requires over 500 MB of memory.
+  // values(17), and  values(20) are technically serializable, but their serialization requires over 100 MB of memory.
   // We skip it to avoid excessive memory pressure on CI agents.
-  private[this] val value18 = values(18) // serialization needs a bit more than 256MB
-  assert(value18.getSerializedSize > 0)
+  private[this] val value16 = values(16) // serialization needs a bit more than 64MB
+  assert(value16.getSerializedSize > 0)
   private[this] val value21 = values(21) // serialization would need a bit more than 2GB
   assert(value21.getSerializedSize < 0)
   private[this] val value22 = values(22) // serialization would need a bit more than 4GB
@@ -32,7 +32,7 @@ class SafeProtoTest extends AnyWordSpec with Inside with Matchers {
   "toByteString" should {
 
     "fail gracefully if the message to serialize exceeds 2GB" in {
-      SafeProto.toByteString(value18) shouldBe a[Right[?, ?]]
+      SafeProto.toByteString(value16) shouldBe a[Right[?, ?]]
       SafeProto.toByteString(value21) shouldBe a[Left[?, ?]]
       SafeProto.toByteString(value22) shouldBe a[Left[?, ?]]
     }
@@ -41,7 +41,7 @@ class SafeProtoTest extends AnyWordSpec with Inside with Matchers {
   "toByteArray" should {
 
     "fail gracefully if the message to serialize exceeds 2GB" in {
-      SafeProto.toByteArray(value18) shouldBe a[Right[?, ?]]
+      SafeProto.toByteArray(value16) shouldBe a[Right[?, ?]]
       SafeProto.toByteArray(value21) shouldBe a[Left[?, ?]]
       SafeProto.toByteArray(value22) shouldBe a[Left[?, ?]]
     }

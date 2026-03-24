@@ -8,7 +8,7 @@ import com.digitalasset.daml.lf.language.{Ast, TypeOrdering}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class TypeOrderingSpec extends AnyWordSpec with Matchers {
 
@@ -25,7 +25,7 @@ class TypeOrderingSpec extends AnyWordSpec with Matchers {
           .sortBy(_.getNumber)
           .collect(protoMapping)
 
-      primTypesInProtoOrder.sortBy(Ast.TBuiltin)(
+      primTypesInProtoOrder.sortBy(Ast.TBuiltin.apply)(
         TypeOrdering.compare _
       ) shouldBe primTypesInProtoOrder
     }

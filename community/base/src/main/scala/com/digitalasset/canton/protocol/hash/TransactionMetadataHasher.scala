@@ -33,7 +33,7 @@ object TransactionMetadataHasher {
       .withContext("Command Id")(_.addString(metadata.commandId))
       .withContext("Transaction UUID")(_.addString(metadata.transactionUUID.toString))
       .withContext("Mediator Group")(_.addInt(metadata.mediatorGroup))
-      .withContext("Synchronizer Id")(_.addString(metadata.synchronizerId.toProtoPrimitive))
+      .withContext("Synchronizer Id")(_.addString(metadata.synchronizer.toProtoPrimitive))
       .withContext("Min Time Boundary")(
         _.addOptional(
           metadata.timeBoundaries.minConstraint,

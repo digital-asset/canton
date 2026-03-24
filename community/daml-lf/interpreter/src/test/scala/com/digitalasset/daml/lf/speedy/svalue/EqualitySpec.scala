@@ -42,7 +42,7 @@ class EqualitySpec extends AnyWordSpec with Inside with Matchers with ScalaCheck
       val cid43 = Value.ContractId.V2(local2, suffix3)
 
       val List(vCid10, vCid11, vCid12, vCid21, vCid30, vCid31, vCid32, vCid41, vCid43) =
-        List(cid10, cid11, cid12, cid21, cid30, cid31, cid32, cid41, cid43).map(SContractId)
+        List(cid10, cid11, cid12, cid21, cid30, cid31, cid32, cid41, cid43).map(SContractId.apply)
 
       val negativeTestCases =
         Table(

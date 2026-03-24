@@ -3,16 +3,15 @@
 
 package com.digitalasset.daml.lf.archive.testing
 
-import java.io.File
-import java.nio.file.Paths
 import com.digitalasset.daml.lf.archive.{Dar, DarWriter}
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
+import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
 import com.digitalasset.daml.lf.testing.parser.{ParserParameters, parsePackage}
 import com.digitalasset.daml.lf.validation.Validation
-//import com.daml.SdkVersion
-import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
 
+import java.io.File
+import java.nio.file.Paths
 import scala.annotation.tailrec
 import scala.collection.immutable.Queue
 import scala.io.Source
@@ -20,11 +19,10 @@ import scala.util.control.NonFatal
 
 private[daml] object DamlLfEncoder extends App {
 
-  import Encode._
+  import Encode.*
 
-  private def error[X](message: String): X = {
+  private def error[X](message: String): X =
     sys.error(message) // Throws a RuntimeException with the message
-  }
 
   private val pkgId = Ref.PackageId.assertFromString("-self-")
 

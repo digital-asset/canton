@@ -6,24 +6,24 @@ package engine
 
 import cats.Monoid
 import com.daml.logging.LoggingContext
-import com.digitalasset.daml.lf.archive.DamlLf._
+import com.digitalasset.daml.lf.archive.DamlLf.*
 import com.digitalasset.daml.lf.archive.testing.Encode
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.testing.parser.Implicits._
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.{AstRewriter, ParserParameters}
-import com.digitalasset.daml.lf.transaction._
+import com.digitalasset.daml.lf.transaction.*
+import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
-import com.digitalasset.daml.lf.value.Value._
 import org.scalatest.Assertion
 
 import scala.annotation.nowarn
 import scala.collection.immutable.ArraySeq
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
 
 /** A test suite for smart contract upgrades.
@@ -35,25 +35,23 @@ import scala.language.implicitConversions
   *   - perform some v2 operation on the v1 contract (exercise, exercise by key, fetch, etc.)
   *   - compare the execution result to the expected outcome
   *
-  * It picks up its list of test scenarios from [[cases]], which is an instance
-  * of [[UpgradesMatrixCases]] class - consult the documentation for the class for
-  * more about how the test cases are generated.
+  * It picks up its list of test scenarios from [[cases]], which is an instance of
+  * [[UpgradesMatrixCases]] class - consult the documentation for the class for more about how the
+  * test cases are generated.
   *
-  * It can be parameterized with (n, k) to split the tests into n pieces, and
-  * only run the ith piece. We can use this to split tests over multiple suites
-  * that get run in parallel, i.e.
+  * It can be parameterized with (n, k) to split the tests into n pieces, and only run the ith
+  * piece. We can use this to split tests over multiple suites that get run in parallel, i.e.
   *
-  * class MyRunner0 extends UpgradesMatrix[...](..., nk = Some(4, 0)) { ... }
-  * class MyRunner1 extends UpgradesMatrix[...](..., nk = Some(4, 1)) { ... }
-  * class MyRunner2 extends UpgradesMatrix[...](..., nk = Some(4, 2)) { ... }
-  * class MyRunner3 extends UpgradesMatrix[...](..., nk = Some(4, 3)) { ... }
+  * class MyRunner0 extends UpgradesMatrix[...](..., nk = Some(4, 0)) { ... } class MyRunner1
+  * extends UpgradesMatrix[...](..., nk = Some(4, 1)) { ... } class MyRunner2 extends
+  * UpgradesMatrix[...](..., nk = Some(4, 2)) { ... } class MyRunner3 extends
+  * UpgradesMatrix[...](..., nk = Some(4, 3)) { ... }
   *
-  * will run a quarter of the tests with MyRunner0, another quarter over
-  * MyRunner1, and so on, all in parallel.
+  * will run a quarter of the tests with MyRunner0, another quarter over MyRunner1, and so on, all
+  * in parallel.
   *
-  * This gives small improvements for unit tests where the processor is already
-  * pretty well utilized, but gives big improvements for integration tests with
-  * multiple Canton runners.
+  * This gives small improvements for unit tests where the processor is already pretty well
+  * utilized, but gives big improvements for integration tests with multiple Canton runners.
   */
 trait UpgradesMatrix[Err, Res, AdditionalSetup] {
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
@@ -163,38 +161,43 @@ object UpgradesMatrixCasesV2MaxStable
       ContractStateMachine.Mode.UCKWithRollback,
     )
 
-/** Pairs of v1/v2 templates are called [[TestCase]]s and are listed in [[testCases]]. A test case is defined by
-  * subclassing [[TestCase]] and overriding one definition. For instance, [[ChangedObservers]] overrides
-  * [[TestCase.v2Observers]] with an expression that is different from [[TestCase.v1Observers]].
-  * Each test case is tested many times against the cartesian product of the following features:
-  *  - The operation to perform ([[Exercise]], [[ExerciseByKey]], etc.), listed in [[operations]].
-  *  - Whether or not to try and catch exceptions thrown when performing the operation, listed in [[catchBehaviors]].
-  *  - What triggered the operation: a toplevel command or the body of a choice, listed in [[entryPoints]].
-  *  - The origin of the contract being operated on: locally created, globally created, or disclosed. This is listed in
-  *    [[contractOrigins]].
+/** Pairs of v1/v2 templates are called [[TestCase]]s and are listed in [[testCases]]. A test case
+  * is defined by subclassing [[TestCase]] and overriding one definition. For instance,
+  * [[ChangedObservers]] overrides [[TestCase.v2Observers]] with an expression that is different
+  * from [[TestCase.v1Observers]]. Each test case is tested many times against the cartesian product
+  * of the following features:
+  *   - The operation to perform ([[Exercise]], [[ExerciseByKey]], etc.), listed in [[operations]].
+  *   - Whether or not to try and catch exceptions thrown when performing the operation, listed in
+  *     [[catchBehaviors]].
+  *   - What triggered the operation: a toplevel command or the body of a choice, listed in
+  *     [[entryPoints]].
+  *   - The origin of the contract being operated on: locally created, globally created, or
+  *     disclosed. This is listed in [[contractOrigins]].
   *
-  * Some combinations of these features don't make sense. For instance, there are no commands for fetching a contract.
-  * These invalid combinations are discarded in [[TestHelper.makeApiCommands]]. For other valid combinations, this method
-  * produces a command to be run against an engine by the main test loop.
+  * Some combinations of these features don't make sense. For instance, there are no commands for
+  * fetching a contract. These invalid combinations are discarded in [[TestHelper.makeApiCommands]].
+  * For other valid combinations, this method produces a command to be run against an engine by the
+  * main test loop.
   *
-  * In order to test scenarios where the operation is triggered by a choice body, we need "clients" contracts whose only
-  * role is to exercise/fetch/lookup the v1 contract. The templates for these client contracts are defined in
-  * [[clientLocalPkg]] and [[clientGlobalPkg]]. They are split into two templates: one whose choices creates local
-  * v1 contracts, and one whose choices act on global contracts by fetching them. The former statically refers to v1 templates while
-  * the latter doesn't, allowing us to test cases where the creation package of the contract being upgraded is not
-  * vetted.
-  * They define a large number of choices: one per combination of operation, catch behavior, entry point and test case.
-  * These choices are defined in [[TestCase.clientChoicesLocal]] and [[TestCase.clientChoicesGlobal]]. These methods
-  * are pretty boilerplate-y and constitute the bulk of this test suite.
+  * In order to test scenarios where the operation is triggered by a choice body, we need "clients"
+  * contracts whose only role is to exercise/fetch/lookup the v1 contract. The templates for these
+  * client contracts are defined in [[clientLocalPkg]] and [[clientGlobalPkg]]. They are split into
+  * two templates: one whose choices creates local v1 contracts, and one whose choices act on global
+  * contracts by fetching them. The former statically refers to v1 templates while the latter
+  * doesn't, allowing us to test cases where the creation package of the contract being upgraded is
+  * not vetted. They define a large number of choices: one per combination of operation, catch
+  * behavior, entry point and test case. These choices are defined in
+  * [[TestCase.clientChoicesLocal]] and [[TestCase.clientChoicesGlobal]]. These methods are pretty
+  * boilerplate-y and constitute the bulk of this test suite.
   *
-  * Finally, some definitions need to be shared between v1 and v2 templates: key and interface definitions, gobal
-  * parties. These are defined in [[commonDefsPkg]].
+  * Finally, some definitions need to be shared between v1 and v2 templates: key and interface
+  * definitions, gobal parties. These are defined in [[commonDefsPkg]].
   */
 class UpgradesMatrixCases(
     val langVersion: LanguageVersion,
     val contractStateMode: ContractStateMachine.Mode,
 ) {
-  import UpgradesMatrixCases._
+  import UpgradesMatrixCases.*
 
   private[this] def parserParameters(implicit
       pkgId: PackageId
@@ -216,7 +219,7 @@ class UpgradesMatrixCases(
       pkgSrc: String,
       lfVersion: LanguageVersion = langVersion,
   ): (String, Archive, Ast.Package, PackageId) = {
-    val pkg = p"${pkgSrc}" (parserParameters(pkgId))
+    val pkg = p"$pkgSrc" (parserParameters(pkgId))
     val archive = Encode.encodeArchive(pkgId -> pkg, lfVersion)
     val computedPkgId = PackageId.assertFromString(archive.getHash)
     val dalfName = s"${pkg.metadata.nameDashVersion}-$computedPkgId.dalf"
@@ -264,15 +267,16 @@ class UpgradesMatrixCases(
         """,
     )
 
-  /** Represents an LF value specified both as some string we can splice into the textual representation of LF, and as a
-    * scala value we can splice into an [[com.digitalasset.daml.lf.command.ApiCommand]].
+  /** Represents an LF value specified both as some string we can splice into the textual
+    * representation of LF, and as a scala value we can splice into an
+    * [[com.digitalasset.daml.lf.command.ApiCommand]].
     */
   case class TestCaseValue[A](inChoiceBodyLfCode: String, inApiCommand: A)
 
-  /** An abstract class whose [[v1TemplateDefinition]], [[v2TemplateDefinition]] and [[clientChoicesLocal]] methods generate
-    * LF code that define a template named [[templateName]] and test choices for that template.
-    * The class is meant to be extended by concrete case objects which override some aspect of the default template,
-    * for instance [[v2Observers]].
+  /** An abstract class whose [[v1TemplateDefinition]], [[v2TemplateDefinition]] and
+    * [[clientChoicesLocal]] methods generate LF code that define a template named [[templateName]]
+    * and test choices for that template. The class is meant to be extended by concrete case objects
+    * which override some aspect of the default template, for instance [[v2Observers]].
     */
   abstract class TestCase(val templateName: String, val expectedOutcome: ExpectedOutcome) {
     def v1AdditionalDefinitions: String = ""
@@ -281,18 +285,18 @@ class UpgradesMatrixCases(
     def v1AdditionalKeyFields: String = ""
     def v1AdditionalChoices: String = ""
     def v1Precondition: String = "True"
-    def v1Signatories: String = s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+    def v1Signatories: String = s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     def v1Observers: String = "Nil @Party"
     def v1Key: String =
       s"""
          |  Mod:${templateName}Key {
          |    label = "test-key",
-         |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+         |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
          |  }""".stripMargin
     def v1Maintainers: String =
       s"\\(key: Mod:${templateName}Key) -> (Mod:${templateName}Key {maintainers} key)"
     def v1InterfaceChoiceControllers: String =
-      s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+      s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     def v1InterfaceChoiceObservers: String = "Nil @Party"
     def v1View: String = s"'$commonDefsPkgId':Mod:MyView { value = 0 }"
     def v1InterfaceInstance: String =
@@ -386,7 +390,7 @@ class UpgradesMatrixCases(
          |    observers $observers;
          |
          |    choice @nonConsuming TemplateChoice (self) (u: Mod:${templateName}ChoiceArgType): Text
-         |      , controllers (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+         |      , controllers (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
          |      , observers (Nil @Party)
          |      to upure @Text "TemplateChoice was called";
          |
@@ -437,7 +441,7 @@ class UpgradesMatrixCases(
       val choiceArgExpr = s"($v2ChoiceArgTypeQualifiedName {})"
 
       val nonByKeyChoices = s"""
-         |  choice @nonConsuming ExerciseNoCatchGlobal${templateName} (self) (cid: ContractId $v2TplQualifiedName): Text
+         |  choice @nonConsuming ExerciseNoCatchGlobal$templateName (self) (cid: ContractId $v2TplQualifiedName): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to exercise
@@ -446,19 +450,19 @@ class UpgradesMatrixCases(
          |         cid
          |         $choiceArgExpr;
          |
-         |  choice @nonConsuming ExerciseAttemptCatchGlobal${templateName}
+         |  choice @nonConsuming ExerciseAttemptCatchGlobal$templateName
          |        (self)
          |        (cid: ContractId $v2TplQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
-         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseNoCatchGlobal${templateName} self cid
+         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseNoCatchGlobal$templateName self cid
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming ExerciseInterfaceNoCatchGlobal${templateName}
+         |  choice @nonConsuming ExerciseInterfaceNoCatchGlobal$templateName
          |        (self)
          |        (cid: ContractId $ifaceQualifiedName)
          |        : Text
@@ -470,19 +474,19 @@ class UpgradesMatrixCases(
          |         cid
          |         ();
          |
-         |  choice @nonConsuming ExerciseInterfaceAttemptCatchGlobal${templateName}
+         |  choice @nonConsuming ExerciseInterfaceAttemptCatchGlobal$templateName
          |        (self)
          |        (cid: ContractId $ifaceQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
-         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseInterfaceNoCatchGlobal${templateName} self cid
+         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseInterfaceNoCatchGlobal$templateName self cid
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming FetchNoCatchGlobal${templateName} (self) (cid: ContractId $v2TplQualifiedName)
+         |  choice @nonConsuming FetchNoCatchGlobal$templateName (self) (cid: ContractId $v2TplQualifiedName)
          |        : $v2TplQualifiedName
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
@@ -490,17 +494,17 @@ class UpgradesMatrixCases(
          |         @$v2TplQualifiedName
          |         cid;
          |
-         |  choice @nonConsuming FetchAttemptCatchGlobal${templateName} (self) (cid: ContractId $v2TplQualifiedName): Text
+         |  choice @nonConsuming FetchAttemptCatchGlobal$templateName (self) (cid: ContractId $v2TplQualifiedName): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:$v2TplQualifiedName <-
-         |             exercise @$clientTplQualifiedName FetchNoCatchGlobal${templateName} self cid
+         |             exercise @$clientTplQualifiedName FetchNoCatchGlobal$templateName self cid
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming FetchInterfaceNoCatchGlobal${templateName} (self) (cid: ContractId $ifaceQualifiedName)
+         |  choice @nonConsuming FetchInterfaceNoCatchGlobal$templateName (self) (cid: ContractId $ifaceQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
@@ -509,12 +513,12 @@ class UpgradesMatrixCases(
          |         cid
          |       in upure @Text "no exception was caught";
          |
-         |  choice @nonConsuming FetchInterfaceAttemptCatchGlobal${templateName} (self) (cid: ContractId $ifaceQualifiedName): Text
+         |  choice @nonConsuming FetchInterfaceAttemptCatchGlobal$templateName (self) (cid: ContractId $ifaceQualifiedName): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:Text <-
-         |             exercise @$clientTplQualifiedName FetchInterfaceNoCatchGlobal${templateName} self cid
+         |             exercise @$clientTplQualifiedName FetchInterfaceNoCatchGlobal$templateName self cid
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
@@ -522,7 +526,7 @@ class UpgradesMatrixCases(
          |""".stripMargin
 
       val byKeyChoices = s"""
-         |  choice @nonConsuming ExerciseByKeyNoCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName): Text
+         |  choice @nonConsuming ExerciseByKeyNoCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to exercise_by_key
@@ -531,17 +535,17 @@ class UpgradesMatrixCases(
          |         key
          |         $choiceArgExpr;
          |
-         |  choice @nonConsuming ExerciseByKeyAttemptCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName)
+         |  choice @nonConsuming ExerciseByKeyAttemptCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
-         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseByKeyNoCatchGlobal${templateName} self key
+         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseByKeyNoCatchGlobal$templateName self key
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming FetchByKeyNoCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName)
+         |  choice @nonConsuming FetchByKeyNoCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : $v2TplQualifiedName
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
@@ -551,18 +555,18 @@ class UpgradesMatrixCases(
          |            key
          |       in upure @$v2TplQualifiedName ($tuple2TyCon @(ContractId $v2TplQualifiedName) @$v2TplQualifiedName {_2} pair);
          |
-         |  choice @nonConsuming FetchByKeyAttemptCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName)
+         |  choice @nonConsuming FetchByKeyAttemptCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:$v2TplQualifiedName <-
-         |             exercise @$clientTplQualifiedName FetchByKeyNoCatchGlobal${templateName} self key
+         |             exercise @$clientTplQualifiedName FetchByKeyNoCatchGlobal$templateName self key
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming LookupByKeyNoCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName)
+         |  choice @nonConsuming LookupByKeyNoCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : Option (ContractId $v2TplQualifiedName)
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
@@ -570,13 +574,13 @@ class UpgradesMatrixCases(
          |         @$v2TplQualifiedName
          |         key;
          |
-         |  choice @nonConsuming LookupByKeyAttemptCatchGlobal${templateName} (self) (key: $v2KeyTypeQualifiedName)
+         |  choice @nonConsuming LookupByKeyAttemptCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:Option (ContractId $v2TplQualifiedName) <-
-         |             exercise @$clientTplQualifiedName LookupByKeyNoCatchGlobal${templateName} self key
+         |             exercise @$clientTplQualifiedName LookupByKeyNoCatchGlobal$templateName self key
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
@@ -616,7 +620,7 @@ class UpgradesMatrixCases(
       val choiceArgExpr = s"($v2ChoiceArgTypeQualifiedName {})"
 
       val nonByKeyChoices = s"""
-         |  choice @nonConsuming ExerciseNoCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming ExerciseNoCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -626,16 +630,16 @@ class UpgradesMatrixCases(
          |            (COERCE_CONTRACT_ID @$v1TplQualifiedName @$v2TplQualifiedName cid)
          |            $choiceArgExpr;
          |
-         |  choice @nonConsuming ExerciseAttemptCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming ExerciseAttemptCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
-         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseNoCatchLocal${templateName} self ()
+         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseNoCatchLocal$templateName self ()
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming ExerciseInterfaceNoCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming ExerciseInterfaceNoCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -645,16 +649,16 @@ class UpgradesMatrixCases(
          |            (COERCE_CONTRACT_ID @$v1TplQualifiedName @$ifaceQualifiedName cid)
          |            ();
          |
-         |  choice @nonConsuming ExerciseInterfaceAttemptCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming ExerciseInterfaceAttemptCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
-         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseInterfaceNoCatchLocal${templateName} self ()
+         |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseInterfaceNoCatchLocal$templateName self ()
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming FetchNoCatchLocal${templateName} (self) (u: Unit): $v2TplQualifiedName
+         |  choice @nonConsuming FetchNoCatchLocal$templateName (self) (u: Unit): $v2TplQualifiedName
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -662,17 +666,17 @@ class UpgradesMatrixCases(
          |            @$v2TplQualifiedName
          |            (COERCE_CONTRACT_ID @$v1TplQualifiedName @$v2TplQualifiedName cid);
          |
-         |  choice @nonConsuming FetchAttemptCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming FetchAttemptCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:$v2TplQualifiedName <-
-         |             exercise @$clientTplQualifiedName FetchNoCatchLocal${templateName} self ()
+         |             exercise @$clientTplQualifiedName FetchNoCatchLocal$templateName self ()
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |
-         |  choice @nonConsuming FetchInterfaceNoCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming FetchInterfaceNoCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to ubind
@@ -682,12 +686,12 @@ class UpgradesMatrixCases(
          |            (COERCE_CONTRACT_ID @$v1TplQualifiedName @$ifaceQualifiedName cid)
          |         in upure @Text "no exception was caught";
          |
-         |  choice @nonConsuming FetchInterfaceAttemptCatchLocal${templateName} (self) (u: Unit): Text
+         |  choice @nonConsuming FetchInterfaceAttemptCatchLocal$templateName (self) (u: Unit): Text
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
          |    to try @Text
          |         ubind __:Text <-
-         |             exercise @$clientTplQualifiedName FetchInterfaceNoCatchLocal${templateName} self ()
+         |             exercise @$clientTplQualifiedName FetchInterfaceNoCatchLocal$templateName self ()
          |         in upure @Text "no exception was caught"
          |       catch
          |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
@@ -695,7 +699,7 @@ class UpgradesMatrixCases(
 
       val byKeyChoices =
         s"""
-           |  choice @nonConsuming ExerciseByKeyNoCatchLocal${templateName} (self) (u: Unit): Text
+           |  choice @nonConsuming ExerciseByKeyNoCatchLocal$templateName (self) (u: Unit): Text
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -705,16 +709,16 @@ class UpgradesMatrixCases(
            |            $v2KeyExpr
            |            $choiceArgExpr;
            |
-           |  choice @nonConsuming ExerciseByKeyAttemptCatchLocal${templateName} (self) (u: Unit): Text
+           |  choice @nonConsuming ExerciseByKeyAttemptCatchLocal$templateName (self) (u: Unit): Text
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to try @Text
-           |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseByKeyNoCatchLocal${templateName} self ()
+           |         ubind __:Text <- exercise @$clientTplQualifiedName ExerciseByKeyNoCatchLocal$templateName self ()
            |         in upure @Text "no exception was caught"
            |       catch
            |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
            |
-           |  choice @nonConsuming FetchByKeyNoCatchLocal${templateName} (self) (u: Unit): $v2TplQualifiedName
+           |  choice @nonConsuming FetchByKeyNoCatchLocal$templateName (self) (u: Unit): $v2TplQualifiedName
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -724,17 +728,17 @@ class UpgradesMatrixCases(
            |                $v2KeyExpr
            |          in upure @$v2TplQualifiedName ($tuple2TyCon @(ContractId $v2TplQualifiedName) @$v2TplQualifiedName {_2} pair);
            |
-           |  choice @nonConsuming FetchByKeyAttemptCatchLocal${templateName} (self) (u: Unit): Text
+           |  choice @nonConsuming FetchByKeyAttemptCatchLocal$templateName (self) (u: Unit): Text
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to try @Text
            |         ubind __:$v2TplQualifiedName <-
-           |             exercise @$clientTplQualifiedName FetchByKeyNoCatchLocal${templateName} self ()
+           |             exercise @$clientTplQualifiedName FetchByKeyNoCatchLocal$templateName self ()
            |         in upure @Text "no exception was caught"
            |       catch
            |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
            |
-           |  choice @nonConsuming LookupByKeyNoCatchLocal${templateName} (self) (u: Unit): Option (ContractId $v2TplQualifiedName)
+           |  choice @nonConsuming LookupByKeyNoCatchLocal$templateName (self) (u: Unit): Option (ContractId $v2TplQualifiedName)
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
@@ -742,12 +746,12 @@ class UpgradesMatrixCases(
            |            @$v2TplQualifiedName
            |            $v2KeyExpr;
            |
-           |  choice @nonConsuming LookupByKeyAttemptCatchLocal${templateName} (self) (u: Unit): Text
+           |  choice @nonConsuming LookupByKeyAttemptCatchLocal$templateName (self) (u: Unit): Text
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to try @Text
            |         ubind __:Option (ContractId $v2TplQualifiedName) <-
-           |             exercise @$clientTplQualifiedName LookupByKeyNoCatchLocal${templateName} self ()
+           |             exercise @$clientTplQualifiedName LookupByKeyNoCatchLocal$templateName self ()
            |         in upure @Text "no exception was caught"
            |       catch
            |         e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
@@ -780,22 +784,22 @@ class UpgradesMatrixCases(
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: changed signatories expression, evaluates to the same value, upgrade succeeds
   case object UnchangedSignatories extends TestCase("UnchangedSignatories", ExpectSuccess) {
-    override def v1Signatories = s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+    override def v1Signatories = s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     override def v2Signatories =
-      s"case () of () -> Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+      s"case () of () -> Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: changed signatories expression, evaluates to a different value, upgrade fails
   case object ChangedSignatories extends TestCase("ChangedSignatories", ExpectUpgradeError) {
-    override def v1Signatories = s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+    override def v1Signatories = s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     override def v2Signatories =
-      s"Cons @Party [Mod:${templateName} {p1} this, Mod:${templateName} {p2} this] (Nil @Party)"
+      s"Cons @Party [Mod:$templateName {p1} this, Mod:$templateName {p2} this] (Nil @Party)"
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: errors thrown by the signatories expression cannot be caught
   case object ThrowingSignatories
       extends TestCase("ThrowingSignatories", ExpectUnhandledException) {
-    override def v1Signatories = s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+    override def v1Signatories = s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     override def v2Signatories =
       s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Signatories"})"""
   }
@@ -809,7 +813,7 @@ class UpgradesMatrixCases(
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: changed observers expression, evaluates to a different value, upgrade fails
   case object ChangedObservers extends TestCase("ChangedObservers", ExpectUpgradeError) {
     override def v1Observers = "Nil @Party"
-    override def v2Observers = s"Cons @Party [Mod:${templateName} {p2} this] (Nil @Party)"
+    override def v2Observers = s"Cons @Party [Mod:$templateName {p2} this] (Nil @Party)"
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: errors thrown by the observers expression cannot be caught
@@ -830,7 +834,7 @@ class UpgradesMatrixCases(
     override def v2AdditionalChoices: String =
       s"""
          | choice @nonConsuming AdditionalChoice (self) (u: Unit): Text
-         |   , controllers (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+         |   , controllers (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
          |   , observers (Nil @Party)
          |   to upure @Text "AdditionalChoice was called";
          |""".stripMargin
@@ -855,12 +859,12 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key = s""" case () of () ->
                             |    Mod:${templateName}Key {
                             |      label = "test-key",
-                            |      maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |      maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |    }""".stripMargin
   }
 
@@ -869,12 +873,12 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key = s"""
                             |    Mod:${templateName}Key {
                             |      label = "test-key-2",
-                            |      maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |      maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |    }""".stripMargin
   }
 
@@ -883,7 +887,7 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key =
       s"""throw @Mod:${templateName}Key @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Key"})"""
@@ -905,8 +909,8 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)),
-                            |    maintainers2 = (Cons @Party [Mod:${templateName} {p2} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party)),
+                            |    maintainers2 = (Cons @Party [Mod:$templateName {p2} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key = v1Key
 
@@ -1220,7 +1224,7 @@ class UpgradesMatrixCases(
       s", r = $qualifiedRecordName { n = 0 }"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* r */ -> ValueRecord(
           None /* Mod:$recordName */,
@@ -1229,7 +1233,6 @@ class UpgradesMatrixCases(
           ),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: differently-named field in record used as template parameter, upgrade fails
@@ -1251,7 +1254,7 @@ class UpgradesMatrixCases(
       s", r = $qualifiedRecordName { n = 0 }"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* r */ -> ValueRecord(
           None /* Mod:$recordName */,
@@ -1260,7 +1263,6 @@ class UpgradesMatrixCases(
           ),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in variant used as template parameter, upgrade succeeds
@@ -1282,7 +1284,7 @@ class UpgradesMatrixCases(
       s", v = $qualifiedVariantName:Ctor1 0"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* v */ -> ValueVariant(
           None,
@@ -1290,7 +1292,6 @@ class UpgradesMatrixCases(
           ValueInt64(0),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: differently-ranked variant constructor used as template parameter, upgrade fails
@@ -1312,7 +1313,7 @@ class UpgradesMatrixCases(
       s", v = $qualifiedVariantName:Ctor1 0"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* v */ -> ValueVariant(
           None,
@@ -1320,7 +1321,6 @@ class UpgradesMatrixCases(
           ValueInt64(0),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in enum used as template parameter, upgrade succeeds
@@ -1342,14 +1342,13 @@ class UpgradesMatrixCases(
       s", e = $qualifiedEnumName:Ctor1"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* e */ -> ValueEnum(
           None,
           "Ctor1",
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: differently-ranked constructor in enum used as template parameter, upgrade fails
@@ -1371,14 +1370,13 @@ class UpgradesMatrixCases(
       s", e = $qualifiedEnumName:Ctor1"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* e */ -> ValueEnum(
           None,
           "Ctor1",
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional template parameter, upgrade succeeds
@@ -1404,7 +1402,7 @@ class UpgradesMatrixCases(
   case object ThrowingInterfaceChoiceControllers
       extends TestCase("ThrowingInterfaceChoiceControllers", ExpectUnhandledException) {
     override def v1InterfaceChoiceControllers =
-      s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+      s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     override def v2InterfaceChoiceControllers =
       s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "InterfaceChoiceControllers"})"""
   }
@@ -1413,7 +1411,7 @@ class UpgradesMatrixCases(
   case object ThrowingInterfaceChoiceObservers
       extends TestCase("ThrowingInterfaceChoiceObservers", ExpectUnhandledException) {
     override def v1InterfaceChoiceObservers =
-      s"Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)"
+      s"Cons @Party [Mod:$templateName {p1} this] (Nil @Party)"
     override def v2InterfaceChoiceObservers =
       s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "InterfaceChoiceObservers"})"""
   }
@@ -1433,11 +1431,10 @@ class UpgradesMatrixCases(
     override def additionalCreateArgsLf(v1PkgId: PackageId): String =
       s", extra = None @Unit"
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* extra */ -> ValueOptional(None)
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional template parameter, None arg, downgrade succeeds
@@ -1449,11 +1446,10 @@ class UpgradesMatrixCases(
     override def additionalCreateArgsLf(v1PkgId: PackageId): String =
       s", extra = Some @Unit ()"
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* extra */ -> ValueOptional(Some(ValueUnit))
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional optional field in record used as template parameter, None value, downgrade succeeds
@@ -1475,7 +1471,7 @@ class UpgradesMatrixCases(
       s", r = $qualifiedRecordName { n = 0, extra = None @Unit }"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* r */ -> ValueRecord(
           None /* Mod:$recordName */,
@@ -1485,7 +1481,6 @@ class UpgradesMatrixCases(
           ),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional optional field in record used as template parameter, Some value, downgrade fails
@@ -1510,7 +1505,7 @@ class UpgradesMatrixCases(
       s", r = $qualifiedRecordName { n = 0, extra = Some @Unit () }"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* r */ -> ValueRecord(
           None /* Mod:$recordName */,
@@ -1520,7 +1515,6 @@ class UpgradesMatrixCases(
           ),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in variant used as template parameter, unused constructor, downgrade succeeds
@@ -1542,7 +1536,7 @@ class UpgradesMatrixCases(
       s", v = $qualifiedVariantName:Ctor1 0"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* v */ -> ValueVariant(
           None,
@@ -1550,7 +1544,6 @@ class UpgradesMatrixCases(
           ValueInt64(0),
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in variant used as template parameter, used constructor, downgrade fails
@@ -1575,7 +1568,7 @@ class UpgradesMatrixCases(
       s", v = $qualifiedVariantName:Ctor2 ()"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* v */ -> ValueVariant(
           None,
@@ -1583,7 +1576,6 @@ class UpgradesMatrixCases(
           ValueUnit,
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in enum used as template parameter, unused constructor, downgrade succeeds
@@ -1605,14 +1597,13 @@ class UpgradesMatrixCases(
       s", e = $qualifiedEnumName:Ctor1"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* e */ -> ValueEnum(
           None,
           "Ctor1",
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional constructor in enum used as template parameter, used constructor, downgrade fails
@@ -1637,14 +1628,13 @@ class UpgradesMatrixCases(
       s", e = $qualifiedEnumName:Ctor2"
     }
 
-    override def additionalCreateArgsValue(v1PkgId: PackageId) = {
+    override def additionalCreateArgsValue(v1PkgId: PackageId) =
       ImmArray(
         None /* e */ -> ValueEnum(
           None,
           "Ctor2",
         )
       )
-    }
   }
 
   // TEST_EVIDENCE: Integrity: Smart Contract Upgrade: additional optional field in key type, None value, upgrade succeeds
@@ -1664,12 +1654,12 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)),
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party)),
                             |    extra = None @Unit
                             |  }""".stripMargin
   }
@@ -1691,12 +1681,12 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
     override def v2Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)),
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party)),
                             |    extra = Some @Unit ()
                             |  }""".stripMargin
   }
@@ -1710,13 +1700,13 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)),
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party)),
                             |    extra = None @Unit
                             |  }""".stripMargin
     override def v2Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
   }
 
@@ -1736,13 +1726,13 @@ class UpgradesMatrixCases(
     override def v1Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party)),
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party)),
                             |    extra = Some @Unit ()
                             |  }""".stripMargin
     override def v2Key = s"""
                             |  Mod:${templateName}Key {
                             |    label = "test-key",
-                            |    maintainers = (Cons @Party [Mod:${templateName} {p1} this] (Nil @Party))
+                            |    maintainers = (Cons @Party [Mod:$templateName {p1} this] (Nil @Party))
                             |  }""".stripMargin
   }
 
@@ -1826,8 +1816,8 @@ class UpgradesMatrixCases(
 
   val templateDefsPkgName = PackageName.assertFromString("-template-defs-")
 
-  /** A package that defines templates called Precondition, Signatories, ... whose metadata should evaluate without
-    * throwing exceptions.
+  /** A package that defines templates called Precondition, Signatories, ... whose metadata should
+    * evaluate without throwing exceptions.
     */
   val (templateDefsV1DalfName, templateDefsV1Dalf, templateDefsV1Pkg, templateDefsV1PkgId) =
     encodeDalfArchive(
@@ -1894,7 +1884,9 @@ class UpgradesMatrixCases(
       },
     )
 
-  /** The package used for the creation (local or global) v1 contracts and packages that depend on them. */
+  /** The package used for the creation (local or global) v1 contracts and packages that depend on
+    * them.
+    */
   val allCreationPackages: Map[PackageId, Ast.Package] =
     Map(templateDefsV1PkgId -> templateDefsV1Pkg, clientLocalPkgId -> clientLocalPkg)
 
@@ -1961,9 +1953,10 @@ class UpgradesMatrixCases(
   val creationPackageStatuses: List[CreationPackageStatus] =
     List(CreationPackageVetted, CreationPackageUnvetted)
 
-  /** A class that defines all the "global" variables shared by tests for a given template name: the template ID of the
-    * v1 template, the template ID of the v2 template, the ID of the v1 contract, etc. It exposes [[makeApiCommands]],
-    * which generates an API command for a given operation, catch behavior, entry point, and contract origin.
+  /** A class that defines all the "global" variables shared by tests for a given template name: the
+    * template ID of the v1 template, the template ID of the v2 template, the ID of the v1 contract,
+    * etc. It exposes [[makeApiCommands]], which generates an API command for a given operation,
+    * catch behavior, entry point, and contract origin.
     */
   class TestHelper(testCase: TestCase) {
     val templateName = testCase.templateName
@@ -2174,7 +2167,7 @@ class UpgradesMatrixCases(
                 clientGlobalTplId.toRef,
                 setupData.clientGlobalContractId,
                 ChoiceName.assertFromString(
-                  s"${operation.name}${catchBehavior.name}Global${templateName}"
+                  s"${operation.name}${catchBehavior.name}Global$templateName"
                 ),
                 operation match {
                   case Fetch | FetchInterface | Exercise | ExerciseInterface =>
@@ -2192,7 +2185,7 @@ class UpgradesMatrixCases(
                 clientLocalTplId.toRef,
                 setupData.clientLocalContractId,
                 ChoiceName.assertFromString(
-                  s"${operation.name}${catchBehavior.name}Local${templateName}"
+                  s"${operation.name}${catchBehavior.name}Local$templateName"
                 ),
                 ValueUnit,
               )

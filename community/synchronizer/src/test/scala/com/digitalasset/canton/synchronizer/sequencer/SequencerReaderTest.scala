@@ -153,7 +153,7 @@ class SequencerReaderTest
       cryptoD,
       eventSignaller,
       topologyClientMember,
-      sequencingTimeBoundExclusiveO = None,
+      lsuSequencingBounds = None,
       sequencerMetrics,
       timeouts,
       loggerFactory,
@@ -213,9 +213,7 @@ class SequencerReaderTest
       )
 
       val source = Source
-        .future(
-          subscribeF
-        )
+        .future(subscribeF)
         .flatMapConcat(identity)
         .map {
           case Right(event) => event

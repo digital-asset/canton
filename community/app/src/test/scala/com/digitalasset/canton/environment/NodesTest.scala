@@ -43,7 +43,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{SimClock, SynchronizerTimeTracker}
-import com.digitalasset.canton.topology.admin.grpc.PSIdLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookup
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{
@@ -216,7 +216,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
 
     override protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager] = Nil
 
-    override protected def lookupActivePSId: PSIdLookup =
+    override protected def lookupActivePsid: PsidLookup =
       _ => None
   }
 

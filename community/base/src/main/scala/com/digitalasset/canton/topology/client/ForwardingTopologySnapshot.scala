@@ -158,15 +158,15 @@ class ForwardingTopologySnapshot(
   ): FutureUnlessShutdown[Option[SigningKeysWithThreshold]] =
     parent.signingKeysWithThreshold(party)
 
-  override def synchronizerUpgradeOngoing()(implicit
+  override def announcedLsu()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
-    parent.synchronizerUpgradeOngoing()
+    parent.announcedLsu()
 
-  override def sequencerConnectionSuccessors()(implicit
+  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
-    parent.sequencerConnectionSuccessors()
+    parent.sequencerConnectionSuccessors(successorPsid)
 }
 
 class CachingTopologySnapshot(
@@ -233,8 +233,18 @@ class CachingTopologySnapshot(
     .buildTracedAsync[FutureUnlessShutdown, ParticipantId, Map[PackageId, VettedPackage]](
       cache = cachingConfigs.packageVettingCache.buildScaffeine(loggerFactory),
       loader = implicit traceContext => x => parent.loadVettedPackages(x),
-      allLoader =
-        Some(implicit traceContext => participants => parent.loadVettedPackages(participants.toSet)),
+      allLoader = Some(implicit traceContext =>
+        participants =>
+          parent
+            .loadVettedPackages(participants.toSet)
+            .map(foundVettedPackages =>
+              participants
+                .map(participant =>
+                  participant -> foundVettedPackages.getOrElse(participant, Map.empty)
+                )
+                .toMap
+            )
+      ),
     )(logger, "packageVettingCache")
 
   private val mediatorsCache =
@@ -309,7 +319,7 @@ class CachingTopologySnapshot(
   override def allKeys(
       members: Seq[Member]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[Member, KeyCollection]] =
-    keyCache.getAll(members)
+    keyCache.getAll(members).map(_.filter { case (_, keys) => !keys.isEmpty })
 
   override def loadActiveParticipantsOf(
       party: PartyId,
@@ -342,7 +352,9 @@ class CachingTopologySnapshot(
   override def loadVettedPackages(participants: Set[ParticipantId])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
-    packageVettingCache.getAll(participants)
+    packageVettingCache
+      .getAll(participants)
+      .map(_.filter { case (_, vettedPackages) => vettedPackages.nonEmpty })
 
   private[client] override def findUnvettedPackagesOrDependencies(
       participant: ParticipantId,
@@ -448,13 +460,13 @@ class CachingTopologySnapshot(
   ): FutureUnlessShutdown[Option[SigningKeysWithThreshold]] =
     signingKeysWithThresholdCache.get(party)
 
-  override def synchronizerUpgradeOngoing()(implicit
+  override def announcedLsu()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
-    getAndCache(synchronizerUpgradeCache, parent.synchronizerUpgradeOngoing())
+    getAndCache(synchronizerUpgradeCache, parent.announcedLsu())
 
-  override def sequencerConnectionSuccessors()(implicit
+  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
-    parent.sequencerConnectionSuccessors()
+    parent.sequencerConnectionSuccessors(successorPsid)
 }

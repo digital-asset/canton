@@ -92,7 +92,7 @@ private[repair] final class RepairServiceHelpers(
     for {
       psid <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateLookup
-          .latestKnownPSId(synchronizerId)
+          .latestKnownPsid(synchronizerId)
           .toRight(s"Unable to resolve $synchronizerId to a physical synchronizer id")
       )
 

@@ -972,7 +972,10 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
       |- it is greater than all previous synchronizer announcements
       |""")
   object InvalidSynchronizerSuccessor
-      extends ErrorCode(id = "TOPOLOGY_INVALID_SUCCESSOR", InvalidIndependentOfSystemState) {
+      extends ErrorCode(
+        id = "TOPOLOGY_INVALID_SUCCESSOR_PHYSICAL_SYNCHRONIZER_ID",
+        InvalidIndependentOfSystemState,
+      ) {
     final case class Reject(
         successorSynchronizerId: PhysicalSynchronizerId,
         details: String,
@@ -984,7 +987,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         with TopologyManagerError
 
     object Reject {
-      def conflictWithCurrentPSId(
+      def conflictWithCurrentPsid(
           currentSynchronizerId: PhysicalSynchronizerId,
           successorSynchronizerId: PhysicalSynchronizerId,
       )(implicit loggingContext: ErrorLoggingContext): Reject =
@@ -1005,6 +1008,27 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
               s"with an increasing synchronizer id",
         )
     }
+  }
+
+  @Explanation(
+    "This error indicates that successor physical synchronizer id specific on the sequencer successor differs from the one of the LSU announcement."
+  )
+  @Resolution("""Change the physical synchronizer id and submit again.""")
+  object LsuSequencerSuccessorInvalidSuccessorPsid
+      extends ErrorCode(
+        id = "LSU_SEQUENCER_SUCCESSOR_INVALID_SUCCESSOR_PSID",
+        InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(
+        sequencerId: SequencerId,
+        successorPsid: PhysicalSynchronizerId,
+        expectedSuccessorPsid: PhysicalSynchronizerId,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Lsu sequencer successor for sequencer $sequencerId is invalid because it mentions successor $successorPsid but the current LSU announcement mentions $expectedSuccessorPsid"
+        )
+        with TopologyManagerError
   }
 
   @Explanation(

@@ -97,6 +97,8 @@ sealed trait AcsCommitmentProcessorIntegrationTest
             cutOffDuration = config.NonNegativeFiniteDuration.ofHours(1),
             // we evict the session key cache right away to make sure we use a fresh session signing key for each request
             keyEvictionPeriod = config.PositiveFiniteDuration.ofMillis(1),
+            // we must disable bound checks because `keyEvictionPeriod` is shorter than `keyValidityDuration`
+            disableBoundChecks = true,
           )
         ),
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),

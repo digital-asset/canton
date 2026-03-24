@@ -7,17 +7,17 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.sql.Connection
 
-private[backend] trait Table[FROM] {
-  def prepareData(in: Vector[FROM], stringInterning: StringInterning): Array[Array[?]]
+private[backend] trait Table[From] {
+  def prepareData(in: Vector[From], stringInterning: StringInterning): Array[Array[?]]
   def executeUpdate: Array[Array[?]] => Connection => Unit
 }
 
-private[backend] abstract class BaseTable[FROM](
-    fields: Seq[(String, Field[FROM, ?, ?])],
-    ordering: Option[Ordering[FROM]] = None,
-) extends Table[FROM] {
+private[backend] abstract class BaseTable[From](
+    fields: Seq[(String, Field[From, ?, ?])],
+    ordering: Option[Ordering[From]] = None,
+) extends Table[From] {
   override def prepareData(
-      in: Vector[FROM],
+      in: Vector[From],
       stringInterning: StringInterning,
   ): Array[Array[?]] = {
     val sortedIn = ordering.map(in.sorted(_)).getOrElse(in)
@@ -33,10 +33,10 @@ private[backend] object Table {
       ()
     }
 
-  private def batchedInsertBase[FROM](
+  private def batchedInsertBase[From](
       insertStatement: String
-  )(fields: Seq[(String, Field[FROM, ?, ?])]): Table[FROM] =
-    new BaseTable[FROM](fields) {
+  )(fields: Seq[(String, Field[From, ?, ?])]): Table[From] =
+    new BaseTable[From](fields) {
       override def executeUpdate: Array[Array[?]] => Connection => Unit =
         data =>
           connection =>
@@ -77,8 +77,8 @@ private[backend] object Table {
        |""".stripMargin
   }
 
-  def batchedInsert[FROM](tableName: String)(
-      fields: (String, Field[FROM, ?, ?])*
-  ): Table[FROM] =
+  def batchedInsert[From](tableName: String)(
+      fields: (String, Field[From, ?, ?])*
+  ): Table[From] =
     batchedInsertBase(batchedInsertStatement(tableName, fields))(fields)
 }

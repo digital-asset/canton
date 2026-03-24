@@ -69,7 +69,7 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       transferTraffic()
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
+        participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
 
         // P2 can now join
         participant2.synchronizers.connect(sequencer2, daName)

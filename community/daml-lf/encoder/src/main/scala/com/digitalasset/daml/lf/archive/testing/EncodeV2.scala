@@ -4,12 +4,12 @@
 package com.digitalasset.daml.lf.archive
 package testing
 
-import com.digitalasset.daml.lf.archive.{DamlLf2 => PLF}
+import com.digitalasset.daml.lf.archive.DamlLf2 as PLF
 import com.digitalasset.daml.lf.archive.testing.Encode.{EncodeError, expect}
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV, Util => AstUtil}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LanguageVersion as LV, Util as AstUtil}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -19,7 +19,7 @@ import scala.language.implicitConversions
 @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
 private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
 
-  import EncodeV2._
+  import EncodeV2.*
   import Name.ordering
 
   private val languageVersion = LV(LV.Major.V2, minorLanguageVersion)
@@ -152,9 +152,9 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
           .setDontDiscloseNonConsumingChoicesToObservers(true)
       )
       builder.accumulateLeft(module.definitions.sortByKey)(addDefinition)
-      builder.accumulateLeft(module.templates.sortByKey) { (a, b) => a.addTemplates(b) }
-      builder.accumulateLeft(module.exceptions.sortByKey) { (a, b) => a.addExceptions(b) }
-      builder.accumulateLeft(module.interfaces.sortByKey) { (a, b) => a.addInterfaces(b) }
+      builder.accumulateLeft(module.templates.sortByKey)((a, b) => a.addTemplates(b))
+      builder.accumulateLeft(module.exceptions.sortByKey)((a, b) => a.addExceptions(b))
+      builder.accumulateLeft(module.interfaces.sortByKey)((a, b) => a.addInterfaces(b))
       builder.build()
     }
 
@@ -247,9 +247,9 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
       */
     private val kStar =
       PLF.Kind.newBuilder().setStar(PLF.Unit.newBuilder()).build()
-    private val KArrows = RightRecMatcher[Kind, Kind]({ case KArrow(param, result) =>
+    private val KArrows = RightRecMatcher[Kind, Kind] { case KArrow(param, result) =>
       (param, result)
-    })
+    }
 
     private implicit def encodeKind(k: Kind): PLF.Kind =
       if (versionSupports(LV.featureFlatArchive))
@@ -311,12 +311,12 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
       b.setType(typ).build()
     }
 
-    private val TForalls = RightRecMatcher[(TypeVarName, Kind), Type]({
+    private val TForalls = RightRecMatcher[(TypeVarName, Kind), Type] {
       case TForall(binder, body) => binder -> body
-    })
-    private val TApps = LeftRecMatcher[Type, Type]({ case TApp(fun, arg) =>
+    }
+    private val TApps = LeftRecMatcher[Type, Type] { case TApp(fun, arg) =>
       fun -> arg
-    })
+    }
 
     private implicit def encodeType(typ: Type): PLF.Type =
       PLF.Type.newBuilder().setInternedType(typeTable.insert(typ)).build()
@@ -597,18 +597,18 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
       builder.build()
     }
 
-    private val EApps = LeftRecMatcher[Expr, Expr]({ case EApp(fun, arg) =>
+    private val EApps = LeftRecMatcher[Expr, Expr] { case EApp(fun, arg) =>
       fun -> arg
-    })
-    private val ETyApps = LeftRecMatcher[Expr, Type]({ case ETyApp(exp, typ) =>
+    }
+    private val ETyApps = LeftRecMatcher[Expr, Type] { case ETyApp(exp, typ) =>
       exp -> typ
-    })
-    private val EAbss = RightRecMatcher[(ExprVarName, Type), Expr]({ case EAbs(binder, body) =>
+    }
+    private val EAbss = RightRecMatcher[(ExprVarName, Type), Expr] { case EAbs(binder, body) =>
       binder -> body
-    })
-    private val ETyAbss = RightRecMatcher[(TypeVarName, Kind), Expr]({ case ETyAbs(binder, body) =>
+    }
+    private val ETyAbss = RightRecMatcher[(TypeVarName, Kind), Expr] { case ETyAbs(binder, body) =>
       binder -> body
-    })
+    }
 
     private def encodeExprBuilder(
         expr0: Expr,
@@ -1073,7 +1073,7 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
     if (!versionSupports(ft)) throw notSupportedError(ft.name)
 
   def assertVersionSupports(ft: LV.Feature, caseDescription: String): Unit =
-    if (!versionSupports(ft)) throw notSupportedError(s"${ft.name} (case ${caseDescription})")
+    if (!versionSupports(ft)) throw notSupportedError(s"${ft.name} (case $caseDescription)")
 }
 
 @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
@@ -1144,7 +1144,7 @@ object EncodeV2 {
   }
 
   private implicit class IdentifierOps(val identifier: Identifier) extends AnyVal {
-    import identifier._
+    import identifier.*
     @inline
     def moduleRef: (PackageId, ModuleName) = packageId -> qualifiedName.module
     @inline

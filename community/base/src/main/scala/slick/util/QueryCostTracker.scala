@@ -316,6 +316,7 @@ object QueryCostTrackerImpl {
       "com.daml.executors",
       "com.digitalasset.canton.store.db.DbBulkUpdateProcessor",
       "com.digitalasset.canton.lifecycle",
+      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous",
       LoggerUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
       MonadUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
     )

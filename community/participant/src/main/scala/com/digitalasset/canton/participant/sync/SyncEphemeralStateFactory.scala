@@ -109,7 +109,7 @@ class SyncEphemeralStateFactoryImpl(
       of the successor a second time.
        */
       approximateSnapshot <- synchronizerCrypto.ips.currentSnapshotApproximation
-      synchronizerSuccessorO <- approximateSnapshot.synchronizerUpgradeOngoing()
+      synchronizerSuccessorO <- approximateSnapshot.announcedLsu()
 
       recordOrderPublisher = RecordOrderPublisher(
         persistentState.psid,

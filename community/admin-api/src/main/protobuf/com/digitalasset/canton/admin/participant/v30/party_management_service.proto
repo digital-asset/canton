@@ -381,6 +381,12 @@ message ImportPartyAcsV2Request {
   //
   // Optional. Can be non-empty only on the first message of the stream.
   optional RepresentativePackageIdOverride representative_package_id_override = 5;
+
+  // The party (ID) for which the ACS is being imported. If present, enables crash-resilient scheduling of the
+  // onboarding flag clearance.
+  //
+  // Optional. Can be non-empty only on the first massage of the stream.
+  optional string party_id = 6;
 }
 
 message ImportPartyAcsV2Response {}

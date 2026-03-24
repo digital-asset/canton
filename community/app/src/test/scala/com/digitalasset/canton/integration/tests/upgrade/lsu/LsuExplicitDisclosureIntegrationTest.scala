@@ -69,7 +69,7 @@ final class LsuExplicitDisclosureIntegrationTest extends LsuBase {
           transferTraffic()
           eventually() {
             environment.simClock.value.advance(Duration.ofSeconds(1))
-            participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
           }
           oldSynchronizerNodes.all.stop()
           waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)

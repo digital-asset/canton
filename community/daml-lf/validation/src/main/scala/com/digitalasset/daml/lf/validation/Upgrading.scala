@@ -4,13 +4,13 @@
 package com.digitalasset.daml.lf
 package validation
 
-import scala.util.{Try, Success, Failure}
 import com.digitalasset.daml.lf.data.Ref.TypeConId
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 
 import scala.annotation.tailrec
+import scala.util.{Failure, Success, Try}
 
 case class Upgrading[A](past: A, present: A) {
   def map[B](f: A => B): Upgrading[B] = Upgrading(f(past), f(present))
@@ -262,17 +262,16 @@ final case class ModuleWithMetadata(module: Ast.ModuleSignature) {
       fullName = dataTypeName.segments.slowSnoc(recordName)
     } yield (Ref.DottedName.unsafeFromNames(fullName), (dataTypeName, variantName))
 
-  private def leftMostApp(typ: Ast.Type): Option[Ref.TypeConId] = {
+  private def leftMostApp(typ: Ast.Type): Option[Ref.TypeConId] =
     typ match {
       case Ast.TApp(func, arg @ _) => leftMostApp(func)
       case Ast.TTyCon(typeConId) => Some(typeConId)
       case _ => None
     }
-  }
 
   def dataTypeOrigin(
       name: Ref.DottedName
-  ): UpgradedRecordOrigin = {
+  ): UpgradedRecordOrigin =
     module.templates.get(name) match {
       case Some(template @ _) => TemplateBody(name)
       case None => {
@@ -288,7 +287,6 @@ final case class ModuleWithMetadata(module: Ast.ModuleSignature) {
         }
       }
     }
-  }
 
 }
 
@@ -296,11 +294,10 @@ private case class Env(
     currentDepth: Int = 0,
     binderDepth: Map[TypeVarName, Int] = Map.empty,
 ) {
-  def extend(varNames: ImmArray[TypeVarName]): Env = {
+  def extend(varNames: ImmArray[TypeVarName]): Env =
     varNames.foldLeft(this) { case (env, varName) =>
       env.extend(varName)
     }
-  }
 
   def extend(varName: TypeVarName): Env = Env(
     currentDepth + 1,
@@ -356,12 +353,11 @@ object TypecheckUpgrades {
 
   private def checkLfVersions(
       arg: Upgrading[LanguageVersion]
-  ): Try[Unit] = {
+  ): Try[Unit] =
     if (arg.past > arg.present)
       fail(UpgradeError.DecreasingLfVersion(arg.past, arg.present))
     else
       Success(())
-  }
 
   private def tryAll[A, B](t: Iterable[A], f: A => Try[B]): Try[Seq[B]] =
     Try(t.map(f(_).get).toSeq)
@@ -371,7 +367,7 @@ object TypecheckUpgrades {
       present: (Ref.PackageId, Ast.PackageSignature),
       pastPackageId: Ref.PackageId,
       mbPastPkg: Option[Ast.PackageSignature],
-  ): Try[Unit] = {
+  ): Try[Unit] =
     mbPastPkg match {
       case None =>
         fail(UpgradeError.CouldNotResolveUpgradedPackageId(Upgrading(pastPackageId, present._1)));
@@ -382,18 +378,17 @@ object TypecheckUpgrades {
         )
         tc.check()
     }
-  }
 }
 
 case class TypecheckUpgrades(
     packageMap: Map[Ref.PackageId, Ast.PackageSignature],
     packages: Upgrading[(Ref.PackageId, Ast.PackageSignature)],
 ) {
-  import TypecheckUpgrades._
+  import TypecheckUpgrades.*
 
   private lazy val `package`: Upgrading[Ast.PackageSignature] = packages.map(_._2)
 
-  private def check(): Try[Unit] = {
+  private def check(): Try[Unit] =
     for {
       _ <- checkLfVersions(`package`.map(_.languageVersion))
       (upgradedModules, newModules @ _) <-
@@ -403,7 +398,6 @@ case class TypecheckUpgrades(
         )
       _ <- tryAll(upgradedModules.values, checkModule(_))
     } yield ()
-  }
 
   private def splitModuleDts(
       module: Ast.ModuleSignature
@@ -412,12 +406,12 @@ case class TypecheckUpgrades(
       Map[Ref.DottedName, (Ast.DDataType, Ast.DefExceptionSignature)],
       Map[Ref.DottedName, Ast.DDataType],
   ) = {
-    val datatypes: Map[Ref.DottedName, Ast.DDataType] = module.definitions.collect({
+    val datatypes: Map[Ref.DottedName, Ast.DDataType] = module.definitions.collect {
       case (name, dt: Ast.DDataType) => (name, dt)
-    })
-    val (ifaces, other1) = datatypes.partitionMap({ case (tcon, dt) =>
+    }
+    val (ifaces, other1) = datatypes.partitionMap { case (tcon, dt) =>
       lookupInterfaceOrException(module, tcon, dt)
-    })
+    }
     val (exceptions, other) = other1.partitionMap(identity)
     (ifaces.toMap, exceptions.toMap, other.toMap)
   }
@@ -432,7 +426,7 @@ case class TypecheckUpgrades(
       (Ref.DottedName, (Ast.DDataType, Ast.DefExceptionSignature)),
       (Ref.DottedName, Ast.DDataType),
     ],
-  ] = {
+  ] =
     module.interfaces.get(tcon) match {
       case None =>
         Right(module.exceptions.get(tcon) match {
@@ -441,19 +435,17 @@ case class TypecheckUpgrades(
         })
       case Some(iface) => Left((tcon, (dt, iface)))
     }
-  }
 
   def flattenInstances(
       module: Ast.ModuleSignature
   ): Map[
     (Ref.DottedName, Ref.TypeConId),
     (Ast.TemplateSignature, Ast.TemplateImplementsSignature),
-  ] = {
+  ] =
     for {
       (templateName, template) <- module.templates
       (implName, impl) <- template.implements.toMap
     } yield ((templateName, implName), (template, impl))
-  }
 
   private def checkModule(module: Upgrading[Ast.ModuleSignature]): Try[Unit] = {
     val (pastIfaceDts, pastExceptionDts, pastUnownedDts) = splitModuleDts(module.past)
@@ -492,7 +484,7 @@ case class TypecheckUpgrades(
 
   private def checkContinuedIfaces(
       ifaces: Map[Ref.DottedName, Upgrading[(Ast.DDataType, Ast.DefInterfaceSignature)]]
-  ): Try[Unit] = {
+  ): Try[Unit] =
     tryAll(
       ifaces,
       (arg: (Ref.DottedName, Upgrading[(Ast.DDataType, Ast.DefInterfaceSignature)])) => {
@@ -505,11 +497,10 @@ case class TypecheckUpgrades(
         Try(())
       },
     ).map(_ => ())
-  }
 
   private def checkContinuedExceptions(
       exceptions: Map[Ref.DottedName, Upgrading[(Ast.DDataType, Ast.DefExceptionSignature)]]
-  ): Try[Unit] = {
+  ): Try[Unit] =
     tryAll(
       exceptions,
       (arg: (Ref.DottedName, Upgrading[(Ast.DDataType, Ast.DefExceptionSignature)])) => {
@@ -522,7 +513,6 @@ case class TypecheckUpgrades(
         Try(())
       },
     ).map(_ => ())
-  }
 
   private def checkDeletedInstances(
       deletedInstances: Map[
@@ -590,9 +580,8 @@ case class TypecheckUpgrades(
         }
     }
 
-  private def checkType(typ: Upgrading[Closure[Ast.Type]]): Boolean = {
+  private def checkType(typ: Upgrading[Closure[Ast.Type]]): Boolean =
     checkTypeList(typ.past.env, typ.present.env, List((typ.past.value, typ.present.value)))
-  }
 
   private def unifyIdentifier(id: Ref.Identifier): Ref.Identifier =
     Ref.Identifier(Ref.PackageId.assertFromString("0"), id.qualifiedName)
@@ -611,7 +600,7 @@ case class TypecheckUpgrades(
   private def checkKey(
       templateName: Ref.DottedName,
       key: Upgrading[Option[Ast.TemplateKeySignature]],
-  ): Try[Unit] = {
+  ): Try[Unit] =
     key match {
       case Upgrading(None, None) => Success(());
       case Upgrading(Some(pastKey), Some(presentKey)) => {
@@ -626,7 +615,6 @@ case class TypecheckUpgrades(
       case Upgrading(None, Some(presentKey @ _)) =>
         fail(UpgradeError.TemplateAddedKey(templateName, presentKey))
     }
-  }
 
   private def checkChoice(choice: Upgrading[Ast.TemplateChoiceSignature]): Try[Unit] = {
     val returnType = choice.map(_.returnType)

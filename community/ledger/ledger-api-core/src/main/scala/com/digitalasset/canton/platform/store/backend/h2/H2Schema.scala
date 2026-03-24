@@ -15,19 +15,19 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 private[h2] object H2Schema {
   private val H2FieldStrategy = new FieldStrategy {
-    override def bytea[FROM](
-        extractor: StringInterning => FROM => Array[Byte]
-    ): Field[FROM, Array[Byte], ?] =
+    override def bytea[From](
+        extractor: StringInterning => From => Array[Byte]
+    ): Field[From, Array[Byte], ?] =
       H2Bytea(extractor)
 
-    override def byteaOptional[FROM](
-        extractor: StringInterning => FROM => Option[Array[Byte]]
-    ): Field[FROM, Option[Array[Byte]], ?] =
+    override def byteaOptional[From](
+        extractor: StringInterning => From => Option[Array[Byte]]
+    ): Field[From, Option[Array[Byte]], ?] =
       H2ByteaOptional(extractor)
 
-    override def insert[FROM](tableName: String)(
-        fields: (String, Field[FROM, ?, ?])*
-    ): Table[FROM] =
+    override def insert[From](tableName: String)(
+        fields: (String, Field[From, ?, ?])*
+    ): Table[From] =
       Table.batchedInsert(tableName)(fields*)
   }
 

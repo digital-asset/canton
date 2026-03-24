@@ -81,7 +81,7 @@ private[reassignment] object TestReassignmentCoordination {
         )
       )
 
-      override def latestKnownPSId(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId] =
+      override def latestKnownPsid(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId] =
         ???
     }
 

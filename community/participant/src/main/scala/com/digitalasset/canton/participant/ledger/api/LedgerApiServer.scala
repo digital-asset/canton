@@ -247,8 +247,8 @@ class LedgerApiServer(
       lfValueTranslation = new LfValueTranslation(
         metrics = grpcApiMetrics,
         engineO = Some(engine),
-        loadPackage = (packageId, loggingContext) =>
-          timedSyncService.getLfArchive(packageId)(loggingContext.traceContext),
+        loadPackage = (packageId, traceContext) =>
+          timedSyncService.getLfArchive(packageId)(traceContext),
         loggerFactory = loggerFactory,
       )
       indexService <- new IndexServiceOwner(
@@ -289,16 +289,19 @@ class LedgerApiServer(
             partyIds: Set[LfPartyId],
             validAt: Option[Offset],
         )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
-          indexService.getActiveContracts(
-            eventFormat = EventFormat(
-              filtersByParty =
-                partyIds.view.map(_ -> CumulativeFilter.templateWildcardFilter(true)).toMap,
-              filtersForAnyParty =
-                Option.when(partyIds.isEmpty)(CumulativeFilter.templateWildcardFilter(true)),
-              verbose = false,
-            ),
-            activeAt = validAt,
-          )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
+          indexService
+            .getActiveContracts(
+              eventFormat = EventFormat(
+                filtersByParty =
+                  partyIds.view.map(_ -> CumulativeFilter.templateWildcardFilter(true)).toMap,
+                filtersForAnyParty =
+                  Option.when(partyIds.isEmpty)(CumulativeFilter.templateWildcardFilter(true)),
+                verbose = false,
+              ),
+              activeAt = validAt,
+              continuationToken = None,
+            )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
+            .map(_.withEmptyChecksum)
 
         override def topologyTransactions(
             partyId: LfPartyId,
@@ -321,6 +324,7 @@ class LedgerApiServer(
                   )
                 ),
               ),
+              descendingOrder = false,
             )
             .mapConcat(_.update.topologyTransaction)
       })
@@ -354,7 +358,7 @@ class LedgerApiServer(
       // when processing unsuffixed contract IDs. For that reason we disable this requirement via the flag below.
       // When CIDs are suffixed, we can re-use the LfValueTranslation from the index service created above
       interactiveSubmissionEnricher = new InteractiveSubmissionEnricher(
-        new Engine(engine.config.copy(forbidLocalContractIds = false)),
+        new Engine(engine.config.copy(forbidLocalContractIds = false), loggerFactory),
         packageResolver = packageResolver,
       )
       apiContractService = new ApiContractService(
@@ -410,7 +414,6 @@ class LedgerApiServer(
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         tokenExpiryGracePeriodForStreams =
           cantonParameterConfig.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,
-        engineLoggingConfig = cantonParameterConfig.engine.submissionPhaseLogging,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractValidator.authenticateHash,
@@ -530,6 +533,8 @@ class LedgerApiServer(
       )
     ),
     topologyAwarePackageSelection = serverConfig.topologyAwarePackageSelection.enabled,
+    tapsMaxPassesDefault = serverConfig.topologyAwarePackageSelection.maxPassesDefault,
+    tapsMaxPassesLimit = serverConfig.topologyAwarePackageSelection.maxPassesLimit,
   )
 
   private def startHttpApiIfEnabled(

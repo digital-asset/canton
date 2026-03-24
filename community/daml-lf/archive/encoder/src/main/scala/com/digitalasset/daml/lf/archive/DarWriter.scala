@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf.archive
 
 import com.digitalasset.daml.lf.data.Bytes
+import scalaz.syntax.traverse.*
 
 import java.io.{ByteArrayOutputStream, FileOutputStream, OutputStream}
 import java.nio.file.Path
 import java.util.zip.{ZipEntry, ZipOutputStream}
-import scalaz.syntax.traverse._
 
 object DarWriter {
   private val manifestPath = "META-INF/MANIFEST.MF"
@@ -20,8 +20,7 @@ object DarWriter {
     encode(sdkVersion, dar, out)
   }
 
-  /** Write the DAR to the given output stream.
-    *      The output stream will be closed afterwards.
+  /** Write the DAR to the given output stream. The output stream will be closed afterwards.
     */
   def encode(sdkVersion: String, dar: Dar[(String, Bytes)], out: OutputStream): Unit = {
     val zipOut = new ZipOutputStream(out)

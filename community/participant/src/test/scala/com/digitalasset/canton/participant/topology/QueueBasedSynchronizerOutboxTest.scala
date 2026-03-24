@@ -130,7 +130,7 @@ class QueueBasedSynchronizerOutboxTest
       loggerFactory,
       timeouts,
     )
-    val queue = new SynchronizerOutboxQueue(loggerFactory)
+    val queue = new SynchronizerOutboxQueue(timeouts, loggerFactory)
     val manager = new SynchronizerTopologyManager(
       participant1.uid,
       clock,

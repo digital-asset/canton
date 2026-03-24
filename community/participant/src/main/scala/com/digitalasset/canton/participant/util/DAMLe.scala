@@ -10,11 +10,10 @@ import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -57,6 +56,9 @@ object DAMLe {
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration,
       paranoidMode: Boolean,
+      submissionPhaseLogging: EngineLoggingConfig,
+      validationPhaseLogging: EngineLoggingConfig,
+      loggerFactory: NamedLoggerFactory,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -72,7 +74,10 @@ object DAMLe {
         forbidLocalContractIds = true,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
-      )
+        submissionPhaseLogging = submissionPhaseLogging,
+        validationPhaseLogging = validationPhaseLogging,
+      ),
+      loggerFactory,
     )
 
   private def maxVersion(enableLfDev: Boolean, enableLfBeta: Boolean) =
@@ -144,7 +149,6 @@ class DAMLe(
     resolvePackage: PackageResolver,
     engine: Engine,
     contractStateMode: ContractStateMachine.Mode,
-    engineLoggingConfig: EngineLoggingConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -157,7 +161,8 @@ class DAMLe(
   // TODO(i21582) Because we do not hash suffixed CIDs, we need to disable validation of suffixed CIDs otherwise enrichment
   // will fail. Remove this when we hash and sign suffixed CIDs
   private lazy val engineForEnrichment = new Engine(
-    engine.config.copy(forbidLocalContractIds = false)
+    engine.config.copy(forbidLocalContractIds = false),
+    loggerFactory,
   )
   private lazy val interactiveSubmissionEnricher = new InteractiveSubmissionEnricher(
     engineForEnrichment,
@@ -255,20 +260,16 @@ class DAMLe(
         }
       }
 
-    val result = LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
-      engine.reinterpret(
-        submitters = submitters,
-        command = command,
-        nodeSeed = rootSeed,
-        preparationTime = preparationTime.toLf,
-        ledgerEffectiveTime = ledgerTime.toLf,
-        packageResolution = packageResolution,
-        engineLogger =
-          engineLoggingConfig.toEngineLogger(loggerFactory.append("phase", "validation")),
-        contractIdVersion = ContractIdVersion.V1,
-        contractStateMode = contractStateMode,
-      )
-    }
+    val result = engine.reinterpret(
+      submitters = submitters,
+      command = command,
+      nodeSeed = rootSeed,
+      preparationTime = preparationTime.toLf,
+      ledgerEffectiveTime = ledgerTime.toLf,
+      packageResolution = packageResolution,
+      contractIdVersion = ContractIdVersion.V1,
+      contractStateMode = contractStateMode,
+    )
 
     for {
       txWithMetadata <- EitherT(

@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast._
@@ -39,7 +41,7 @@ class SBuiltinInterfaceTestDevLf
       Compiler.Config.Dev,
     )
 
-class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matchers with Inside {
+class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
 
   import EvalHelpers._
 
@@ -213,7 +215,7 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
   }
 }
 
-class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with Inside {
+class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
 
   import EvalHelpers._
   import org.scalatest.Inspectors.forEvery
@@ -438,7 +440,8 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
     extends AnyFreeSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with Inside {
+    with Inside
+    with SuppressingLogging {
 
   import EvalHelpers._
   val helpers = new SBuiltinInterfaceTestHelpers(languageVersion, compilerConfig)
@@ -733,13 +736,12 @@ final class SBuiltinInterfaceTestHelpers(
 }
 
 object EvalHelpers {
-  import SpeedyTestLib.loggingContext
 
   def eval(
       e: Expr,
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
-  ): Try[Either[SError, SValue]] =
+  )(implicit loggingContext: NamedLoggingContext): Try[Either[SError, SValue]] =
     evalSExpr(
       compiledPackages.compiler.unsafeCompile(e),
       Map.empty,
@@ -760,7 +762,7 @@ object EvalHelpers {
         PartialFunction.empty,
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
-  ): Try[Either[SError, SValue]] =
+  )(implicit loggingContext: NamedLoggingContext): Try[Either[SError, SValue]] =
     evalSExpr(
       SEApp(compiledPackages.compiler.unsafeCompile(e), args),
       packageResolution,
@@ -779,7 +781,7 @@ object EvalHelpers {
       getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
-  ): Try[Either[SError, SValue]] = {
+  )(implicit loggingContext: NamedLoggingContext): Try[Either[SError, SValue]] = {
     val machine =
       Speedy.Machine.fromUpdateSExpr(
         compiledPackages,
@@ -787,6 +789,7 @@ object EvalHelpers {
         transactionSeed = crypto.Hash.hashPrivateKey("SBuiltinTest"),
         updateSE = SELet1(e, SEMakeClo(ArraySeq(SELocS(1)), 1, SELocF(0))),
         committers = committers,
+        logger = MachineLogger(),
       )
     Try(SpeedyTestLib.run(machine, getPkg, getContract, getKeys))
   }

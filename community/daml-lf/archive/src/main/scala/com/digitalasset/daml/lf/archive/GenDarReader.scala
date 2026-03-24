@@ -3,18 +3,17 @@
 
 package com.digitalasset.daml.lf.archive
 
-import com.digitalasset.daml.lf.data.Bytes
 import com.daml.nameof.NameOf
+import com.digitalasset.daml.lf.data.Bytes
+import scalaz.std.either.*
+import scalaz.std.list.*
+import scalaz.syntax.traverse.*
 
 import java.io.{File, FileInputStream, IOException}
 import java.util.zip.ZipInputStream
 
-import scalaz.syntax.traverse._
-import scalaz.std.list._
-import scalaz.std.either._
-
 sealed abstract class GenDarReader[A] {
-  import GenDarReader._
+  import GenDarReader.*
 
   def readArchiveFromFile(
       darFile: File,
@@ -33,16 +32,16 @@ sealed abstract class GenDarReader[A] {
 
   @throws[Error]
   def assertReadArchive(
-                   name: String,
-                   darStream: ZipInputStream,
-                   entrySizeThreshold: Int = EntrySizeThreshold,
-                 ): Dar[A] =
+      name: String,
+      darStream: ZipInputStream,
+      entrySizeThreshold: Int = EntrySizeThreshold,
+  ): Dar[A] =
     assertRight(readArchive(name, darStream, entrySizeThreshold))
 }
 
 private[archive] final class GenDarReaderImpl[A](reader: GenReader[A]) extends GenDarReader[A] {
 
-  import GenDarReader._
+  import GenDarReader.*
 
   /** Reads an archive from a File. */
   override def readArchiveFromFile(

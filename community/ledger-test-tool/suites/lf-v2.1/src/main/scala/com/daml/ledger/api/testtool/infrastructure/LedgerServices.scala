@@ -302,32 +302,32 @@ private final class LedgerServicesJson(
     },
   )
 
-  private def client[INPUT, OUTPUT](
+  private def client[Input, Output](
       endpoint: sttp.tapir.Endpoint[
         CallerContext,
-        INPUT,
+        Input,
         (StatusCode, JsCantonError),
-        OUTPUT,
+        Output,
         sttp.capabilities.pekko.PekkoStreams & sttp.capabilities.WebSockets,
       ],
       ws: Boolean,
-  ): CallerContext => INPUT => Future[DecodeResult[Either[(StatusCode, JsCantonError), OUTPUT]]] =
+  ): CallerContext => Input => Future[DecodeResult[Either[(StatusCode, JsCantonError), Output]]] =
     SttpClientInterpreter().toSecureClient(
       endpoint,
       Some(sttp.model.Uri(if (ws) "ws" else "http", hostname, port)),
       backend,
     )(WsHelper.webSocketsSupportedForPekkoStreams)
 
-  private def clientContext[INPUT, OUTPUT](
+  private def clientContext[Input, Output](
       endpoint: sttp.tapir.Endpoint[
         CallerContext,
-        INPUT,
+        Input,
         (StatusCode, JsCantonError),
-        OUTPUT,
+        Output,
         sttp.capabilities.pekko.PekkoStreams & sttp.capabilities.WebSockets,
       ],
       ws: Boolean,
-  ): INPUT => Future[DecodeResult[Either[(StatusCode, JsCantonError), OUTPUT]]] =
+  ): Input => Future[DecodeResult[Either[(StatusCode, JsCantonError), Output]]] =
     client(endpoint, ws)(
       CallerContext(
         jwt = token.map(Jwt.apply),
@@ -336,17 +336,17 @@ private final class LedgerServicesJson(
       )
     )
 
-  private def clientCall[INPUT, OUTPUT](
+  private def clientCall[Input, Output](
       endpoint: sttp.tapir.Endpoint[
         CallerContext,
-        INPUT,
+        Input,
         (StatusCode, JsCantonError),
-        OUTPUT,
+        Output,
         sttp.capabilities.pekko.PekkoStreams & sttp.capabilities.WebSockets,
       ],
-      input: INPUT,
+      input: Input,
       ws: Boolean = false,
-  ): Future[OUTPUT] =
+  ): Future[Output] =
     clientContext(endpoint, ws)(input)
       .map {
         case DecodeResult.Value(Right(value)) =>
@@ -390,24 +390,24 @@ private final class LedgerServicesJson(
       definiteAnswerO = jsCantonError.definiteAnswer,
     )
 
-  private def wsCall[REQ, JSRESP, RESP](
+  private def wsCall[Req, JSResp, Resp](
       endpoint: Endpoint[CallerContext, Unit, (StatusCode, JsCantonError), Flow[
-        REQ,
-        Either[JsCantonError, JSRESP],
+        Req,
+        Either[JsCantonError, JSResp],
         Any,
       ], PekkoStreams & capabilities.WebSockets],
-      input: REQ,
-      responseObserver: StreamObserver[RESP],
-      converter: JSRESP => Future[RESP],
+      input: Req,
+      responseObserver: StreamObserver[Resp],
+      converter: JSResp => Future[Resp],
   ): Unit = {
     val unusedF = for {
       wsFlow <- clientCall(endpoint = endpoint, input = (), ws = true)
 
-      sink = Sink.fromSubscriber(new Subscriber[Either[JsCantonError, RESP]]() {
+      sink = Sink.fromSubscriber(new Subscriber[Either[JsCantonError, Resp]]() {
         override def onSubscribe(subscription: Subscription): Unit =
           subscription.request(Long.MaxValue)
 
-        override def onNext(t: Either[JsCantonError, RESP]): Unit =
+        override def onNext(t: Either[JsCantonError, Resp]): Unit =
           t match {
             case Left(cantonError) =>
               val decoded = toDecodedCantonError(cantonError)
@@ -539,6 +539,7 @@ private final class LedgerServicesJson(
         filter = None,
         activeAtOffset = req.activeAtOffset,
         eventFormat = req.eventFormat,
+        streamContinuationToken = req.streamContinuationToken,
       )
 
     override def getConnectedSynchronizers(
@@ -764,6 +765,7 @@ private final class LedgerServicesJson(
         endInclusive = req.endInclusive,
         filter = None,
         updateFormat = req.updateFormat,
+        descendingOrder = req.descendingOrder,
       )
 
     override def getUpdateByOffset(

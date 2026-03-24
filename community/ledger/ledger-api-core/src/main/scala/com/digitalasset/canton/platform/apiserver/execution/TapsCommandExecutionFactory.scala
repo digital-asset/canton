@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps}
+import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
@@ -18,6 +19,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
 import com.digitalasset.canton.platform.PackagePreferenceBackend.{
   Candidate,
@@ -58,12 +60,13 @@ private[execution] class TapsCommandExecutionFactory(
     commands: Commands,
     commandInterpreter: CommandInterpreter,
     forExternallySigned: Boolean,
-    val loggerFactory: NamedLoggerFactory,
+    override val loggerFactory: NamedLoggerFactory,
     packageMetadataSnapshot: PackageMetadata,
     rootLevelPackageNames: Set[LfPackageName],
     routingSynchronizerState: RoutingSynchronizerState,
     submissionSeed: Hash,
     syncService: SyncService,
+    metrics: LedgerApiServerMetrics,
 )(implicit ec: ExecutionContext, loggingContextWithTrace: LoggingContextWithTrace)
     extends NamedLogging {
 
@@ -112,12 +115,15 @@ private[execution] class TapsCommandExecutionFactory(
           Map[PhysicalSynchronizerId, Set[LfPackageId]]
         ] => FutureUnlessShutdown[Set[LfPackageId]],
     ): FutureUnlessShutdown[TapsResult] = {
+      import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerOnShutdownSyntax
       logDebug(s"Attempting $tapsPassDescription of $TapsDescription")
       for {
         // Compute package preference set
-        perSynchronizerPreferenceSet <-
+        packagePreferenceSet <- Timed.futureUS(
+          metrics.commands.tapsPackageSelection,
           computePerSynchronizerPackagePreferenceSet(requiredSubmitters, partyPackageRequirements)
-        packagePreferenceSet <- computePackagePreferenceSet(perSynchronizerPreferenceSet)
+            .flatMap(computePackagePreferenceSet),
+        )
         _ = logDebug(show"Using package preference set: $packagePreferenceSet")
 
         // Interpret command with the computed package preference set
@@ -182,7 +188,17 @@ private[execution] class TapsCommandExecutionFactory(
         partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
     )(implicit
         loggingContextWithTrace: LoggingContextWithTrace
-    ): FutureUnlessShutdown[NonEmpty[Map[PhysicalSynchronizerId, Set[LfPackageId]]]] =
+    ): FutureUnlessShutdown[NonEmpty[Map[PhysicalSynchronizerId, Set[LfPackageId]]]] = {
+      val packageIdMap = packageMetadataSnapshot.packageIdVersionMap
+      def toPackageReference(party: Party, pkgId: PackageId): Option[PackageReference] =
+        pkgId.toPackageReference(packageIdMap).tap { pkgRef =>
+          if (pkgRef.isEmpty) {
+            logger.debug(
+              show"Discarding package ID $pkgId from the vetting state of $party, as it doesn't exist in the participant's package store."
+            )
+          }
+        }
+
       for {
         partyVettingMap: Map[PhysicalSynchronizerId, Map[LfPartyId, Set[PackageId]]] <-
           syncService.computePartyVettingMap(
@@ -193,6 +209,24 @@ private[execution] class TapsCommandExecutionFactory(
             prescribedSynchronizer = commands.synchronizerId,
             routingSynchronizerState = routingSynchronizerState,
           )
+        filteredPartyVettingMap = partyVettingMap.map { case (syncId, partyVettingMap) =>
+          syncId -> partyVettingMap.map { case (party, packageIds) =>
+            val filteredPackageRefs =
+              if (requiredSubmitters.contains(party)) {
+                // Submitter: Keep all known packages. This covers the scenario of a package
+                // appearing during interpretation.
+                packageIds.flatMap(toPackageReference(party, _))
+              } else {
+                // Non-submitter: Keep only the packages that are explicitly required. This
+                // prevents the party from influencing the selection for packages it does not need.
+                val packageRequirements = partyPackageRequirements(party)
+                packageIds
+                  .flatMap(toPackageReference(party, _))
+                  .filter(packageRef => packageRequirements.contains(packageRef.packageName))
+              }
+            party -> filteredPackageRefs
+          }
+        }
 
         _ = logDebug(
           show"Computing per-synchronizer package preference sets using the party-package requirements ($partyPackageRequirements) and root package-names ($rootLevelPackageNames)"
@@ -201,18 +235,16 @@ private[execution] class TapsCommandExecutionFactory(
         perSynchronizerCandidates: Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[
           SortedPreferences
         ]]] =
-          PackagePreferenceBackend
-            .computePerSynchronizerPackageCandidates(
-              synchronizersPartiesVettingState = partyVettingMap,
-              packageMetadataSnapshot = packageMetadataSnapshot,
-              packageFilter = SupportedPackagesFilter(
-                supportedPackagesPerPackageName =
-                  userSpecifiedPreference.view.mapValues(_.map(_.pkgId).toSet).toMap,
-                restrictionDescription = "Commands.package_id_selection_preference",
-              ),
-              requirements = partyPackageRequirements,
-              logger = logger,
-            )
+          PackagePreferenceBackend.computePerSynchronizerPackageCandidates(
+            synchronizersPartiesVettingState = filteredPartyVettingMap,
+            packageMetadataSnapshot = packageMetadataSnapshot,
+            packageFilter = SupportedPackagesFilter(
+              supportedPackagesPerPackageName =
+                userSpecifiedPreference.view.mapValues(_.map(_.pkgId).toSet).toMap,
+              restrictionDescription = "Commands.package_id_selection_preference",
+            ),
+            requirements = partyPackageRequirements,
+          )
 
         (discardedSyncs, availableSyncs) =
           applyRootPackageNamesRestriction(perSynchronizerCandidates, rootLevelPackageNames)
@@ -232,6 +264,7 @@ private[execution] class TapsCommandExecutionFactory(
             )
             .toFutureUS(identity)
       } yield perSynchronizerPreferenceSet
+    }
 
     private def applyRootPackageNamesRestriction(
         perSynchronizerCandidates: Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[

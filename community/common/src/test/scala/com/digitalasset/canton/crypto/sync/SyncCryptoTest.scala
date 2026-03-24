@@ -172,6 +172,28 @@ trait SyncCryptoTest
         .futureValueUS
 
       syncCryptoVerifierP1
+        .verifyKeyUsage(
+          testSnapshot,
+          participant1.member,
+          signature.signedBy,
+          signature.signatureDelegation,
+          defaultUsage,
+        )
+        .futureValueUS
+        .valueOrFail("key usage failed")
+
+      syncCryptoVerifierP1
+        .verifyKeyUsage(
+          testSnapshot,
+          participant2.member,
+          signature.signedBy,
+          signature.signatureDelegation,
+          defaultUsage,
+        )
+        .futureValueUS
+        .isLeft shouldBe true
+
+      syncCryptoVerifierP1
         .verifySignature(
           testSnapshot,
           hash,

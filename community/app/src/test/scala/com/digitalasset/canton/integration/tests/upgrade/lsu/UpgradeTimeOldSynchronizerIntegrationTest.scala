@@ -59,12 +59,12 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
   "Upgrade time on old synchronizer" should {
     "is respected by sequencers and participants" in { implicit env =>
       import env.*
-      val successorPSId = daId.copy(serial = NonNegativeInt.one)
+      val successorPsid = daId.copy(serial = NonNegativeInt.one)
 
       participant1.synchronizers.connect_local(sequencer1, daName)
 
       synchronizerOwners1.foreach(
-        _.topology.lsu.announcement.propose(successorPSId, upgradeTime)
+        _.topology.lsu.announcement.propose(successorPsid, upgradeTime)
       )
 
       eventually() {

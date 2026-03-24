@@ -58,6 +58,8 @@ final case class EngineConfig(
     paranoid: Boolean = false,
     useDefensiveContractLookup: Boolean = false,
     gasBudget: Option[Long] = None,
+    submissionPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
+    validationPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
 ) {
   private[lf] def getCompilerConfig: speedy.Compiler.Config =
     speedy.Compiler.Config(

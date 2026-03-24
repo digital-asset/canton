@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf.testing.parser
 
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.testing.parser.Token._
+import com.digitalasset.daml.lf.testing.parser.Token.*
 
 import scala.util.parsing.input.{NoPosition, Position}
 

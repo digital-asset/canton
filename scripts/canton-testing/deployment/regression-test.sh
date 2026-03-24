@@ -59,7 +59,7 @@ FAILURES_FILE="../failures"
 MAX_FAILURES=1
 if scripts/canton-testing/test-after-main-merge.sh scripts/canton-testing/canton-testing.env; then
   cat > "$LAST_REV_FILE" <<<"$NEXT_REV"
-  rm "$FAILURES_FILE"
+  rm -f "$FAILURES_FILE"
 else
   if [[ -e $FAILURES_FILE ]]; then
     NFAILURES=$(( $(cat "$FAILURES_FILE") + 1 ))

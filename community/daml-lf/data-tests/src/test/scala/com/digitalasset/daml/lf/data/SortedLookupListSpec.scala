@@ -22,9 +22,9 @@ class SortedLookupListSpec extends AnyWordSpec with Matchers with ScalaCheckProp
     val positiveTestCases =
       Table("list", ImmArray("1" -> 1, "1" -> 2), ImmArray("1" -> 1, "2" -> 2, "3" -> 3, "1" -> 2))
 
-    forAll(negativeTestCases)(l => SortedLookupList.fromImmArray(l) shouldBe a[Right[_, _]])
+    forAll(negativeTestCases)(l => SortedLookupList.fromImmArray(l) shouldBe a[Right[?, ?]])
 
-    forAll(positiveTestCases)(l => SortedLookupList.fromImmArray(l) shouldBe a[Left[_, _]])
+    forAll(positiveTestCases)(l => SortedLookupList.fromImmArray(l) shouldBe a[Left[?, ?]])
 
   }
 
@@ -45,9 +45,9 @@ class SortedLookupListSpec extends AnyWordSpec with Matchers with ScalaCheckProp
       ImmArray("2" -> 2, "3" -> 3, "1" -> 1),
     )
 
-    forAll(negativeTestCases)(l => SortedLookupList.fromOrderedImmArray(l) shouldBe a[Right[_, _]])
+    forAll(negativeTestCases)(l => SortedLookupList.fromOrderedImmArray(l) shouldBe a[Right[?, ?]])
 
-    forAll(positiveTestCases)(l => SortedLookupList.fromOrderedImmArray(l) shouldBe a[Left[_, _]])
+    forAll(positiveTestCases)(l => SortedLookupList.fromOrderedImmArray(l) shouldBe a[Left[?, ?]])
 
   }
 

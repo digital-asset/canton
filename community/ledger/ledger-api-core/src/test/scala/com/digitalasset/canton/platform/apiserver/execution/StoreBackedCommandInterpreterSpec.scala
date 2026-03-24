@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.participant.state.index.{ContractState, Co
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.InterpretationTimeExceeded
 import com.digitalasset.canton.platform.config.CommandServiceConfig
@@ -53,7 +52,11 @@ class StoreBackedCommandInterpreterSpec
     with BaseTest {
 
   private val testEngine =
-    new TestEngine(packagePaths = Seq(CantonExamplesPath), iterationsBetweenInterruptions = 10)
+    new TestEngine(
+      packagePaths = Seq(CantonExamplesPath),
+      iterationsBetweenInterruptions = 10,
+      loggerFactory = loggerFactory,
+    )
   private val alice = LfPartyId.assertFromString("Alice")
 
   private val createCycleApiCommand: Commands =
@@ -134,7 +137,6 @@ class StoreBackedCommandInterpreterSpec
       contractStore = contractStore,
       contractAuthenticator = contractAuthenticator,
       metrics = LedgerApiServerMetrics.ForTesting,
-      config = EngineLoggingConfig(),
       prefetchingRecursionLevel = CommandServiceConfig.DefaultContractPrefetchingDepth,
       loggerFactory = loggerFactory,
       dynParamGetter = new TestDynamicSynchronizerParameterGetter(tolerance),

@@ -3,10 +3,10 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.validation.NamedEntity._
-import com.digitalasset.daml.lf.validation.Util._
+import com.digitalasset.daml.lf.validation.NamedEntity.*
+import com.digitalasset.daml.lf.validation.Util.*
 
 private[validation] object Collision {
 

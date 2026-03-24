@@ -3,12 +3,10 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.Struct
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.language.PackageInterface
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{ImmArray, Struct}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -46,7 +44,7 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
 
   "alpha equivalence (stack-safety)" - {
 
-    val testCases = {
+    val testCases =
       Table[String, Type => Type](
         ("name", "recursion-point"),
         ("forall", forall),
@@ -55,18 +53,16 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
         ("struct1", struct1),
         ("struct2", struct2),
       )
-    }
-    {
-      val depth = 10000
-      s"alpha equivalence, (BIG) depth = $depth" - {
-        forEvery(testCases) { (name: String, recursionPoint: Type => Type) =>
-          name in {
-            val a = Name.assertFromString("A")
-            val b = Name.assertFromString("B")
-            val tyA = TForall((a, KStar), makeAst(depth, TVar(a), recursionPoint))
-            val tyB = TForall((b, KStar), makeAst(depth, TVar(b), recursionPoint))
-            AlphaEquiv.alphaEquiv(tyA, tyB) shouldBe true
-          }
+
+    val depth = 10000
+    s"alpha equivalence, (BIG) depth = $depth" - {
+      forEvery(testCases) { (name: String, recursionPoint: Type => Type) =>
+        name in {
+          val a = Name.assertFromString("A")
+          val b = Name.assertFromString("B")
+          val tyA = TForall((a, KStar), makeAst(depth, TVar(a), recursionPoint))
+          val tyB = TForall((b, KStar), makeAst(depth, TVar(b), recursionPoint))
+          AlphaEquiv.alphaEquiv(tyA, tyB) shouldBe true
         }
       }
     }
@@ -93,7 +89,7 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
       }
     }
 
-    val testCases = {
+    val testCases =
       Table[String, Type => Type](
         ("name", "recursion-point"),
         ("forall", forall),
@@ -102,15 +98,13 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
         ("struct1", struct1),
         ("struct2", struct2),
       )
-    }
-    {
-      val depth = 10000
-      s"kind checking, (LARGE) depth = $depth" - {
-        forEvery(testCases) { (name: String, recursionPoint: Type => Type) =>
-          name in {
-            // ensure examples can be kind-checked and are well-kinded
-            kindCheck(makeAst(depth, theType, recursionPoint)) shouldBe None
-          }
+
+    val depth = 10000
+    s"kind checking, (LARGE) depth = $depth" - {
+      forEvery(testCases) { (name: String, recursionPoint: Type => Type) =>
+        name in {
+          // ensure examples can be kind-checked and are well-kinded
+          kindCheck(makeAst(depth, theType, recursionPoint)) shouldBe None
         }
       }
     }
@@ -130,21 +124,18 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
     )
 
     // make an expression of any given type...
-    def mk(ty: Type): Expr = {
+    def mk(ty: Type): Expr =
       EApp(ETyApp(EBuiltinFun(BError), ty), EBuiltinLit(BLText("message")))
-    }
 
     def theType: Type = unitT
     def theExp: Expr = mk(theType)
 
     // embed an expression of the fixed type, whilst constructing an expression of any given type
-    def embed(exp: Expr, ty: Type): Expr = {
+    def embed(exp: Expr, ty: Type): Expr =
       EApp(mk(arrow(theType, ty)), exp)
-    }
     // consume an expression of any given type, whilst constructing an expression of the fixed type
-    def consume(ty: Type, exp: Expr): Expr = {
+    def consume(ty: Type, exp: Expr): Expr =
       EApp(mk(arrow(ty, theType)), exp)
-    }
 
     def var1: ExprVarName = Name.assertFromString("x1")
     def var2: ExprVarName = Name.assertFromString("x2")
@@ -269,7 +260,7 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
     // -- Kind, Type, Expr
     // And also for 'wide' lists, i.e. declaration lists
 
-    val testCases = {
+    val testCases =
       Table[String, Expr => Expr](
         ("name", "recursion-point"),
         ("tyApp", tyApp),
@@ -297,7 +288,6 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
         ("let1", let1),
         ("let2", let2),
       )
-    }
 
     {
       val depth = 10000 // big enough to demonstrate stack-safety

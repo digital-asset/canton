@@ -101,7 +101,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   protected val acsSnapshotFile: TempFile = tempDirectory.toTempFile("offpr_test_acs_snapshot.gz")
 
   protected def makeFixture1(implicit env: TestEnvironment): Fixture = Fixture(
-    currentPSId = env.daId,
+    currentPsid = env.daId,
     upgradeTime = upgradeTime1,
     oldSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer1), Seq(env.mediator1)),
     newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
@@ -112,7 +112,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   )
 
   protected def makeFixture2(fixture1: Fixture)(implicit env: TestEnvironment): Fixture = Fixture(
-    currentPSId = fixture1.newPSId,
+    currentPsid = fixture1.newPsid,
     upgradeTime = upgradeTime2,
     oldSynchronizerNodes = fixture1.newSynchronizerNodes,
     newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer3), Seq(env.mediator3)),
@@ -153,7 +153,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     )
     eventually() {
       environment.simClock.value.advance(Duration.ofSeconds(1))
-      connectedParticipants.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+      connectedParticipants.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
     }
     if (stopOldSynchronizerNodes) fixture.oldSynchronizerNodes.all.stop()
     waitForTargetTimeOnSequencer(
@@ -194,32 +194,36 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
         participant2.topology.party_to_participant_mappings.propose_delta(
           party = alice.partyId,
           adds = Seq(participant2.id -> ParticipantPermission.Submission),
-          store = fixture.newPSId,
-          requiresPartyToBeOnboarded = true,
-        )
-        alice.topology.party_to_participant_mappings.propose_delta(
-          participant1,
-          adds = Seq(participant2.id -> ParticipantPermission.Submission),
-          store = fixture.newPSId,
+          store = fixture.newPsid,
           requiresPartyToBeOnboarded = true,
         )
         participant2.synchronizers.disconnect_all()
+        alice.topology.party_to_participant_mappings.propose_delta(
+          participant1,
+          adds = Seq(participant2.id -> ParticipantPermission.Submission),
+          store = fixture.newPsid,
+          requiresPartyToBeOnboarded = true,
+        )
 
         // Physically export and import
         participant1.parties.export_party_acs(
           party = alice,
-          synchronizerId = fixture.newPSId,
+          synchronizerId = fixture.newPsid,
           targetParticipantId = participant2.id,
           beginOffsetExclusive = offsetBeforePartyUpdate,
           exportFilePath = acsSnapshotFile.path.toString,
         )
-        participant2.parties.import_party_acsV2(acsSnapshotFile.path.toString, fixture.newPSId)
+        participant2.parties.import_party_acsV2(
+          fixture.newPsid,
+          Some(alice),
+          acsSnapshotFile.path.toString,
+        )
         val offsetAfterImport = participant2.ledger_api.state.end()
 
         participant2.synchronizers.reconnect(daName)
         eventually() {
           participant2.topology.party_to_participant_mappings
-            .list(fixture.newPSId, filterParty = alice.filterString)
+            .list(fixture.newPsid, filterParty = alice.filterString)
             .loneElement
             .item
             .participants should contain(
@@ -227,7 +231,7 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
           )
         }
 
-        awaitClearOnboardingFlag(alice, participant2, fixture.newPSId.logical, offsetAfterImport)
+        awaitClearOnboardingFlag(alice, participant2, fixture.newPsid.logical, offsetAfterImport)
       }
 
       withClue("Alice can see the contract on participant2") {
@@ -256,7 +260,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
         import env.*
 
         val fixture = makeFixture1
-        val lsid = fixture.currentPSId.logical
+        val lsid = fixture.currentPsid.logical
 
         IouSyntax.createIou(participant1)(alice, bob)
 
@@ -294,7 +298,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
         }
 
         val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
-          participant2.parties.import_party_acsV2(acsSnapshotFile.path.toString, lsid)
+          participant2.parties.import_party_acsV2(lsid, Some(alice), acsSnapshotFile.path.toString)
           participant2.ledger_api.state.end()
         }
 
@@ -338,7 +342,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       import env.*
 
       val fixture = makeFixture1
-      val lsid = fixture.currentPSId.logical
+      val lsid = fixture.currentPsid.logical
 
       IouSyntax.createIou(participant1)(alice, bob)
 
@@ -378,7 +382,9 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       }
 
       val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
-        participant2.parties.import_party_acsV2(acsSnapshotFile.path.toString, lsid)
+        // TODO(#29427) - Address ongoing synchronizer upgrade "no more topology transaction after freeze"
+        // Switch back to import_party_acs(V2) from repair.import_acs
+        participant2.repair.import_acsV2(lsid, acsSnapshotFile.path.toString)
         participant2.ledger_api.state.end()
       }
 

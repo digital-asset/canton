@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.benchmarks
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
@@ -19,29 +20,27 @@ import com.digitalasset.canton.FutureHelpers
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.DbConfig.Postgres
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto, SynchronizerCryptoClient}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
-import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerSends
-import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
-import com.digitalasset.canton.sequencing.client.transports.replay.ReplayingSendsSequencerClientTransportPekko
-import com.digitalasset.canton.sequencing.client.transports.{
-  GrpcSequencerClientAuth,
-  GrpcSequencerClientTransportPekko,
-  SequencerClientTransport,
-  SequencerClientTransportPekko,
+import com.digitalasset.canton.sequencing.client.transports.replay.{ReplayClient, ReplayClientImpl}
+import com.digitalasset.canton.sequencing.client.{ReplayConfig, RequestSigner}
+import com.digitalasset.canton.sequencing.{
+  GrpcSequencerConnection,
+  GrpcSequencerConnectionXPoolFactory,
+  SequencerConnectionXPool,
+  SequencerConnections,
 }
-import com.digitalasset.canton.sequencing.client.{ReplayConfig, RequestSigner, SequencerClient}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.time.Clock
@@ -55,7 +54,6 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, TracingConfig}
-import io.grpc.{CallOptions, ManagedChannel}
 import org.apache.pekko.stream.Materializer
 import org.scalatest.{EitherValues, OptionValues}
 
@@ -69,7 +67,7 @@ import scala.concurrent.ExecutionContextExecutor
 final class ReplayingParticipant private (
     val sendsConfig: SequencerSends,
     synchronizerCryptoClient: SynchronizerCryptoClient,
-    replayingTransport: ReplayingSendsSequencerClientTransportPekko,
+    replayClient: ReplayClient,
     storage: DbStorageSingle,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -78,7 +76,7 @@ final class ReplayingParticipant private (
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
     Seq[AsyncOrSyncCloseable](
-      SyncCloseable("replayingTransport.close()", replayingTransport.close()),
+      SyncCloseable("replayClient.close()", replayClient.close()),
       SyncCloseable("synchronizerCryptoClient.close()", synchronizerCryptoClient.close()),
       SyncCloseable("storage.close()", storage.close()),
     )
@@ -143,16 +141,16 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       ).valueOrFail("create crypto").futureValueUS
     val synchronizerCrypto = SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters)
 
-    val underlyingTransport =
-      mkUnderlyingTransport(
-        connectedToSequencer.sequencerConnection.toInternal,
-        member,
-        psid,
-        synchronizerCrypto,
-        clock,
-        extendedLoggerFactory,
-        timeouts,
-      )
+    val connectionPool = mkConnectionPool(
+      connectedToSequencer.sequencerConnection.toInternal,
+      member,
+      psid,
+      synchronizerCrypto,
+      clock,
+      futureSupervisor,
+      extendedLoggerFactory,
+      timeouts,
+    ).futureValueUS.valueOr(err => throw new IllegalStateException(err))
 
     val indexedStringStore =
       IndexedStringStore.create(
@@ -222,25 +220,24 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       ReplayConfig(replayDirectory, sendsConfig).recordingConfig.setFilename(recordingFileName)
 
     // Registers itself in the `sendsConfig`
-    val replayingTransport =
-      new ReplayingSendsSequencerClientTransportPekko(
-        testedProtocolVersion,
-        recordingConfig.fullFilePath,
-        sendsConfig,
-        member,
-        underlyingTransport,
-        RequestSigner(synchronizerCryptoClient, testedProtocolVersion, extendedLoggerFactory),
-        synchronizerCryptoClient.currentSnapshotApproximation.futureValueUS,
-        clock,
-        SequencerTestMetrics.sequencerClient,
-        timeouts,
-        extendedLoggerFactory,
-      )
+    val replayClient = new ReplayClientImpl(
+      testedProtocolVersion,
+      recordingConfig.fullFilePath,
+      sendsConfig,
+      member,
+      connectionPool,
+      RequestSigner(synchronizerCryptoClient, extendedLoggerFactory),
+      synchronizerCryptoClient.currentSnapshotApproximation.futureValueUS,
+      clock,
+      SequencerTestMetrics.sequencerClient,
+      timeouts,
+      extendedLoggerFactory,
+    )
 
     new ReplayingParticipant(
       sendsConfig,
       synchronizerCryptoClient,
-      replayingTransport,
+      replayClient,
       storage,
       extendedLoggerFactory,
       timeouts,
@@ -278,61 +275,49 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       )
   }
 
-  private def mkUnderlyingTransport(
+  private def mkConnectionPool(
       sequencerConnection: GrpcSequencerConnection,
       member: Member,
       synchronizerId: PhysicalSynchronizerId,
       synchronizerCrypto: SynchronizerCrypto,
       clock: Clock,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
   )(implicit
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
-  ): SequencerClientTransport & SequencerClientTransportPekko = {
-
-    val channel = createChannel(sequencerConnection, loggerFactory)
-
-    val auth =
-      new GrpcSequencerClientAuth(
-        synchronizerId,
-        member,
-        synchronizerCrypto,
-        NonEmpty(Map, sequencerConnection.endpoints.head -> channel),
-        Seq(testedProtocolVersion),
-        AuthenticationTokenManagerConfig(),
-        clock,
-        metricsO = None,
-        metricsContext = MetricsContext.Empty,
-        timeouts,
-        loggerFactory,
-      )
-
-    new GrpcSequencerClientTransportPekko(
-      channel,
-      CallOptions.DEFAULT,
-      auth,
-      timeouts,
-      SequencerClient
-        .loggerFactoryWithSequencerAlias(loggerFactory, sequencerConnection.sequencerAlias),
-      testedProtocolVersion,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionXPool] = {
+    val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+      clientProtocolVersions = NonEmpty(Seq, testedProtocolVersion),
+      minimumProtocolVersion = Some(testedProtocolVersion),
+      authConfig = AuthenticationTokenManagerConfig(),
+      keepAliveClientConfigO = Some(KeepAliveClientConfig()),
+      member = member,
+      clock = clock,
+      crypto = synchronizerCrypto.crypto,
+      seedForRandomnessO = None,
+      metrics = CommonMockMetrics.sequencerClient.connectionPool,
+      metricsContext = MetricsContext.Empty,
+      futureSupervisor = futureSupervisor,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
     )
-  }
 
-  private def createChannel(conn: GrpcSequencerConnection, loggerFactory: NamedLoggerFactory)(
-      implicit executionContext: ExecutionContextExecutor
-  ): ManagedChannel = {
-    val channelBuilder =
-      ClientChannelBuilder(
-        SequencerClient.loggerFactoryWithSequencerAlias(loggerFactory, conn.sequencerAlias)
+    for {
+      connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
+        connectionPoolFactory
+          .createFromOldConfig(
+            sequencerConnections = SequencerConnections.single(sequencerConnection),
+            expectedPsidO = Some(synchronizerId),
+            tracingConfig = TracingConfig(propagation = TracingConfig.Propagation.Disabled),
+            name = "replay",
+          )
+          .leftMap(_.toString)
       )
-    GrpcSequencerChannelBuilder(
-      channelBuilder,
-      conn,
-      maxRequestSize = NonNegativeInt.maxValue,
-      TracingConfig.Propagation.Disabled,
-      Some(KeepAliveClientConfig()),
-    )
+      _ <- connectionPool.start().leftMap(_.toString)
+    } yield connectionPool
   }
 }

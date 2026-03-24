@@ -22,6 +22,7 @@ import com.digitalasset.canton.data.ViewType.{AssignmentViewType, UnassignmentVi
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.TestSubmissionService
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
+import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,
@@ -79,7 +80,7 @@ class MaliciousParticipantNode(
     contractOfId: TransactionTreeFactory.ContractInstanceOfId,
     confirmationRequestFactory: TransactionConfirmationRequestFactory,
     sequencerClient: SequencerClient,
-    defaultPSId: PhysicalSynchronizerId,
+    defaultPsid: PhysicalSynchronizerId,
     defaultMediatorGroup: MediatorGroupRecipient,
     pureCrypto: CryptoPureApi,
     defaultCryptoSnapshot: () => SynchronizerSnapshotSyncCryptoApi,
@@ -235,8 +236,8 @@ class MaliciousParticipantNode(
     logger.info(
       s"Malicious participant $participantId submitting assignment request for $reassignmentId"
     )
-    val sourceSynchronizer = reassignmentData.sourcePSId
-    val targetSynchronizer = reassignmentData.targetPSId
+    val sourceSynchronizer = reassignmentData.sourcePsid
+    val targetSynchronizer = reassignmentData.targetPsid
 
     val stakeholders = reassignmentData.contractsBatch.stakeholders
 
@@ -363,7 +364,7 @@ class MaliciousParticipantNode(
 
   def submitTopologyTransactionRequest[Op <: TopologyChangeOp, M <: TopologyMapping](
       signedTopologyTransaction: SignedTopologyTransaction[Op, M],
-      psid: PhysicalSynchronizerId = defaultPSId,
+      psid: PhysicalSynchronizerId = defaultPsid,
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
       topologyTimestamp: Option[CantonTimestamp] = None,
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
@@ -386,7 +387,7 @@ class MaliciousParticipantNode(
 
   def submitTopologyTransactionBroadcasts(
       topologyBroadcasts: Seq[TopologyTransactionsBroadcast],
-      psid: PhysicalSynchronizerId = defaultPSId,
+      psid: PhysicalSynchronizerId = defaultPsid,
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
       topologyTimestamp: Option[CantonTimestamp] = None,
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
@@ -414,6 +415,7 @@ class MaliciousParticipantNode(
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = defaultCryptoSnapshot(),
       maxDeduplicationDuration: Duration = Duration.ofDays(7),
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
+      submitterInfoInterceptor: SubmitterInfo => SubmitterInfo = identity,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, SendResult.Success] =
@@ -449,7 +451,7 @@ class MaliciousParticipantNode(
         transactionTree <- transactionTreeFactory
           .createTransactionTree(
             wfTransaction,
-            command.submitterInfo(maxDeduplicationDuration),
+            submitterInfoInterceptor(command.submitterInfo(maxDeduplicationDuration)),
             command.workflowIdO.map(WorkflowId(_)),
             mediator,
             command.transactionSeed,

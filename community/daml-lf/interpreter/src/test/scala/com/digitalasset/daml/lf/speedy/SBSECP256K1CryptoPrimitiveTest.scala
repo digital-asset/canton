@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.support.crypto.MessageSignatureUtil
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
@@ -27,9 +28,9 @@ import scala.collection.immutable.ArraySeq
 class SBSECP256K1CryptoPrimitiveTest
     extends AnyFreeSpec
     with Matchers
-    with ScalaCheckPropertyChecks {
+    with ScalaCheckPropertyChecks
+    with SuppressingLogging {
   import DERTestLib._
-  import SpeedyTestLib.loggingContext
 
   Security.addProvider(new BouncyCastleProvider)
 

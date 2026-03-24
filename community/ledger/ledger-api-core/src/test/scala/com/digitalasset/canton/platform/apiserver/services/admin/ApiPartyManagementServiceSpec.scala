@@ -78,11 +78,11 @@ import com.digitalasset.canton.topology.{
   Namespace,
   ParticipantId,
   PartyId,
+  PhysicalSynchronizerId,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
@@ -1251,10 +1251,12 @@ object ApiPartyManagementServiceSpec {
       FutureUnlessShutdown.pure(state.SubmissionResult.Acknowledged)
     }
 
-    override def protocolVersionForSynchronizerId(
+    override def physicalSynchronizerIdForSynchronizerId(
         synchronizerId: SynchronizerId
-    ): Option[ProtocolVersion] =
-      Option.when(synchronizerId == DefaultTestIdentities.synchronizerId)(ProtocolVersion.latest)
+    ): Option[PhysicalSynchronizerId] =
+      Option.when(synchronizerId == DefaultTestIdentities.synchronizerId)(
+        DefaultTestIdentities.physicalSynchronizerId
+      )
 
     override def participantId: ParticipantId = DefaultTestIdentities.participant1
 

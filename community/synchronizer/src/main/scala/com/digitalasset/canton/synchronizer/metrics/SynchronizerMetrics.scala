@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.metrics
 
 import cats.Eval
+import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{
@@ -320,6 +321,7 @@ object SequencerMetrics {
       case SubmissionRequestType.ConfirmationRequest => "send-confirmation-request"
       case SubmissionRequestType.Verdict => "send-verdict"
       case SubmissionRequestType.Commitment => "send-commitment"
+      case SubmissionRequestType.LsuSequencingTest => "send-test-lsu-sequencing"
       case SubmissionRequestType.TopUp => "send-topup"
       case SubmissionRequestType.TopUpMed => "send-topup-med"
       case SubmissionRequestType.TopologyTransaction => "send-topology"
@@ -339,12 +341,25 @@ object SequencerMetrics {
 class MediatorHistograms(val parent: MetricName)(implicit
     inventory: HistogramInventory
 ) {
-
   private[metrics] val prefix = parent :+ "mediator"
   private[metrics] val sequencerClient = new SequencerClientHistograms(parent)
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
 
+  private[metrics] val responseLatencies: Item = Item(
+    prefix :+ "response-latency",
+    summary = "Individual participant response latencies",
+    description =
+      """Provides the time difference between the sequencing time of the given senders response
+                    |and the first response received for a particular request..
+                    |""",
+    labelsWithDescription = Map(
+      "sender" -> "The participant who sent the response"
+    ),
+    qualification = MetricQualification.Latency,
+  )
+
 }
+
 class MediatorMetrics(
     histograms: MediatorHistograms,
     val openTelemetryMetricsFactory: LabeledMetricsFactory,
@@ -421,6 +436,24 @@ class MediatorMetrics(
     )(
       MetricsContext.Empty
     )
+
+  lazy val receivedTestingLsuSequencingMessages: Meter =
+    openTelemetryMetricsFactory.meter(
+      MetricInfo(
+        name = histograms.parent :+ "received-lsu-sequencing-test-messages",
+        summary = "Received testing lsu sequencing messages by sender (sequencer)",
+        description =
+          """The number of received testing lsu sequencing messages by sender (sequencer)""".stripMargin,
+        qualification = MetricQualification.Debug,
+        labelsWithDescription = Map(
+          "sender" -> "The sequencer who sent the message"
+        ),
+      )
+    )(MetricsContext.Empty)
+
+  val responseLatencies: Timer =
+    openTelemetryMetricsFactory.timer(histograms.responseLatencies.info)(MetricsContext.Empty)
+
 }
 
 object MediatorMetrics {

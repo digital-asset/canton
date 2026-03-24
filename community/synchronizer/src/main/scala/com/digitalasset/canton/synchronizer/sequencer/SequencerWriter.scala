@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerWriter.*
 import com.digitalasset.canton.synchronizer.sequencer.WriterStartupError.FailedToInitializeFromSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.synchronizer.sequencer.store.{SequencerStore, SequencerWriterStore}
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.tracing.TraceContext
@@ -524,7 +525,7 @@ object SequencerWriter {
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
       blockSequencerMode: Boolean,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       metrics: SequencerMetrics,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     implicit val loggingContext: ErrorLoggingContext = ErrorLoggingContext(
@@ -548,7 +549,7 @@ object SequencerWriter {
           protocolVersion,
           metrics,
           blockSequencerMode,
-          sequencingTimeLowerBoundExclusive,
+          lsuSequencingBounds,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void))

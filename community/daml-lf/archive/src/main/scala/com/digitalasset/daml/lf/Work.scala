@@ -37,7 +37,7 @@ private object Work {
     Work.Bind(work, k)
 
   def sequence[A, B](works: SeqView[Work[A]])(k: List[A] => Work[B]): Work[B] = {
-    def loop(acc: List[A], works: List[Work[A]]): Work[B] = {
+    def loop(acc: List[A], works: List[Work[A]]): Work[B] =
       works match {
         case Nil => k(acc.reverse)
         case work :: works =>
@@ -45,7 +45,6 @@ private object Work {
             loop(x :: acc, works)
           }
       }
-    }
 
     loop(Nil, works.toList)
   }

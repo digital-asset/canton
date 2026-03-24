@@ -22,10 +22,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
   RemoteParticipantReference,
 }
-import com.digitalasset.canton.integration.ConfigTransforms.{
-  enableReplicatedParticipants,
-  heavyTestDefaults,
-}
+import com.digitalasset.canton.integration.ConfigTransforms.heavyTestDefaults
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -44,7 +41,6 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceBecamePassive
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.PassiveReplica
-import monocle.macros.GenLens
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
@@ -265,20 +261,22 @@ trait ReplicatedParticipantTestSetup extends ReplicatedNodeHelper {
       .clearConfigTransforms()
       .addConfigTransforms(heavyTestDefaults*)
       .addConfigTransforms(
-        enableReplicatedParticipants(activeParticipantName, passiveParticipantName),
         // Aggressive check periods to speed up the test
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.replication).some
-            .andThen(GenLens[ReplicationConfig](_.connectionPool))
+          _.focus(_.replication)
+            .withDefault(ReplicationConfig())
             .modify(
-              _.focus(_.healthCheckPeriod)
-                .replace(PositiveFiniteDuration.ofSeconds(1))
-                .focus(_.connection.healthCheckPeriod)
-                .replace(PositiveFiniteDuration.ofSeconds(1))
-                .focus(_.connection.passiveCheckPeriod)
-                .replace(PositiveFiniteDuration.ofSeconds(5))
+              _.focus(_.connectionPool)
+                .modify(
+                  _.focus(_.healthCheckPeriod)
+                    .replace(PositiveFiniteDuration.ofSeconds(1))
+                    .focus(_.connection.healthCheckPeriod)
+                    .replace(PositiveFiniteDuration.ofSeconds(1))
+                    .focus(_.connection.passiveCheckPeriod)
+                    .replace(PositiveFiniteDuration.ofSeconds(5))
+                )
             )
-        ),
+        )
       )
 }
 

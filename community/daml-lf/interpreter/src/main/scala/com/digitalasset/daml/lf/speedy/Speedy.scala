@@ -4,9 +4,10 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.logging.HasLoggerName
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{CostModel => _, _}
@@ -20,7 +21,6 @@ import com.digitalasset.daml.lf.speedy.SError._
 import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.speedy.SResult._
 import com.digitalasset.daml.lf.speedy.SValue.{SAnyException, SArithmeticError, SRecord, SText}
-import com.digitalasset.daml.lf.speedy.Speedy.Machine.{newTraceLog, newWarningLog}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
 import com.digitalasset.daml.lf.transaction.{
@@ -201,10 +201,21 @@ private[lf] object Speedy {
   ): Unit =
     if (actual > limit) throwLimitError(location, error(limit))
 
+  // See implementation of UpdateMachine.handleException to see use of UnwindResult
+  sealed trait UnwindResult
+  object UnwindResult {
+    // Handler found for exception, continue with handler expression
+    case class TryCatchHandler(e: KTryCatchV1Handler) extends UnwindResult
+    // Rollback error - abort and error with e
+    case class Rollback(e: IError.EffectfulRollback) extends UnwindResult
+    // No handler found, return unhandledException
+    case object Unhandled extends UnwindResult
+    // Error during conversion, return unhandledException with original exception
+    case class Conversion(e: KConvertingException[Question.Update]) extends UnwindResult
+  }
+
   final class UpdateMachine(
       override val sexpr: SExpr,
-      override val traceLog: TraceLog,
-      override val warningLog: WarningLog,
       override var compiledPackages: CompiledPackages,
       override val profile: Profile,
       override val iterationsBetweenInterruptions: Long,
@@ -227,13 +238,14 @@ private[lf] object Speedy {
       initialEnvSize: Int,
       initialKontStackSize: Int,
       metricPlugins: Seq[MetricPlugin],
-  )(implicit loggingContext: LoggingContext)
-      extends Machine[Question.Update](
+      logger: MachineLogger,
+  ) extends Machine[Question.Update](
         costModel = costModel,
         initialGasBudget = initialGasBudget,
         initialEnvSize = initialEnvSize,
         initialKontStackSize = initialKontStackSize,
         metricPlugins = metricPlugins,
+        logger = logger,
       ) {
 
     private[this] var contractLookupCache =
@@ -376,31 +388,33 @@ private[lf] object Speedy {
       f(this)
 
     /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or
-      * re-thrown by the builtin SBTryHandler. If a catch-handler is found, we initiate
-      * execution of the handler code (which might decide to re-throw). Otherwise we call
-      * throwUnhandledException to apply the message function to the exception payload,
-      * producing a text message.
+      * re-thrown by the builtin SBTryHandler. If a rollback of an effectful
+      * node is attempted, we error out with the rollback error. If a
+      * catch-handler is found, we initiate execution of the handler code (which
+      * might decide to re-throw). Otherwise we call unhandledException to apply
+      * the message function to the exception payload, producing a text message.
       */
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] = {
-      // Return value meaning:
-      // None: No handler or exception conversion tag, regular unhandled exception
-      // Some(Left): try-catch handler found up the stack, continue using that
-      // Some(Right): exception conversion tag found, meaning this exception was thrown during exception -> failure status
-      //   conversion, pass this information forward to unhandledException
       @tailrec
       def unwind(
           ptx: PartialTransaction
-      ): Option[Either[KTryCatchV1Handler, KConvertingException[Question.Update]]] =
+      ): UnwindResult =
         if (kontDepth() == 0) {
-          None
+          UnwindResult.Unhandled
         } else {
           popKont() match {
             case handler: KTryCatchV1Handler =>
               // The machine's ptx is updated even if the handler does not catch the exception.
               // This may cause the transaction trace to report the error from the handler's location.
               // Ideally we should embed the trace into the exception directly.
-              this.ptx = ptx.rollbackTry()
-              Some(Left(handler))
+              ptx.rollbackTry() match {
+                case Left(rollbackErr) =>
+                  UnwindResult.Rollback(rollbackErr)
+                case Right(newPtx) => {
+                  this.ptx = newPtx
+                  UnwindResult.TryCatchHandler(handler)
+                }
+              }
             case KCloseExercise =>
               unwind(ptx.abortExercises)
             case k: KCheckChoiceGuard =>
@@ -410,24 +424,28 @@ private[lf] object Speedy {
               abort()
               k.abort()
             case KPreventException() =>
-              None
+              UnwindResult.Unhandled
             case converting: KConvertingException[Question.Update] =>
-              Some(Right(converting))
+              UnwindResult.Conversion(converting)
             case _ =>
               unwind(ptx)
           }
         }
 
       unwind(ptx) match {
-        case Some(Left(kh)) =>
+        case UnwindResult.TryCatchHandler(kh) =>
           kh.restore()
           popTempStackToBase()
           pushEnv(excep) // payload on stack where handler expects it
           Control.Expression(kh.handler)
-        case Some(Right(KConvertingException(originalExceptionId))) =>
+        case UnwindResult.Conversion(KConvertingException(originalExceptionId)) =>
           unhandledException(excep, Some(originalExceptionId))
-        case None =>
+        case UnwindResult.Unhandled =>
           unhandledException(excep)
+        case UnwindResult.Rollback(rollbackErr) => {
+          abort()
+          Control.Error(rollbackErr)
+        }
       }
     }
 
@@ -675,12 +693,11 @@ private[lf] object Speedy {
         expr: SExpr,
         committers: Set[Party],
         readAs: Set[Party],
+        logger: MachineLogger,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         validating: Boolean = false,
-        traceLog: TraceLog = newTraceLog,
-        warningLog: WarningLog = newWarningLog,
         contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
         commitLocation: Option[Location] = None,
@@ -690,7 +707,7 @@ private[lf] object Speedy {
         initialEnvSize: Int = 512,
         initialKontStackSize: Int = 128,
         metricPlugins: Seq[MetricPlugin] = Seq.empty,
-    )(implicit loggingContext: LoggingContext): UpdateMachine =
+    ): UpdateMachine =
       new UpdateMachine(
         sexpr = expr,
         packageResolution = packageResolution,
@@ -709,8 +726,6 @@ private[lf] object Speedy {
         contractKeyUniqueness = contractStateMode,
         contractIdVersion = contractIdVersion,
         limits = limits,
-        traceLog = traceLog,
-        warningLog = warningLog,
         profile = new Profile(),
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         compiledPackages = compiledPackages,
@@ -719,6 +734,7 @@ private[lf] object Speedy {
         initialEnvSize = initialEnvSize,
         initialKontStackSize = initialKontStackSize,
         metricPlugins = metricPlugins,
+        logger = logger,
       )
 
     private[lf] final case class Result(
@@ -732,23 +748,20 @@ private[lf] object Speedy {
   final class PureMachine(
       override val sexpr: SExpr,
       /* The trace log. */
-      override val traceLog: TraceLog,
-      /* Engine-generated warnings. */
-      override val warningLog: WarningLog,
-      /* Compiled packages (Daml-LF ast + compiled speedy expressions). */
       override var compiledPackages: CompiledPackages,
       /* Profile of the run when the packages haven been compiled with profiling enabled. */
       override val profile: Profile,
       override val iterationsBetweenInterruptions: Long,
       override val convertLegacyExceptions: Boolean,
       metricPlugins: Seq[MetricPlugin],
-  )(implicit loggingContext: LoggingContext)
-      extends Machine[Nothing](
+      logger: MachineLogger,
+  ) extends Machine[Nothing](
         costModel = CostModel.Empty,
         initialGasBudget = None,
         initialEnvSize = 512,
         initialKontStackSize = 128,
         metricPlugins = metricPlugins,
+        logger = logger
       ) {
 
     private[speedy] override def asUpdateMachine(location: String)(
@@ -779,15 +792,10 @@ private[lf] object Speedy {
       initialEnvSize: Int,
       initialKontStackSize: Int,
       metricPlugins: Seq[MetricPlugin],
-  )(implicit
-      val loggingContext: LoggingContext
-  ) {
+      logger: MachineLogger,
+  ) extends HasLoggerName {
 
     val sexpr: SExpr
-    /* The trace log. */
-    val traceLog: TraceLog
-    /* Engine-generated warnings. */
-    val warningLog: WarningLog
     /* Compiled packages (Daml-LF ast + compiled speedy expressions). */
     var compiledPackages: CompiledPackages
     /* Profile of the run when the packages haven been compiled with profiling enabled. */
@@ -798,7 +806,7 @@ private[lf] object Speedy {
 
     private[lf] lazy val metrics = {
       metricPlugins.foreach { plugin =>
-        traceLog.add(s"Enabling metric plugin: ${plugin.getClass.getSimpleName}", None)
+        logger.trace(s"Enabling metric plugin: ${plugin.getClass.getSimpleName}", None)
       }
 
       new Speedy.Metrics(metricPlugins)
@@ -824,6 +832,9 @@ private[lf] object Speedy {
       new SArithmeticError(valueArithmeticError)
 
     private[speedy] def handleException(excep: SValue.SAny): Control[Nothing]
+
+    private[speedy] def trace(message: String): Unit = logger.trace(message, getLastLocation)
+    private[speedy] def warn(message: String): Unit = logger.warn(message, getLastLocation)
 
     // Triggers conversion of exception to failure status and throws.
     // if the computation of the exception message also throws an exception, this will be called with
@@ -1245,12 +1256,7 @@ private[lf] object Speedy {
 
   object Machine {
 
-    private[this] val damlTraceLog = ContextualizedLogger.createFor("daml.tracelog")
-    private[this] val damlWarnings = ContextualizedLogger.createFor("daml.warnings")
-
     def newProfile: Profile = new Profile()
-    def newTraceLog: TraceLog = new RingBufferTraceLog(damlTraceLog, 100)
-    def newWarningLog: WarningLog = new WarningLog(damlWarnings)
 
     @throws[PackageNotFound]
     @throws[CompilationError]
@@ -1264,7 +1270,7 @@ private[lf] object Speedy {
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
-    )(implicit loggingContext: LoggingContext): UpdateMachine = {
+    )(implicit loggingContext: NamedLoggingContext): UpdateMachine = {
       val updateSE: SExpr = compiledPackages.compiler.unsafeCompile(updateE)
       fromUpdateSExpr(
         compiledPackages = compiledPackages,
@@ -1274,6 +1280,7 @@ private[lf] object Speedy {
         authorizationChecker = authorizationChecker,
         packageResolution = packageResolution,
         limits = limits,
+        logger = MachineLogger(),
       )
     }
 
@@ -1286,13 +1293,13 @@ private[lf] object Speedy {
         transactionSeed: crypto.Hash,
         updateSE: SExpr,
         committers: Set[Party],
+        logger: MachineLogger,
         readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         mode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
-        traceLog: TraceLog = newTraceLog,
-    )(implicit loggingContext: LoggingContext): UpdateMachine = {
+    ): UpdateMachine = {
       UpdateMachine(
         compiledPackages = compiledPackages,
         preparationTime = Time.Timestamp.MinValue,
@@ -1302,10 +1309,10 @@ private[lf] object Speedy {
         readAs = readAs,
         packageResolution = packageResolution,
         limits = limits,
-        traceLog = traceLog,
         authorizationChecker = authorizationChecker,
         iterationsBetweenInterruptions = 10000,
         contractStateMode = mode,
+        logger = logger,
       )
     }
 
@@ -1315,22 +1322,20 @@ private[lf] object Speedy {
     def fromPureSExpr(
         compiledPackages: CompiledPackages,
         expr: SExpr,
+        logger: MachineLogger,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
-        traceLog: TraceLog = newTraceLog,
-        warningLog: WarningLog = newWarningLog,
         profile: Profile = newProfile,
         convertLegacyExceptions: Boolean = true,
         metricPlugins: Seq[MetricPlugin] = Seq.empty,
-    )(implicit loggingContext: LoggingContext): PureMachine =
+    ): PureMachine =
       new PureMachine(
         sexpr = expr,
-        traceLog = traceLog,
-        warningLog = warningLog,
         compiledPackages = compiledPackages,
         profile = profile,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         convertLegacyExceptions = convertLegacyExceptions,
         metricPlugins = metricPlugins,
+        logger = logger,
       )
 
     @throws[PackageNotFound]
@@ -1338,11 +1343,12 @@ private[lf] object Speedy {
     // Construct an off-ledger machine for evaluating an expression that is not an update
     def fromPureExpr(
         compiledPackages: CompiledPackages,
-        expr: Expr,
-    )(implicit loggingContext: LoggingContext): PureMachine =
+        expr: Expr
+    )(implicit loggingContext: NamedLoggingContext): PureMachine =
       fromPureSExpr(
         compiledPackages,
         compiledPackages.compiler.unsafeCompile(expr),
+        logger = MachineLogger(),
       )
 
     @throws[PackageNotFound]
@@ -1350,7 +1356,7 @@ private[lf] object Speedy {
     def runPureExpr(
         expr: Expr,
         compiledPackages: CompiledPackages,
-    )(implicit loggingContext: LoggingContext): Either[SError, SValue] =
+    )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
       fromPureExpr(compiledPackages, expr).runPure()
 
     @throws[PackageNotFound]
@@ -1359,8 +1365,8 @@ private[lf] object Speedy {
         expr: SExpr,
         compiledPackages: CompiledPackages,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
-    )(implicit loggingContext: LoggingContext): Either[SError, SValue] =
-      fromPureSExpr(compiledPackages, expr, iterationsBetweenInterruptions).runPure()
+    )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
+      fromPureSExpr(compiledPackages, expr, MachineLogger(), iterationsBetweenInterruptions).runPure()
 
     def tmplId2TxVersion(pkgInterface: PackageInterface, tmplId: TypeConId): SerializationVersion =
       SerializationVersion.assign(pkgInterface.packageLanguageVersion(tmplId.packageId))

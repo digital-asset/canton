@@ -41,6 +41,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMaxRequestPayloadBytes,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
+  DefaultOutputEnqueueMaxRetries,
+  DefaultOutputEnqueueMaxRetryDelay,
   DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
@@ -51,6 +53,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.util.retry
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import java.io.File
@@ -172,6 +175,8 @@ final case class BftBlockOrdererConfig(
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
     outputFetchMinimumDelay: FiniteDuration = DefaultOutputFetchMinimumDelay,
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
+    outputEnqueueMaxRetries: Int = DefaultOutputEnqueueMaxRetries,
+    outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
     // TODO(#24184) make a dynamic sequencing parameter
@@ -214,6 +219,8 @@ object BftBlockOrdererConfig {
   val DefaultOutputFetchTimeout: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
+  val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
+  val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
 
   val DefaultHowLongToBlackList: LeaderSelectionPolicyConfig.HowLongToBlacklist =
     LeaderSelectionPolicyConfig.HowLongToBlacklist.Linear

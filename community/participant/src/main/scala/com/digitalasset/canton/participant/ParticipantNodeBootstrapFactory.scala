@@ -49,6 +49,9 @@ trait ParticipantNodeBootstrapFactory {
     iterationsBetweenInterruptions =
       arguments.parameterConfig.engine.iterationsBetweenInterruptions,
     paranoidMode = arguments.parameterConfig.engine.enableAdditionalConsistencyChecks,
+    submissionPhaseLogging = arguments.parameterConfig.engine.submissionPhaseLogging,
+    validationPhaseLogging = arguments.parameterConfig.engine.validationPhaseLogging,
+    loggerFactory = arguments.loggerFactory,
   )
 
   protected def createResourceService(
@@ -133,8 +136,9 @@ object ParticipantNodeBootstrapFactoryImpl extends ParticipantNodeBootstrapFacto
       arguments.config.storage,
       exitOnFatalFailures = arguments.parameters.exitOnFatalFailures,
       arguments.config.replication,
-      () => replicaManager.setActive(),
-      () => replicaManager.setPassive(),
+      _ => replicaManager.setActive(),
+      _ => replicaManager.setPassive(),
+      mustStayActive = false,
       DbLockCounters.PARTICIPANT_WRITE,
       DbLockCounters.PARTICIPANT_WRITERS,
       arguments.futureSupervisor,

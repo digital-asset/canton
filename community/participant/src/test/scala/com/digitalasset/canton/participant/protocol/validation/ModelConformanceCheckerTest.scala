@@ -45,7 +45,6 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.HasReinterpret
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.*
@@ -111,6 +110,7 @@ class ModelConformanceCheckerTest
     } else {
       ContractStateMachine.Mode.LegacyNUCK
     },
+    loggerFactory = loggerFactory,
   )
 
   private val contractHasher =
@@ -184,9 +184,8 @@ class ModelConformanceCheckerTest
       resolvePackage = testEngine.packageResolver,
       engine = testEngine.engine,
       contractStateMode = ContractStateMachine.Mode.default,
-      engineLoggingConfig = EngineLoggingConfig(),
-      loggerFactory = loggerFactory,
       participantId = participantId,
+      loggerFactory = loggerFactory,
     )
 
     val reinterpreter = if (flattenTx) {
@@ -976,7 +975,7 @@ object ModelConformanceCheckerTest extends OptionValues {
     val alice: PartyId = DefaultTestIdentities.party1
     val bob: PartyId = DefaultTestIdentities.party2
 
-    def createCycle(): Example = {
+    def createCycle()(implicit traceContext: TraceContext): Example = {
 
       val command: Command = new Cycle("id", alice.toLf).create().commands.loneElement
 
@@ -991,7 +990,7 @@ object ModelConformanceCheckerTest extends OptionValues {
       )
     }
 
-    def exerciseCycle(): Example = {
+    def exerciseCycle()(implicit traceContext: TraceContext): Example = {
 
       val create = createCycle()
       val createNode = create.tx.nodes.values.collect { case e: Node.Create => e }.loneElement
@@ -1016,7 +1015,7 @@ object ModelConformanceCheckerTest extends OptionValues {
         create: Update[Created[CID]],
         actAs: PartyId,
         builder: String => CID,
-    ): (CID, GenContractInstance) = {
+    )(implicit traceContext: TraceContext): (CID, GenContractInstance) = {
       val command = create.commands.loneElement
       val (tx, _) = testEngine.submitAndConsume(command, actAs.toLf)
       val createNode = tx.nodes.values.collect { case e: Node.Create => e }.loneElement
@@ -1025,7 +1024,7 @@ object ModelConformanceCheckerTest extends OptionValues {
       (cid, inst)
     }
 
-    def acceptPaintOffer(): Example = {
+    def acceptPaintOffer()(implicit traceContext: TraceContext): Example = {
 
       import com.digitalasset.canton.examples.java.iou
 
@@ -1066,7 +1065,7 @@ object ModelConformanceCheckerTest extends OptionValues {
 
     }
 
-    def multiReaderLookup(): Example = {
+    def multiReaderLookup()(implicit traceContext: TraceContext): Example = {
 
       import com.digitalasset.canton.damltests.modelconformance.v1.java.modelconformanceexamples.*
 
@@ -1091,7 +1090,7 @@ object ModelConformanceCheckerTest extends OptionValues {
 
     }
 
-    def multiReaderCreate(): Example = {
+    def multiReaderCreate()(implicit traceContext: TraceContext): Example = {
 
       import com.digitalasset.canton.damltests.modelconformance.v1.java.modelconformanceexamples.*
 
@@ -1114,7 +1113,7 @@ object ModelConformanceCheckerTest extends OptionValues {
 
     }
 
-    def multiReaderClone(): Example = {
+    def multiReaderClone()(implicit traceContext: TraceContext): Example = {
 
       import com.digitalasset.canton.damltests.modelconformance.v1.java.modelconformanceexamples.*
 
@@ -1140,7 +1139,7 @@ object ModelConformanceCheckerTest extends OptionValues {
     private def exceptionTesterNContract(
         n: Int,
         exec: PartialFunction[List[ExceptionTester.ContractId], Command],
-    ): Example = {
+    )(implicit traceContext: TraceContext): Example = {
 
       val (contractsIds, contracts) = (0 until n).toList
         .map({ id =>
@@ -1167,27 +1166,29 @@ object ModelConformanceCheckerTest extends OptionValues {
 
     private def exceptionTesterSingleContract(
         exec: ExceptionTester.ContractId => Command
-    ): Example = exceptionTesterNContract(1, { case cid :: Nil => exec(cid) })
+    )(implicit traceContext: TraceContext): Example =
+      exceptionTesterNContract(1, { case cid :: Nil => exec(cid) })
 
     private def exceptionTesterTwoContract(
         exec: (ExceptionTester.ContractId, ExceptionTester.ContractId) => Command
-    ): Example = exceptionTesterNContract(2, { case cid1 :: cid2 :: Nil => exec(cid1, cid2) })
+    )(implicit traceContext: TraceContext): Example =
+      exceptionTesterNContract(2, { case cid1 :: cid2 :: Nil => exec(cid1, cid2) })
 
-    def exceptionTesterGetId(): Example =
+    def exceptionTesterGetId()(implicit traceContext: TraceContext): Example =
       exceptionTesterSingleContract(_.exerciseET_GetId().commands().loneElement)
 
-    def exceptionTesterFail(): Example =
+    def exceptionTesterFail()(implicit traceContext: TraceContext): Example =
       exceptionTesterTwoContract((c1, c2) => c1.exerciseET_CatchFail(c2).commands().loneElement)
 
-    def exceptionTesterNonConsumingExec(): Example =
+    def exceptionTesterNonConsumingExec()(implicit traceContext: TraceContext): Example =
       exceptionTesterTwoContract((c1, c2) => c1.exerciseET_CatchGetFail(c2).commands().loneElement)
 
-    def exceptionTesterCreateFail(): Example =
+    def exceptionTesterCreateFail()(implicit traceContext: TraceContext): Example =
       exceptionTesterTwoContract((c1, c2) =>
         c1.exerciseET_CatchCreateFail(c2).commands().loneElement
       )
 
-    def exceptionTesterConsumingExec(): Example =
+    def exceptionTesterConsumingExec()(implicit traceContext: TraceContext): Example =
       exceptionTesterNContract(
         3,
         { case c1 :: c2 :: c3 :: Nil => c1.exerciseET_CatchExecFail(c2, c3).commands().loneElement },

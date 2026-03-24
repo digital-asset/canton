@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.client.transports.replay.ReplayingSendsSequencerClientTransport
+import com.digitalasset.canton.sequencing.client.transports.replay.ReplayClient
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -51,26 +51,24 @@ object ReplayAction {
   case object SequencerEvents extends ReplayAction
 
   /** Replay sends that were made to the sequencer. Tests can control the
-    * [[transports.replay.ReplayingSendsSequencerClientTransport]] once constructed by waiting for
-    * the `transport` future to be completed with the transport instance.
+    * [[transports.replay.ReplayClient]] once constructed by waiting for the `replayClient` future
+    * to be completed with the `ReplayClient` instance.
     */
   final case class SequencerSends(
       override protected val loggerFactory: NamedLoggerFactory,
       sendTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.tryOfSeconds(20),
-      private val transportP: Promise[ReplayingSendsSequencerClientTransport] =
-        Promise[ReplayingSendsSequencerClientTransport](),
+      private val replayClientP: Promise[ReplayClient] = Promise[ReplayClient](),
       usePekko: Boolean = false,
   ) extends ReplayAction
       with NamedLogging {
 
-    /** Used by the transport to notify a test that the transport is ready */
-    private[client] def publishTransport(
-        transport: ReplayingSendsSequencerClientTransport
+    private[client] def publishReplayClient(
+        replayClient: ReplayClient
     ): Unit =
-      if (transportP.trySuccess(transport)) {
-        logger.info("Publishing transport")(TraceContext.empty)
+      if (replayClientP.trySuccess(replayClient)) {
+        logger.info("Publishing replay client")(TraceContext.empty)
       }
 
-    val transport: Future[ReplayingSendsSequencerClientTransport] = transportP.future
+    val replayClient: Future[ReplayClient] = replayClientP.future
   }
 }

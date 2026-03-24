@@ -108,6 +108,12 @@ class BackgroundRunnerHandler[ProcessInfo](
         ErrorUtil.internalError(new IllegalStateException(s"$instanceName is not registered"))
     }
 
+  def processHasCrashed(instanceName: String): Boolean = external.get(instanceName) match {
+    case Some(r: Running) =>
+      r.runner.processHasCrashed()
+    case _ => false
+  }
+
   def tryStart(instanceName: String): Unit =
     perform(
       instanceName,
@@ -291,6 +297,8 @@ class BackgroundRunner(
       noTracingLogger.debug("Shutting down external process")
       rt.destroy()
     }
+
+  def processHasCrashed(): Boolean = !rt.isAlive
 
 }
 

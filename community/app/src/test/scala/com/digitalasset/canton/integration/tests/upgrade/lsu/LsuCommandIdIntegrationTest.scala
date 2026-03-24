@@ -153,12 +153,12 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
               participant1.ledger_api.javaapi.commands
                 .submit_async(Seq(bank), createIouCmd, commandId = cmdIdAtUpgradeTime)
 
-              // Move forward until the new PSId is up
+              // Move forward until the new psid is up
               environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
               transferTraffic(suppressLogs = false)
               eventually() {
                 environment.simClock.value.advance(Duration.ofSeconds(1))
-                participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+                participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
               }
               waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 

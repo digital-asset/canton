@@ -104,6 +104,9 @@ object RejectionGenerators {
         case _: LfInterpretationError.FailedAuthorization =>
           CommandExecutionErrors.Interpreter.AuthorizationError
             .Reject(renderedMessage)
+        case e: LfInterpretationError.EffectfulRollback =>
+          CommandExecutionErrors.Interpreter.EffectfulRollback
+            .Reject(renderedMessage)
         case LfInterpretationError.UnresolvedPackageName(packageName) =>
           CommandExecutionErrors.Interpreter.LookupErrors.UnresolvedPackageName
             .Reject(renderedMessage, packageName)

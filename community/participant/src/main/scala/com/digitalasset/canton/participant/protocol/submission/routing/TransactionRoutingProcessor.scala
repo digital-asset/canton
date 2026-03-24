@@ -424,27 +424,26 @@ object TransactionRoutingProcessor {
   ): Map[LfContractId, Stakeholders] = {
 
     // TODO(#16065) Revisit this value
-    val keyLookupMap = tx.nodes.values.collect { case LfNodeLookupByKey(_, _, key, Some(cid), _) =>
-      cid -> checked(
-        Stakeholders.tryCreate(stakeholders = key.maintainers, signatories = Set.empty)
-      )
+    val keyLookupMap = tx.nodes.values.collect {
+      case LfNodeLookupByKey(_, _, key, Some(cid), _) if !tx.localContractIds.contains(cid) =>
+        cid -> checked(
+          Stakeholders.tryCreate(stakeholders = key.maintainers, signatories = Set.empty)
+        )
     }.toMap
 
     val mainMap = tx.nodes.values.collect {
-      case n: LfNodeFetch =>
+      case n: LfNodeFetch if !tx.localContractIds.contains(n.coid) =>
         val stakeholders = checked(
           Stakeholders.tryCreate(signatories = n.signatories, stakeholders = n.stakeholders)
         )
         n.coid -> stakeholders
-      case n: LfNodeExercises =>
+      case n: LfNodeExercises if !tx.localContractIds.contains(n.targetCoid) =>
         val stakeholders = checked(
           Stakeholders.tryCreate(signatories = n.signatories, stakeholders = n.stakeholders)
         )
-
         n.targetCoid -> stakeholders
     }.toMap
-
-    (keyLookupMap ++ mainMap) -- tx.localContracts.keySet
+    (keyLookupMap ++ mainMap)
   }
 
 }

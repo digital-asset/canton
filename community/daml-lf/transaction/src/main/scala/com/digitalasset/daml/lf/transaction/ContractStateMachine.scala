@@ -49,8 +49,6 @@ object ContractStateMachine {
     def toString: String
   }
 
-  sealed abstract class StateMachineStatus
-
   final case class StateMachineResult (
     inputContractIds: Set[ContractId],
     globalKeyInputs: Map[GlobalKey, KeyInput],
@@ -74,7 +72,7 @@ object ContractStateMachine {
     /** Tracks all contracts created by a node processed so far (including nodes under a rollback).
       */
 
-    def locallyCreated: Set[ContractId]
+    def locallyCreated: Map[ContractId, Nid]
 
     /** Contains the key mappings required by Daml Engine to get to the current state (including
       * [[Transaction.KeyCreate]] for create nodes). That is, `globalKeyInputs` contains the answers
@@ -132,8 +130,12 @@ object ContractStateMachine {
 
     /** To be called when interpretation does insert a Rollback node or iteration leaves a Rollback
       * node. Must be matched by a [[beginRollback]].
+      * TODO(#31454)
+      * This must return a Nid for now until we make EffectfulRollback
+      * polymorphic in Nid, which would require all use sites of TransactionError
+      * to become polymorphic in Nid also.
       */
-    def endRollback(): State[Nid]
+    def endRollback(): Either[Set[Nid], State[Nid]]
 
     /** To be called if interpretation notices that a try block did not lead to a Rollback node Must
       * be matched by a [[beginRollback]].
@@ -173,6 +175,7 @@ object ContractStateMachine {
     private[lf] def visitCreate(
         contractId: ContractId,
         mbKey: Option[GlobalKey],
+        nid: Nid,
     ): ErrOr[State[Nid]]
 
     /** Omits the key lookup that is done in
@@ -221,14 +224,14 @@ object ContractStateMachine {
     private[transaction] def withinRollbackScope: Boolean
 
     @VisibleForTesting
-    private[lf] def withLocalContractKey(contractId: ContractId, key: GlobalKey): State[Nid]
+    private[lf] def withLocalContractKey(contractId: ContractId, key: GlobalKey, nid: Nid): State[Nid]
 
     @VisibleForTesting
     private[lf] def toStateMachineResult: StateMachineResult
   }
 
   final case class UniqueContractKeyStateWithRollback[Nid] private[lf] (
-      override val locallyCreated: Set[ContractId],
+      override val locallyCreated: Map[ContractId, Nid],
       override val inputContractIds: Set[ContractId],
       override val globalKeyInputs: Map[GlobalKey, KeyInput],
       activeState: ActiveLedgerState[Nid],
@@ -239,7 +242,7 @@ object ContractStateMachine {
       activeState.consumedBy.get(cid) match {
         case Some(nid) => Some(Left(nid)) // consumed
         case None =>
-          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
+          if (locallyCreated.contains(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
             Some(Right(())) // inactive
           } else {
             None // neither
@@ -262,7 +265,7 @@ object ContractStateMachine {
         node: Node.Action,
         keyInput: => Vector[ContractId],
     ): ErrOr[State[Nid]] = node match {
-      case create: Node.Create => handleCreate(create)
+      case create: Node.Create => handleCreate(id, create)
       case fetch: Node.Fetch => handleFetch(fetch)
       case queryByKey: Node.QueryByKey => handleQueryByKey(queryByKey)
       case exercise: Node.Exercise => handleExercise(id, exercise)
@@ -271,9 +274,9 @@ object ContractStateMachine {
     override def beginRollback(): State[Nid] =
       this.copy(rollbackStack = activeState :: rollbackStack)
 
-    override def endRollback(): State[Nid] = rollbackStack match {
+    override def endRollback(): Either[Set[Nid], State[Nid]] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
-      case headState :: tailStack => this.copy(activeState = headState, rollbackStack = tailStack)
+      case headState :: tailStack => Right(this.copy(activeState = headState, rollbackStack = tailStack))
     }
 
     override def advance(
@@ -295,8 +298,8 @@ object ContractStateMachine {
 
       // We want consistent key lookups within an action in any contract key mode.
       def consistentGlobalKeyInputs: ErrOr[Unit] =
-        substate.locallyCreated.find(locallyCreated.union(inputContractIds).contains) match {
-          case Some(contractId) =>
+        substate.locallyCreated.find(x => locallyCreated.contains(x._1) || inputContractIds.contains(x._1)) match {
+          case Some((contractId, _)) =>
             Left(DuplicateContractId(contractId))
           case None =>
             substate.globalKeyInputs
@@ -323,9 +326,9 @@ object ContractStateMachine {
           substate.globalKeyInputs ++ this.globalKeyInputs
 
         this.copy(
-          locallyCreated = this.locallyCreated.union(substate.locallyCreated),
+          locallyCreated = this.locallyCreated ++ substate.locallyCreated,
           inputContractIds =
-            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated)),
+            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated.keySet)),
           globalKeyInputs = globalKeyInputs,
           activeState = next,
         )
@@ -348,10 +351,9 @@ object ContractStateMachine {
     override private[transaction] def withinRollbackScope: Boolean = rollbackStack.nonEmpty
 
     override def projectKeyResolver(resolver: KeyResolver): KeyResolver = {
-      val consumed = activeState.consumedBy.keySet
       resolver.map { case (key, keyMapping) =>
         val newKeyInput = activeState.getLocalActiveKey(key) match {
-          case None => keyMapping.filterNot(consumed.contains)
+          case None => keyMapping.filterNot(activeState.consumedBy.contains)
           case Some(localMapping) => localMapping
         }
         key -> newKeyInput
@@ -359,19 +361,20 @@ object ContractStateMachine {
     }
 
     /** Visit a create node */
-    private def handleCreate(node: Node.Create): ErrOr[State[Nid]] =
-      visitCreate(node.coid, node.gkeyOpt)
+    private def handleCreate(nid: Nid, node: Node.Create): ErrOr[State[Nid]] =
+      visitCreate(node.coid, node.gkeyOpt, nid)
 
     private[lf] def visitCreate(
         contractId: ContractId,
         mbKey: Option[GlobalKey],
+        nid: Nid,
     ): ErrOr[State[Nid]] =
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =
           this.copy(
-            locallyCreated = locallyCreated + contractId,
+            locallyCreated = locallyCreated ++ Seq(contractId -> nid),
             activeState = this.activeState
               .copy(locallyCreatedThisTimeline =
                 this.activeState.locallyCreatedThisTimeline + contractId
@@ -511,9 +514,10 @@ object ContractStateMachine {
     override private[lf] def withLocalContractKey(
         contractId: ContractId,
         key: GlobalKey,
+        nid: Nid,
     ): UniqueContractKeyStateWithRollback[Nid] =
       this.copy(
-        locallyCreated = locallyCreated + contractId,
+        locallyCreated = locallyCreated ++ Seq(contractId -> nid),
         activeState = activeState.createKey(key, contractId),
       )
 
@@ -526,7 +530,7 @@ object ContractStateMachine {
   }
 
   final case class UniqueContractKeyStateWithoutRollback[Nid] private[lf] (
-      override val locallyCreated: Set[ContractId],
+      override val locallyCreated: Map[ContractId, Nid],
       override val inputContractIds: Set[ContractId],
       override val globalKeyInputs: Map[GlobalKey, KeyInput],
       consumedBy: Map[ContractId, Nid],
@@ -556,7 +560,7 @@ object ContractStateMachine {
         node: Node.Action,
         keyInput: => Vector[ContractId],
     ): ErrOr[State[Nid]] = node match {
-      case create: Node.Create => handleCreate(create)
+      case create: Node.Create => handleCreate(id, create)
       case fetch: Node.Fetch => handleFetch(fetch)
       case query: Node.QueryByKey => handleQueryByKey(query)
       case exercise: Node.Exercise => handleExercise(id, exercise)
@@ -565,18 +569,21 @@ object ContractStateMachine {
     override def beginRollback(): State[Nid] =
       this.copy(rollbackStack = this :: rollbackStack)
 
-    override def endRollback(): State[Nid] = rollbackStack match {
+    override def endRollback(): Either[Set[Nid], State[Nid]] = rollbackStack match {
       case Nil =>
         throw new IllegalStateException("Not inside a rollback scope")
       case headState :: tailStack =>
-        // locallyCreated and consumedBy increase monotonically, so can quickly check there size did not change since
-        // the last try block.
-        if (locallyCreated.size != headState.locallyCreated.size) {
-          throw new IllegalStateException("Rollback of create node is not supported")
-        } else if (consumedBy.size != headState.consumedBy.size) {
-          throw new IllegalStateException("Rollback of consuming exercise node is not supported")
+        // locallyCreated and consumedBy increase monotonically, so can quickly check their size did not change since the last try block.
+        if (locallyCreated.size != headState.locallyCreated.size || consumedBy.size != headState.consumedBy.size) {
+          val consumedByChanges =
+            consumedBy.view.filterKeys(consumedBy.keySet -- headState.consumedBy.keySet).values.toSet
+
+          val locallyCreatedChanges =
+            locallyCreated.view.filterKeys(locallyCreated.keySet -- headState.locallyCreated.keySet).values.toSet
+
+          Left(consumedByChanges ++ locallyCreatedChanges)
         } else {
-          this.copy(rollbackStack = tailStack)
+          Right(this.copy(rollbackStack = tailStack))
         }
     }
 
@@ -598,8 +605,8 @@ object ContractStateMachine {
 
       // We want consistent key lookups within an action in any contract key mode.
       def consistentGlobalKeyInputs: ErrOr[Unit] =
-        substate.locallyCreated.find(cid => locallyCreated(cid) || inputContractIds(cid)) match {
-          case Some(contractId) =>
+        substate.locallyCreated.find(x => locallyCreated.contains(x._1) || inputContractIds.contains(x._1)) match {
+          case Some((contractId, _)) =>
             Left(DuplicateContractId(contractId))
           case None =>
             substate.globalKeyInputs
@@ -618,10 +625,18 @@ object ContractStateMachine {
       for {
         _ <- consistentGlobalKeyInputs
       } yield {
+        // compute new input contracts
+        val builder = Set.newBuilder[ContractId]
+        builder ++= this.inputContractIds
+        substate.inputContractIds.foreach { id =>
+          if (!this.locallyCreated.contains(id)) {
+            builder += id
+          }
+        }
+        val newInputContractIds = builder.result()
         this.copy(
-          locallyCreated = this.locallyCreated union substate.locallyCreated,
-          inputContractIds =
-            this.inputContractIds union (substate.inputContractIds diff this.locallyCreated),
+          locallyCreated = this.locallyCreated ++ substate.locallyCreated,
+          inputContractIds = newInputContractIds,
           globalKeyInputs = substate.globalKeyInputs ++ this.globalKeyInputs,
           consumedBy = this.consumedBy ++ substate.consumedBy,
           localKeys = this.localKeys ++ substate.localKeys,
@@ -645,10 +660,9 @@ object ContractStateMachine {
     override private[transaction] def withinRollbackScope: Boolean = rollbackStack.nonEmpty
 
     override def projectKeyResolver(resolver: KeyResolver): KeyResolver = {
-      val consumed = consumedBy.keySet
       resolver.map { case (key, keyMapping) =>
         val newKeyInput = getLocalActiveKey(key) match {
-          case None => keyMapping.filterNot(consumed.contains)
+          case None => keyMapping.filterNot(consumedBy.contains)
           case Some(localMapping) => localMapping
         }
         key -> newKeyInput
@@ -663,17 +677,18 @@ object ContractStateMachine {
       }
 
     /** Visit a create node */
-    private def handleCreate(node: Node.Create): ErrOr[State[Nid]] =
-      visitCreate(node.coid, node.gkeyOpt)
+    private def handleCreate(nid: Nid, node: Node.Create): ErrOr[State[Nid]] =
+      visitCreate(node.coid, node.gkeyOpt, nid)
 
     private[lf] def visitCreate(
         cid: ContractId,
         mbKey: Option[GlobalKey],
+        nid: Nid,
     ): ErrOr[State[Nid]] =
-      if (locallyCreated(cid) || inputContractIds(cid)) {
+      if (locallyCreated.contains(cid) || inputContractIds.contains(cid)) {
         Left(DuplicateContractId(cid))
       } else {
-        val me = this.copy(locallyCreated = locallyCreated + cid)
+        val me = this.copy(locallyCreated = locallyCreated ++ Seq(cid -> nid))
         // if we have a contract key being added, include it in the list of
         // active keys
         mbKey match {
@@ -813,9 +828,10 @@ object ContractStateMachine {
     override private[lf] def withLocalContractKey(
         contractId: ContractId,
         key: GlobalKey,
+        nid: Nid,
     ): UniqueContractKeyStateWithoutRollback[Nid] =
       this.copy(
-        locallyCreated = locallyCreated + contractId,
+        locallyCreated = locallyCreated ++ Seq(contractId -> nid),
         localKeys = localKeys.updated(key, contractId),
       )
 
@@ -828,7 +844,7 @@ object ContractStateMachine {
   }
 
   final case class NonUniqueContractKeyState[Nid] private[lf] (
-      override val locallyCreated: Set[ContractId],
+      override val locallyCreated: Map[ContractId, Nid],
       override val inputContractIds: Set[ContractId],
       override val globalKeyInputs: Map[GlobalKey, KeyInput],
       activeState: ActiveLedgerState[Nid],
@@ -841,7 +857,7 @@ object ContractStateMachine {
       activeState.consumedBy.get(cid) match {
         case Some(nid) => Some(Left(nid)) // consumed
         case None =>
-          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
+          if (locallyCreated.contains(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
             Some(Right(())) // inactive
           } else {
             None // neither
@@ -862,7 +878,7 @@ object ContractStateMachine {
         node: Node.Action,
         keyInput: => Vector[ContractId],
     ): ErrOr[State[Nid]] = node match {
-      case create: Node.Create => handleCreate(create)
+      case create: Node.Create => handleCreate(id, create)
       case fetch: Node.Fetch => handleFetch(fetch)
       case queryByKey: Node.QueryByKey => handleQueryByKeyWith(queryByKey, keyInput)
       case exercise: Node.Exercise => handleExercise(id, exercise)
@@ -871,9 +887,9 @@ object ContractStateMachine {
     override def beginRollback(): State[Nid] =
       this.copy(rollbackStack = activeState :: rollbackStack)
 
-    override def endRollback(): State[Nid] = rollbackStack match {
+    override def endRollback(): Either[Set[Nid], State[Nid]] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
-      case headState :: tailStack => this.copy(activeState = headState, rollbackStack = tailStack)
+      case headState :: tailStack => Right(this.copy(activeState = headState, rollbackStack = tailStack))
     }
 
     override def advance(
@@ -895,8 +911,8 @@ object ContractStateMachine {
 
       // We want consistent key lookups within an action in any contract key mode.
       def consistentGlobalKeyInputs: ErrOr[Unit] =
-        substate.locallyCreated.find(locallyCreated.union(inputContractIds).contains) match {
-          case Some(contractId) =>
+        substate.locallyCreated.find(x => locallyCreated.contains(x._1) || inputContractIds.contains(x._1)) match {
+          case Some((contractId, _)) =>
             Left(DuplicateContractId(contractId))
           case None =>
             substate.globalKeyInputs
@@ -938,9 +954,9 @@ object ContractStateMachine {
           }
 
         this.copy(
-          locallyCreated = this.locallyCreated.union(substate.locallyCreated),
+          locallyCreated = this.locallyCreated ++ substate.locallyCreated,
           inputContractIds =
-            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated)),
+            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated.keySet)),
           globalKeyInputs = globalKeyInputs,
           activeState = next,
         )
@@ -962,10 +978,9 @@ object ContractStateMachine {
     override private[transaction] def withinRollbackScope: Boolean = rollbackStack.nonEmpty
 
     override def projectKeyResolver(resolver: KeyResolver): KeyResolver = {
-      val consumed = activeState.consumedBy.keySet
       resolver.map { case (key, keyMapping) =>
         val newKeyInput = activeState.getLocalActiveKey(key) match {
-          case None => keyMapping.filterNot(consumed.contains)
+          case None => keyMapping.filterNot(activeState.consumedBy.contains)
           case Some(localMapping) => localMapping
         }
         key -> newKeyInput
@@ -973,19 +988,20 @@ object ContractStateMachine {
     }
 
     /** Visit a create node */
-    private def handleCreate(node: Node.Create): ErrOr[State[Nid]] =
-      visitCreate(node.coid, node.gkeyOpt)
+    private def handleCreate(nid: Nid, node: Node.Create): ErrOr[State[Nid]] =
+      visitCreate(node.coid, node.gkeyOpt, nid)
 
     private[lf] def visitCreate(
         contractId: ContractId,
         mbKey: Option[GlobalKey],
+        nid: Nid,
     ): ErrOr[State[Nid]] =
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =
           this.copy(
-            locallyCreated = locallyCreated + contractId,
+            locallyCreated = locallyCreated ++ Seq(contractId -> nid),
             activeState = this.activeState
               .copy(locallyCreatedThisTimeline =
                 this.activeState.locallyCreatedThisTimeline + contractId
@@ -1140,9 +1156,10 @@ object ContractStateMachine {
     override private[lf] def withLocalContractKey(
         contractId: ContractId,
         key: GlobalKey,
+        nid: Nid,
     ): NonUniqueContractKeyState[Nid] =
       this.copy(
-        locallyCreated = locallyCreated + contractId,
+        locallyCreated = locallyCreated ++ Seq(contractId -> nid),
         activeState = activeState.createKey(key, contractId),
       )
 
@@ -1155,7 +1172,7 @@ object ContractStateMachine {
   }
 
   final case class NoContractKeyState[Nid] private[lf] (
-      override val locallyCreated: Set[ContractId],
+      override val locallyCreated: Map[ContractId, Nid],
       override val inputContractIds: Set[ContractId],
       activeState: NoContractKeyState.ActiveLedgerState[Nid],
       rollbackStack: List[NoContractKeyState.ActiveLedgerState[Nid]],
@@ -1169,7 +1186,7 @@ object ContractStateMachine {
       activeState.consumedBy.get(cid) match {
         case Some(nid) => Some(Left(nid)) // consumed
         case None =>
-          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
+          if (locallyCreated.contains(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
             Some(Right(())) // inactive
           } else {
             None // neither
@@ -1190,7 +1207,7 @@ object ContractStateMachine {
         node: Node.Action,
         keyInput: => Vector[ContractId],
     ): ErrOr[State[Nid]] = node match {
-      case create: Node.Create => handleCreate(create)
+      case create: Node.Create => handleCreate(id, create)
       case fetch: Node.Fetch => handleFetch(fetch)
       case _: Node.QueryByKey => keyOperationError
       case exercise: Node.Exercise => handleExercise(id, exercise)
@@ -1199,9 +1216,9 @@ object ContractStateMachine {
     override def beginRollback(): State[Nid] =
       this.copy(rollbackStack = activeState :: rollbackStack)
 
-    override def endRollback(): State[Nid] = rollbackStack match {
+    override def endRollback(): Either[Set[Nid], State[Nid]] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
-      case headState :: tailStack => this.copy(activeState = headState, rollbackStack = tailStack)
+      case headState :: tailStack => Right(this.copy(activeState = headState, rollbackStack = tailStack))
     }
 
     override def advance(
@@ -1224,9 +1241,9 @@ object ContractStateMachine {
 
       Right(
         this.copy(
-          locallyCreated = this.locallyCreated.union(substate.locallyCreated),
+          locallyCreated = this.locallyCreated ++ substate.locallyCreated,
           inputContractIds =
-            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated)),
+            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated.keySet)),
           activeState = this.activeState.advance(substate.activeState),
         )
       )
@@ -1242,20 +1259,21 @@ object ContractStateMachine {
     )
 
     /** Visit a create node */
-    private def handleCreate(node: Node.Create): ErrOr[State[Nid]] =
-      visitCreate(node.coid, node.gkeyOpt)
+    private def handleCreate(nid: Nid, node: Node.Create): ErrOr[State[Nid]] =
+      visitCreate(node.coid, node.gkeyOpt, nid)
 
     private[lf] def visitCreate(
         contractId: ContractId,
         mbKey: Option[GlobalKey],
+        nid: Nid,
     ): ErrOr[State[Nid]] = {
       mbKey.foreach(_ => keyOperationError)
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =
           this.copy(
-            locallyCreated = locallyCreated + contractId,
+            locallyCreated = locallyCreated ++ Seq(contractId -> nid),
             activeState = this.activeState
               .copy(locallyCreatedThisTimeline =
                 this.activeState.locallyCreatedThisTimeline + contractId
@@ -1338,8 +1356,10 @@ object ContractStateMachine {
     private[lf] def withLocalContractKey(
         contractId: com.digitalasset.daml.lf.value.Value.ContractId,
         key: com.digitalasset.daml.lf.transaction.GlobalKey,
+        nid: Nid,
     ): Nothing =
       keyOperationError
+
     override private[lf] def toStateMachineResult: StateMachineResult = StateMachineResult(
       inputContractIds = inputContractIds,
       globalKeyInputs = globalKeyInputs,
@@ -1484,7 +1504,7 @@ object ContractStateMachine {
       mode match {
         case Mode.UCKWithRollback =>
           new UniqueContractKeyStateWithRollback(
-            locallyCreated = Set.empty,
+            locallyCreated = Map.empty,
             inputContractIds = Set.empty,
             globalKeyInputs = Map.empty,
             activeState = ActiveLedgerState.empty,
@@ -1492,7 +1512,7 @@ object ContractStateMachine {
           )
         case Mode.UCKWithoutRollback =>
           new UniqueContractKeyStateWithoutRollback(
-            locallyCreated = Set.empty,
+            locallyCreated = Map.empty,
             inputContractIds = Set.empty,
             globalKeyInputs = Map.empty,
             consumedBy = Map.empty,
@@ -1501,7 +1521,7 @@ object ContractStateMachine {
           )
         case Mode.LegacyNUCK =>
           new NonUniqueContractKeyState(
-            Set.empty,
+            Map.empty,
             Set.empty,
             Map.empty,
             ActiveLedgerState.empty,
@@ -1509,7 +1529,7 @@ object ContractStateMachine {
           )
         case Mode.NoContractKey =>
           new NoContractKeyState(
-            Set.empty,
+            Map.empty,
             Set.empty,
             NoContractKeyState.ActiveLedgerState.empty,
             List.empty,

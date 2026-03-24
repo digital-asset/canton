@@ -623,6 +623,7 @@ sealed trait PackageRemovalIntegrationTest
         "",
         adminParty.toProtoPrimitive,
         adminParty.toProtoPrimitive,
+        "l",
       ).create.commands.asScala.toSeq
 
       participant1.ledger_api.javaapi.commands.submit(
@@ -735,6 +736,7 @@ sealed trait PackageRemovalIntegrationTest
         "",
         adminParty.toProtoPrimitive,
         adminParty.toProtoPrimitive,
+        "l",
       ).create.commands.asScala.toSeq
 
       val asset = JavaDecodeUtil

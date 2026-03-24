@@ -67,7 +67,7 @@ class SequencerConnectionSuccessorListener(
       transactions: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     Monad[FutureUnlessShutdown].whenA(
-      transactions.exists(_.mapping.code == Code.SequencerConnectionSuccessor)
+      transactions.exists(_.mapping.code == Code.LsuSequencerConnectionSuccessor)
     )(checkAndCreateSynchronizerConfig(effectiveTimestamp.value.immediateSuccessor))
 
   private def checkAndCreateSynchronizerConfig(
@@ -85,17 +85,19 @@ class SequencerConnectionSuccessorListener(
         }.toMap
       configuredSequencerIds = configuredSequencers.keySet
 
-      (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.synchronizerUpgradeOngoing())
-      SynchronizerSuccessor(successorPSId, upgradeTime) = synchronizerUpgradeOngoing
+      (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.announcedLsu())
+      SynchronizerSuccessor(successorPsid, upgradeTime) = synchronizerUpgradeOngoing
 
       logger = Lsu.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
 
       _ = logger.info(
-        s"Checking whether the participant can migrate $alias config from ${activeConfig.configuredPSId} to $successorPSId"
+        s"Checking whether the participant can migrate $alias config from ${activeConfig.configuredPsid} to $successorPsid"
       )
       _ = logger.info(s"Configured sequencer connections: $configuredSequencerIds")
 
-      sequencerSuccessors <- OptionT.liftF(snapshot.sequencerConnectionSuccessors())
+      sequencerSuccessors <- OptionT.liftF(
+        snapshot.sequencerConnectionSuccessors(successorPsid = successorPsid)
+      )
 
       _ = logger.info(s"Successors are currently known for: $sequencerSuccessors")
 
@@ -123,13 +125,13 @@ class SequencerConnectionSuccessorListener(
       )
 
       currentSuccessorConfigO =
-        configStore.get(alias, KnownPhysicalSynchronizerId(successorPSId)).toOption
+        configStore.get(alias, KnownPhysicalSynchronizerId(successorPsid)).toOption
 
       updatedSuccessorConfig <- currentSuccessorConfigO match {
         case None =>
           val updated = activeConfig.config
             .copy(
-              synchronizerId = Some(successorPSId),
+              synchronizerId = Some(successorPsid),
               sequencerConnections = sequencerConnections,
             )
           // TODO(#28724) Can we have races leading to failures here?
@@ -137,7 +139,7 @@ class SequencerConnectionSuccessorListener(
             .put(
               config = updated,
               status = SynchronizerConnectionConfigStore.LsuTarget,
-              configuredPSId = KnownPhysicalSynchronizerId(successorPSId),
+              configuredPsid = KnownPhysicalSynchronizerId(successorPsid),
               synchronizerPredecessor = Some(
                 SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
               ),
@@ -150,7 +152,7 @@ class SequencerConnectionSuccessorListener(
           val updated =
             currentSuccessorConfig.config.copy(sequencerConnections = sequencerConnections)
           configStore
-            .replace(currentSuccessorConfig.configuredPSId, updated)
+            .replace(currentSuccessorConfig.configuredPsid, updated)
             .toOption
             .map(_ => updated)
       }
@@ -160,26 +162,26 @@ class SequencerConnectionSuccessorListener(
         .contains(updatedSuccessorConfig.sequencerConnections)
 
       _ = if (automaticallyConnectToUpgradedSynchronizer && sequencerConnectionsChanged) {
-        logger.info(s"Performing handshake to validate connection to $successorPSId")
-        performHandshake(successorPSId)
+        logger.info(s"Performing handshake to validate connection to $successorPsid")
+        performHandshake(successorPsid)
       }
     } yield ()
 
     resultOT.value.void
   }
 
-  private def performHandshake(successorPSId: PhysicalSynchronizerId)(implicit
+  private def performHandshake(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): Unit = {
 
     val resF: FutureUnlessShutdown[Unit] = for {
       _ <- pendingHandshakesWithSuccessorsStore
         .insert(
-          PendingHandshakeWithLsuSuccessor(successorPSId = successorPSId)(
+          PendingHandshakeWithLsuSuccessor(successorPsid = successorPsid)(
             PendingHandshakeWithLsuSuccessor.protocolVersionRepresentativeFor(
               topologyClient.protocolVersion
             )
-          ).toPendingOperation(currentPSId = topologyClient.psid)
+          ).toPendingOperation(currentPsid = topologyClient.psid)
         )
 
         /* Left can happen only on inconsistent successor for a given psid which cannot happen because:
@@ -191,7 +193,7 @@ class SequencerConnectionSuccessorListener(
         .void
 
       _ <- synchronizerHandshake
-        .handshakeWithSuccessor(successorPSId)
+        .handshakeWithSuccessor(successorPsid)
         .value
         .map {
           case Left(error) =>
@@ -199,25 +201,25 @@ class SequencerConnectionSuccessorListener(
 
             // e.g., transient network or pool errors
             if (isRetryable)
-              logger.info(s"Unable to perform handshake with $successorPSId: $error")
+              logger.info(s"Unable to perform handshake with $successorPsid: $error")
             else
-              logger.error(s"Unable to perform handshake with $successorPSId: $error")
+              logger.error(s"Unable to perform handshake with $successorPsid: $error")
 
           case Right(()) =>
-            logger.info(s"Handshake with $successorPSId was successful")
+            logger.info(s"Handshake with $successorPsid was successful")
         }
     } yield ()
 
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
       resF,
       level = Level.INFO,
-      failureMessage = s"Failed to perform the synchronizer handshake with $successorPSId",
+      failureMessage = s"Failed to perform the synchronizer handshake with $successorPsid",
     )
   }
 }
 
 trait HandshakeWithSuccessor {
-  def handshakeWithSuccessor(successorPSId: PhysicalSynchronizerId)(implicit
+  def handshakeWithSuccessor(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit]
 }

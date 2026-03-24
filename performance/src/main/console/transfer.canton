@@ -1,0 +1,62 @@
+// -----------------------------------------------------------
+// load jar
+// -----------------------------------------------------------
+Seq("performance-driver_", "performance_").foreach { jar =>
+  os.walk(os.Path(".", base=os.pwd)).filter(x => x.ext == "jar" && x.baseName.startsWith(jar)).sorted.lastOption match {
+    case Some(jar) =>
+      logger.info(s"Loading $jar")
+      println(s"Loading $jar")
+      interp.load.cp(jar)
+    case None =>
+      println(s"No ${jar} found by walking pwd. If you haven't included in the classpath, then you will likely start to see errors. Lots of errors.")
+  }
+}
+
+// adding a @ will make the imports available
+@
+
+import com.digitalasset.canton.performance.scenarios.TransferTesting
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+
+logger.info(s"Init")
+println(s"Init")
+
+// initialization and connectity code
+val needsBootstrap = sequencers.all.nonEmpty && mediators.all.nonEmpty && !sequencers.all.active.headOption.exists(_.health.initialized())
+if (needsBootstrap) {
+  logger.info(s"Bootstrapping synchronizer")
+  println(s"Bootstrapping synchronizer")
+  assert(sequencers.all.active.length == mediators.all.active.length, "we need the same amount of sequencers and mediators")
+
+  bootstrap.synchronizer(
+    synchronizerName = "thesync",
+    sequencers = sequencers.all,
+    mediators = mediators.all,
+    synchronizerOwners = owners,
+    synchronizerThreshold = PositiveInt.tryCreate(owners.length),
+    staticSynchronizerParameters =
+      StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.v35),
+  )
+}
+
+logger.info(s"Connect")
+println(s"Connect")
+participants.all.active.filter(_.synchronizers.list_connected().isEmpty).foreach {
+  participant =>
+    participant.synchronizers.connect_bft(
+      sequencers.all.map(_.sequencerConnection),
+      "thesync",
+    )
+}
+
+logger.info(s"Startup")
+println(s"Startup")
+
+val mc = try {
+  TransferTesting.startup()
+} catch {
+  case e: Exception =>
+    logger.error("Failed to start the performance test", e)
+    throw e
+}
+import mc._

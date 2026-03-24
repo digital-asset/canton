@@ -4,7 +4,9 @@
 package com.digitalasset.daml.lf
 package testing.snapshot
 
-import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.canton.LfPackageId
+import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -12,25 +14,25 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import org.scalatest.BeforeAndAfterAll
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
-import com.digitalasset.canton.LfPackageId
-import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.daml.lf.archive.DarSchemaDecoder
+import com.digitalasset.daml.lf.data.Ref
 import monocle.macros.syntax.lens.*
-import org.scalatest.Assertion
+import org.scalatest.{Assertion, BeforeAndAfterAll}
 
 import java.nio.file.{FileSystems, Files, Path}
 
 /** Generate and save snapshot data by running Daml script code.
   *
   * The following environment variables provide test arguments:
-  * - DAR_FILE:     defines the actual Dar file containing the script code
-  * - SCRIPT_NAME:  defines the script function that should be ran to generate transaction entries for the snapshot file - e.g. Module:Script
-  * - SNAPSHOT_DIR: defines the (base) directory used for storing snapshot data. Snapshot files are saved in the file with
-  *   path $SNAPSHOT_DIR/$(basename DAR_FILE)/Script/snapshot-participant0*.bin (where Script is the script function name defined by $SCRIPT_NAME)
+  *   - DAR_FILE: defines the actual Dar file containing the script code
+  *   - SCRIPT_NAME: defines the script function that should be ran to generate transaction entries
+  *     for the snapshot file - e.g. Module:Script
+  *   - SNAPSHOT_DIR: defines the (base) directory used for storing snapshot data. Snapshot files
+  *     are saved in the file with path $SNAPSHOT_DIR/$(basename
+  *     DAR_FILE)/Script/snapshot-participant0*.bin (where Script is the script function name
+  *     defined by $SCRIPT_NAME)
   */
 // Integration tests need to live in the package com.digitalasset.canton.integration.tests, so we
 // make the test base an abstract class
@@ -104,13 +106,12 @@ abstract class GenerateSnapshotsBase
         )
       }
 
-  private def runWhenEnvVarSet(name: String)(testFun: TestConsoleEnvironment => Assertion): Unit = {
+  private def runWhenEnvVarSet(name: String)(testFun: TestConsoleEnvironment => Assertion): Unit =
     if (sys.env.contains("STANDALONE")) {
       name.in(testFun)
     } else {
       name.ignore(testFun)
     }
-  }
 
   runWhenEnvVarSet("Generate snapshot data") { implicit env =>
     import env.*

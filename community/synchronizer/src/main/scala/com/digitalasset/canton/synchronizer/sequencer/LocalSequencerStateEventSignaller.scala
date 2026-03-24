@@ -58,10 +58,13 @@ class LocalSequencerStateEventSignaller(
   override def notifyOfLocalWrite(
       notification: WriteNotification
   ): Unit = {
-    val membersToNotify =
-      if (notification.isBroadcast) memberQueues.iterator
-      else
-        notification.memberIds.iterator.flatMap(member => memberQueues.get(member).map(member -> _))
+    val membersToNotify = notification match {
+      case WriteNotification.Members(memberIds) =>
+        memberIds.iterator.flatMap(member => memberQueues.get(member).map(member -> _))
+      case WriteNotification.All =>
+        memberQueues.iterator
+      case WriteNotification.NoTarget => Iterator.empty
+    }
 
     membersToNotify.foreach { case (member, queues) =>
       queues.foreach { tracedQueue =>

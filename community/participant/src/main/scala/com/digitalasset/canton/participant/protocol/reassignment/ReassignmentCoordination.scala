@@ -51,7 +51,7 @@ trait GetTopologyAtTimestamp {
     * which case it'll return None.
     */
   def maybeAwaitTopologySnapshot(
-      targetPSId: Target[PhysicalSynchronizerId],
+      targetPsid: Target[PhysicalSynchronizerId],
       requestedTimestamp: Target[CantonTimestamp],
   )(implicit
       traceContext: TraceContext
@@ -64,7 +64,7 @@ trait GetTopologyAtTimestamp {
    * TODO(i27585): After cleaning up the waiting routines, refactor to something like
    *
    *    def getTopologySnapshot(
-   *      targetPSId: PhysicalSynchronizerId,
+   *      targetPsid: PhysicalSynchronizerId,
    *      requestedTimestamp: CantonTimestamp,
    *    ): Either[UnknownPhysicalSynchronizer, TopologySnapshotResult]
    *
@@ -93,25 +93,25 @@ class ReassignmentCoordination(
 
   def addPendingUnassignment(
       reassignmentId: ReassignmentId,
-      sourcePSId: Source[SynchronizerId],
+      sourcePsid: Source[SynchronizerId],
   ): Unit =
-    pendingUnassignments(sourcePSId)
+    pendingUnassignments(sourcePsid)
       .foreach(_.add(reassignmentId))
 
   def completeUnassignment(
       reassignmentId: ReassignmentId,
-      sourcePSId: Source[PhysicalSynchronizerId],
+      sourcePsid: Source[PhysicalSynchronizerId],
   ): Unit =
-    pendingUnassignments(sourcePSId.map(_.logical))
+    pendingUnassignments(sourcePsid.map(_.logical))
       .foreach(_.completePhase7(reassignmentId))
 
   // Todo(i25029): Add the ability to interrupt the wait for unassignment completion in specific cases
   def waitForStartedUnassignmentToCompletePhase7(
       reassignmentId: ReassignmentId,
-      sourcePSId: Source[PhysicalSynchronizerId],
+      sourcePsid: Source[PhysicalSynchronizerId],
   ): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.outcomeF(
-      pendingUnassignments(sourcePSId.map(_.logical))
+      pendingUnassignments(sourcePsid.map(_.logical))
         .flatMap(_.find(reassignmentId))
         .getOrElse(Future.successful(()))
     )
@@ -300,7 +300,7 @@ class ReassignmentCoordination(
   } yield snapshot
 
   override def maybeAwaitTopologySnapshot(
-      targetPSId: Target[PhysicalSynchronizerId],
+      targetPsid: Target[PhysicalSynchronizerId],
       requestedTimestamp: Target[CantonTimestamp],
   )(implicit
       traceContext: TraceContext
@@ -310,16 +310,16 @@ class ReassignmentCoordination(
     Option[Target[TopologySnapshot]],
   ] = for {
     staticSynchronizerParameters <- EitherT.fromEither[FutureUnlessShutdown](
-      getStaticSynchronizerParameter(targetPSId)
+      getStaticSynchronizerParameter(targetPsid)
     )
 
-    recentTimestamp <- getRecentTopologyTimestamp(targetPSId)
+    recentTimestamp <- getRecentTopologyTimestamp(targetPsid)
 
     timestampUpperBound = recentTimestamp.map(_ + targetTimestampForwardTolerance)
     topology <-
       if (requestedTimestamp <= timestampUpperBound) {
         awaitTimestampAndGetTaggedCryptoSnapshot(
-          targetPSId,
+          targetPsid,
           staticSynchronizerParameters,
           requestedTimestamp,
         ).map(_.map(_.ipsSnapshot)).map(Some(_))
@@ -370,7 +370,7 @@ class ReassignmentCoordination(
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
     for {
       reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
-        reassignmentStoreFor(unassignmentData.targetPSId.map(_.logical))
+        reassignmentStoreFor(unassignmentData.targetPsid.map(_.logical))
       )
       _ <- reassignmentStore
         .addUnassignmentData(unassignmentData)

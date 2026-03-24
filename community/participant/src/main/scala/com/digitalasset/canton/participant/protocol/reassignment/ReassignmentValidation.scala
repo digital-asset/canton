@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -112,11 +111,7 @@ object ReassignmentValidation {
         rpId: LfPackageId,
     ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
       contractValidator
-        .authenticate(contract.inst, rpId)(
-          ec,
-          traceContext,
-          LoggingContext.empty,
-        )
+        .authenticate(contract.inst, rpId)
         .leftMap { reason =>
           ReassignmentValidationError.ContractValidationError(
             reassignmentRef.getOrElse(ContractIdRef(Set(contract.contractId))),

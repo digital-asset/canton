@@ -4,18 +4,28 @@
 package com.digitalasset.daml.lf
 package testing.snapshot
 
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.speedy.Speedy
+import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, CreationTime, FatContractInstance, GlobalKeyWithMaintainers, Node, SubmittedTransaction as SubmittedTx, TransactionCoder as TxCoder, TransactionOuterClass as TxOuterClass}
-import com.digitalasset.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
+import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
+  CreationTime,
+  FatContractInstance,
+  GlobalKeyWithMaintainers,
+  Node,
+  SubmittedTransaction as SubmittedTx,
+  TransactionCoder as TxCoder,
+  TransactionOuterClass as TxOuterClass,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 
 import java.io.BufferedInputStream
@@ -35,12 +45,17 @@ final case class TransactionSnapshot(
     profileDir: Option[Path],
     contractIdVersion: ContractIdVersion,
     gasBudget: Option[Long],
-) {
-
-  private[this] implicit def loggingContext: LoggingContext = LoggingContext.ForTesting
+) extends NamedLogging {
+  override val loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
+  import TraceContext.Implicits.Empty.emptyTraceContext
 
   private[this] lazy val engine =
-    TransactionSnapshot.compile(pkgs, profileDir, gasBudget = gasBudget)
+    TransactionSnapshot.compile(
+      pkgs,
+      profileDir,
+      gasBudget = gasBudget,
+      loggerFactory = loggerFactory,
+    )
 
   private[this] lazy val metricPlugins =
     Seq(new StepCount(engine.config.iterationsBetweenInterruptions), new TxNodeCount)
@@ -92,6 +107,7 @@ private[snapshot] object TransactionSnapshot {
       profileDir: Option[Path] = None,
       snapshotDir: Option[Path] = None,
       gasBudget: Option[Long] = None,
+      loggerFactory: NamedLoggerFactory,
   ): Engine = {
     require(pkgs.nonEmpty, "expected at least one package, got none")
     println(s"%%% compile ${pkgs.size} packages ...")
@@ -101,7 +117,8 @@ private[snapshot] object TransactionSnapshot {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         gasBudget = gasBudget,
-      )
+      ),
+      loggerFactory,
     )
     AstUtil.dependenciesInTopologicalOrder(pkgs.keys.toList, pkgs).foreach { pkgId =>
       val r = engine
@@ -118,9 +135,8 @@ private[snapshot] object TransactionSnapshot {
     val entries = new Iterator[Snapshot.SubmissionEntry] {
       override def hasNext: Boolean = (inputStream.available() != 0)
 
-      override def next(): Snapshot.SubmissionEntry = {
+      override def next(): Snapshot.SubmissionEntry =
         Snapshot.SubmissionEntry.parseDelimitedFrom(inputStream)
-      }
     }
 
     var result = Set.empty[String]
@@ -182,9 +198,8 @@ private[snapshot] object TransactionSnapshot {
 
     val entries = new Iterator[Snapshot.SubmissionEntry] {
       override def hasNext: Boolean = (inputStream.available() != 0)
-      override def next(): Snapshot.SubmissionEntry = {
+      override def next(): Snapshot.SubmissionEntry =
         Snapshot.SubmissionEntry.parseDelimitedFrom(inputStream)
-      }
     }
 
     var idx: Int = index
@@ -247,13 +262,14 @@ private[snapshot] object TransactionSnapshot {
           Bytes.Empty,
         )
       }.toMap
-      val contractKeys = contracts.values.foldLeft(Map.empty[GlobalKeyWithMaintainers, Vector[FatContractInstance]]){
-        case (acc, contract) =>
-          contract.contractKeyWithMaintainers match {
-            case Some(key) =>
-              acc.updated(key, contract +: acc.getOrElse(key, Vector.empty))
-            case None => acc
-          }
+      val contractKeys = contracts.values.foldLeft(
+        Map.empty[GlobalKeyWithMaintainers, Vector[FatContractInstance]]
+      ) { case (acc, contract) =>
+        contract.contractKeyWithMaintainers match {
+          case Some(key) =>
+            acc.updated(key, contract +: acc.getOrElse(key, Vector.empty))
+          case None => acc
+        }
       }
       new TransactionSnapshot(
         transaction = tx,

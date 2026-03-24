@@ -6,14 +6,14 @@ package testing.archive
 
 import com.digitalasset.daml.lf.archive.Decode
 import com.digitalasset.daml.lf.archive.testing.Encode
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.{AstRewriter, ParserParameters}
 import com.digitalasset.daml.lf.validation.Validation
-import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.language.implicitConversions
@@ -27,7 +27,7 @@ abstract class EncodeSpec(languageVersion: LanguageVersion)
     with Matchers
     with TableDrivenPropertyChecks {
 
-  import EncodeSpec._
+  import EncodeSpec.*
 
   private val stablePackages =
     com.digitalasset.daml.lf.stablepackages.StablePackages.stablePackages
@@ -173,7 +173,7 @@ ${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))("""
            val anExercise: (ContractId Mod:Person) -> Update Unit = \(cId: ContractId Mod:Person) ->
              exercise @Mod:Person Sleep (Mod:identity @(ContractId Mod:Person) cId) ();
 
-${onlyIf(LanguageVersion.featureUCKKeyBuiltins.enabledIn(languageVersion))(s"""
+${onlyIf(LanguageVersion.featureUCKBuiltins.enabledIn(languageVersion))(s"""
            val aFecthByKey: Party -> Update ($tuple2TyCon (ContractId Mod:Person) Mod:Person) = \\(party: Party) ->
              fetch_by_key @Mod:Person party;
            val aLookUpByKey: Party -> Update (Option (ContractId Mod:Person)) =\\(party: Party) ->
@@ -187,7 +187,7 @@ ${onlyIf(LanguageVersion.featureUCKKeyBuiltins.enabledIn(languageVersion))(s"""
              uembed_expr @a x;
            val isZero: Int64 -> Bool = EQUAL @Int64 0;
 
-${onlyIf(LanguageVersion.featureUCKKeyBuiltins.enabledIn(languageVersion))("""
+${onlyIf(LanguageVersion.featureUCKBuiltins.enabledIn(languageVersion))("""
            val isOne: BigNumeric -> Bool = EQUAL @BigNumeric (NUMERIC_TO_BIGNUMERIC @10 1.0000000000);
            val defaultRounding: RoundingMode = ROUNDING_UP;
 """)}
@@ -296,7 +296,7 @@ ${onlyIf(LanguageVersion.featureChoiceFuncs.enabledIn(languageVersion))("""
     }
   }
 
-  private def validate(pkgId: PackageId, pkg: Package): Unit = {
+  private def validate(pkgId: PackageId, pkg: Package): Unit =
     Validation
       .checkPackage(
         language.PackageInterface(stablePackages.packagesMap + (pkgId -> pkg)),
@@ -305,7 +305,6 @@ ${onlyIf(LanguageVersion.featureChoiceFuncs.enabledIn(languageVersion))("""
       )
       .left
       .foreach(e => sys.error(e.toString))
-  }
 
 }
 

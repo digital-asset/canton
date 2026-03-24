@@ -4,7 +4,9 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.Dar
+import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -16,9 +18,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.zip.ZipInputStream
-import com.digitalasset.daml.lf.archive.DarDecoder
 
-class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside {
+class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside with SuppressingLogging {
 
   // TODO(#30144): extend with a (set of) compat dar(s), script-test-v2.dev.dar is
   // tested here as placeholder https://github.com/digital-asset/daml/pull/22101
@@ -71,7 +72,8 @@ class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside {
   )
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.allLfVersionsRange)
+    EngineConfig(LanguageVersion.allLfVersionsRange),
+    loggerFactory,
   )
 
   private def darFromPackageMap(

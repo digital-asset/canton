@@ -4,6 +4,9 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.Dar
 import com.digitalasset.daml.lf.command._
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
@@ -35,11 +38,9 @@ import java.nio.file.{Files, StandardOpenOption}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value, ValueCoder}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, PackageInterface}
-import com.digitalasset.daml.lf.speedy.Speedy.Machine.newTraceLog
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.validation.Validation
-import com.daml.logging.LoggingContext
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
@@ -47,30 +48,6 @@ import com.digitalasset.daml.lf.data
 
 import scala.collection.immutable.ArraySeq
 import scala.jdk.CollectionConverters._
-
-// TODO once the ContextualizedLogger is replaced with the NamedLogger and Speedy doesn't use its
-//   own logger, we can remove this import
-trait EngineLogger {
-  def add(message: String)(implicit loggingContext: LoggingContext): Unit
-}
-
-object EngineLogger {
-  def toTraceLog(logger: Option[EngineLogger]): TraceLog = logger match {
-    case Some(value) =>
-      new TraceLog {
-        override def add(
-            message: String,
-            optLocation: Option[com.digitalasset.daml.lf.data.Ref.Location],
-        )(implicit
-            loggingContext: LoggingContext
-        ): Unit = value.add(message)
-        override def iterator
-            : Iterator[(String, Option[com.digitalasset.daml.lf.data.Ref.Location])] =
-          Iterator.empty
-      }
-    case None => newTraceLog
-  }
-}
 
 /** Allows for evaluating [[com.digitalasset.daml.lf.command.ApiCommands]] and validating [[com.digitalasset.daml.lf.transaction.Transaction]]s.
   * <p>
@@ -101,7 +78,10 @@ object EngineLogger {
   *
   * This class is thread safe as long `nextRandomInt` is.
   */
-class Engine(val config: EngineConfig) {
+class Engine(
+  val config: EngineConfig,
+  override val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   config.profileDir.foreach(Files.createDirectories(_))
   config.snapshotDir.foreach(Files.createDirectories(_))
@@ -116,6 +96,7 @@ class Engine(val config: EngineConfig) {
       loadPackage = loadPackage,
       forbidLocalContractIds = config.forbidLocalContractIds,
       costModel = data.CostModel.EmptyCostModelImplicits,
+      loggerFactory = loggerFactory,
     )
 
   def info = new EngineInfo(config)
@@ -154,11 +135,8 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       prefetchKeys: Seq[ApiContractKey],
-      engineLogger: Option[EngineLogger] = None,
-  )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] = {
-
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] = {
     val preparationTime = cmds.ledgerEffectiveTime
-
     for {
       pkgResolution <- preprocessor.buildPackageResolution(packageMap, packagePreference)
       processedCmds <- preprocessor.preprocessApiCommands(pkgResolution, cmds.commands)
@@ -182,7 +160,6 @@ class Engine(val config: EngineConfig) {
           contractIdVersion = contractIdVersion,
           contractStateMode = contractStateMode,
           packageResolution = pkgResolution,
-          engineLogger = engineLogger,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
         )
       (tx, meta, _) = result
@@ -212,8 +189,7 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      engineLogger: Option[EngineLogger] = None,
-  )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] =
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] =
     for {
       speedyCommand <- preprocessor.preprocessReplayCommand(command)
       sexpr <- runCompilerSafely(
@@ -229,10 +205,9 @@ class Engine(val config: EngineConfig) {
         ledgerTime = ledgerEffectiveTime,
         preparationTime = preparationTime,
         seeding = InitialSeeding.RootNodeSeeds(ImmArray(nodeSeed)),
-        contractIdVersion: ContractIdVersion,
+        contractIdVersion = contractIdVersion,
         contractStateMode = contractStateMode,
         packageResolution = packageResolution,
-        engineLogger = engineLogger,
         submissionInfo = None,
       )
       (tx, meta, _) = result
@@ -248,8 +223,7 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      engineLogger: Option[EngineLogger] = None,
-  )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] =
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] =
     replayAndCollectMetrics(
       submitters,
       tx,
@@ -260,7 +234,6 @@ class Engine(val config: EngineConfig) {
       contractIdVersion,
       contractStateMode,
       packageResolution,
-      engineLogger,
     ).map { case (tx, meta, _) => (tx, meta) }
 
   private[lf] def replayAndCollectMetrics(
@@ -273,11 +246,8 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      engineLogger: Option[EngineLogger] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit
-      loggingContext: LoggingContext
-  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
     for {
       commands <- preprocessor.translateTransactionRoots(tx)
       result <- interpretCommands(
@@ -291,7 +261,6 @@ class Engine(val config: EngineConfig) {
         contractIdVersion = contractIdVersion,
         contractStateMode = contractStateMode,
         packageResolution = packageResolution,
-        engineLogger = engineLogger,
         submissionInfo = None,
         metricPlugins = metricPlugins,
       )
@@ -321,7 +290,7 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit loggingContext: LoggingContext): Result[Unit] = {
+  )(implicit traceContext: TraceContext): Result[Unit] = {
     validateAndCollectMetrics(
       submitters,
       tx,
@@ -345,7 +314,7 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit loggingContext: LoggingContext): Result[Speedy.Metrics] = {
+  )(implicit traceContext: TraceContext): Result[Speedy.Metrics] = {
     // reinterpret
     for {
       result <- replayAndCollectMetrics(
@@ -394,7 +363,7 @@ class Engine(val config: EngineConfig) {
     )
 
   @inline
-  private[this] def runCompilerSafely[X](funcName: => String, run: => X): Result[X] =
+  private[this] def runCompilerSafely[X](funcName: => String, run: => X)(implicit traceContext: TraceContext): Result[X] =
     try {
       ResultDone(run)
     } catch {
@@ -424,12 +393,9 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      engineLogger: Option[EngineLogger] = None,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit
-      loggingContext: LoggingContext
-  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
     for {
       sexpr <- runCompilerSafely(
         NameOf.qualifiedNameOfCurrentFunc,
@@ -446,7 +412,6 @@ class Engine(val config: EngineConfig) {
         contractIdVersion,
         contractStateMode,
         packageResolution,
-        engineLogger,
         submissionInfo,
         metricPlugins,
       )
@@ -471,12 +436,9 @@ class Engine(val config: EngineConfig) {
       contractIdVersion: ContractIdVersion,
       contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
-      engineLogger: Option[EngineLogger] = None,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit
-      loggingContext: LoggingContext
-  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
 
     val machine = UpdateMachine(
       compiledPackages = compiledPackages,
@@ -487,7 +449,6 @@ class Engine(val config: EngineConfig) {
       readAs = readAs,
       authorizationChecker = config.authorizationChecker,
       validating = validating,
-      traceLog = EngineLogger.toTraceLog(engineLogger),
       contractStateMode = contractStateMode,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
@@ -495,6 +456,7 @@ class Engine(val config: EngineConfig) {
       iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
       initialGasBudget = config.gasBudget,
       metricPlugins = metricPlugins,
+      logger = machineLogger(validating),
     )
     interpretLoop(machine, ledgerTime, submissionInfo)
   }
@@ -536,13 +498,14 @@ class Engine(val config: EngineConfig) {
     addFieldNames = true,
     addTrailingNoneFields = true,
     forbidLocalContractIds = false,
+    loggerFactory = loggerFactory,
   )
 
   private[engine] def interpretLoop(
       machine: UpdateMachine,
       time: Time.Timestamp,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
-  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
+  )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
     val abort = () => {
       machine.abort()
       Some(machine.transactionTrace(config.transactionTraceMaxLength))
@@ -796,7 +759,7 @@ class Engine(val config: EngineConfig) {
       templateId: Identifier,
       argument: Value,
       interfaceId: Identifier,
-  )(implicit loggingContext: LoggingContext): Result[Versioned[Value]] = {
+  )(implicit traceContext: TraceContext): Result[Versioned[Value]] = {
     @scala.annotation.nowarn("msg=dead code following this construct")
     def interpret(machine: PureMachine, abort: () => Option[String]): Result[SValue] =
       machine.run() match {
@@ -815,11 +778,17 @@ class Engine(val config: EngineConfig) {
       machine = Machine.fromPureSExpr(
         compiledPackages,
         sexpr,
+        machineLogger(validating = true),
         config.iterationsBetweenInterruptions,
       )
       r <- interpret(machine, () => { machine.abort(); None })
       version = machine.tmplId2TxVersion(interfaceId)
     } yield Versioned(version, r.toNormalizedValue)
+  }
+
+  private def machineLogger(validating: Boolean)(implicit traceContext: TraceContext) = {
+    val loggingConfig = if (validating) config.validationPhaseLogging else config.submissionPhaseLogging
+    MachineLogger(loggingConfig.enabled, loggingConfig.logLevel, loggingConfig.matching)
   }
 
   /** Computes the hash of a Create node. Used for producing fat contract
@@ -923,7 +892,7 @@ class Engine(val config: EngineConfig) {
       contractIdSubstitution: ContractId => ContractId,
       hashingMethod: Hash.HashingMethod,
       idValidator: Hash => Boolean,
-  )(implicit loggingContext: LoggingContext): Result[Either[IError, Unit]] = {
+  )(implicit traceContext: TraceContext): Result[Either[IError, Unit]] = {
     val substitutedInstance = instance.mapCid(contractIdSubstitution)
 
     def internalError(msg: String): Result[Either[IError, Unit]] =
@@ -983,6 +952,7 @@ class Engine(val config: EngineConfig) {
           ),
         ),
         committers = Set.empty,
+        logger = machineLogger(validating = true),
       )
 
     interpret(machine, () => { machine.abort(); None })
@@ -1025,11 +995,8 @@ object Engine {
     }
   }
 
-  def DevEngine: Engine = new Engine(
-    EngineConfig(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange
-    )
-  )
+  def DevConfig: EngineConfig = EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange)
+  def DevEngine(loggerFactory: NamedLoggerFactory): Engine = new Engine(DevConfig, loggerFactory)
 
   private def mkInterpretationError(error: IError) =
     Error.Interpretation(Error.Interpretation.DamlException(error), None)

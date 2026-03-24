@@ -7,7 +7,8 @@ package interpretation
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, Party, TypeConId}
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers, Node, NodeId}
+import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers, NodeId}
+import com.digitalasset.daml.lf.transaction.{Node => TxNode}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -133,6 +134,20 @@ object Error {
       fa: ledger.FailedAuthorization,
   ) extends Error
 
+  final case class EffectfulRollback(nodes: Set[EffectfulRollback.Node]) extends Error
+
+  object EffectfulRollback {
+    sealed abstract class Node(val coid: ContractId)
+    object Node {
+      def fromCreate(n: TxNode.Create) =
+        Create(n.coid, n.templateId)
+      def fromExercise(n: TxNode.Exercise) =
+        Exercise(n.targetCoid, n.templateId, n.choiceId, n.byKey)
+    }
+    final case class Create(override val coid: ContractId, templateId: TypeConId) extends Node(coid)
+    final case class Exercise(override val coid: ContractId, templateId: TypeConId, choiceId: ChoiceName, byKey: Boolean) extends Node(coid)
+  }
+
   // We do not include the culprit value in the NonComparableValues Error
   // as are not serializable.
   final case object NonComparableValues extends Error
@@ -252,8 +267,8 @@ object Error {
     sealed abstract class Error extends Serializable with Product
 
     sealed case class Conformance(
-        provided: Node.Create,
-        recomputed: Node.Create,
+        provided: TxNode.Create,
+        recomputed: TxNode.Create,
         details: String,
     ) extends Error
 

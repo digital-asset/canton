@@ -224,7 +224,6 @@ object Dependencies {
   lazy val scaffeine = "com.github.blemale" %% "scaffeine" % scaffeine_version
 
   lazy val slf4j_api = "org.slf4j" % "slf4j-api" % slf4j_version
-  lazy val slf4j_nop = "org.slf4j" % "slf4j-nop" % slf4j_version
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
   lazy val logback_classic = resolveDependency("ch.qos.logback", "logback-classic")
 

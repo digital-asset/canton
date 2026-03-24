@@ -14,10 +14,13 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 
-// See invariants in `checkInvariants` below
+/** Request for a late LSU (from a decommissioned synchronizer)
+  *
+  * See invariants in `checkInvariants` below
+  */
 final case class LateLsuRequest private (
-    currentPSId: PhysicalSynchronizerId,
-    successorPSId: PhysicalSynchronizerId,
+    currentPsid: PhysicalSynchronizerId,
+    successorPsid: PhysicalSynchronizerId,
     upgradeTime: CantonTimestamp,
     successorConfig: SynchronizerConnectionConfig,
     successorConnectionValidation: SequencerConnectionValidation,
@@ -30,7 +33,7 @@ object LateLsuRequest {
       request: v30.PerformLateLsuRequest
   ): ParsingResult[LateLsuRequest] =
     for {
-      currentPSId <-
+      currentPsid <-
         PhysicalSynchronizerId
           .fromProtoPrimitive(
             request.physicalSynchronizerId,
@@ -40,7 +43,7 @@ object LateLsuRequest {
       successor <- request.successor
         .toRight(ProtoDeserializationError.FieldNotSet("successor"))
 
-      successorPSId <- PhysicalSynchronizerId
+      successorPsid <- PhysicalSynchronizerId
         .fromProtoPrimitive(
           successor.physicalSynchronizerId,
           "successor.physical_synchronizer_id",
@@ -65,32 +68,32 @@ object LateLsuRequest {
       )
 
       _ <- checkInvariants(
-        currentPSId = currentPSId,
-        successorPSId = successorPSId,
+        currentPsid = currentPsid,
+        successorPsid = successorPsid,
       ).leftMap(InvariantViolation(None, _))
 
     } yield LateLsuRequest(
-      currentPSId = currentPSId,
-      successorPSId = successorPSId,
+      currentPsid = currentPsid,
+      successorPsid = successorPsid,
       upgradeTime = upgradeTime,
       successorConfig = successorConfig,
       successorConnectionValidation = validation,
     )
 
   private def checkInvariants(
-      currentPSId: PhysicalSynchronizerId,
-      successorPSId: PhysicalSynchronizerId,
+      currentPsid: PhysicalSynchronizerId,
+      successorPsid: PhysicalSynchronizerId,
   ): Either[String, Unit] = for {
     _ <- Either.cond(
-      currentPSId.logical == successorPSId.logical,
+      currentPsid.logical == successorPsid.logical,
       (),
-      s"Current and successor physical synchronizer ids must have same logical ids. Found: $currentPSId and $successorPSId",
+      s"Current and successor physical synchronizer ids must have same logical ids. Found: $currentPsid and $successorPsid",
     )
 
     _ <- Either.cond(
-      currentPSId < successorPSId,
+      currentPsid < successorPsid,
       (),
-      s"Current physical synchronizer id must be smaller than the successor. Found: $currentPSId and $successorPSId",
+      s"Current physical synchronizer id must be smaller than the successor. Found: $currentPsid and $successorPsid",
     )
   } yield ()
 }

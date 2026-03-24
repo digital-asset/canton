@@ -24,7 +24,6 @@ import com.digitalasset.canton.integration.plugins.toxiproxy.{
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -91,7 +90,6 @@ sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S4M1_Config
-      .addConfigTransforms(ConfigTransforms.setConnectionPool(true))
       .withNetworkBootstrap { implicit env =>
         import env.*
 

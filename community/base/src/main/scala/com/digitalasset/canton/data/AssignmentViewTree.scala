@@ -212,8 +212,8 @@ object AssignmentCommonData
 
   def create(hashOps: HashOps)(
       salt: Salt,
-      sourcePSId: Source[PhysicalSynchronizerId],
-      targetPSId: Target[PhysicalSynchronizerId],
+      sourcePsid: Source[PhysicalSynchronizerId],
+      targetPsid: Target[PhysicalSynchronizerId],
       targetMediatorGroup: MediatorGroupRecipient,
       stakeholders: Stakeholders,
       uuid: UUID,
@@ -222,8 +222,8 @@ object AssignmentCommonData
       unassignmentTs: CantonTimestamp,
   ): AssignmentCommonData = AssignmentCommonData(
     salt = salt,
-    sourceSynchronizerId = sourcePSId,
-    targetSynchronizerId = targetPSId,
+    sourceSynchronizerId = sourcePsid,
+    targetSynchronizerId = targetPsid,
     targetMediatorGroup = targetMediatorGroup,
     stakeholders = stakeholders,
     uuid = uuid,

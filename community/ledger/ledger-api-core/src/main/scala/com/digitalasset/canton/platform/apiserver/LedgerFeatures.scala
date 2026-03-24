@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.api.v2.experimental_features.ExperimentalCommandInspectionService
 import com.daml.ledger.api.v2.version_service.OffsetCheckpointFeature
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 
 final case class LedgerFeatures(
     staticTime: Boolean = false,
@@ -12,4 +13,6 @@ final case class LedgerFeatures(
       ExperimentalCommandInspectionService(supported = true),
     offsetCheckpointFeature: OffsetCheckpointFeature = OffsetCheckpointFeature(None),
     topologyAwarePackageSelection: Boolean = true,
+    tapsMaxPassesDefault: PositiveInt,
+    tapsMaxPassesLimit: PositiveInt,
 )

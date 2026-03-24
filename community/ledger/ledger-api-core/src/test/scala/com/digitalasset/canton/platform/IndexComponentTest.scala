@@ -9,6 +9,9 @@ import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, Processin
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
   ContractInfo,
@@ -17,10 +20,12 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   RepairTransactionAccepted,
   SequencedReassignmentAccepted,
   SequencedTransactionAccepted,
+  TopologyTransactionEffective,
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
+  ReassignmentInfo,
   TestAcsChangeFactory,
   TransactionMeta,
   Update,
@@ -51,6 +56,7 @@ import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
   LfContractId,
+  ReassignmentId,
   TestUpdateId,
   UpdateId,
 }
@@ -62,8 +68,9 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
-import com.digitalasset.canton.{BaseTest, HasExecutorService, platform}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, RepairCounter, platform}
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
@@ -216,14 +223,19 @@ trait IndexComponentTest
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
+  @scala.annotation.unused
+  protected def incompleteOffsets(
+      _o: Offset,
+      _p: Option[Set[Ref.Party]],
+      _tc: TraceContext,
+  ): FutureUnlessShutdown[Vector[Offset]] = FutureUnlessShutdown.pure(Vector.empty)
+
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
-    val engine = new Engine(
-      EngineConfig(LanguageVersion.stableLfVersionsRange)
-    )
+    val engine = new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
     val mutableLedgerEndCache = MutableLedgerEndCache()
     val stringInterningView = new StringInterningView(loggerFactory)
     val participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id")
@@ -337,7 +349,7 @@ trait IndexComponentTest
           inMemoryState = inMemoryState,
           tracer = NoReportingTracerProvider.tracer,
           loggerFactory = loggerFactory,
-          incompleteOffsets = (_, _, _) => FutureUnlessShutdown.pure(Vector.empty),
+          incompleteOffsets = incompleteOffsets,
           contractLoader = contractLoader,
           getPackageMetadataSnapshot = _ => PackageMetadata(),
           lfValueTranslation = new LfValueTranslation(
@@ -415,7 +427,7 @@ trait IndexComponentTest
   private def randomLength(lengthFromToInclusive: (Int, Int)) = {
     val (from, to) = lengthFromToInclusive
     val randomDistance = to - from + 1
-    assert(randomDistance > 1)
+    assert(randomDistance > 1, s"random range ($from, $to) must have length of at least 1")
     from + random.nextInt(randomDistance)
   }
   private val builder = TxBuilder()
@@ -458,20 +470,7 @@ trait IndexComponentTest
       size: Int
   ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
     val txBuilder = TxBuilder()
-    val contracts = (1 to size)
-      .map(_ =>
-        genContract(
-          argumentPayload = randomString(payloadLength),
-          template = randomTemplate,
-          signatories = Set(
-            dsoParty,
-            randomParty,
-            randomParty,
-            randomParty,
-          ),
-        )
-      )
-      .toVector
+    val contracts = createContracts(payloadLength, size)
     contracts.map(_.inst.toCreateNode).foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
     val contractAuthenticationData = contracts
@@ -485,6 +484,44 @@ trait IndexComponentTest
     )(tx, contractAuthenticationData) -> contracts
   }
 
+  private def createContracts(payloadLength: Int, size: Int) =
+    (1 to size)
+      .map(_ =>
+        genContract(
+          argumentPayload = randomString(payloadLength),
+          template = randomTemplate,
+          signatories = Set(
+            dsoParty,
+            randomParty,
+            randomParty,
+            randomParty,
+          ),
+        )
+      )
+      .toVector
+
+  protected def ingestPartyOnboarding(parties: Set[String], recordTime: CantonTimestamp): Offset = {
+    val topologyTransaction = TopologyTransactionEffective(
+      updateId = randomUpdateId,
+      events = parties.map(party =>
+        PartyToParticipantAuthorization(
+          party = Ref.Party.assertFromString(party),
+          participant = Ref.ParticipantId.assertFromString("participant"),
+          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
+        )
+      ),
+      synchronizerId = synchronizer1,
+      effectiveTime = recordTime,
+    )
+    val ledgerEndBeforeTopology = index.currentLedgerEnd().futureValue
+    ingestUpdateAsync(topologyTransaction).futureValue
+    eventually() {
+      val ledgerEndAfterTopology = index.currentLedgerEnd().futureValue
+      ledgerEndAfterTopology should be > ledgerEndBeforeTopology
+      ledgerEndAfterTopology.value
+    }
+  }
+
   protected def archives(
       recordTime: () => CantonTimestamp,
       argumentLength: Int,
@@ -494,18 +531,7 @@ trait IndexComponentTest
   ): Update.SequencedTransactionAccepted = {
     val txBuilder = TxBuilder()
     val archives = creates.iterator
-      .map(create =>
-        archive(
-          create = create,
-          actingParties = Set(
-            randomParty,
-            randomParty,
-            randomParty,
-          ),
-          argumentPayload = randomString(argumentLength),
-          resultPayload = randomString(resultLength),
-        )
-      )
+      .map(archiveCreatedContract(argumentLength, resultLength))
       .toVector
     archives.foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
@@ -514,6 +540,20 @@ trait IndexComponentTest
       recordTime = recordTime(),
     )(tx)
   }
+
+  private def archiveCreatedContract(argumentLength: Int, resultLength: Int)(
+      create: Node.Create
+  ): Node.Exercise =
+    archive(
+      create = create,
+      actingParties = Set(
+        randomParty,
+        randomParty,
+        randomParty,
+      ),
+      argumentPayload = randomString(argumentLength),
+      resultPayload = randomString(resultLength),
+    )
 
   def genContract(
       argumentPayload: String,
@@ -591,6 +631,81 @@ trait IndexComponentTest
       },
     )
 
+  protected def mkReassignmentAccepted(
+      party: Ref.Party,
+      updateIdS: String,
+      withAcsChange: Boolean,
+      createNode: Node.Create,
+  ): Update.ReassignmentAccepted = {
+    val synchronizer1 = SynchronizerId.tryFromString("x::synchronizer1")
+    val synchronizer2 = SynchronizerId.tryFromString("x::synchronizer2")
+    val updateId = TestUpdateId(updateIdS)
+    val recordTime = Time.Timestamp.now()
+    if (withAcsChange)
+      Update.OnPRReassignmentAccepted(
+        workflowId = None,
+        updateId = updateId,
+        reassignmentInfo = ReassignmentInfo(
+          sourceSynchronizer = Source(synchronizer1),
+          targetSynchronizer = Target(synchronizer2),
+          submitter = Option(party),
+          reassignmentId = ReassignmentId.tryCreate("00"),
+          isReassigningParticipant = true,
+        ),
+        reassignment = Reassignment.Batch(
+          Reassignment.Assign(
+            ledgerEffectiveTime = Time.Timestamp.now(),
+            createNode = createNode,
+            contractAuthenticationData = Bytes.Empty,
+            reassignmentCounter = 15L,
+            nodeId = 0,
+            internalContractId =
+              -1, // will be filled when contracts are stored in the participant contract store
+          )
+        ),
+        repairCounter = RepairCounter.Genesis,
+        recordTime = CantonTimestamp(recordTime),
+        synchronizerId = synchronizer2,
+        acsChangeFactory = TestAcsChangeFactory(),
+      )
+    else
+      Update.RepairReassignmentAccepted(
+        workflowId = None,
+        updateId = updateId,
+        reassignmentInfo = ReassignmentInfo(
+          sourceSynchronizer = Source(synchronizer1),
+          targetSynchronizer = Target(synchronizer2),
+          submitter = Option(party),
+          reassignmentId = ReassignmentId.tryCreate("00"),
+          isReassigningParticipant = true,
+        ),
+        reassignment = Reassignment.Batch(
+          Reassignment.Assign(
+            ledgerEffectiveTime = Time.Timestamp.now(),
+            createNode = createNode,
+            contractAuthenticationData = Bytes.Empty,
+            reassignmentCounter = 15L,
+            nodeId = 0,
+            internalContractId =
+              -1, // will be filled when contracts are stored in the participant contract store
+          )
+        ),
+        repairCounter = RepairCounter.Genesis,
+        recordTime = CantonTimestamp(recordTime),
+        synchronizerId = synchronizer2,
+      )
+  }
+
+  protected def ingestUpdateSync(update: Update): Offset = {
+    val ledgerEndBefore = index.currentLedgerEnd().futureValue
+    ingestUpdateAsync(update).futureValue
+
+    eventually() {
+      val ledgerEndAfter = index.currentLedgerEnd().futureValue
+      ledgerEndAfter should be > ledgerEndBefore
+      ledgerEndAfter.value
+    }
+  }
 }
 
 object IndexComponentTest {

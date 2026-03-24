@@ -4,7 +4,7 @@
 
 FROM fullstorydev/grpcurl:v1.9.3@sha256:085e183ca334eb4e81ca81ee12cbb2b2737505d1d77f5e33dabc5d066593d998 AS grpcurl
 
-FROM eclipse-temurin:21-jdk-noble@sha256:71f2d18eea2e834fad8b6b8d5c7ae6effca37b97f3a3da2df5de932ee540c060
+FROM eclipse-temurin:21-jdk-noble@sha256:efec1fca48fed530d4727c1ecd9c48d955153bad24067ee43ccf55e6e0d727c7
 
 
 # Install:
@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.ref.name=canton-base:${base_version}
 
 
 # Add label for security scanners, compliance tools, and auditing purposes
-LABEL org.opencontainers.image.base.name="eclipse-temurin:21-jdk-noble@sha256:5a65f334da5a91a66076735d78e3ae30483a2593ac108f830dcd59521f2535cd"
+LABEL org.opencontainers.image.base.name="eclipse-temurin:21-jdk-noble@sha256:efec1fca48fed530d4727c1ecd9c48d955153bad24067ee43ccf55e6e0d727c7"
 
 RUN addgroup --gid 1001 nonroot && adduser --uid 1001 --gid 1001 nonroot
 RUN chown -R nonroot:nonroot /app

@@ -12,6 +12,7 @@ import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInpu
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsCantonError,
+  OneOfSchemaExtension,
   stringDecoderForEnum,
   stringEncoderForEnum,
   stringSchemaForEnum,
@@ -291,7 +292,7 @@ object JsPackageCodecs {
     deriveConfiguredCodec
   implicit val vettedPackagesChangeOperationSchema
       : Schema[package_management_service.VettedPackagesChange.Operation] =
-    Schema.oneOfWrapped
+    Schema.oneOfWrapped[package_management_service.VettedPackagesChange.Operation].oneOfExtension()
 
   implicit val topologySerial: Codec[package_reference.PriorTopologySerial] =
     deriveRelaxedCodec

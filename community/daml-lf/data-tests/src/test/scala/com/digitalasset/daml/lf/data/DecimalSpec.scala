@@ -3,8 +3,8 @@
 
 package com.digitalasset.daml.lf.data
 
-import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 @scala.annotation.nowarn("cat=deprecation")
@@ -44,7 +44,7 @@ class DecimalSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChec
       val testCases = Table("strings", "a", "decimal", "0x00", "1E10", "2-1", "2+2", "2*3", "55/11")
 
       forEvery(testCases) { testCase =>
-        Decimal.fromString(testCase) shouldBe a[Left[_, _]]
+        Decimal.fromString(testCase) shouldBe a[Left[?, ?]]
       }
 
     }
@@ -69,7 +69,7 @@ class DecimalSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChec
       forEvery(signs) { sign =>
         forEvery(testCases) { testCase =>
           val decimal = sign + testCase
-          Decimal.fromString(decimal) shouldBe a[Left[_, _]]
+          Decimal.fromString(decimal) shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -86,7 +86,7 @@ class DecimalSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChec
         ".1.",
       )
 
-      forEvery(testCases)(testCase => Decimal.fromString(testCase) shouldBe a[Left[_, _]])
+      forEvery(testCases)(testCase => Decimal.fromString(testCase) shouldBe a[Left[?, ?]])
 
     }
 
@@ -104,7 +104,7 @@ class DecimalSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChec
       forEvery(signs) { sign =>
         forEvery(testCases) { testCase =>
           val decimal = sign + testCase
-          Decimal.fromString(decimal) shouldBe a[Left[_, _]]
+          Decimal.fromString(decimal) shouldBe a[Left[?, ?]]
         }
       }
 
@@ -137,7 +137,7 @@ class DecimalSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChec
         Decimal.fromString(testCase) shouldBe Right(d(testCase))
       )
 
-      forEvery(positiveTestCases)(testCase => Decimal.fromString(testCase) shouldBe a[Left[_, _]])
+      forEvery(positiveTestCases)(testCase => Decimal.fromString(testCase) shouldBe a[Left[?, ?]])
     }
 
   }

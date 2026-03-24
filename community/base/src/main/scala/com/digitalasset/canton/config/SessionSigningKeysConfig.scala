@@ -62,16 +62,20 @@ import com.google.common.annotations.VisibleForTesting
   * @param signingKeySpec
   *   Defines the key scheme to use for the session signing keys. It defaults to EcCurve25519. Both
   *   algorithm and key scheme must be supported and allowed by the node.
+  * @param disableBoundChecks
+  *   Flag to disable parameter bounds, allowing any values. Should only be used for testing and
+  *   requires `nonStandardConfig` to be enabled.
   */
 final case class SessionSigningKeysConfig(
     enabled: Boolean,
-    keyValidityDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(6),
-    toleranceShiftDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(3),
+    keyValidityDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(8),
+    toleranceShiftDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(2),
     cutOffDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(1),
-    keyEvictionPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(10),
+    keyEvictionPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(15),
     // TODO(#13649): be sure these are supported by all the synchronizers the participant will connect to
     signingAlgorithmSpec: SigningAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
     signingKeySpec: SigningKeySpec = SigningKeySpec.EcCurve25519,
+    disableBoundChecks: Boolean = false,
 ) extends PrettyPrinting {
 
   override protected def pretty: Pretty[SessionSigningKeysConfig] =
@@ -101,5 +105,6 @@ object SessionSigningKeysConfig {
     toleranceShiftDuration = NonNegativeFiniteDuration.ofSeconds(5),
     cutOffDuration = NonNegativeFiniteDuration.ofSeconds(2),
     keyEvictionPeriod = PositiveFiniteDuration.ofMinutes(1),
+    disableBoundChecks = true,
   )
 }

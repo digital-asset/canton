@@ -31,7 +31,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.PreparedTransactionCodec.*
 import com.digitalasset.canton.protocol.{LfNode, LfNodeId}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.TypeConId
@@ -451,9 +451,9 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         )
         .transform
         .toFutureWithLoggedFailuresDecode("Failed to deserialize submitter info", logger)
-      synchronizerId <- Future.fromTry(
-        SynchronizerId
-          .fromProtoPrimitive(metadataProto.synchronizerId, "synchronizer_id")
+      synchronizer <- Future.fromTry(
+        Synchronizer
+          .fromLogicalOrPhysicalString(metadataProto.synchronizerId, "synchronizer_id")
           .leftMap(_.message)
           .leftMap(RequestValidationErrors.InvalidArgument.Reject(_).asGrpcError)
           .toTry
@@ -535,7 +535,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
     } yield {
       ExecuteTransactionData(
         submitterInfo = submitterInfo,
-        synchronizerId = synchronizerId,
+        synchronizer = synchronizer,
         transactionMeta = transactionMeta,
         transaction = lf.transaction.SubmittedTransaction(transaction),
         globalKeyMapping = globalKeyMapping,

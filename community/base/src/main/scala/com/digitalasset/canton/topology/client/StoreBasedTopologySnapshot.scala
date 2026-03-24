@@ -208,16 +208,16 @@ class StoreBasedTopologySnapshot(
         )
     }
 
-  override def sequencerConnectionSuccessors()(implicit
+  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
     findTransactionsByType(
-      types = Seq(TopologyMapping.Code.SequencerConnectionSuccessor)
+      types = Seq(TopologyMapping.Code.LsuSequencerConnectionSuccessor)
     ).map(txs =>
       txs
         .collectOfMapping[LsuSequencerConnectionSuccessor]
         .toTopologyState
-        .map(m => m.sequencerId -> m)
+        .collect { case m if m.successorPsid == successorPsid => m.sequencerId -> m }
         .toMap
     )
 }

@@ -52,7 +52,7 @@ trait AcsCommitmentMetricsIntegrationTest
 
   private var metricsSynchronizerAlias: Shown = _
 
-  private val metricsPrefix = s"daml.participant.sync.commitments"
+  private val metricsPrefix = "daml.participant.sync.commitments"
   private val interval = JDuration.ofSeconds(5)
   private lazy val maxDedupDuration = java.time.Duration.ofSeconds(1)
 

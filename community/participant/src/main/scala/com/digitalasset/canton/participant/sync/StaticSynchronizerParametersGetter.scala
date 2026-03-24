@@ -20,7 +20,7 @@ trait StaticSynchronizerParametersGetter {
     *   - repair service
     *   - inspection services
     */
-  def latestKnownPSId(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
+  def latestKnownPsid(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
 
   /** Return the latest [[com.digitalasset.canton.version.ProtocolVersion]] known for the given
     * [[com.digitalasset.canton.topology.SynchronizerId]].
@@ -31,5 +31,5 @@ trait StaticSynchronizerParametersGetter {
     *   - inspection services
     */
   def latestKnownProtocolVersion(synchronizerId: SynchronizerId): Option[ProtocolVersion] =
-    latestKnownPSId(synchronizerId).map(_.protocolVersion)
+    latestKnownPsid(synchronizerId).map(_.protocolVersion)
 }

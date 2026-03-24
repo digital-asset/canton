@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasCloseContext,
 }
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.{SuppressionRule, TracedLogger}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.resource.DbLockedConnection.State
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
@@ -131,8 +131,8 @@ trait DbStorageMultiTest
 
   protected def createStorage(
       customClock: Option[Clock] = None,
-      onActive: () => FutureUnlessShutdown[Unit] = () => FutureUnlessShutdown.unit,
-      onPassive: () => FutureUnlessShutdown[Unit] = () => FutureUnlessShutdown.unit,
+      onActive: TracedLogger => FutureUnlessShutdown[Unit] = _ => FutureUnlessShutdown.unit,
+      onPassive: TracedLogger => FutureUnlessShutdown[Unit] = _ => FutureUnlessShutdown.unit,
       name: String,
       mainLockCounter: DbLockCounter,
       poolLockCounter: DbLockCounter,
@@ -154,6 +154,7 @@ trait DbStorageMultiTest
         poolLockCounter,
         onActive,
         onPassive,
+        mustStayActive = false,
         CommonMockMetrics.dbStorage,
         None,
         customClock,
@@ -167,8 +168,11 @@ trait DbStorageMultiTest
       .valueOrFailShutdown("create DB storage")
   }
 
-  protected def setBoolean(ref: AtomicBoolean, active: Boolean): () => FutureUnlessShutdown[Unit] =
-    () => FutureUnlessShutdown.pure(ref.set(active))
+  protected def setBoolean(
+      ref: AtomicBoolean,
+      active: Boolean,
+  ): TracedLogger => FutureUnlessShutdown[Unit] =
+    _ => FutureUnlessShutdown.pure(ref.set(active))
 
   def withFixture(test: OneArgAsyncTest): FutureOutcome = {
     val clock = new SimClock(loggerFactory = loggerFactory)
@@ -178,8 +182,8 @@ trait DbStorageMultiTest
     val storage =
       createStorage(
         name = "fixture",
-        onPassive = () => {
-          setBoolean(onPassiveCalled, active = true)().map(_ => None)
+        onPassive = _ => {
+          setBoolean(onPassiveCalled, active = true)(logger).map(_ => None)
         },
         customClock = Some(clock),
         mainLockCounter = mainLockCounter,
@@ -241,8 +245,8 @@ trait DbStorageMultiTest
   ): DbStorageMulti = {
     val storage = createStorage(
       onActive = setBoolean(replicaActive, active = true),
-      onPassive = () => {
-        setBoolean(replicaActive, active = false)().map(_ => None)
+      onPassive = _ => {
+        setBoolean(replicaActive, active = false)(logger).map(_ => None)
       },
       name = "failover",
       mainLockCounter = mainLockCounter,

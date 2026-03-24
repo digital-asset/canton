@@ -141,7 +141,7 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
         import env.*
 
         fixture = fixtureWithDefaults()
-        fixture.newPSId.protocolVersion.isDev shouldBe true
+        fixture.newPsid.protocolVersion.isDev shouldBe true
 
         performSynchronizerNodesLsu(fixture, announceSequencerSuccessors = false)
 
@@ -157,7 +157,7 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
             oldSequencer.topology.lsu.sequencer_successors.propose_successor(
               sequencerId = oldSequencer.id,
               endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-              synchronizerId = fixture.currentPSId,
+              successorSynchronizerId = fixture.newPsid,
             )
           }
 
@@ -183,7 +183,7 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
             // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
             forExactly(1, logs)(
               _.errorMessage should (include(
-                s"Failed to perform the synchronizer handshake with ${fixture.newPSId}"
+                s"Failed to perform the synchronizer handshake with ${fixture.newPsid}"
               ) and include("Trust threshold of 1 is no longer reachable"))
             )
           },
@@ -209,7 +209,7 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
 
         hasPendingHandshake(participant2) shouldBe true
         fixture.oldSynchronizerOwners.foreach(
-          _.topology.lsu.announcement.revoke(fixture.newPSId, fixture.upgradeTime)
+          _.topology.lsu.announcement.revoke(fixture.newPsid, fixture.upgradeTime)
         )
         eventually() {
           hasPendingHandshake(participant2) shouldBe false

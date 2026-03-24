@@ -9,11 +9,11 @@ import java.sql.Connection
 
 private[postgresql] object PGTable {
 
-  private def transposedInsertBase[FROM](
+  private def transposedInsertBase[From](
       insertStatement: String,
-      ordering: Option[Ordering[FROM]] = None,
-  )(fields: Seq[(String, Field[FROM, ?, ?])]): Table[FROM] =
-    new BaseTable[FROM](fields, ordering) {
+      ordering: Option[Ordering[From]] = None,
+  )(fields: Seq[(String, Field[From, ?, ?])]): Table[From] =
+    new BaseTable[From](fields, ordering) {
       override def executeUpdate: Array[Array[?]] => Connection => Unit =
         data =>
           connection =>
@@ -48,15 +48,15 @@ private[postgresql] object PGTable {
        |   ($tableFields)
        | SELECT
        |   $selectFields
-       | FROM
+       | From
        |   unnest($unnestFields)
        | as t($inputFields)
        | $statementSuffix
        |""".stripMargin
   }
 
-  def transposedInsert[FROM](tableName: String)(
-      fields: (String, Field[FROM, ?, ?])*
-  ): Table[FROM] =
+  def transposedInsert[From](tableName: String)(
+      fields: (String, Field[From, ?, ?])*
+  ): Table[From] =
     transposedInsertBase(transposedInsertStatement(tableName, fields))(fields)
 }

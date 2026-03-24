@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf.data
 
 import com.daml.scalatest.{Unnatural, WordSpecCheckLaws}
-import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalaz.scalacheck.ScalazProperties
-import scalaz.std.anyVal._
+import scalaz.std.anyVal.*
 
 class FrontStackSpec
     extends AnyWordSpec
@@ -16,7 +16,7 @@ class FrontStackSpec
     with ScalaCheckPropertyChecks
     with WordSpecCheckLaws {
 
-  import DataArbitrary._
+  import DataArbitrary.*
 
   "apply" when {
     "1 element is provided" should {
@@ -59,7 +59,7 @@ class FrontStackSpec
     "preserve Seq's apply" in forAll { fs: FrontStack[Int] =>
       val expected = Table(
         ("value", "index"),
-        fs.toImmArray.toSeq.zipWithIndex: _*
+        fs.toImmArray.toSeq.zipWithIndex*
       )
       forEvery(expected) { (value, index) =>
         fs.slowApply(index) should ===(value)

@@ -994,6 +994,7 @@ class TransactionProcessingSteps(
           rejection,
           psid.logical,
           ts,
+          isTransaction = true,
         )
     } -> None // Transaction processing doesn't use pending submissions
   }
@@ -1038,6 +1039,7 @@ class TransactionProcessingSteps(
         rejection,
         psid.logical,
         requestTime,
+        isTransaction = true,
       )
     )
     Right(updateO)

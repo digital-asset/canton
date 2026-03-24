@@ -108,18 +108,18 @@ final case class ParticipantNodeConfig(
   override def withDefaults(
       ports: Option[DefaultPorts]
   ): ParticipantNodeConfig =
-    ports.fold(this)(ports =>
-      this
-        .focus(_.ledgerApi.internalPort)
-        .modify(ports.ledgerApiPort.setDefaultPort)
-        .focus(_.adminApi.internalPort)
-        .modify(ports.participantAdminApiPort.setDefaultPort)
-        .focus(_.replication)
-        .modify(ReplicationConfig.withDefaultO(storage, _))
-        .focus(_.httpLedgerApi.internalPort)
-        .modify(ports.jsonLedgerApiPort.setDefaultPort)
-    )
-
+    ports
+      .fold(this)(ports =>
+        this
+          .focus(_.ledgerApi.internalPort)
+          .modify(ports.ledgerApiPort.setDefaultPort)
+          .focus(_.adminApi.internalPort)
+          .modify(ports.participantAdminApiPort.setDefaultPort)
+          .focus(_.httpLedgerApi.internalPort)
+          .modify(ports.jsonLedgerApiPort.setDefaultPort)
+      )
+      .focus(_.replication)
+      .modify(ReplicationConfig.withDefaultO(storage, _))
 }
 
 object ParticipantNodeConfig {

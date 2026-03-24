@@ -6,8 +6,8 @@ package archive
 
 import com.daml.crypto.MessageDigestPrototype
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.LanguageVersion.{Major, Minor}
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.language.LanguageVersion.{Major, Minor}
 import com.google.protobuf
 
 sealed abstract class ArchivePayload {

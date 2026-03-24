@@ -31,6 +31,7 @@ import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, OpenEnvelope
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
+import com.digitalasset.canton.synchronizer.LsuSequencingTestMessageHandler
 import com.digitalasset.canton.synchronizer.mediator.Mediator.PruningError
 import com.digitalasset.canton.synchronizer.mediator.store.MediatorState
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
@@ -120,8 +121,12 @@ private[mediator] class Mediator(
     loggerFactory,
   )
 
+  private val lsuTestSequencingMessageHandler =
+    new LsuSequencingTestMessageHandler(metrics, syncCrypto, loggerFactory)
+
   private val eventsProcessor = new MediatorEventsProcessor(
     topologyTransactionProcessor.createHandler(psid),
+    lsuTestSequencingMessageHandler,
     processor,
     deduplicator,
     loggerFactory,

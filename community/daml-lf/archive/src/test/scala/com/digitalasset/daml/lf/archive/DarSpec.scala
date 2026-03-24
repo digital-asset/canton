@@ -5,10 +5,10 @@ package com.digitalasset.daml.lf.archive
 
 import com.daml.scalatest.FlatSpecCheckLaws
 import org.scalacheck.{Arbitrary, Gen}
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
-import scalaz.std.anyVal._
+import org.scalatest.matchers.should.Matchers
 import scalaz.scalacheck.ScalazProperties
+import scalaz.std.anyVal.*
 
 class DarSpec extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
   behavior of s"${Dar.getClass.getSimpleName} Equal"

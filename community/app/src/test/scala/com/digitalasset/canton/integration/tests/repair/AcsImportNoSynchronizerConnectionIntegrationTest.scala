@@ -108,8 +108,8 @@ final class AcsImportNoSynchronizerConnectionIntegrationTest
       val examplesMainPackageId =
         participant3.dars.upload(CantonExamplesPath, vetAllPackages = false)
 
-      participant2.repair.import_acsV2(acsFilename.canonicalPath, daId)
-      participant3.repair.import_acsV2(acsFilename.canonicalPath, daId)
+      participant2.repair.import_acsV2(daId, acsFilename.canonicalPath)
+      participant3.repair.import_acsV2(daId, acsFilename.canonicalPath)
 
       participants.all.synchronizers.reconnect_all()
       participant2.dars.vetting.enable(examplesMainPackageId)

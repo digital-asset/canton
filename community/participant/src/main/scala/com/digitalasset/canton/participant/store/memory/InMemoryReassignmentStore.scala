@@ -53,8 +53,8 @@ class InMemoryReassignmentStore(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     ErrorUtil.requireArgument(
-      unassignmentData.targetPSId.map(_.logical) == synchronizer,
-      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetPSId
+      unassignmentData.targetPsid.map(_.logical) == synchronizer,
+      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetPsid
           .map(_.logical)}",
     )
 
@@ -277,7 +277,7 @@ class InMemoryReassignmentStore(
         requestAfter.forall { case (ts, sourceSynchronizerID) =>
           (
             entry.unassignmentTs,
-            entry.unassignmentData.map(_.sourcePSId.map(_.logical)),
+            entry.unassignmentData.map(_.sourcePsid.map(_.logical)),
           ) > (ts, Some(sourceSynchronizerID))
         }
 
@@ -285,7 +285,7 @@ class InMemoryReassignmentStore(
       .to(LazyList)
       .filter(filter)
       .flatMap(_.unassignmentData)
-      .sortBy(t => (t.unassignmentTs, t.sourcePSId.unwrap))
+      .sortBy(t => (t.unassignmentTs, t.sourcePsid.unwrap))
       .take(limit)
   }
 
@@ -380,7 +380,7 @@ class InMemoryReassignmentStore(
               .map(_.contractsBatch.contractIds)
               .exists(contractIds.contains) &&
             sourceSynchronizer.forall(source =>
-              entry.unassignmentData.exists(_.sourcePSId == source)
+              entry.unassignmentData.exists(_.sourcePsid == source)
             ) &&
             unassignmentTs.forall(
               _ == entry.unassignmentTs

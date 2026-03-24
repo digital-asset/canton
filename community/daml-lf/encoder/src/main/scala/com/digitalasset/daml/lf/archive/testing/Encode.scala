@@ -4,18 +4,18 @@
 package com.digitalasset.daml.lf
 package archive.testing
 
-import com.digitalasset.daml.SafeProto
 import com.daml.crypto.MessageDigestPrototype
-import com.digitalasset.daml.lf.archive.{DamlLf => PLF}
+import com.digitalasset.daml.SafeProto
+import com.digitalasset.daml.lf.archive.DamlLf as PLF
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 
-/** The Daml-LF Encoder library can be used to build dar files directly from LF
-  * definitions without passing through Damlc.
+/** The Daml-LF Encoder library can be used to build dar files directly from LF definitions without
+  * passing through Damlc.
   *
-  * It is designed for testing only and provided without any guarantee.
-  * In particular future version can break the API without notice.
+  * It is designed for testing only and provided without any guarantee. In particular future version
+  * can break the API without notice.
   */
 // Important: do not use this in production code. It is designed for testing only.
 object Encode {

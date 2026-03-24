@@ -26,12 +26,11 @@ private[interning] object RawStringInterning {
       )
 
   def newEntries(
-      strings: Iterator[String],
+      distinctRawStrings: Iterable[String],
       rawStringInterning: RawStringInterning,
   ): Vector[(Int, String)] =
-    strings
+    distinctRawStrings.view
       .filterNot(rawStringInterning.map.contains)
-      .distinct
       .zipWithIndex
       .map { case (string, index) =>
         (index + 1 + rawStringInterning.lastId, string)

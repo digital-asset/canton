@@ -11,7 +11,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
@@ -164,8 +163,6 @@ private[lsu] trait LsuBase
     SynchronizerConnectionConfig(
       synchronizerAlias = daName,
       sequencerConnections = sequencer1,
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 
@@ -177,8 +174,6 @@ private[lsu] trait LsuBase
     SynchronizerConnectionConfig(
       synchronizerAlias = daName,
       sequencerConnections = seq,
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 
@@ -198,8 +193,6 @@ private[lsu] trait LsuBase
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       ),
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 
@@ -210,10 +203,10 @@ private[lsu] trait LsuBase
   )(implicit
       env: TestConsoleEnvironment
   ): Fixture = {
-    val currentPSId = env.daId
+    val currentPsid = env.daId
 
     Fixture(
-      currentPSId = currentPSId,
+      currentPsid = currentPsid,
       upgradeTime = upgradeTime,
       oldSynchronizerNodes = oldSynchronizerNodes,
       newSynchronizerNodes = newSynchronizerNodes,
@@ -221,7 +214,7 @@ private[lsu] trait LsuBase
       oldSynchronizerOwners = env.synchronizerOwners1,
       newPV = newPVOverride.getOrElse(ProtocolVersion.dev),
       // increasing the serial as well, so that the test also works when running with PV=dev
-      newSerial = newSerialOverride.getOrElse(currentPSId.serial.increment.toNonNegative),
+      newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.toNonNegative),
     )
   }
 
@@ -236,15 +229,15 @@ private[lsu] trait LsuBase
       announceSequencerSuccessors: Boolean = true,
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
     fixture.oldSynchronizerOwners.foreach(
-      _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
+      _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
     )
 
     // Ensure all nodes see the announcement
     eventually() {
       forAll(fixture.oldSynchronizerNodes.all)(
         _.topology.lsu.announcement
-          .list(store = Some(fixture.currentPSId))
-          .filter(_.item.successorSynchronizerId == fixture.newPSId)
+          .list(store = Some(fixture.currentPsid))
+          .filter(_.item.successorSynchronizerId == fixture.newPsid)
           .loneElement
       )
     }
@@ -257,7 +250,7 @@ private[lsu] trait LsuBase
           oldSequencer.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = oldSequencer.id,
             endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
       }
     }
@@ -274,7 +267,7 @@ private[lsu] trait LsuBase
         sequencers = fixture.oldSynchronizerNodes.sequencers,
         mediators = fixture.oldSynchronizerNodes.mediators,
       ),
-      successorPSId = fixture.newPSId,
+      successorPsid = fixture.newPsid,
     )
 
     // Migrate nodes preserving their data (and IDs)
@@ -282,7 +275,7 @@ private[lsu] trait LsuBase
       migrateNode(
         migratedNode = newNode,
         newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
-        synchronizerId = fixture.currentPSId,
+        synchronizerId = fixture.currentPsid,
         newSequencers = fixture.newSynchronizerNodes.sequencers,
         exportDirectory = exportDirectory,
         newNodeToOldNodeName = fixture.newOldNodesResolution,
@@ -293,7 +286,7 @@ private[lsu] trait LsuBase
 
 private[lsu] object LsuBase {
   final case class Fixture(
-      currentPSId: PhysicalSynchronizerId,
+      currentPsid: PhysicalSynchronizerId,
       upgradeTime: CantonTimestamp,
       oldSynchronizerNodes: SynchronizerNodes,
       newSynchronizerNodes: SynchronizerNodes,
@@ -301,7 +294,7 @@ private[lsu] object LsuBase {
       oldSynchronizerOwners: Set[InstanceReference],
       newPV: ProtocolVersion,
       newSerial: NonNegativeInt,
-      overridePSId: Option[PhysicalSynchronizerId] = None,
+      overridePsid: Option[PhysicalSynchronizerId] = None,
   ) {
     val newStaticSynchronizerParameters: StaticSynchronizerParameters =
       StaticSynchronizerParameters.defaultsWithoutKMS(
@@ -310,11 +303,11 @@ private[lsu] object LsuBase {
         topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,
       )
 
-    val newPSId: PhysicalSynchronizerId =
-      overridePSId.getOrElse(
-        PhysicalSynchronizerId(currentPSId.logical, newStaticSynchronizerParameters.toInternal)
+    val newPsid: PhysicalSynchronizerId =
+      overridePsid.getOrElse(
+        PhysicalSynchronizerId(currentPsid.logical, newStaticSynchronizerParameters.toInternal)
       )
 
-    val synchronizerSuccessor: SynchronizerSuccessor = SynchronizerSuccessor(newPSId, upgradeTime)
+    val synchronizerSuccessor: SynchronizerSuccessor = SynchronizerSuccessor(newPsid, upgradeTime)
   }
 }

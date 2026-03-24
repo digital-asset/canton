@@ -47,5 +47,5 @@ package object transaction {
       a <- decode(msg)
     } yield a
 
-  type ErrOr[A] = Either[TransactionError, A]
+  type ErrOr[+A] = Either[TransactionError, A]
 }

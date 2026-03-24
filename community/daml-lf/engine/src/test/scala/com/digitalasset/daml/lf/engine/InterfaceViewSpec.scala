@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, Party, QualifiedName}
@@ -40,11 +40,10 @@ class InterfaceViewSpecV2 extends InterfaceViewSpec(LanguageVersion.Major.V2)
 class InterfaceViewSpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
-    with EitherValues {
+    with EitherValues 
+    with SuppressingLogging {
 
   import InterfaceViewSpec._
-
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   private def loadPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -57,7 +56,7 @@ class InterfaceViewSpec(majorLanguageVersion: LanguageVersion.Major)
     s"InterfaceViews-v${majorLanguageVersion.pretty}.dar"
   )
 
-  val engine = Engine.DevEngine
+  val engine = Engine.DevEngine(loggerFactory)
 
   private def id(s: String) = Identifier(interfaceviewsPkgId, s"InterfaceViews:$s")
 

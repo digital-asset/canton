@@ -505,6 +505,8 @@ object Update {
 
     override protected def pretty: Pretty[CommandRejected] =
       CommandRejected.pretty
+
+    def isTransaction: Boolean
   }
 
   final case class SequencedCommandRejected(
@@ -512,6 +514,7 @@ object Update {
       reasonTemplate: RejectionReasonTemplate,
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
+      isTransaction: Boolean,
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with SequencedEventUpdate
@@ -522,6 +525,7 @@ object Update {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       messageUuid: UUID,
+      isTransaction: Boolean,
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with FloatingUpdate

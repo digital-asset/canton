@@ -744,6 +744,7 @@ object BuildCommon {
         DamlProjects.`contextualized-logging`,
         DamlProjects.`observability-metrics`,
         DamlProjects.`observability-tracing`,
+        `base-errors`,
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
@@ -762,6 +763,7 @@ object BuildCommon {
           opentelemetry_exporter_prometheus,
           opentelemetry_exporter_zipkin,
           opentelemetry_sdk,
+          scalatest % Test,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
@@ -2488,6 +2490,16 @@ object BuildCommon {
             (Test / damlDarOutput).value / "foo-4.0.0.dar",
             "com.digitalasset.canton.damltests.foo.v4",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Qux" / "V1",
+            (Test / damlDarOutput).value / "qux-1.0.0.dar",
+            "com.digitalasset.canton.damltests.qux.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Qux" / "V2",
+            (Test / damlDarOutput).value / "qux-2.0.0.dar",
+            "com.digitalasset.canton.damltests.qux.v2",
+          ),
         ),
       )
 
@@ -2496,6 +2508,7 @@ object BuildCommon {
       .dependsOn(
         `community-app` % "test->test",
         `model-based-testing-drivers`,
+        DamlProjects.`daml-lf-transaction-tests` % "test->test",
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -2520,7 +2533,8 @@ object BuildCommon {
           cats,
           scalacheck,
           scala_lang_modules_scala_parser_combinators,
-          scalatest % Test,
+          scalatest,
+          scopt,
           scalatestScalacheck % Test,
         ),
         Compile / unmanagedJars += Z3.z3Install.value.jar,
@@ -2657,11 +2671,11 @@ object BuildCommon {
           grpc_api,
           grpc_stub,
           reactivestreams,
-          reactivestreams_tck,
-          reactivestreams_examples,
-          scalatestTestNG,
           slf4j_api,
-          scalatest,
+          reactivestreams_tck % Test,
+          reactivestreams_examples % Test,
+          scalatestTestNG % Test,
+          scalatest % Test,
         ),
         coverageEnabled := false,
         publish / skip := false,
@@ -3003,9 +3017,6 @@ object BuildCommon {
 
     lazy val `observability-tracing` = project
       .in(file("base/observability/tracing"))
-      .dependsOn(
-        `testing-utils`
-      )
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
@@ -3188,7 +3199,7 @@ object BuildCommon {
       // better error reporting for pureconfig
       "-Xmacro-settings:materialize-derivations",
       "-Xfatal-warnings",
-      // "-Xlint:valpattern"
+      "-Xlint:valpattern",
       "-Ywarn-dead-code",
       // Warn about implicit conversion between numerical types
       "-Ywarn-numeric-widen",
@@ -3199,6 +3210,7 @@ object BuildCommon {
       "-Ywarn-unused",
       "-Xlint:_",
       "-Xlint:-pattern-shadow",
+      "-Xsource:3-cross",
     )
 
     lazy val damlWarts: List[wartremover.Wart] = List(
@@ -3215,9 +3227,7 @@ object BuildCommon {
     lazy val `daml-lf-data` = project
       .in(file("community/daml-lf/data"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3251,9 +3261,7 @@ object BuildCommon {
     lazy val `daml-lf-data-scalacheck` = project
       .in(file("community/daml-lf/data-scalacheck"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3291,9 +3299,7 @@ object BuildCommon {
     lazy val `daml-lf-data-tests` = project
       .in(file("community/daml-lf/data-tests"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3314,7 +3320,8 @@ object BuildCommon {
         addProtobufFilesToHeaderCheck(Compile),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
         Test / scalacOptions ++= Seq(
-          "-Wconf:msg=match may not be exhaustive:s"
+          "-Wconf:msg=match may not be exhaustive:s",
+          "-Wconf:msg=lambda-parens:s",
         ),
       )
       .dependsOn(
@@ -3331,9 +3338,7 @@ object BuildCommon {
     lazy val `daml-lf-repl` = project
       .in(file("community/daml-lf/repl"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3343,10 +3348,7 @@ object BuildCommon {
         wartremoverErrors := damlWarts,
         publish / skip := false,
         coverageEnabled := false,
-        libraryDependencies ++= Seq(
-          slf4j_nop,
-          jline,
-        ),
+        libraryDependencies ++= Seq(jline),
         addProtobufFilesToHeaderCheck(Compile),
       )
       .dependsOn(
@@ -3365,9 +3367,9 @@ object BuildCommon {
     lazy val `daml-lf-ide-ledger` = project
       .in(file("community/daml-lf/ide-ledger"))
       .disablePlugins(
+        WartRemover,
         ScalafixPlugin,
         ScalafmtPlugin,
-        WartRemover,
       )
       .settings(
         sharedCommunitySettings,
@@ -3397,9 +3399,7 @@ object BuildCommon {
       .in(file("community/daml-lf/language"))
       .enablePlugins(BuildInfoPlugin)
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         buildInfoKeys ++= Seq[BuildInfoKey](
@@ -3417,9 +3417,6 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          circe_core,
-          circe_generic,
-          circe_parser,
           google_protobuf_java,
           scalatest % Test,
         ),
@@ -3435,9 +3432,9 @@ object BuildCommon {
     lazy val `daml-lf-transaction` = project
       .in(file("community/daml-lf/transaction"))
       .disablePlugins(
+        WartRemover,
         ScalafixPlugin,
         ScalafmtPlugin,
-        WartRemover,
       )
       .settings(
         sharedCommunitySettings,
@@ -3448,6 +3445,7 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
+          cats,
           google_common_protos,
           google_common_protos % "protobuf",
           google_protobuf_java,
@@ -3480,9 +3478,7 @@ object BuildCommon {
     lazy val `daml-lf-transaction-test-lib` = project
       .in(file("community/daml-lf/transaction-test-lib"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3521,9 +3517,9 @@ object BuildCommon {
     lazy val `daml-lf-transaction-tests` = project
       .in(file("community/daml-lf/transaction-tests"))
       .disablePlugins(
+        WartRemover,
         ScalafixPlugin,
         ScalafmtPlugin,
-        WartRemover,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -3566,9 +3562,7 @@ object BuildCommon {
     lazy val `daml-lf-archive` = project
       .in(file("community/daml-lf/archive"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -3612,9 +3606,7 @@ object BuildCommon {
     lazy val `daml-lf-stable-packages` = project
       .in(file("community/daml-lf/stable-packages"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -3644,9 +3636,7 @@ object BuildCommon {
     lazy val `daml-lf-validation` = project
       .in(file("community/daml-lf/validation"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3663,7 +3653,10 @@ object BuildCommon {
         Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
         addProtobufFilesToHeaderCheck(Compile),
         // TODO(#30144): replace with @nowarn once the corresponding bazel targets are deleted
-        Test / scalacOptions ++= Seq("-Wconf:msg=match may not be exhaustive:s"),
+        Test / scalacOptions ++= Seq(
+          "-Wconf:msg=match may not be exhaustive:s",
+          "-Wconf:msg=lambda-parens:s",
+        ),
       )
       .dependsOn(
         `daml-lf-archive`,
@@ -3681,9 +3674,7 @@ object BuildCommon {
     lazy val `daml-lf-snapshot-proto` = project
       .in(file("community/daml-lf/snapshot-proto"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3700,9 +3691,7 @@ object BuildCommon {
     lazy val `daml-lf-snapshot` = project
       .in(file("community/daml-lf/snapshot"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .enablePlugins(DamlPlugin, JmhPlugin)
       .dependsOn(
@@ -3751,9 +3740,9 @@ object BuildCommon {
     lazy val `daml-lf-interpreter` = project
       .in(file("community/daml-lf/interpreter"))
       .disablePlugins(
+        WartRemover,
         ScalafixPlugin,
         ScalafmtPlugin,
-        WartRemover,
       )
       .settings(
         sharedCommunitySettings,
@@ -3776,7 +3765,6 @@ object BuildCommon {
           scalatest_compatible % Test,
           scalatestScalacheck % Test,
           jol_core % Test,
-          slf4j_nop % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
         Test / scalacOptions ++= Seq(
@@ -3793,6 +3781,10 @@ object BuildCommon {
           "--add-opens=java.base/java.lang=ALL-UNNAMED",
           "--add-opens=java.base/java.math=ALL-UNNAMED",
           "-Djol.skipHotspotSAAttach=true",
+          "-Djol.skipDynamicAttach=true",
+        ),
+        Test / scalacOptions ++= Seq(
+          "-Wconf:msg=lambda-parens:s"
         ),
       )
       .dependsOn(
@@ -3808,7 +3800,9 @@ object BuildCommon {
         crypto,
         nameof,
         `scala-utils`,
+        CommunityProjects.`util-observability`,
         `daml-lf-transaction-test-lib` % "test->test",
+        CommunityProjects.`community-testing` % "test->test",
       )
 
     lazy val `daml-lf-interpreter-bench` = project
@@ -3841,9 +3835,9 @@ object BuildCommon {
     lazy val `daml-lf-engine` = project
       .in(file("community/daml-lf/engine"))
       .disablePlugins(
+        WartRemover,
         ScalafixPlugin,
         ScalafmtPlugin,
-        WartRemover,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -3863,7 +3857,6 @@ object BuildCommon {
           scalactic % Test,
           scalameter % Test,
           scalatest % Test,
-          slf4j_nop % Test,
         ),
         Compile / bufLintCheck := {},
         Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
@@ -3889,14 +3882,13 @@ object BuildCommon {
         `daml-lf-parser` % Test,
         `daml-lf-encoder` % Test,
         `daml-lf-tests` % Test,
+        CommunityProjects.`community-testing` % "test->test",
       )
 
     lazy val `daml-lf-upgrades-matrix` = project
       .in(file("community/daml-lf/upgrades-matrix"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3936,19 +3928,18 @@ object BuildCommon {
         `daml-lf-parser`,
         `daml-lf-encoder`,
         `daml-lf-tests`,
+        CommunityProjects.`community-testing` % "test->test",
       )
 
     lazy val `daml-lf-api-type-signature` = project
       .in(file("community/daml-lf/api-type-signature"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
         organization := "com.daml",
-        scalacOptions := Seq.empty,
+        scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
         publish / skip := false,
@@ -3971,9 +3962,7 @@ object BuildCommon {
     lazy val `daml-lf-parser` = project
       .in(file("community/daml-lf/parser"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -4009,9 +3998,7 @@ object BuildCommon {
         DamlLfPlugin
       )
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -4024,6 +4011,7 @@ object BuildCommon {
         libraryDependencies ++= List(
           google_protobuf_java,
           scalaz_core,
+          logback_classic % Runtime,
           scalatest % Test,
         ),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
@@ -4044,9 +4032,7 @@ object BuildCommon {
     lazy val `daml-lf-archive-encoder` = project
       .in(file("community/daml-lf/archive/encoder"))
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -4074,8 +4060,7 @@ object BuildCommon {
         `ledger-api-value`,
       )
       .disablePlugins(
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        ScalafmtPlugin
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -4117,8 +4102,6 @@ object BuildCommon {
       .dependsOn(`google-common-protos-scala`, `ledger-api-proto`, `ledger-api-value`)
       .disablePlugins(
         BufPlugin,
-        ScalafixPlugin,
-        ScalafmtPlugin,
         WartRemover,
       )
       .settings(

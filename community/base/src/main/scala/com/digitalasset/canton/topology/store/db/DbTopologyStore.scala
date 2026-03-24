@@ -318,17 +318,17 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       errorLoggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[Unit] = {
     implicit val tc = errorLoggingContext.traceContext
-    val targetPSId = ev(storeId).psid
-    val sourcePSId = sourceStore.storeId.psid
+    val targetPsid = ev(storeId).psid
+    val sourcePsid = sourceStore.storeId.psid
 
     for {
       _ <- ErrorUtil.requireArgumentAsyncShutdown(
-        targetPSId.logical == sourcePSId.logical,
-        s"unexpected logical synchronizer id: expected=${targetPSId.logical}, actual=${sourcePSId.logical}",
+        targetPsid.logical == sourcePsid.logical,
+        s"unexpected logical synchronizer id: expected=${targetPsid.logical}, actual=${sourcePsid.logical}",
       )
       _ <- ErrorUtil.requireArgumentAsyncShutdown(
-        sourcePSId < targetPSId,
-        s"source synchronizer [$targetPSId] is not a predecessor of the target synchronizer [$targetPSId]",
+        sourcePsid < targetPsid,
+        s"source synchronizer [$targetPsid] is not a predecessor of the target synchronizer [$targetPsid]",
       )
       sourceDbStore <- sourceStore match {
         case dbStore: DbTopologyStore[SynchronizerStore] => FutureUnlessShutdown.pure(dbStore)
@@ -355,7 +355,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         sql" ON CONFLICT DO NOTHING" // idempotency-"conflict" based on common_topology_transactions unique constraint
       numInserted <- storage.update(insert.asUpdate, functionFullName)
     } yield {
-      logger.info(s"Transferred $numInserted topology transactions from $sourcePSId to $targetPSId")
+      logger.info(s"Transferred $numInserted topology transactions from $sourcePsid to $targetPsid")
     }
   }
 

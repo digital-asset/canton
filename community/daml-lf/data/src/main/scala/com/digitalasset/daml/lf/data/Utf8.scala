@@ -11,7 +11,7 @@ import com.google.protobuf.ByteString
 import scalaz.Order
 
 import scala.annotation.tailrec
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 // The Daml-LF strings are supposed to be UTF-8 while standard java strings are UTF16
 // Note number of UTF16 operations are not Utf8 equivalent (for instance length, charAt, ordering ...)

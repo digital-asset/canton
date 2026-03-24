@@ -54,11 +54,11 @@ object SynchronizerAliasAndIdStore {
 
   final case class InconsistentLogicalSynchronizerIds(
       alias: SynchronizerAlias,
-      newPSId: PhysicalSynchronizerId,
-      existingPSId: PhysicalSynchronizerId,
+      newPsid: PhysicalSynchronizerId,
+      existingPsid: PhysicalSynchronizerId,
   ) extends Error {
     val message =
-      s"Synchronizer with id $newPSId and alias $alias cannot be registered because existing id `$existingPSId` is for a different logical synchronizer"
+      s"Synchronizer with id $newPsid and alias $alias cannot be registered because existing id `$existingPsid` is for a different logical synchronizer"
   }
 }
 

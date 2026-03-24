@@ -124,7 +124,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
 
       fixture.oldSynchronizerOwners.foreach(
         _.topology.lsu.announcement
-          .propose(fixture.newPSId, fixture.upgradeTime)
+          .propose(fixture.newPsid, fixture.upgradeTime)
       )
 
       val exportDirectory = exportNodesData(
@@ -132,7 +132,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
           sequencers = fixture.oldSynchronizerNodes.sequencers,
           mediators = fixture.oldSynchronizerNodes.mediators,
         ),
-        successorPSId = fixture.newPSId,
+        successorPsid = fixture.newPsid,
       )
 
       // only (s1, m1), (s3, m3), (s4, m4) are upgrading, not (s2, m2)
@@ -150,7 +150,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
         case (newNodeName, oldNodeName) if oldNodeName != "mediator2" =>
           migrateMediator(
             migratedMediator = m(newNodeName),
-            newPSId = fixture.newPSId,
+            newPsid = fixture.newPsid,
             newSequencers = Seq(s(newNodeName.replace("mediator", "sequencer"))),
             exportDirectory = exportDirectory,
             oldNodeName = oldNodeName,
@@ -164,7 +164,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
           s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
             sequencerId = s(oldNodeName).id,
             endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
         case _ => ()
       }
@@ -175,14 +175,14 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
         {
           // LSU succeeds for all the participants but only p1 is connected to the successor
           eventually() {
-            participant1.synchronizers.is_connected(fixture.currentPSId) shouldBe false
-            participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
+            participant1.synchronizers.is_connected(fixture.currentPsid) shouldBe false
+            participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
 
-            participant2.synchronizers.is_connected(fixture.newPSId) shouldBe false
-            participant2.synchronizers.is_connected(fixture.currentPSId) shouldBe false
+            participant2.synchronizers.is_connected(fixture.newPsid) shouldBe false
+            participant2.synchronizers.is_connected(fixture.currentPsid) shouldBe false
 
-            participant3.synchronizers.is_connected(fixture.newPSId) shouldBe false
-            participant3.synchronizers.is_connected(fixture.currentPSId) shouldBe false
+            participant3.synchronizers.is_connected(fixture.newPsid) shouldBe false
+            participant3.synchronizers.is_connected(fixture.currentPsid) shouldBe false
           }
 
           for (newSequencer <- newOldSequencers.keys) {
@@ -202,7 +202,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
           )
           migrateMediator(
             migratedMediator = mediator6,
-            newPSId = fixture.newPSId,
+            newPsid = fixture.newPsid,
             newSequencers = Seq(sequencer6),
             exportDirectory = exportDirectory,
             oldNodeName = "mediator2",
@@ -221,8 +221,8 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
             // Time needs to progress so that the connect gets retried
             environment.simClock.value.advance(retryDelay)
 
-            participant2.synchronizers.is_connected(fixture.newPSId) shouldBe true
-            participant3.synchronizers.is_connected(fixture.newPSId) shouldBe true
+            participant2.synchronizers.is_connected(fixture.newPsid) shouldBe true
+            participant3.synchronizers.is_connected(fixture.newPsid) shouldBe true
           }
         },
         (

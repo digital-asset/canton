@@ -52,7 +52,6 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
 
         val blockChunkProcessor =
           new BlockChunkProcessor(
-            testedProtocolVersion,
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,

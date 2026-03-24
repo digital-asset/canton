@@ -125,7 +125,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
       )
     } yield {
       val engine = Some(
-        new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange))
+        new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
       )
       new JdbcLedgerWriteDao(
         dbDispatcher = dbSupport.dbDispatcher,

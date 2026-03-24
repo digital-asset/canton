@@ -29,9 +29,12 @@ import java.time.Duration
 This class tests that we can successfully run an LSU in the case of a topology where synchronizer nodes are
 added to the synchronizer after initialization. Steps are:
  * bootstrap with s1, m1
+ * connect p1 to s1
  * add s2, m2
+ * connect p1 to s1 and s2
  * do lsu
  * add s5, m5
+ * connect p2 to s5
  */
 final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with OnboardsNewSequencerNode {
 
@@ -58,7 +61,7 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1S5M5_Config
+    EnvironmentDefinition.P2S5M5_Config
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(S1M1)
       }
@@ -66,9 +69,8 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
       .withSetup { implicit env =>
         import env.*
 
-        participants.all.synchronizers.connect(defaultSynchronizerConnectionConfig())
-
-        participants.all.dars.upload(CantonExamplesPath)
+        participant1.synchronizers.connect_by_config(defaultSynchronizerConnectionConfig())
+        participant1.dars.upload(CantonExamplesPath)
 
         setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
       }
@@ -156,8 +158,8 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
       transferTraffic()
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
-        participants.all.forall(_.synchronizers.is_connected(fixture.currentPSId)) shouldBe false
+        participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
+        participant1.synchronizers.is_connected(fixture.currentPsid) shouldBe false
       }
       oldSynchronizerNodes.all.stop()
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
@@ -165,13 +167,18 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
       IouSyntax.createIou(participant1)(bank, alice, amount = 3.0).discard
 
       addNewSV(
-        psid = fixture.newPSId,
+        psid = fixture.newPsid,
         newSequencer = sequencer5,
         newMediator = mediator5,
         existingSequencer = sequencer3,
       )
 
       participant1.health.ping(participant1)
+
+      participant2.synchronizers.list_registered() shouldBe empty
+      participant2.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer5))
+
+      participant1.health.ping(participant2)
     }
   }
 }

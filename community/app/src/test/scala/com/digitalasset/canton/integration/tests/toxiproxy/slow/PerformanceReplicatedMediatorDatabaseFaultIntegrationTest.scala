@@ -143,7 +143,6 @@ class PerformanceReplicatedMediatorDatabaseFaultIntegrationTest
     new UseConfigTransforms(
       Seq(
         ConfigTransforms.setStorageQueueSize(10000),
-        ConfigTransforms.enableReplicatedMediators(),
         ConfigTransforms.setPassiveCheckPeriodMediators(config.PositiveFiniteDuration.ofSeconds(3)),
       ),
       loggerFactory,

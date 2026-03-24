@@ -9,10 +9,10 @@ import com.digitalasset.canton.topology.{
   ExternalPartyOnboardingDetails,
   ParticipantId,
   PartyId,
+  PhysicalSynchronizerId,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref
 
 /** An interface for on-boarding parties via a participant. */
@@ -54,9 +54,11 @@ trait PartySyncService {
       traceContext: TraceContext
   ): FutureUnlessShutdown[SubmissionResult]
 
-  /** Return the protocol version for a synchronizer ID if the node is connected to it.
+  /** Return the physical synchronizer ID for a synchronizer ID if the node is connected to it.
     */
-  def protocolVersionForSynchronizerId(synchronizerId: SynchronizerId): Option[ProtocolVersion]
+  def physicalSynchronizerIdForSynchronizerId(
+      synchronizerId: SynchronizerId
+  ): Option[PhysicalSynchronizerId]
 
   /** The participant id */
   def participantId: ParticipantId

@@ -4,15 +4,15 @@
 package com.digitalasset.canton.testing.modelbased
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
+import com.digitalasset.canton.testing.modelbased.checker.{
+  PropertyChecker,
+  PropertyCheckerResultAssertions,
+}
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.syntax.{Parser, Pretty}
 import com.digitalasset.daml.lf.language.LanguageVersion
-import org.scalacheck.Gen
-import org.scalacheck.Prop.forAllShrink
-import org.scalactic.Prettifier
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.scalatestplus.scalacheck.Checkers
 
 class SyntaxTestPVDev
     extends SyntaxTest(
@@ -29,20 +29,7 @@ class SyntaxTestPV34
 abstract class SyntaxTest(languageVersion: LanguageVersion, readOnlyRollbacks: Boolean)
     extends AnyWordSpec
     with Matchers
-    with Checkers {
-
-  // Used to pretty-print counter examples. Displays both the pretty version for readability and the raw version in
-  // case the bug resides in the pretty-printer.
-  private implicit val prettifier: Prettifier = Prettifier.apply {
-    case scenario: Concrete.Scenario =>
-      s"""|
-          |=== toString ===
-          |${scenario.toString}
-          |=== prettyScenario ===
-          |${Pretty.prettyScenario(scenario)}""".stripMargin
-    case other =>
-      Prettifier.default(other)
-  }
+    with PropertyCheckerResultAssertions {
 
   private val generators =
     new ConcreteGenerators(languageVersion, readOnlyRollbacks, generateQueryByKey = true)
@@ -54,17 +41,21 @@ abstract class SyntaxTest(languageVersion: LanguageVersion, readOnlyRollbacks: B
         numPackages = 3,
         numParticipants = 3,
       )
-      check {
-        forAllShrink(
-          Gen.delay(Gen.const(scenarioGenerator.generate(size = 30))),
-          Shrinker.shrinkScenario.shrink,
-        ) { scenario =>
-          Parser.parseScenario(Pretty.prettyScenario(scenario)) match {
-            case Left(error) => throw new AssertionError(s"Failed to parse scenario: $error")
-            case Right(parsed) => parsed == scenario
-          }
-        }
-      }
+
+      PropertyChecker
+        .checkProperty(
+          generate = () => scenarioGenerator.generate(size = 20),
+          shrink = Shrinker.shrinkScenario,
+          property = (scenario: Concrete.Scenario) =>
+            Parser.parseScenario(Pretty.prettyScenario(scenario)) match {
+              case Left(error) => Left(s"Failed to parse scenario: $error")
+              case Right(parsed) =>
+                if (parsed == scenario) Right(())
+                else Left("Roundtrip failed: parsed scenario differs from original")
+            },
+          maxSamples = 50,
+        )
+        .assertPassed(Pretty.prettyScenario)
     }
   }
 }

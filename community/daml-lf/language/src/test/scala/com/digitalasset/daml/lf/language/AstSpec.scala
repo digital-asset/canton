@@ -3,12 +3,12 @@
 
 package com.digitalasset.daml.lf.language
 
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, DottedName, Name, TypeConId}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import org.scalatest.prop.TableDrivenPropertyChecks
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.VectorMap

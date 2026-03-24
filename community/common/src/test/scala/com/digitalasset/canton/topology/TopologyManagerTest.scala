@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.BaseCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
 import com.digitalasset.canton.topology.store.TopologyStoreId
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
@@ -33,9 +34,53 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
     behave like rejectingMissingSigningKeySignatures(
       createSynchronizerTopologyManager()._2
     )
-    behave like ((backpressureOnFullQueue _).tupled) (
+    behave like (backpressureOnFullQueue _).tupled(
       createSynchronizerTopologyManager(maxUnsentQueueSize = NonNegativeInt.one)
     )
+
+    behave like ((closingOutboxQueue _).tupled) (createSynchronizerTopologyManager())
+
+  }
+
+  private def closingOutboxQueue(
+      outbox: SynchronizerOutboxQueue,
+      manager: SynchronizerTopologyManager,
+  ): Unit = "close the outbox queue" in {
+    // put one transaction into the outbox queue
+    val asyncResult1 = manager
+      .add(Seq(ns1k1_k1), ForceFlags.none, expectFullAuthorization = true)
+      .futureValueUS
+      .value
+    outbox.numUnsentTransactions shouldBe 1
+
+    // dequeue to move the transaction from unsent to inProcess
+    outbox.dequeue(limit = PositiveInt.MaxValue).failOnShutdown
+    outbox.numUnsentTransactions shouldBe 0
+    outbox.numInProcessTransactions shouldBe 1
+
+    // add another transaction to unsent
+    val asyncResult2 = manager
+      .add(Seq(ns2k2_k2), ForceFlags.none, expectFullAuthorization = true)
+      .futureValueUS
+      .value
+    outbox.numUnsentTransactions shouldBe 1
+    outbox.numInProcessTransactions shouldBe 1
+
+    // now close the manager and therefore also the queue
+    manager.close()
+
+    outbox.numUnsentTransactions shouldBe 0
+    outbox.numInProcessTransactions shouldBe 0
+
+    // the pending async results should be notified of the shutdown
+    asyncResult1.unwrap.unwrap.futureValue shouldBe AbortedDueToShutdown
+    asyncResult2.unwrap.unwrap.futureValue shouldBe AbortedDueToShutdown
+
+    // attempting to use the queue after the shutdown results in AbortedDueToShutdown
+    outbox.enqueue(Seq(ns1k1_k1)).unwrap.unwrap.futureValue shouldBe AbortedDueToShutdown
+    outbox.dequeue(limit = PositiveInt.MaxValue) shouldBe AbortedDueToShutdown
+    outbox.completeCycle() shouldBe AbortedDueToShutdown
+
   }
 
   private def backpressureOnFullQueue(
@@ -173,7 +218,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
   private def createSynchronizerTopologyManager(
       maxUnsentQueueSize: NonNegativeInt = NonNegativeInt.tryCreate(10)
   ) = {
-    val outbox = new SynchronizerOutboxQueue(loggerFactory)
+    val outbox = new SynchronizerOutboxQueue(timeouts, loggerFactory)
     val manager = new SynchronizerTopologyManager(
       Factory.sequencer1.uid,
       wallClock,

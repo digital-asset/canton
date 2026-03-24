@@ -102,6 +102,7 @@ class PartyReplicationAdminWorkflow(
             synchronizerId = synchronizerId.toProtoPrimitive,
             packageIdSelectionPreference = Nil,
             prefetchContractKeys = Nil,
+            tapsMaxPasses = None,
           ),
           timeouts.default.asFiniteApproximation,
         )
@@ -188,6 +189,7 @@ class PartyReplicationAdminWorkflow(
             synchronizerId = synchronizerIdS,
             packageIdSelectionPreference = Nil,
             prefetchContractKeys = Nil,
+            tapsMaxPasses = None,
           ),
           timeouts.default.asFiniteApproximation,
         )
@@ -387,6 +389,7 @@ class PartyReplicationAdminWorkflow(
                 synchronizerId = ap.synchronizerId.toProtoPrimitive,
                 packageIdSelectionPreference = Nil,
                 prefetchContractKeys = Nil,
+                tapsMaxPasses = None,
               ),
               timeouts.default.asFiniteApproximation,
             )

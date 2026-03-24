@@ -641,7 +641,7 @@ abstract class BaseTopologySnapshot(
         }
     }
 
-  override def synchronizerUpgradeOngoing()(implicit
+  override def announcedLsu()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
     findTransactionsByUids(

@@ -166,7 +166,7 @@ private class SymbolicSolver(
 
   /** Enum used by [[listRelationshipConstraint]] */
   private sealed trait ListRelationship
-  private case object StrictPrefix extends ListRelationship
+  private case object Prefix extends ListRelationship
   private case object ListEquality extends ListRelationship
 
   /** Expresses a relationship constraint between two "virtual sequences" of symbolic contract IDs,
@@ -197,8 +197,8 @@ private class SymbolicSolver(
     * @param ys
     *   A [[BoundedContractIdList]] representing the truncated virtual list ys.
     * @param relationship
-    *   If ScrictPrefix, enforces that ys is a strict prefix of xs (l < length of xs). If ListEqual,
-    *   enforces that ys is exactly equal to xs (l == length of xs).
+    *   If Prefix, enforces that ys is a prefix of xs (l <= length of xs). If ListEqual, enforces
+    *   that ys is exactly equal to xs (l == length of xs).
     */
   private def listRelationshipConstraint(
       xs: Seq[(IntExpr, BoolExpr)],
@@ -219,7 +219,7 @@ private class SymbolicSolver(
     )
     val lengthConstraints = Seq(ctx.mkGe(ys.length, ctx.mkInt(0))) ++ (relationship match {
       case ListEquality => Seq(ctx.mkEq(ys.length, totalLengthxs))
-      case StrictPrefix => Seq(ctx.mkLt(ys.length, totalLengthxs))
+      case Prefix => Seq(ctx.mkLe(ys.length, totalLengthxs))
     })
 
     // element matching
@@ -313,7 +313,7 @@ private class SymbolicSolver(
       Set.empty
     case LookupByKey(_, _, _) =>
       Set.empty
-    case QueryByKey(_, _, _, _) =>
+    case QueryByKey(_, keyId, _, _) =>
       Set.empty
     case Rollback(subTransaction) =>
       subTransaction.view.flatMap(collectCreatedKeyIds).toSet
@@ -331,7 +331,7 @@ private class SymbolicSolver(
       subTransaction.view.flatMap(collectQueryByKeyKeyIds).toSet
     case Fetch(_) => Set.empty
     case FetchByKey(_, _, _) => Set.empty
-    case LookupByKey(_, _, _) => Set.empty
+    case LookupByKey(_, keyId, _) => Set(keyId)
     case QueryByKey(_, keyId, _, _) => Set(keyId)
     case Rollback(subTransaction) =>
       subTransaction.view.flatMap(collectQueryByKeyKeyIds).toSet
@@ -509,15 +509,28 @@ private class SymbolicSolver(
     val createdKeyIds = collectCreatedKeyIds(ledger)
     val queryByKeyKeyIds = collectQueryByKeyKeyIds(ledger)
     val upperBound = (createdKeyIds.size * distinctKeyToContractRatio).round
-    and(
-      (createdKeyIds ++ queryByKeyKeyIds)
-        .map(keyId =>
-          ctx.mkAnd(
-            ctx.mkGe(keyId, ctx.mkInt(1)),
-            ctx.mkLe(keyId, ctx.mkInt(upperBound)),
+    ctx.mkAnd(
+      and(
+        createdKeyIds
+          .map(keyId =>
+            ctx.mkAnd(
+              ctx.mkGe(keyId, ctx.mkInt(1)),
+              ctx.mkLe(keyId, ctx.mkInt(upperBound)),
+            )
           )
-        )
-        .toSeq
+          .toSeq
+      ),
+      and(
+        queryByKeyKeyIds
+          .map(keyId =>
+            ctx.mkAnd(
+              ctx.mkGe(keyId, ctx.mkInt(1)),
+              // Leave room for querying keys that have not been created
+              ctx.mkLe(keyId, ctx.mkInt(upperBound + 1)),
+            )
+          )
+          .toSeq
+      ),
     )
   }
 
@@ -794,10 +807,15 @@ private class SymbolicSolver(
                 })
                 (cid, ctx.mkAnd(exists, active, hasKey, notSeenBefore))
               }
-            listRelationshipConstraint(
-              activeCandidatesWithKey,
-              contractIds,
-              if (exhaustive) ListEquality else StrictPrefix,
+            ctx.mkAnd(
+              listRelationshipConstraint(
+                activeCandidatesWithKey,
+                contractIds,
+                if (exhaustive) ListEquality else Prefix,
+              ),
+              // Asking for 0 contracts is not allowed, so we should never end up with a QueryByKey node in which
+              // no contracts were returned but the answer is not exhaustive.
+              if (exhaustive) ctx.mkTrue() else ctx.mkGt(contractIds.length, ctx.mkInt(0)),
             )
           }
         case Rollback(subTransaction) =>

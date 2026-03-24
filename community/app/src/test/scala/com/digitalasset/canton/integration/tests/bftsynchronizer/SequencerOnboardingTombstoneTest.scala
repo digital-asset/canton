@@ -137,8 +137,6 @@ trait SequencerOnboardingTombstoneTest
         sequencer2.sequencerConnection.withAlias(SequencerAlias.tryCreate("seq2x")),
       )
 
-      val usingPool = participant1.config.sequencerClient.useNewConnectionPool
-
       loggerFactory.assertLogsUnorderedOptional(
         {
 
@@ -192,22 +190,14 @@ trait SequencerOnboardingTombstoneTest
         ),
         (
           LogEntryOptionality.Required,
-          (entry: LogEntry) =>
-            if (usingPool) {
-              entry.loggerName should include("SequencerSubscriptionX")
-              entry.warningMessage should (include(
-                "Permanently closing sequencer subscription due to error"
-              ) and include(
-                "FAILED_PRECONDITION/SEQUENCER_TOMBSTONE_ENCOUNTERED"
-              ))
-            } else {
-              entry.loggerName should include("ResilientSequencerSubscription")
-              entry.warningMessage should (include(
-                "Closing resilient sequencer subscription due to error"
-              ) and include(
-                "FAILED_PRECONDITION/SEQUENCER_TOMBSTONE_ENCOUNTERED"
-              ))
-            },
+          (entry: LogEntry) => {
+            entry.loggerName should include("SequencerSubscriptionX")
+            entry.warningMessage should (include(
+              "Permanently closing sequencer subscription due to error"
+            ) and include(
+              "FAILED_PRECONDITION/SEQUENCER_TOMBSTONE_ENCOUNTERED"
+            ))
+          },
         ),
         (
           LogEntryOptionality.OptionalMany,

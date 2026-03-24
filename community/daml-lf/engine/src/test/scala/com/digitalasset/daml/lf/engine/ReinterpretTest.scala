@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package engine
 
 import java.util.zip.ZipInputStream
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
@@ -12,7 +13,6 @@ import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command.ReplayCommand
-import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -29,7 +29,8 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with EitherValues {
+    with EitherValues
+    with SuppressingLogging {
 
   import ReinterpretTest._
 
@@ -68,7 +69,8 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     EngineConfig(
       allowedLanguageVersions = language.LanguageVersion.allLfVersionsRange,
       forbidLocalContractIds = true,
-    )
+    ),
+    loggerFactory,
   )
 
   private val contractStateMode = ContractStateMachine.Mode.default
@@ -226,8 +228,6 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
 }
 
 object ReinterpretTest {
-
-  private implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   private implicit def qualifiedNameStr(s: String): QualifiedName =
     QualifiedName.assertFromString(s)

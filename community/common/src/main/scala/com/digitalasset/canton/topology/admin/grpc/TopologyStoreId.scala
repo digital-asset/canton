@@ -17,12 +17,12 @@ sealed trait TopologyStoreId extends Product with Serializable {
   def toProtoV30: adminProto.StoreId
 
   private[canton] def toInternal(
-      lookup: PSIdLookup
+      lookup: PsidLookup
   ): Either[SynchronizerId, store.TopologyStoreId]
 }
 
-private[canton] trait PSIdLookup {
-  def activePSIdFor(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
+private[canton] trait PsidLookup {
+  def activePsidFor(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
 }
 
 object TopologyStoreId {
@@ -99,12 +99,12 @@ object TopologyStoreId {
       )
 
     override private[canton] def toInternal(
-        lookup: PSIdLookup
+        lookup: PsidLookup
     ): Either[SynchronizerId, store.TopologyStoreId.SynchronizerStore] =
       id.fold(
         logical =>
           lookup
-            .activePSIdFor(logical)
+            .activePsidFor(logical)
             .map(store.TopologyStoreId.SynchronizerStore(_))
             .toRight(logical),
         physical => Right(store.TopologyStoreId.SynchronizerStore(physical)),
@@ -127,7 +127,7 @@ object TopologyStoreId {
       )
 
     override private[canton] def toInternal(
-        lookup: PSIdLookup
+        lookup: PsidLookup
     ): Either[SynchronizerId, store.TopologyStoreId.TemporaryStore] =
       Right(store.TopologyStoreId.TemporaryStore(name))
   }
@@ -147,7 +147,7 @@ object TopologyStoreId {
       adminProto.StoreId(adminProto.StoreId.Store.Authorized(adminProto.StoreId.Authorized()))
 
     override private[canton] def toInternal(
-        lookup: PSIdLookup
+        lookup: PsidLookup
     ): Either[SynchronizerId, store.TopologyStoreId.AuthorizedStore] =
       Right(store.TopologyStoreId.AuthorizedStore)
   }

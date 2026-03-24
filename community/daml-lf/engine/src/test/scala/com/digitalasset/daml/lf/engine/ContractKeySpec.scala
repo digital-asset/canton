@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.Ref.{
@@ -33,7 +34,6 @@ import com.digitalasset.daml.lf.value.Value.{
   ValueParty,
   ValueRecord,
 }
-import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -61,20 +61,19 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with EitherValues {
+    with EitherValues 
+    with SuppressingLogging {
 
   import ContractKeySpec._
 
   private[this] val version = SerializationVersion.minContractKeys
   private[this] val contractIdVersion = ContractIdVersion.V2
 
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
-
-  private[this] val suffixLenientEngine = Engine.DevEngine
+  private[this] val suffixLenientEngine = Engine.DevEngine(loggerFactory)
   private[this] val compiledPackages = ConcurrentCompiledPackages(
     suffixLenientEngine.config.getCompilerConfig
   )
-  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages)
+  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -301,7 +300,8 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersionsRange,
           forbidLocalContractIds = true,
-        )
+        ),
+        loggerFactory,
       )
       val (multiKeysPkgId, multiKeysPkg, allMultiKeysPkgs) =
         loadAndAddPackage(s"MultiKeys-v${majorLanguageVersion.pretty}dev.dar")

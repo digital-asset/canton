@@ -126,7 +126,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
       participant1.health.ping(participant3)
       // no activity for P4 on purpose: LSU should also work that way
 
-      val upgradeFailureError = s"Upgrade to ${fixture.newPSId} failed"
+      val upgradeFailureError = s"Upgrade to ${fixture.newPsid} failed"
 
       val logAssertions: Seq[(LogEntryOptionality, LogEntry => Assertion)] =
         Seq(
@@ -162,7 +162,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
         clue("Migrate") {
           fixture.oldSynchronizerOwners.foreach(
             _.topology.lsu.announcement
-              .propose(fixture.newPSId, fixture.upgradeTime)
+              .propose(fixture.newPsid, fixture.upgradeTime)
           )
 
           val exportDirectory = exportNodesData(
@@ -170,7 +170,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
               sequencers = fixture.oldSynchronizerNodes.sequencers,
               mediators = fixture.oldSynchronizerNodes.mediators,
             ),
-            successorPSId = fixture.newPSId,
+            successorPsid = fixture.newPsid,
           )
 
           // Note that mediators are not migrated yet
@@ -186,7 +186,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
               sequencerId = s(oldSequencerName).id,
               endpoints =
                 s(newSequencerName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-              synchronizerId = fixture.currentPSId,
+              successorSynchronizerId = fixture.newPsid,
             )
           }
 
@@ -200,14 +200,15 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        forEvery(automaticallyUpgraded)(_.synchronizers.is_connected(fixture.newPSId) shouldBe true)
+        forEvery(automaticallyUpgraded)(_.synchronizers.is_connected(fixture.newPsid) shouldBe true)
         forEvery(automaticallyUpgraded)(
-          _.synchronizers.is_connected(fixture.currentPSId) shouldBe false
+          _.synchronizers.is_connected(fixture.currentPsid) shouldBe false
         )
       }
-      for (newSequencer <- newOldSequencers.keys) {
+
+      newOldSequencers.keys.foreach(newSequencer =>
         waitForTargetTimeOnSequencer(ls(newSequencer), environment.clock.now, logger)
-      }
+      )
 
       participant1.underlying.value.sync
         .connectedSynchronizerForAlias(daName)
@@ -232,7 +233,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
       newOldMediators.foreach { case (newMediatorName, oldMediatorName) =>
         migrateMediator(
           migratedMediator = m(newMediatorName),
-          newPSId = fixture.newPSId,
+          newPsid = fixture.newPsid,
           newSequencers = Seq(s(newMediatorsAndSequencers(newMediatorName))),
           exportDirectory = exportDirectory,
           oldNodeName = oldMediatorName,
@@ -243,8 +244,8 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
       manuallyUpgraded.foreach { p =>
         p.repair.perform_late_lsu(
-          currentPhysicalSynchronizerId = fixture.currentPSId,
-          successorPhysicalSynchronizerId = fixture.newPSId,
+          currentPhysicalSynchronizerId = fixture.currentPsid,
+          successorPhysicalSynchronizerId = fixture.newPsid,
           announcedUpgradeTime = fixture.upgradeTime,
           successorConfig = synchronizerConnectionConfig(sequencer5),
         )

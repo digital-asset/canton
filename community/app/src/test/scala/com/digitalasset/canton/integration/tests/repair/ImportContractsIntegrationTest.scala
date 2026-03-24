@@ -130,7 +130,7 @@ trait ImportContractsIntegrationTestBase
             }
           } else {
             assertThrowsAndLogsCommandFailures(
-              participant3.repair.import_acsV2(file.canonicalPath, daId),
+              participant3.repair.import_acsV2(daId, file.canonicalPath),
               _.errorMessage should include("with a non-zero reassignment counter"),
             )
           }

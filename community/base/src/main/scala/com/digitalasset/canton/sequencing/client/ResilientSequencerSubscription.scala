@@ -23,14 +23,11 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionErro
   ApplicationHandlerShutdown,
 }
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.HandlerException
-import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handlers.{EventTimestampCapture, HasReceivedEvent}
-import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
-import com.digitalasset.canton.topology.{Member, SequencerId}
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil, LoggerUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.apache.pekko.stream.AbruptStageTerminationException
 
 import java.util.concurrent.atomic.AtomicReference
@@ -313,58 +310,6 @@ class ResilientSequencerSubscription[HandlerError](
 }
 
 object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
-  def apply[E](
-      sequencerId: SequencerId,
-      protocolVersion: ProtocolVersion,
-      member: Member,
-      getTransport: => UnlessShutdown[SequencerClientTransport],
-      handler: SequencedEventHandler[E],
-      startingTimestamp: Option[CantonTimestamp],
-      maybeExitOnFatalError: SubscriptionCloseReason[E] => Unit,
-      initialDelay: FiniteDuration,
-      warnDelay: FiniteDuration,
-      maxRetryDelay: FiniteDuration,
-      timeouts: ProcessingTimeout,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): ResilientSequencerSubscription[E] =
-    new ResilientSequencerSubscription[E](
-      sequencerId,
-      startingTimestamp,
-      handler,
-      createSubscription(member, getTransport, protocolVersion),
-      SubscriptionRetryDelayRule(
-        initialDelay,
-        warnDelay,
-        maxRetryDelay,
-      ),
-      maybeExitOnFatalError,
-      timeouts,
-      loggerFactory,
-    )
-
-  /** Creates a simpler handler subscription function for the underlying class */
-  private def createSubscription[E](
-      member: Member,
-      getTransport: => UnlessShutdown[SequencerClientTransport],
-      protocolVersion: ProtocolVersion,
-  ): SequencerSubscriptionFactory[E] =
-    new SequencerSubscriptionFactory[E] {
-      override def create(
-          startingTimestamp: Option[CantonTimestamp],
-          handler: SequencedEventHandler[E],
-      )(implicit
-          traceContext: TraceContext
-      ): UnlessShutdown[(SequencerSubscription[E], SubscriptionErrorRetryPolicy)] = {
-        val request = SubscriptionRequest(member, startingTimestamp, protocolVersion)
-        getTransport
-          .map { transport =>
-            val subscription =
-              transport.subscribe(request, handler)(traceContext)
-            (subscription, transport.subscriptionRetryPolicy)
-          }
-      }
-    }
-
   @Explanation(
     """This warning is logged when a sequencer subscription is interrupted. The system will keep on retrying to reconnect indefinitely."""
   )

@@ -66,10 +66,10 @@ final class LsuAsynchronousIntegrationTest extends LsuBase {
 
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
-        participant2.synchronizers.is_connected(fixture.newPSId) shouldBe false
+        participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
+        participant2.synchronizers.is_connected(fixture.newPsid) shouldBe false
 
-        participants.all.forall(_.synchronizers.is_connected(fixture.currentPSId)) shouldBe false
+        participants.all.forall(_.synchronizers.is_connected(fixture.currentPsid)) shouldBe false
       }
 
       waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
@@ -96,7 +96,7 @@ final class LsuAsynchronousIntegrationTest extends LsuBase {
 
       // It performs the LSU...
       eventually() {
-        participant2.synchronizers.is_connected(fixture.newPSId) shouldBe true
+        participant2.synchronizers.is_connected(fixture.newPsid) shouldBe true
       }
 
       oldSynchronizerNodes.all.stop()

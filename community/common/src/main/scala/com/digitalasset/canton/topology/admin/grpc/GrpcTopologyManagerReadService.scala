@@ -37,7 +37,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, topology}
 import com.google.protobuf.ByteString
@@ -114,7 +114,7 @@ class GrpcTopologyManagerReadService(
     crypto: Crypto,
     topologyClientLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
     timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
-    physicalSynchronizerIdLookup: PSIdLookup,
+    physicalSynchronizerIdLookup: PsidLookup,
     processingTimeout: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext, materializer: Materializer)
@@ -140,14 +140,14 @@ class GrpcTopologyManagerReadService(
     storeO match {
       case Some(store) =>
         EitherT.rightT(
-          activePSIdFor(store).toOption.toList.flatMap(targetStoreId =>
+          activePsidFor(store).toOption.toList.flatMap(targetStoreId =>
             stores.filter(_.storeId == targetStoreId)
           )
         )
       case None => EitherT.rightT(stores)
     }
 
-  private def activePSIdFor(
+  private def activePsidFor(
       grpcTopologyStoreId: grpc.TopologyStoreId
   )(implicit
       traceContext: TraceContext
@@ -166,7 +166,7 @@ class GrpcTopologyManagerReadService(
     val synchronizerStores =
       storeO match {
         case Some(store) =>
-          activePSIdFor(store).flatMap { targetStoreInternal =>
+          activePsidFor(store).flatMap { targetStoreInternal =>
             val synchronizerStores = stores
               .flatMap(
                 topology.store.TopologyStoreId
@@ -196,7 +196,7 @@ class GrpcTopologyManagerReadService(
             .toMap
           val allKnownLogical = synchronizerStores.keySet.map(_.logical)
           val allKnownActivePhysical =
-            allKnownLogical.flatMap(physicalSynchronizerIdLookup.activePSIdFor)
+            allKnownLogical.flatMap(physicalSynchronizerIdLookup.activePsidFor)
           val activePhysicalStores = allKnownActivePhysical.flatMap(synchronizerStores.get)
           activePhysicalStores.toSeq match {
             case Seq(synchronizerStore) => synchronizerStore.asRight
@@ -1013,7 +1013,7 @@ class GrpcTopologyManagerReadService(
         topologyClient.awaitSnapshot(referenceEffectiveTime.immediateSuccessor.value)
       )
       _ <- EitherT.fromOptionF(
-        fopt = topologySnapshot.synchronizerUpgradeOngoing(),
+        fopt = topologySnapshot.announcedLsu(),
         ifNone = TopologyManagerError.NoLsuAnnounced.Failure(): RpcError,
       )
 
@@ -1091,11 +1091,20 @@ class GrpcTopologyManagerReadService(
         request.filterSequencerId,
       )
     } yield {
-      val results = res.collect { case (context, successor: LsuSequencerConnectionSuccessor) =>
-        adminProto.ListLsuSequencerConnectionSuccessorResponse.Result(
-          context = Some(createBaseResult(context)),
-          item = Some(successor.toProto),
+      val filterSuccessorPhysicalSynchronizerId =
+        OptionUtil.emptyStringAsNone(request.filterSuccessorPhysicalSynchronizerId)
+      def successorPsidPredicate(mapping: LsuSequencerConnectionSuccessor) =
+        filterSuccessorPhysicalSynchronizerId.fold(true)(
+          _.startsWith(mapping.successorPsid.toProtoPrimitive)
         )
+
+      val results = res.collect {
+        case (context, successor: LsuSequencerConnectionSuccessor)
+            if (successorPsidPredicate(successor)) =>
+          adminProto.ListLsuSequencerConnectionSuccessorResponse.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(successor.toProto),
+          )
       }
       adminProto.ListLsuSequencerConnectionSuccessorResponse(results)
     }

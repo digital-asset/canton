@@ -57,7 +57,6 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfKeyResolver, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, Party, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -320,9 +319,9 @@ object ApiPackageManagementServiceSpec {
     ): Future[(Option[EnrichedVettedPackages], Option[EnrichedVettedPackages])] =
       throw new UnsupportedOperationException()
 
-    override def protocolVersionForSynchronizerId(
+    override def physicalSynchronizerIdForSynchronizerId(
         synchronizerId: SynchronizerId
-    ): Option[ProtocolVersion] =
+    ): Option[PhysicalSynchronizerId] =
       throw new UnsupportedOperationException()
 
     override def participantId: ParticipantId = DefaultTestIdentities.participant1

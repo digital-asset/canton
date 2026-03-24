@@ -609,18 +609,22 @@ trait WithImportPartyAcs {
       contractImportMode: ContractImportMode,
       file: File,
       synchronizerId: SynchronizerId,
-  ): Unit = importParticipant.parties
-    .import_party_acsV2(
-      importFilePath = file.canonicalPath,
-      synchronizerId = synchronizerId,
-      representativePackageIdOverride = RepresentativePackageIdOverride(
-        contractOverride = contractRpIdOverride,
-        packageIdOverride = packageIdOverride,
-        packageNameOverride = packageNameOverride,
-      ),
-      contractImportMode = contractImportMode,
-    )
-    .discard
+  ): Unit =
+    // Using the repair import ACS endpoing as the offline party replication specific
+    // behaviour of the parties.import_party_acsV2 is irrelevant for the representative
+    // PackageId selection test.
+    importParticipant.repair
+      .import_acsV2(
+        importFilePath = file.canonicalPath,
+        synchronizerId = synchronizerId,
+        representativePackageIdOverride = RepresentativePackageIdOverride(
+          contractOverride = contractRpIdOverride,
+          packageIdOverride = packageIdOverride,
+          packageNameOverride = packageNameOverride,
+        ),
+        contractImportMode = contractImportMode,
+      )
+      .discard
 }
 
 // TODO(#25385): This test should be a variation in the conformance test suites

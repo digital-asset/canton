@@ -73,6 +73,15 @@ private[protocol] object TopologyTransactionDiff {
 
     val allEvents: Set[TopologyEvent] = added ++ changed ++ removed ++ onboarding
 
+    val clearingOnboardingLocalParty = after.exists {
+      case ((partyId, participantId), (_, onboardingAfter)) =>
+        !onboardingAfter &&
+        participantId == localParticipantId.toLf &&
+        before.get(partyId -> participantId).exists { case (_, onboardingBefore) =>
+          onboardingBefore
+        }
+    }
+
     NonEmpty
       .from(allEvents)
       .map(
@@ -80,6 +89,7 @@ private[protocol] object TopologyTransactionDiff {
           _,
           updateId(psid, oldRelevantState, currentRelevantState),
           onboardingLocalParty = onboarding.exists(_.participant == localParticipantId.toLf),
+          clearingOnboardingLocalParty = clearingOnboardingLocalParty,
         )
       )
   }
@@ -164,4 +174,5 @@ private[protocol] final case class TopologyTransactionDiff(
     topologyEvents: NonEmpty[Set[TopologyEvent]],
     updateId: UpdateId,
     onboardingLocalParty: Boolean,
+    clearingOnboardingLocalParty: Boolean,
 )

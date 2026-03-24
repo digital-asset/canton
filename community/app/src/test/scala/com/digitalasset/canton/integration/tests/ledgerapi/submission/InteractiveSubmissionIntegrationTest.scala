@@ -19,8 +19,8 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
 }
 import com.daml.ledger.api.v2.value.Value
 import com.daml.ledger.api.v2.value.Value.Sum
-import com.daml.ledger.javaapi.data.DisclosedContract
 import com.daml.ledger.javaapi.data.codegen.ContractId as CodeGenCID
+import com.daml.ledger.javaapi.data.{Command, DisclosedContract}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.TemplateId
@@ -443,6 +443,52 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
             Seq.empty,
           ),
         )
+    }
+
+    "use the appropriate synchronizer ID value based on the protocol version" in { implicit env =>
+      import env.*
+
+      val cycle =
+        new M.Cycle(UUID.randomUUID().toString, aliceE.toProtoPrimitive).create.commands.loneElement
+      val preparedTransaction = cpn.ledger_api.javaapi.interactive_submission.prepare(
+        Seq(aliceE.partyId),
+        Seq(cycle),
+      )
+      val preparedSynchronizerId =
+        preparedTransaction.preparedTransaction.value.metadata.value.synchronizerId
+
+      if (testedProtocolVersion <= ProtocolVersion.v34)
+        preparedSynchronizerId shouldBe synchronizer1Id.logical.toProtoPrimitive
+      else
+        preparedSynchronizerId shouldBe synchronizer1Id.toProtoPrimitive
+    }
+
+    "return a clear error if the wrong kind of synchronizer ID is used" in { implicit env =>
+      val cycle: Command =
+        new M.Cycle(
+          UUID.randomUUID().toString,
+          aliceE.toProtoPrimitive,
+        ).create.commands.loneElement
+
+      val (signature, preparedTransactionWithWrongSyncIdFormat) =
+        prepareTransactionsWithIncorrectSynchronizerIdFormat(cycle, aliceE)
+
+      val expectedErrorMessage = if (testedProtocolVersion <= ProtocolVersion.v34) {
+        "Please use a Logical Synchronizer ID in the prepared transaction metadata on PVs <= 34"
+      } else {
+        "Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
+      }
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        cpn.ledger_api.interactive_submission
+          .execute_and_wait(
+            preparedTransactionWithWrongSyncIdFormat,
+            Map(aliceE.partyId -> Seq(signature)),
+            UUID.randomUUID().toString,
+            testedHashingSchemeVersion.toLedgerApiProto,
+          ),
+        _.errorMessage should include(expectedErrorMessage),
+      )
     }
 
     "create a contract" in { implicit env =>

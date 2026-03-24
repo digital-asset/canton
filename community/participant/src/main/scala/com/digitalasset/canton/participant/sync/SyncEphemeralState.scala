@@ -162,6 +162,7 @@ class SyncEphemeralState(
       reassignmentCache,
       reassignmentSynchronizer,
       sessionKeyStore,
+      onboardingClearanceScheduler,
     )(logger)
 
 }

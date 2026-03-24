@@ -313,7 +313,7 @@ class SynchronizerSelectorTest
     "a synchronizer is prescribed" when {
       "return correct response when prescribed submitter synchronizer id is the current one" in {
         val selector = selectorForExerciseByInterface(
-          prescribedPSId = Some(da)
+          prescribedPsid = Some(da)
         )
 
         selector.forSingleSynchronizer.futureValueUS.value shouldBe defaultSynchronizerRank
@@ -322,7 +322,7 @@ class SynchronizerSelectorTest
 
       "return an error when prescribed synchronizer is incorrect" in {
         val selector = selectorForExerciseByInterface(
-          prescribedPSId = Some(acme),
+          prescribedPsid = Some(acme),
           connectedSynchronizers = Set(acme, da),
         )
 
@@ -347,7 +347,7 @@ class SynchronizerSelectorTest
 
       "propose reassignments when needed" in {
         val selector = selectorForExerciseByInterface(
-          prescribedPSId = Some(acme),
+          prescribedPsid = Some(acme),
           connectedSynchronizers = Set(acme, da),
           admissibleSynchronizers = NonEmpty.mk(Set, acme, da),
         )
@@ -538,7 +538,7 @@ private[routing] object SynchronizerSelectorTest {
         connectedSynchronizers: Set[PhysicalSynchronizerId] = Set(defaultSynchronizer),
         admissibleSynchronizers: NonEmpty[Set[PhysicalSynchronizerId]] =
           defaultAdmissibleSynchronizers,
-        prescribedPSId: Option[PhysicalSynchronizerId] = defaultPrescribedSynchronizerId,
+        prescribedPsid: Option[PhysicalSynchronizerId] = defaultPrescribedSynchronizerId,
         serializationVersion: LfSerializationVersion = fixtureSerializationVersion,
         vettedPackages: Seq[VettedPackage] = ExerciseByInterface.correctPackages,
         ledgerTime: CantonTimestamp = CantonTimestamp.now(),
@@ -562,7 +562,7 @@ private[routing] object SynchronizerSelectorTest {
         synchronizerOfContracts,
         connectedSynchronizers,
         admissibleSynchronizers,
-        prescribedPSId,
+        prescribedPsid,
         vettedPackages,
         exerciseByInterface.tx,
         ledgerTime,
@@ -622,7 +622,7 @@ private[routing] object SynchronizerSelectorTest {
         ],
         connectedSynchronizers: Set[PhysicalSynchronizerId],
         admissibleSynchronizers: NonEmpty[Set[PhysicalSynchronizerId]],
-        prescribedSubmitterPSId: Option[PhysicalSynchronizerId],
+        prescribedSubmitterPsid: Option[PhysicalSynchronizerId],
         vettedPackages: Seq[VettedPackage],
         tx: LfVersionedTransaction,
         ledgerTime: CantonTimestamp,
@@ -681,7 +681,7 @@ private[routing] object SynchronizerSelectorTest {
           transaction = tx,
           synchronizerState = TestSynchronizerState$,
           contractsStakeholders = inputContractStakeholders,
-          prescribedSynchronizerIdO = prescribedSubmitterPSId,
+          prescribedSynchronizerIdO = prescribedSubmitterPsid,
           disclosedContracts = Nil,
         )
 

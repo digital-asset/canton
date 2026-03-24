@@ -6,11 +6,11 @@ package validation
 
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{DottedName, Identifier, PackageId, QualifiedName}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion => LV}
-import org.scalatest.prop.TableDrivenPropertyChecks
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion as LV}
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 class DependencyVersionSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {

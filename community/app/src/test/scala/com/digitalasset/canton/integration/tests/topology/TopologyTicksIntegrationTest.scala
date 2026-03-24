@@ -133,7 +133,7 @@ class TopologyTicksIntegrationTest
 
           // but becomes effective after advancing time enough for a topology tick to be created and signal that the
           // topology transaction is effective.
-          eventually() {
+          eventually(timeUntilSuccess = 60.seconds) {
             simClock.advance(epsilon.duration)
             participant1.ledger_api.parties.list().map(_.party) should contain(partyId)
             sequencer1.topology.party_to_participant_mappings

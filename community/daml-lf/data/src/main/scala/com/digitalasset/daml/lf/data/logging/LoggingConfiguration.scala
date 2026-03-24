@@ -17,11 +17,9 @@ object LoggingConfiguration {
 
   def current: LoggingConfiguration = _current
 
-  def modify(f: LoggingConfiguration => LoggingConfiguration): Unit = {
+  def modify(f: LoggingConfiguration => LoggingConfiguration): Unit =
     _current = f(_current)
-  }
 
-  def set(configuration: LoggingConfiguration): Unit = {
+  def set(configuration: LoggingConfiguration): Unit =
     _current = configuration
-  }
 }

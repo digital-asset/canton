@@ -148,15 +148,15 @@ private[reassignment] class AssignmentProcessingSteps(
         .lookup(reassignmentId)
         .leftMap(err => NoReassignmentData(reassignmentId, err))
 
-      sourceSynchronizer = unassignmentData.sourcePSId
+      sourceSynchronizer = unassignmentData.sourcePsid
 
       /*
        Because an upgrade of the target synchronizer can happen between unassignment
        and assignment, the comparison needs to be logical.
        */
-      _ = if (unassignmentData.targetPSId.map(_.logical) != psid.map(_.logical))
+      _ = if (unassignmentData.targetPsid.map(_.logical) != psid.map(_.logical))
         throw new IllegalStateException(
-          s"Assignment $reassignmentId: Reassignment data for ${unassignmentData.targetPSId
+          s"Assignment $reassignmentId: Reassignment data for ${unassignmentData.targetPsid
               .map(_.logical)} found on wrong synchronizer ${psid.map(_.logical)}"
         )
 
@@ -547,7 +547,7 @@ private[reassignment] class AssignmentProcessingSteps(
                 reassignmentCoordination.addAssignmentData(
                   assignmentValidationResult.reassignmentId,
                   contracts = assignmentValidationResult.contracts,
-                  source = assignmentValidationResult.sourcePSId.map(_.logical),
+                  source = assignmentValidationResult.sourcePsid.map(_.logical),
                   target = psid.map(_.logical),
                 )
               } else EitherTUtil.unitUS[ReassignmentProcessorError]

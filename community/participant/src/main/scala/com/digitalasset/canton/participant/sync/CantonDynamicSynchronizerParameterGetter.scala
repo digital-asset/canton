@@ -68,7 +68,7 @@ class CantonDynamicSynchronizerParameterGetter(
         ): FutureUnlessShutdown[Option[NonNegativeFiniteDuration]] =
           synchronizerConnectionConfigStore
             .getActive(alias)
-            .map(_.configuredPSId) match {
+            .map(_.configuredPsid) match {
             case Left(err) =>
               logger.info(
                 s"Failed to get ledger time tolerance for synchronizer $alias: ${err.message}"

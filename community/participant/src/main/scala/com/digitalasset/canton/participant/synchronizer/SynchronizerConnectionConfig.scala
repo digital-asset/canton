@@ -56,7 +56,7 @@ final case class SynchronizerConnectionConfig(
     synchronizerAlias: SynchronizerAlias,
     sequencerConnections: SequencerConnections,
     manualConnect: Boolean = false,
-    // TODO(#26021) Consider accepting both LSId and PSId
+    // TODO(#26021) Consider accepting both lsid and psid
     synchronizerId: Option[PhysicalSynchronizerId] = None,
     priority: Int = 0,
     initialRetryDelay: Option[NonNegativeFiniteDuration] = None,

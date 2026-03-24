@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.InvalidQueryTime
-import com.digitalasset.canton.topology.admin.grpc.PSIdLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookup
 import com.digitalasset.canton.topology.client.{
   StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClient,
@@ -52,7 +52,7 @@ final class TopologyLookup(
     futureSupervisor: FutureSupervisor,
     private val topologyManagerO: PhysicalSynchronizerId => Option[SynchronizerTopologyManager],
     private val topologyClientO: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
-    private val psidLookup: PSIdLookup,
+    private val psidLookup: PsidLookup,
     private val syncPersistentStateO: PhysicalSynchronizerId => Option[SyncPersistentState],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -90,7 +90,7 @@ final class TopologyLookup(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, CantonTimestamp] = for {
     psid <- synchronizer match {
-      case lsid: SynchronizerId => activePSIdFor(lsid).toEitherT[FutureUnlessShutdown]
+      case lsid: SynchronizerId => activePsidFor(lsid).toEitherT[FutureUnlessShutdown]
       case psid: PhysicalSynchronizerId =>
         EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](psid)
     }
@@ -139,7 +139,7 @@ final class TopologyLookup(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SynchronizerTopologyClient] =
     for {
-      psid <- activePSIdFor(synchronizerId).toEitherT[FutureUnlessShutdown]
+      psid <- activePsidFor(synchronizerId).toEitherT[FutureUnlessShutdown]
       client <- topologyClientFor(psid).biflatMap(
         _ => offlineTopologyClient(psid).toEitherT[FutureUnlessShutdown],
         topologyClient =>
@@ -157,7 +157,7 @@ final class TopologyLookup(
       traceContext: TraceContext
   ): Either[ParticipantTopologyManagerError, TopologyStore[SynchronizerStore]] = for {
     psid <- synchronizer match {
-      case lsid: SynchronizerId => activePSIdFor(lsid)
+      case lsid: SynchronizerId => activePsidFor(lsid)
       case psid: PhysicalSynchronizerId => Right(psid)
     }
     store <- syncPersistentStateFor(psid).map(_.topologyStore)
@@ -181,11 +181,11 @@ final class TopologyLookup(
       ),
     )
 
-  private def activePSIdFor(lsid: SynchronizerId)(implicit
+  private def activePsidFor(lsid: SynchronizerId)(implicit
       traceContext: TraceContext
   ): Either[ParticipantTopologyManagerError, PhysicalSynchronizerId] =
     psidLookup
-      .activePSIdFor(lsid)
+      .activePsidFor(lsid)
       .toRight(
         ParticipantTopologyManagerError.IdentityManagerParentError(
           TopologyManagerError.TopologyStoreUnknown.NoActiveSynchronizer(lsid)

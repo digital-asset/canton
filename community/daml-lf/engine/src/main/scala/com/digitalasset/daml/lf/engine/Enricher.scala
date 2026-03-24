@@ -5,6 +5,9 @@ package com.digitalasset.daml.lf
 package engine
 
 import cats.data.NonEmptySet
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, PackageId, PackageRef, QualifiedName}
@@ -177,7 +180,8 @@ final class Enricher(
     addFieldNames: Boolean,
     addTrailingNoneFields: Boolean,
     forbidLocalContractIds: Boolean,
-) {
+    override val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   def this(
       engine: Engine,
@@ -193,12 +197,14 @@ final class Enricher(
       addFieldNames = addFieldNames,
       addTrailingNoneFields = addTrailingNoneFields,
       forbidLocalContractIds,
+      engine.loggerFactory,
     )
 
   val preprocessor = new preprocessing.Preprocessor(
     compiledPackages,
     loadPackage,
     forbidLocalContractIds = forbidLocalContractIds,
+    loggerFactory = loggerFactory,
   )
 
   private[this] def toValue(sValue: SValue): Value =
@@ -208,7 +214,7 @@ final class Enricher(
       keepTrailingNoneFields = addTrailingNoneFields,
     )
 
-  def enrichValue(typ: Ast.Type, value: Value): Result[Value] =
+  def enrichValue(typ: Ast.Type, value: Value)(implicit traceContext: TraceContext): Result[Value] =
     preprocessor
       .translateValue(typ, value)
       .map(toValue)
@@ -216,21 +222,21 @@ final class Enricher(
   def enrichVersionedValue(
       typ: Ast.Type,
       versionedValue: Value.VersionedValue,
-  ): Result[Value.VersionedValue] =
+  )(implicit traceContext: TraceContext): Result[Value.VersionedValue] =
     for {
       value <- enrichValue(typ, versionedValue.unversioned)
     } yield versionedValue.map(_ => value)
 
   def enrichContract(
       contract: Value.ThinContractInstance
-  ): Result[Value.ThinContractInstance] =
+  )(implicit traceContext: TraceContext): Result[Value.ThinContractInstance] =
     for {
       arg <- enrichContract(contract.template, contract.arg)
     } yield contract.copy(arg = arg)
 
   def enrichContract(
       contract: FatContractInstance
-  ): Result[FatContractInstance] =
+  )(implicit traceContext: TraceContext): Result[FatContractInstance] =
     enrichCreate(contract.toCreateNode).map(create =>
       FatContractInstance.fromCreateNode(create, contract.createdAt, contract.authenticationData)
     )
@@ -247,7 +253,7 @@ final class Enricher(
   def enrichContractWithPackages(
       contract: FatContractInstance,
       packageIds: NonEmptySet[PackageId],
-  ): Result[Either[String, FatContractInstance]] = {
+  )(implicit traceContext: TraceContext): Result[Either[String, FatContractInstance]] = {
     enrichCreateWithPackages(contract.toCreateNode, packageIds).map(createOrError =>
       createOrError.map(create =>
         FatContractInstance.fromCreateNode(create, contract.createdAt, contract.authenticationData)
@@ -256,8 +262,8 @@ final class Enricher(
   }
 
   def enrichVersionedContract(
-      contract: Value.VersionedThinContractInstance
-  ): Result[Value.VersionedThinContractInstance] =
+      contract: Value.VersionedThinContractInstance,
+  )(implicit traceContext: TraceContext): Result[Value.VersionedThinContractInstance] =
     for {
       arg <- enrichValue(Ast.TTyCon(contract.unversioned.template), contract.unversioned.arg)
     } yield contract.map(_.copy(arg = arg))
@@ -265,7 +271,7 @@ final class Enricher(
   def enrichView(
       interfaceId: Identifier,
       viewValue: Value,
-  ): Result[Value] = for {
+  )(implicit traceContext: TraceContext): Result[Value] = for {
     iface <- handleLookup(
       compiledPackages.pkgInterface.lookupInterface(interfaceId)
     )
@@ -275,14 +281,14 @@ final class Enricher(
   def enrichVersionedView(
       interfaceId: Identifier,
       viewValue: Value.VersionedValue,
-  ): Result[Value.VersionedValue] = for {
+  )(implicit traceContext: TraceContext): Result[Value.VersionedValue] = for {
     view <- enrichView(interfaceId, viewValue.unversioned)
   } yield viewValue.copy(unversioned = view)
 
-  def enrichContract(tyCon: Identifier, value: Value): Result[Value] =
+  def enrichContract(tyCon: Identifier, value: Value)(implicit traceContext: TraceContext): Result[Value] =
     enrichValue(Ast.TTyCon(tyCon), value)
 
-  def enrichException(tyCon: Identifier, value: Value): Result[Value] =
+  def enrichException(tyCon: Identifier, value: Value)(implicit traceContext: TraceContext): Result[Value] =
     enrichValue(Ast.TTyCon(tyCon), value)
 
   private[this] def pkgInterface = compiledPackages.pkgInterface
@@ -307,7 +313,7 @@ final class Enricher(
       interfaceId: Option[Identifier],
       choiceName: Name,
       value: Value,
-  ): Result[Value] = enrichChoiceArgument(
+  )(implicit traceContext: TraceContext): Result[Value] = enrichChoiceArgument(
     templateId.packageId,
     templateId.qualifiedName,
     interfaceId,
@@ -321,7 +327,7 @@ final class Enricher(
       interfaceId: Option[Identifier],
       choiceName: Name,
       value: Value,
-  ): Result[Value] =
+  )(implicit traceContext: TraceContext): Result[Value] =
     handleLookup(
       pkgInterface.lookupChoice(Identifier(packageId, templateName), interfaceId, choiceName)
     )
@@ -333,7 +339,7 @@ final class Enricher(
       interfaceId: Option[Identifier],
       choiceName: Name,
       value: Value,
-  ): Result[Value] = enrichChoiceResult(
+  )(implicit traceContext: TraceContext): Result[Value] = enrichChoiceResult(
     templateId.packageId,
     templateId.qualifiedName,
     interfaceId,
@@ -347,28 +353,28 @@ final class Enricher(
       interfaceId: Option[Identifier],
       choiceName: Name,
       value: Value,
-  ): Result[Value] =
+  )(implicit traceContext: TraceContext): Result[Value] =
     handleLookup(
       pkgInterface.lookupChoice(Identifier(packageId, templateName), interfaceId, choiceName)
     )
       .flatMap(choice => enrichValue(choice.returnType, value))
 
-  def enrichContractKey(tyCon: Identifier, value: Value): Result[Value] =
+  def enrichContractKey(tyCon: Identifier, value: Value)(implicit traceContext: TraceContext): Result[Value] =
     handleLookup(pkgInterface.lookupTemplateKey(tyCon))
       .flatMap(key => enrichValue(key.typ, value))
 
   private val ResultNone = ResultDone(None)
 
   def enrichContractKey(
-      key: GlobalKeyWithMaintainers
-  ): Result[GlobalKeyWithMaintainers] =
+      key: GlobalKeyWithMaintainers,
+  )(implicit traceContext: TraceContext): Result[GlobalKeyWithMaintainers] =
     enrichContractKey(key.globalKey.templateId, key.globalKey.key).map(normalizedKey =>
       key.copy(globalKey = GlobalKey.assertWithRenormalizedValue(key.globalKey, normalizedKey))
     )
 
   def enrichContractKey(
       key: Option[GlobalKeyWithMaintainers]
-  ): Result[Option[GlobalKeyWithMaintainers]] =
+  )(implicit traceContext: TraceContext): Result[Option[GlobalKeyWithMaintainers]] =
     key match {
       case Some(k) =>
         enrichContractKey(k).map(Some(_))
@@ -378,12 +384,12 @@ final class Enricher(
 
   def enrichVersionedContractKey(
       key: Versioned[GlobalKeyWithMaintainers]
-  ): Result[Versioned[GlobalKeyWithMaintainers]] =
+  )(implicit traceContext: TraceContext): Result[Versioned[GlobalKeyWithMaintainers]] =
     enrichContractKey(key.unversioned).map(normalizedValue => key.map(_ => normalizedValue))
 
   def enrichVersionedContractKey(
       key: Option[Versioned[GlobalKeyWithMaintainers]]
-  ): Result[Option[Versioned[GlobalKeyWithMaintainers]]] =
+  )(implicit traceContext: TraceContext): Result[Option[Versioned[GlobalKeyWithMaintainers]]] =
     key match {
       case Some(k) =>
         enrichVersionedContractKey(k).map(Some(_))
@@ -391,7 +397,7 @@ final class Enricher(
         ResultNone
     }
 
-  def enrichCreate(create: Node.Create): Result[Node.Create] =
+  def enrichCreate(create: Node.Create)(implicit traceContext: TraceContext): Result[Node.Create] =
     for {
       arg <- enrichValue(Ast.TTyCon(create.templateId), create.arg)
       key <- enrichContractKey(create.keyOpt)
@@ -409,7 +415,7 @@ final class Enricher(
   def enrichCreateWithPackages(
       create: Node.Create,
       packageIds: NonEmptySet[PackageId],
-  ): Result[Either[String, Node.Create]] = {
+  )(implicit traceContext: TraceContext): Result[Either[String, Node.Create]] = {
     import Result.ResultInstances._
     import cats.implicits._
 
@@ -473,7 +479,7 @@ final class Enricher(
     }
   }
 
-  private def enrichNode(node: Node): Result[Node] =
+  private def enrichNode(node: Node)(implicit traceContext: TraceContext): Result[Node] =
     node match {
       case rb @ Node.Rollback(_) =>
         ResultDone(rb)
@@ -507,7 +513,7 @@ final class Enricher(
         } yield exe.copy(chosenValue = choiceArg, exerciseResult = result, keyOpt = key)
     }
 
-  def enrichTransaction(tx: Transaction): Result[Transaction] =
+  def enrichTransaction(tx: Transaction)(implicit traceContext: TraceContext): Result[Transaction] =
     for {
       normalizedNodes <-
         tx.nodes.foldLeft[Result[Map[NodeId, Node]]](ResultDone(Map.empty)) {
@@ -522,7 +528,7 @@ final class Enricher(
       roots = tx.roots,
     )
 
-  def enrichVersionedTransaction(versionedTx: VersionedTransaction): Result[VersionedTransaction] =
+  def enrichVersionedTransaction(versionedTx: VersionedTransaction)(implicit traceContext: TraceContext): Result[VersionedTransaction] =
     enrichTransaction(Transaction(versionedTx.nodes, versionedTx.roots)).map {
       case Transaction(nodes, roots) =>
         VersionedTransaction(versionedTx.version, nodes, roots)
@@ -530,7 +536,7 @@ final class Enricher(
 
   def enrichIncompleteTransaction(
       incompleteTx: IncompleteTransaction
-  ): Result[IncompleteTransaction] =
+  )(implicit traceContext: TraceContext): Result[IncompleteTransaction] =
     enrichTransaction(incompleteTx.transaction).map(transaction =>
       incompleteTx.copy(transaction = transaction)
     )

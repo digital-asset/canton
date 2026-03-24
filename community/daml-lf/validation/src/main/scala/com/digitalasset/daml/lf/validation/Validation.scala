@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package validation
 
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.PackageInterface
 
 object Validation {

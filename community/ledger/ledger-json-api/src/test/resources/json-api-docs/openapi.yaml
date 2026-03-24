@@ -2635,6 +2635,10 @@ components:
       - party
       properties:
         party:
+          description: |-
+            The right to authorize commands for this party.
+
+            Required
           type: string
     CanExecuteAs:
       title: CanExecuteAs
@@ -2651,9 +2655,20 @@ components:
       - party
       properties:
         party:
+          description: |-
+            The right to prepare and execute submissions as this party.
+            This right does not entitle the user to perform any reads.
+            If reading is required, a separate ReadAs right must be added.
+            Right to execute as a party is also implicitly contained in the CanActAs right.
+
+            Required
           type: string
     CanExecuteAsAnyParty:
       title: CanExecuteAsAnyParty
+      description: |-
+        The rights of a user to prepare and execute transactions as any party.
+        Its utility is predominantly for users that perform interactive submissions
+        on behalf of many parties.
       type: object
       required:
       - value
@@ -2662,6 +2677,10 @@ components:
           $ref: '#/components/schemas/CanExecuteAsAnyParty1'
     CanExecuteAsAnyParty1:
       title: CanExecuteAsAnyParty
+      description: |-
+        The rights of a user to prepare and execute transactions as any party.
+        Its utility is predominantly for users that perform interactive submissions
+        on behalf of many parties.
       type: object
     CanReadAs:
       title: CanReadAs
@@ -2678,9 +2697,17 @@ components:
       - party
       properties:
         party:
+          description: |-
+            The right to read ledger data visible to this party.
+
+            Required
           type: string
     CanReadAsAnyParty:
       title: CanReadAsAnyParty
+      description: |-
+        The rights of a participant's super reader. Its utility is predominantly for
+        feeding external tools, such as PQS, continually without the need to change subscriptions
+        as new parties pop in and out of existence.
       type: object
       required:
       - value
@@ -2689,6 +2716,10 @@ components:
           $ref: '#/components/schemas/CanReadAsAnyParty1'
     CanReadAsAnyParty1:
       title: CanReadAsAnyParty
+      description: |-
+        The rights of a participant's super reader. Its utility is predominantly for
+        feeding external tools, such as PQS, continually without the need to change subscriptions
+        as new parties pop in and out of existence.
       type: object
     Command:
       title: Command
@@ -2918,13 +2949,25 @@ components:
       required:
       - synchronizerAlias
       - synchronizerId
-      - permission
       properties:
         synchronizerAlias:
+          description: |-
+            The alias of the synchronizer
+
+            Required
           type: string
         synchronizerId:
+          description: |-
+            The ID of the synchronizer
+
+            Required
           type: string
         permission:
+          description: |-
+            The permission on the synchronizer
+            Set if a party was used in the request, otherwise unspecified.
+
+            Optional
           type: string
           enum:
           - PARTICIPANT_PERMISSION_UNSPECIFIED
@@ -4126,6 +4169,22 @@ components:
             - filters_by_party is the filter.filters_by_party from this request
             - filters_for_any_party is the filter.filters_for_any_party from this request
             - verbose is the verbose field from this request
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token defining a position in the active contracts snapshot.
+            The prefix of the active contracts snapshot will be omitted up to and including the element from which
+            the continuation token was read.
+            To reuse the continuation token from a `GetActiveContractsPageResponse`:
+
+            - subsequent request must be executed on the same participant with the same version of canton,
+            - subsequent request must have the same active_at_offset,
+            - subsequent request must have the same event_format
+            - and the participant must not have been pruned after the active_at_offset.
+
+            If not specified, the whole active contracts snapshot will be returned.
+
+            Optional: can be empty
+          type: string
     GetConnectedSynchronizersResponse:
       title: GetConnectedSynchronizersResponse
       type: object
@@ -4501,24 +4560,26 @@ components:
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
+      required:
+      - beginExclusive
       properties:
         beginExclusive:
           description: |-
-            Beginning of the requested ledger section (non-negative integer).
+            Exclusive lower bound offset of the requested ledger section (non-negative integer).
             The response will only contain transactions whose offset is strictly greater than this.
-            If not populated or set to zero, the stream will start from the beginning of the ledger.
-            If positive, the streaming will start after this absolute offset.
-            If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
-
-            Optional
+            If set to zero, the lower bound is set to the the beginning of the ledger.
+            If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
+            Required
           type: integer
           format: int64
         endInclusive:
           description: |-
-            End of the requested ledger section.
-            The response will only contain transactions whose offset is less than or equal to this.
-            If empty, the stream will not terminate.
-            If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+            Inclusive higher bound offset of the requested ledger section.
+            If specified the response will only contain transactions whose offset is less than or equal to this.
+            If not specified,
+
+            - the descending_order must not be selected,
+            - the stream will not terminate.
 
             Optional
           type: integer
@@ -4551,6 +4612,12 @@ components:
             - include_reassignments.filter = the same filter specified on this request
             - include_reassignments.verbose = the same flag specified on this request
             - include_topology_events.include_participant_authorization_events.parties = all the parties specified in filter
+        descendingOrder:
+          description: |-
+            If set, the stream will populate the elements in descending order.
+
+            Optional
+          type: boolean
     GetUserResponse:
       title: GetUserResponse
       type: object
@@ -4636,6 +4703,10 @@ components:
             $ref: '#/components/schemas/WildcardFilter'
     IdentityProviderAdmin:
       title: IdentityProviderAdmin
+      description: |-
+        The right to administer the identity provider that the user is assigned to.
+        It means, being able to manage users and parties that are also assigned
+        to the same identity provider.
       type: object
       required:
       - value
@@ -4644,6 +4715,10 @@ components:
           $ref: '#/components/schemas/IdentityProviderAdmin1'
     IdentityProviderAdmin1:
       title: IdentityProviderAdmin
+      description: |-
+        The right to administer the identity provider that the user is assigned to.
+        It means, being able to manage users and parties that are also assigned
+        to the same identity provider.
       type: object
     IdentityProviderConfig:
       title: IdentityProviderConfig
@@ -5036,6 +5111,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PrefetchContractKey'
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
     JsContractEntry:
       title: JsContractEntry
       description: |-
@@ -5312,6 +5397,14 @@ components:
           type: string
         contractEntry:
           $ref: '#/components/schemas/JsContractEntry'
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+            of the active contracts snapshot.
+            Only populated for the streaming ``GetActiveContracts`` rpc call.
+
+            Optional: can be empty
+          type: string
     JsGetEventsByContractIdResponse:
       title: JsGetEventsByContractIdResponse
       type: object
@@ -5576,6 +5669,16 @@ components:
             To turn off cost estimation, set the CostEstimationHints#disabled field to true
 
             Optional
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
         hashingSchemeVersion:
           description: |-
             The hashing scheme version to be used when building the hash.
@@ -6543,6 +6646,7 @@ components:
           type: string
     ParticipantAdmin:
       title: ParticipantAdmin
+      description: The right to administer the participant node.
       type: object
       required:
       - value
@@ -6551,6 +6655,7 @@ components:
           $ref: '#/components/schemas/ParticipantAdmin1'
     ParticipantAdmin1:
       title: ParticipantAdmin
+      description: The right to administer the participant node.
       type: object
     ParticipantAuthorizationAdded:
       title: ParticipantAuthorizationAdded
@@ -6989,8 +7094,18 @@ components:
       - transaction
       properties:
         transaction:
+          description: |-
+            The serialized TopologyTransaction
+
+            Required: must be non-empty
           type: string
         signatures:
+          description: |-
+            Additional signatures for this transaction specifically
+            Use for transactions that require additional signatures beyond the namespace key signatures
+            e.g: PartyToKeyMapping must be signed by all registered keys
+
+            Optional: can be empty
           type: array
           items:
             $ref: '#/components/schemas/Signature'
@@ -7547,6 +7662,7 @@ components:
           $ref: '#/components/schemas/Map_Int_Field'
     Unvet:
       title: Unvet
+      description: Remove packages from the set of vetted packages
       type: object
       required:
       - value
@@ -7555,9 +7671,19 @@ components:
           $ref: '#/components/schemas/Unvet1'
     Unvet1:
       title: Unvet
+      description: Remove packages from the set of vetted packages
       type: object
+      required:
+      - packages
       properties:
         packages:
+          description: |-
+            Packages to be unvetted.
+
+            If a reference in this list matches multiple packages, they are all
+            unvetted.
+
+            Required: must be non-empty
           type: array
           items:
             $ref: '#/components/schemas/VettedPackagesRef'
@@ -7984,6 +8110,9 @@ components:
           format: int32
     Vet:
       title: Vet
+      description: |-
+        Set vetting bounds of a list of packages. Packages that were not previously
+        vetted have their bounds added, previous vetting bounds are overwritten.
       type: object
       required:
       - value
@@ -7992,15 +8121,36 @@ components:
           $ref: '#/components/schemas/Vet1'
     Vet1:
       title: Vet
+      description: |-
+        Set vetting bounds of a list of packages. Packages that were not previously
+        vetted have their bounds added, previous vetting bounds are overwritten.
       type: object
+      required:
+      - packages
       properties:
         packages:
+          description: |-
+            Packages to be vetted.
+
+            If a reference in this list matches more than one package, the change is
+            considered ambiguous and the entire update request is rejected. In other
+            words, every reference must match exactly one package.
+
+            Required: must be non-empty
           type: array
           items:
             $ref: '#/components/schemas/VettedPackagesRef'
         newValidFromInclusive:
+          description: |-
+            The time from which these packages should be vetted, prior lower bounds
+            are overwritten.
+            Optional
           type: string
         newValidUntilExclusive:
+          description: |-
+            The time until which these packages should be vetted, prior upper bounds
+            are overwritten.
+            Optional
           type: string
     VettedPackage:
       title: VettedPackage

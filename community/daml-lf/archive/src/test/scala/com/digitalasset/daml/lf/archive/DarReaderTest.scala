@@ -3,21 +3,16 @@
 
 package com.digitalasset.daml.lf.archive
 
-import java.util.zip.ZipInputStream
 import com.daml.crypto.MessageDigestPrototype
 import com.google.protobuf
-import org.scalatest._
+import org.scalatest.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.jdk.CollectionConverters._
+import java.util.zip.ZipInputStream
+import scala.jdk.CollectionConverters.*
 
-class DarReaderTest
-    extends AnyWordSpec
-    with Matchers
-    with Inside
-    with Inspectors
-    with TryValues {
+class DarReaderTest extends AnyWordSpec with Matchers with Inside with Inspectors with TryValues {
 
   private def resource(path: String): ZipInputStream = {
     val stream = getClass.getClassLoader.getResourceAsStream(path)
@@ -27,7 +22,9 @@ class DarReaderTest
   "should reject a zip bomb with the proper error" in {
     val darFile = "DarReaderTest.dar"
     DarReader
-      .readArchive(darFile, resource(darFile), entrySizeThreshold = 1024) shouldBe Left(Error.ZipBomb)
+      .readArchive(darFile, resource(darFile), entrySizeThreshold = 1024) shouldBe Left(
+      Error.ZipBomb
+    )
   }
 
   s"should read LF1 dar file, main archive: DarReaderTest returned first" in {
@@ -99,11 +96,10 @@ class DarReaderTest
         internedDotted: collection.Seq[DamlLf1.InternedDottedName],
         internedStrings: collection.Seq[String],
         n: Int,
-    ): String = {
+    ): String =
       internedDotted(n).getSegmentsInternedStrList.asScala
         .map(i => internedStrings(i))
         .mkString(".")
-    }
   }
 
   s"should read LF2 dar file, main archive: DarReaderTest returned first" in {
@@ -176,11 +172,10 @@ class DarReaderTest
         internedDotted: collection.Seq[DamlLf2.InternedDottedName],
         internedStrings: collection.Seq[String],
         n: Int,
-    ): String = {
+    ): String =
       internedDotted(n).getSegmentsInternedStrList.asScala
         .map(i => internedStrings(i))
         .mkString(".")
-    }
   }
 
   private def addUnknownField(
@@ -209,15 +204,15 @@ class DarReaderTest
     val (negativeTestCase, positiveTestCase) = testCases(archive)
 
     s"ArchiveReader should reject $messageName with unknown fields" in {
-      ArchiveReader.fromByteString(negativeTestCase) shouldBe a[Right[_, _]]
+      ArchiveReader.fromByteString(negativeTestCase) shouldBe a[Right[?, ?]]
       inside(ArchiveReader.fromByteString(positiveTestCase)) { case Left(Error.Parsing(err)) =>
         err should include(s"$messageName contains unknown field")
       }
     }
 
     s"ArchiveSchemaReader should accept $messageName with unknown fields" in {
-      ArchiveSchemaReader.fromByteString(negativeTestCase) shouldBe a[Right[_, _]]
-      ArchiveSchemaReader.fromByteString(positiveTestCase) shouldBe a[Right[_, _]]
+      ArchiveSchemaReader.fromByteString(negativeTestCase) shouldBe a[Right[?, ?]]
+      ArchiveSchemaReader.fromByteString(positiveTestCase) shouldBe a[Right[?, ?]]
     }
   }
 

@@ -1860,11 +1860,7 @@ private[lf] object SBuiltinFun {
     ): Control[Nothing] = {
       val coid = getSContractId(args, 0)
       val (tyCon, record) = getSAnyContract(args, 1)
-      val warning = Warning(
-        machine.getLastLocation,
-        "unsafeFromInterface is deprecated, use fromInterface instead.",
-      )
-      machine.warningLog.add(warning)(machine.loggingContext)
+      machine.warn("unsafeFromInterface is deprecated, use fromInterface instead.")
       if (tplId == tyCon) {
         Control.Value(record)
       } else {
@@ -2215,7 +2211,7 @@ private[lf] object SBuiltinFun {
         machine: Machine[Q],
     ): Control.Value = {
       val message = getSText(args, 0)
-      machine.traceLog.add(message, machine.getLastLocation)(machine.loggingContext)
+      machine.trace(message)
       Control.Value(args(1))
     }
   }
@@ -2500,11 +2496,11 @@ private[lf] object SBuiltinFun {
   private[this] def extractParties(where: String, v: SValue): TreeSet[Party] =
     v match {
       case SList(vs) =>
-        TreeSet.empty(Party.ordering) ++ vs.iterator.map {
+        TreeSet.from(vs.iterator.map {
           case SParty(p) => p
           case x =>
             throw SErrorCrash(where, s"non-party value in list: $x")
-        }
+        })(Party.ordering)
       case SParty(p) =>
         TreeSet(p)(Party.ordering)
       case _ =>

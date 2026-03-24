@@ -11,8 +11,8 @@ import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier, NameTypeConRef
 import java.sql.Connection
 import scala.reflect.ClassTag
 
-private[backend] trait Schema[FROM] {
-  def prepareData(in: Vector[FROM], stringInterning: StringInterning): Array[Array[Array[?]]]
+private[backend] trait Schema[From] {
+  def prepareData(in: Vector[From], stringInterning: StringInterning): Array[Array[Array[?]]]
   def executeUpdate(data: Array[Array[Array[?]]], connection: Connection): Unit
 }
 
@@ -21,40 +21,40 @@ private[backend] object AppendOnlySchema {
   type Batch = Array[Array[Array[?]]]
 
   private[backend] trait FieldStrategy {
-    def string[FROM](extractor: StringInterning => FROM => String): Field[FROM, String, ?] =
+    def string[From](extractor: StringInterning => From => String): Field[From, String, ?] =
       StringField(extractor)
 
-    def stringOptional[FROM](
-        extractor: StringInterning => FROM => Option[String]
-    ): Field[FROM, Option[String], ?] =
+    def stringOptional[From](
+        extractor: StringInterning => From => Option[String]
+    ): Field[From, Option[String], ?] =
       StringOptional(extractor)
 
-    def stringArray[FROM](
-        extractor: StringInterning => FROM => Iterable[String]
-    ): Field[FROM, Iterable[String], ?] =
+    def stringArray[From](
+        extractor: StringInterning => From => Iterable[String]
+    ): Field[From, Iterable[String], ?] =
       StringArray(extractor)
 
-    def bytea[FROM](
-        extractor: StringInterning => FROM => Array[Byte]
-    ): Field[FROM, Array[Byte], ?] =
+    def bytea[From](
+        extractor: StringInterning => From => Array[Byte]
+    ): Field[From, Array[Byte], ?] =
       Bytea(extractor)
 
-    def byteaOptional[FROM](
-        extractor: StringInterning => FROM => Option[Array[Byte]]
-    ): Field[FROM, Option[Array[Byte]], ?] =
+    def byteaOptional[From](
+        extractor: StringInterning => From => Option[Array[Byte]]
+    ): Field[From, Option[Array[Byte]], ?] =
       ByteaOptional(extractor)
 
-    def party[FROM](extractor: FROM => Party): Field[FROM, Int, ?] =
-      int[FROM](stringInterning => from => stringInterning.party.internalize(extractor(from)))
+    def party[From](extractor: From => Party): Field[From, Int, ?] =
+      int[From](stringInterning => from => stringInterning.party.internalize(extractor(from)))
 
-    def partyOptional[FROM](extractor: FROM => Option[Party]): Field[FROM, Option[Int], ?] =
-      intOptional[FROM](stringInterning =>
+    def partyOptional[From](extractor: From => Option[Party]): Field[From, Option[Int], ?] =
+      intOptional[From](stringInterning =>
         from => extractor(from).map(stringInterning.party.internalize)
       )
 
-    def parties[FROM](
-        extractor: FROM => Set[Party]
-    ): Field[FROM, Array[Byte], ?] =
+    def parties[From](
+        extractor: From => Set[Party]
+    ): Field[From, Array[Byte], ?] =
       bytea(stringInterning =>
         from =>
           encodeToByteArray(
@@ -62,9 +62,9 @@ private[backend] object AppendOnlySchema {
           )
       )
 
-    def partiesOptional[FROM](
-        extractor: FROM => Option[Set[Party]]
-    ): Field[FROM, Option[Array[Byte]], ?] =
+    def partiesOptional[From](
+        extractor: From => Option[Set[Party]]
+    ): Field[From, Option[Array[Byte]], ?] =
       byteaOptional(stringInterning =>
         from =>
           extractor(from)
@@ -72,65 +72,65 @@ private[backend] object AppendOnlySchema {
             .map(encodeToByteArray)
       )
 
-    def template[FROM](extractor: FROM => NameTypeConRef): Field[FROM, Int, ?] =
-      int[FROM](intern => from => intern.templateId.internalize(extractor(from)))
+    def template[From](extractor: From => NameTypeConRef): Field[From, Int, ?] =
+      int[From](intern => from => intern.templateId.internalize(extractor(from)))
 
-    def templateOptional[FROM](
-        extractor: FROM => Option[NameTypeConRef]
-    ): Field[FROM, Option[Int], ?] =
-      intOptional[FROM](intern => from => extractor(from).map(intern.templateId.internalize))
+    def templateOptional[From](
+        extractor: From => Option[NameTypeConRef]
+    ): Field[From, Option[Int], ?] =
+      intOptional[From](intern => from => extractor(from).map(intern.templateId.internalize))
 
-    def interface[FROM](extractor: FROM => Identifier): Field[FROM, Int, ?] =
-      int[FROM](intern => from => intern.interfaceId.internalize(extractor(from)))
+    def interface[From](extractor: From => Identifier): Field[From, Int, ?] =
+      int[From](intern => from => intern.interfaceId.internalize(extractor(from)))
 
-    def interfaceOptional[FROM](
-        extractor: FROM => Option[Identifier]
-    ): Field[FROM, Option[Int], ?] =
-      intOptional[FROM](intern => from => extractor(from).map(intern.interfaceId.internalize))
+    def interfaceOptional[From](
+        extractor: From => Option[Identifier]
+    ): Field[From, Option[Int], ?] =
+      intOptional[From](intern => from => extractor(from).map(intern.interfaceId.internalize))
 
-    def choice[FROM](extractor: FROM => ChoiceName): Field[FROM, Int, ?] =
-      int[FROM](intern => from => intern.choiceName.internalize(extractor(from)))
+    def choice[From](extractor: From => ChoiceName): Field[From, Int, ?] =
+      int[From](intern => from => intern.choiceName.internalize(extractor(from)))
 
-    def choiceOptional[FROM](extractor: FROM => Option[ChoiceName]): Field[FROM, Option[Int], ?] =
-      intOptional[FROM](intern => from => extractor(from).map(intern.choiceName.internalize))
+    def choiceOptional[From](extractor: From => Option[ChoiceName]): Field[From, Option[Int], ?] =
+      intOptional[From](intern => from => extractor(from).map(intern.choiceName.internalize))
 
-    def bigint[FROM](extractor: StringInterning => FROM => Long): Field[FROM, Long, ?] =
+    def bigint[From](extractor: StringInterning => From => Long): Field[From, Long, ?] =
       Bigint(extractor)
 
-    def bigintOptional[FROM](
-        extractor: StringInterning => FROM => Option[Long]
-    ): Field[FROM, Option[Long], ?] =
+    def bigintOptional[From](
+        extractor: StringInterning => From => Option[Long]
+    ): Field[From, Option[Long], ?] =
       BigintOptional(extractor)
 
-    def smallintOptional[FROM](
-        extractor: StringInterning => FROM => Option[Int]
-    ): Field[FROM, Option[Int], ?] =
+    def smallintOptional[From](
+        extractor: StringInterning => From => Option[Int]
+    ): Field[From, Option[Int], ?] =
       SmallintOptional(extractor)
 
-    def smallint[FROM](
-        extractor: StringInterning => FROM => Int
-    ): Field[FROM, Int, ?] =
+    def smallint[From](
+        extractor: StringInterning => From => Int
+    ): Field[From, Int, ?] =
       Smallint(extractor)
 
-    def int[FROM](extractor: StringInterning => FROM => Int): Field[FROM, Int, ?] =
+    def int[From](extractor: StringInterning => From => Int): Field[From, Int, ?] =
       Integer(extractor)
 
-    def intOptional[FROM](
-        extractor: StringInterning => FROM => Option[Int]
-    ): Field[FROM, Option[Int], ?] =
+    def intOptional[From](
+        extractor: StringInterning => From => Option[Int]
+    ): Field[From, Option[Int], ?] =
       IntOptional(extractor)
 
-    def booleanOptional[FROM](
-        extractor: StringInterning => FROM => Option[Boolean]
-    ): Field[FROM, Option[Boolean], ?] =
+    def booleanOptional[From](
+        extractor: StringInterning => From => Option[Boolean]
+    ): Field[From, Option[Boolean], ?] =
       BooleanOptional(extractor)
 
-    def boolean[FROM](
-        extractor: StringInterning => FROM => Boolean
-    ): Field[FROM, Boolean, ?] =
+    def boolean[From](
+        extractor: StringInterning => From => Boolean
+    ): Field[From, Boolean, ?] =
       BooleanMandatory(extractor)
 
-    def insert[FROM](tableName: String)(fields: (String, Field[FROM, ?, ?])*): Table[FROM]
+    def insert[From](tableName: String)(fields: (String, Field[From, ?, ?])*): Table[From]
   }
 
   def apply(fieldStrategy: FieldStrategy): Schema[DbDto] = {

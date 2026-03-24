@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
@@ -23,10 +25,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Matchers with Inside {
-
-  val helpers = new CompilerTestHelpers
-  import helpers._
+class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Matchers with Inside with SuppressingLogging {
+  import CompilerTest._
 
   "unsafeCompile" should {
     "handle 10k commands" in {
@@ -117,10 +117,7 @@ class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Match
   }
 }
 
-final class CompilerTestHelpers {
-
-  import SpeedyTestLib.loggingContext
-
+object CompilerTest {
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
   val pkgId = parserParameters.defaultPackageId
 
@@ -175,7 +172,7 @@ final class CompilerTestHelpers {
       sexpr: SExpr,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
       committers: Set[Party] = Set.empty,
-  ): Either[
+  )(implicit loggingContext: NamedLoggingContext): Either[
     SError,
     (SValue, Map[ContractId, (Ref.Identifier, SValue)]),
   ] = {
@@ -187,6 +184,7 @@ final class CompilerTestHelpers {
         expr = sexpr,
         committers = committers,
         readAs = Set.empty,
+        logger = MachineLogger(),
       )
 
     SpeedyTestLib

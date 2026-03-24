@@ -25,6 +25,10 @@ template K
     key (p, v) : (Party, Int)
     maintainer key._1
 
+    choice ConsumingExercise : ()
+      controller p
+      do pure ()
+
 template T
   with
     p : Party
@@ -104,6 +108,36 @@ template T
            E -> pure ()
          archive cid
 
+    nonconsuming choice RollbackConsumingExercise : ()
+      with
+        i : Int
+      controller p
+      do cid <- create (K p i)
+         try (exercise cid ConsumingExercise >> throw E)
+         catch
+           E -> archive cid
+
+    nonconsuming choice NonRollbackConsumingExercise : ()
+      with
+        i : Int
+      controller p
+      do cid <- create (K p i)
+         try (exercise cid ConsumingExercise)
+         catch
+           E -> pure ()
+         exercise cid ConsumingExercise
+
+    nonconsuming choice RollbackCreate : ()
+      with
+        i : Int
+      controller p
+      do try do
+           cid <- create (K p i)
+           throw E
+           pure ()
+         catch
+           E -> pure ()
+
 template Fetcher
   with
     sig : Party
@@ -167,8 +201,17 @@ duplicateKey = script do
 
 rollbackArchive = script do
   p <- allocateParty "p"
-  submit p $ createAndExerciseCmd (T p) (RollbackArchive 0)
   submitMustFail p $ createAndExerciseCmd (T p) (NonRollbackArchive 0)
+  submit p $ createAndExerciseCmd (T p) (RollbackArchive 0)
+
+rollbackConsumingExercise = script do
+  p <- allocateParty "p"
+  submitMustFail p $ createAndExerciseCmd (T p) (NonRollbackConsumingExercise 0)
+  submit p $ createAndExerciseCmd (T p) (RollbackConsumingExercise 0)
+
+rollbackCreate = script do
+  p <- allocateParty "p"
+  submit p $ createAndExerciseCmd (T p) (RollbackCreate 0)
 
 divulgence = script do
   p1 <- allocateParty "p1"

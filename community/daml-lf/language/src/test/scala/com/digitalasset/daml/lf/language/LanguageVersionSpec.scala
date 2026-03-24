@@ -3,9 +3,9 @@
 
 package com.digitalasset.daml.lf.language
 
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
-import org.scalatest.prop.TableDrivenPropertyChecks
+import com.digitalasset.daml.lf.language.LanguageVersion as LV
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 class LanguageVersionSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
@@ -20,7 +20,7 @@ class LanguageVersionSpec extends AnyWordSpec with Matchers with TableDrivenProp
 
     val versionRank = versionInOrder.zipWithIndex.toMap
 
-    val versions = Table("version", versionInOrder: _*)
+    val versions = Table("version", versionInOrder*)
 
     forEvery(versions)(v1 =>
       forEvery(versions)(v2 =>
@@ -32,7 +32,7 @@ class LanguageVersionSpec extends AnyWordSpec with Matchers with TableDrivenProp
   "fromString" should {
 
     "recognize known versions" in {
-      val testCases = Table("version", (LV.allLegacyLfVersions ++ LV.allLfVersions): _*)
+      val testCases = Table("version", (LV.allLegacyLfVersions ++ LV.allLfVersions)*)
 
       forEvery(testCases)(v => LV.fromString(v.pretty) shouldBe Right(v))
     }
@@ -40,7 +40,7 @@ class LanguageVersionSpec extends AnyWordSpec with Matchers with TableDrivenProp
     "reject invalid versions" in {
       val testCases = Table("invalid version", "1.1", "2", "14", "version", "2.1.11")
 
-      forEvery(testCases)(s => LV.fromString(s) shouldBe a[Left[_, _]])
+      forEvery(testCases)(s => LV.fromString(s) shouldBe a[Left[?, ?]])
     }
   }
 

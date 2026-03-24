@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.repair
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.*
@@ -75,7 +74,6 @@ object ContractAuthenticationImportProcessor {
       for {
         _ <- validatedContractIdVersionE.toEitherT[FutureUnlessShutdown]
         _ <- {
-          implicit val loggingContext: LoggingContext = LoggingContext.empty
           contractValidator
             .authenticate(contract.contract, contract.representativePackageId)
             .leftMap { e =>

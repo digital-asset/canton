@@ -84,7 +84,7 @@ class FirstUnsafeOffsetComputation(
           // This is just a sanity check; it does not prevent a migration from being started concurrently with pruning
           checkForNoOngoingMigrationForSynchronizer(synchronizerId).flatMap { _ =>
             configs.traverseFilter { case config =>
-              config.configuredPSId.toOption
+              config.configuredPsid.toOption
                 .toRight(
                   LedgerPruningInternalError(
                     s"No configured physical synchronizer id for logical $synchronizerId"

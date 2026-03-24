@@ -6,9 +6,16 @@ package lf
 package value
 package test
 
+import org.scalacheck.{Arbitrary, Gen, Shrink}
+import scalaz.std.option.*
+import scalaz.std.tuple.*
+import scalaz.syntax.bitraverse.*
+import scalaz.syntax.traverse.*
+import scalaz.{@@, Order, Ordering, Tag}
+
 import data.{FrontStack, ImmArray, ImmArrayCons, Numeric, Ref, SortedLookupList, Time}
 import ImmArray.ImmArraySeq
-import data.DataArbitrary._
+import data.DataArbitrary.*
 import typesig.{
   DefDataType,
   Enum,
@@ -19,26 +26,19 @@ import typesig.{
   TypeNumeric,
   TypePrim,
   Variant,
-  PrimType => PT,
+  PrimType as PT,
 }
-import scalaz.{@@, Order, Ordering, Tag}
-import scalaz.syntax.bitraverse._
-import scalaz.syntax.traverse._
-import scalaz.std.option._
-import scalaz.std.tuple._
-import org.scalacheck.{Arbitrary, Gen, Shrink}
 import Arbitrary.arbitrary
 
-/** [[ValueGenerators]] produce untyped values; for example, if you use the list gen,
-  * you get a heterogeneous list.  The generation target here, on the other hand, is
-  * ''a pair of a type and a generator of values of that type''.  For example, you might
-  * generate the type `[Map Decimal]`, which would be accompanied by a `Gen` that produced
-  * [[Value]]s each guaranteed to be a list of maps, whose values are all guaranteed to
-  * be Decimals.
+/** [[ValueGenerators]] produce untyped values; for example, if you use the list gen, you get a
+  * heterogeneous list. The generation target here, on the other hand, is ''a pair of a type and a
+  * generator of values of that type''. For example, you might generate the type `[Map Decimal]`,
+  * which would be accompanied by a `Gen` that produced [[Value]]s each guaranteed to be a list of
+  * maps, whose values are all guaranteed to be Decimals.
   *
-  * As a user, you will probably be most interested in one of the generators derived
-  * from `genAddend`; if you need a generator in this theme not already supported by
-  * one such generator, you can probably derive a new one from `genAddend` yourself.
+  * As a user, you will probably be most interested in one of the generators derived from
+  * `genAddend`; if you need a generator in this theme not already supported by one such generator,
+  * you can probably derive a new one from `genAddend` yourself.
   */
 object TypedValueGenerators {
   sealed abstract class ValueAddend {
@@ -83,8 +83,8 @@ object TypedValueGenerators {
       override def prj = prj0.lift
     }
 
-    import Value._, ValueGenerators.Implicits._, data.Utf8.ImplicitOrder._
-    import scalaz.std.anyVal._
+    import Value.*, ValueGenerators.Implicits.*, data.Utf8.ImplicitOrder.*
+    import scalaz.std.anyVal.*
 
     val text = leaf(PT.Text, ValueText.apply) { case ValueText(t) => t }
     val int64 = leaf(PT.Int64, ValueInt64.apply) { case ValueInt64(i) => i }
@@ -129,12 +129,12 @@ object TypedValueGenerators {
         ValueList(elts.map(elt.inj(_)).to(FrontStack))
       override def prj = {
         case ValueList(v) =>
-          import scalaz.std.vector._
+          import scalaz.std.vector.*
           v.toImmArray.toSeq.to(Vector) traverse elt.prj
         case _ => None
       }
       override def injord = {
-        import scalaz.std.iterable._ // compatible with SValue ordering
+        import scalaz.std.iterable.* // compatible with SValue ordering
         implicit val e: Order[elt.Inj] = elt.injord
         Order[Iterable[elt.Inj]] contramap identity
       }
@@ -192,7 +192,7 @@ object TypedValueGenerators {
       override val t = TypePrim(PT.GenMap, ImmArraySeq(key.t, elt.t))
       override def inj(m: key.Inj Map elt.Inj) =
         ValueGenMap {
-          import key.{injord => keyorder}
+          import key.injord as keyorder
           implicit val skeyord: math.Ordering[key.Inj] = Order[key.Inj].toScalaOrdering
           m.to(ImmArraySeq)
             .sortBy(_._1)
@@ -219,7 +219,7 @@ object TypedValueGenerators {
         Tag unsubst implicitly[Arbitrary[key.Inj Map elt.Inj @@ Div3]]
       }
       override def injshrink = {
-        import key.{injshrink => keyshrink}, elt.{injshrink => eltshrink}
+        import key.injshrink as keyshrink, elt.injshrink as eltshrink
         implicitly[Shrink[key.Inj Map elt.Inj]]
       }
     }
@@ -342,7 +342,7 @@ object TypedValueGenerators {
       val t: List[(Ref.Name, Type)]
 
       def injRec(v: HRec): List[Value]
-      def prjRec(v: ImmArray[(_, Value)]): Option[HRec]
+      def prjRec(v: ImmArray[(?, Value)]): Option[HRec]
       implicit def record: Order[HRec]
       implicit def recarb: Arbitrary[HRec]
       implicit def recshrink: Shrink[HRec]
@@ -358,7 +358,7 @@ object TypedValueGenerators {
 
   object RecVarSpec {
     import shapeless.{::, :+:, CNil, Coproduct, HList, HNil, Inl, Inr, Witness}
-    import shapeless.labelled.{field, FieldType => :->>:}
+    import shapeless.labelled.{field, FieldType as :->>:}
 
     type Aux[In, HRec0 <: HList, HVar0 <: Coproduct] = RecVarSpec[In] {
       type HRec = HRec0
@@ -372,7 +372,7 @@ object TypedValueGenerators {
         override val t = List.empty
 
         override def injRec(v: HNil) = List.empty
-        override def prjRec(v: ImmArray[(_, Value)]) =
+        override def prjRec(v: ImmArray[(?, Value)]) =
           Some(HNil)
         override def record = (_, _) => Ordering.EQ
         override def recarb =
@@ -408,7 +408,7 @@ object TypedValueGenerators {
           override def injRec(v: HRec) =
             hVA.inj(v.head) :: tlRules.injRec(v.tail)
 
-          override def prjRec(v: ImmArray[(_, Value)]) = v match {
+          override def prjRec(v: ImmArray[(?, Value)]) = v match {
             case ImmArrayCons(vh, vt) =>
               for {
                 pvh <- hVA.prj(vh._2)
@@ -418,19 +418,19 @@ object TypedValueGenerators {
           }
 
           override def record = {
-            import hVA.{injord => hord}, tlRules.{record => tailord}
+            import hVA.injord as hord, tlRules.record as tailord
             Order.orderBy { case ah :: at => (ah: hVA.Inj, at) }
           }
 
           override def recarb = {
-            import tlRules.{recarb => tailarb}, hVA.{injarb => headarb}
+            import tlRules.recarb as tailarb, hVA.injarb as headarb
             Arbitrary(arbitrary[(hVA.Inj, TL.HRec)] map { case (vh, vt) =>
               field[K](vh) :: vt
             })
           }
 
           override def recshrink: Shrink[HRec] = {
-            import hVA.{injshrink => hshrink}, tlRules.{recshrink => tshrink}
+            import hVA.injshrink as hshrink, tlRules.recshrink as tshrink
             Shrink { case vh :: vt =>
               (Shrink.shrink(vh: hVA.Inj) zip Shrink.shrink(vt)) map { case (nh, nt) =>
                 field[K](nh) :: nt
@@ -467,7 +467,7 @@ object TypedValueGenerators {
               }
             r.updated(
               fname, {
-                import hVA.{injarb => harb}
+                import hVA.injarb as harb
                 arbitrary[hVA.Inj] map (hv => Inl(field[K](hv)))
               },
             )
@@ -489,7 +489,7 @@ object TypedValueGenerators {
     // specifying records and variants works the same way: a
     // record written with the Record macro
     val sample = {
-      import shapeless.record.{Record => ShRecord}
+      import shapeless.record.Record as ShRecord
       ShRecord(foo = ValueAddend.int64, bar = ValueAddend.text)
     }
 
@@ -530,7 +530,7 @@ object TypedValueGenerators {
         sample,
       )
     // You can create a matching value with Coproduct
-    import shapeless.Coproduct, shapeless.syntax.singleton._
+    import shapeless.Coproduct, shapeless.syntax.singleton.*
     val sampleVt =
       Coproduct[sampleAsVariant.Inj](Symbol("foo") ->> 42L)
     val anotherSampleVt =
@@ -552,11 +552,10 @@ object TypedValueGenerators {
     def timestamp: F[Time.Timestamp]
     def bool: F[Boolean]
     def party: F[Ref.Party]
-    def leafInstances: Seq[F[_]] = Seq(text, int64, unit, date, timestamp, bool, party)
+    def leafInstances: Seq[F[?]] = Seq(text, int64, unit, date, timestamp, bool, party)
   }
 
-  /** Given a function that produces one-level-nested cases, produce a
-    * ValueAddend gen.
+  /** Given a function that produces one-level-nested cases, produce a ValueAddend gen.
     */
   def indGenAddend(
       f: (Gen[ValueAddend], Gen[ValueAddend]) => Seq[Gen[ValueAddend]]
@@ -582,13 +581,12 @@ object TypedValueGenerators {
 
   /** This is the key member of interest, supporting many patterns:
     *
-    *  1. generating a type and value
-    *  2. generating a type and many values
-    *  3. generating well-typed values of different types
+    *   1. generating a type and value 2. generating a type and many values 3. generating well-typed
+    *      values of different types
     *
-    * All of which are derivable from what [[ValueAddend]] is, ''a type, a
-    * prism into [[Value]], a [[com.digitalasset.daml.lf.typesig.Type]] describing that type, and
-    * Scalacheck support surrounding that type.''
+    * All of which are derivable from what [[ValueAddend]] is, ''a type, a prism into [[Value]], a
+    * [[com.digitalasset.daml.lf.typesig.Type]] describing that type, and Scalacheck support
+    * surrounding that type.''
     */
   def genAddend(implicit cid: Arbitrary[Value.ContractId]): Gen[ValueAddend] =
     indGenAddend { (keySelf, self) =>

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.*
@@ -173,7 +172,6 @@ object ReassignmentDataHelpers {
     override def authenticate(contract: FatContractInstance, targetPackageId: PackageId)(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
-        loggingContext: LoggingContext,
     ): EitherT[FutureUnlessShutdown, String, Unit] =
       EitherT.fromEither[FutureUnlessShutdown](
         invalid.get((contract.contractId, targetPackageId)).toLeft(())

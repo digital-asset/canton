@@ -94,9 +94,9 @@ class IssuerDriver(
   listeners.appendAll(Seq(requests, registry))
 
   override def flush(): Boolean =
-    registry.one(()) match {
+    registry.one(()).map(_._2) match {
       case Some(registryContract) if (!requests.hasPending) =>
-        requests.allAvailable.foreach { request =>
+        requests.allAvailable.take(role.numPending).foreach { request =>
           val cmd = request.id.exerciseAcceptRequest(registryContract.id).commands.asScala.toSeq
           val submissionF =
             submitCommand(

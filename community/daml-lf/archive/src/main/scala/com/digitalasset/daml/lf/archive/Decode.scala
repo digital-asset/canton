@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf.archive
 
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util => AstUtil}
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 
 object Decode {
 
@@ -44,7 +44,7 @@ object Decode {
   private[this] def decodeArchivePayload(
       payload: ArchivePayload,
       schemaMode: Boolean,
-  ): Either[Error, (PackageId, Ast.Package)] = {
+  ): Either[Error, (PackageId, Ast.Package)] =
     payload match {
       case ArchivePayload.Lf2(pkgId, protoPkg, minor, patch)
           if LanguageVersion.allLfVersions.map(_.minor).contains(minor) =>
@@ -70,7 +70,6 @@ object Decode {
           Error.Parsing(s"Encountered unsupported LF version ${payload.version} during decoding")
         )
     }
-  }
 
   def decodeArchive(
       archive: DamlLf.Archive

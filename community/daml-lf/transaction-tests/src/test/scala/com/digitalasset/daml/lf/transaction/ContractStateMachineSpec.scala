@@ -755,7 +755,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       name = s"Single create}",
       interaction = state =>
         for {
-          state2 <- state.visitCreate(id, None)
+          state2 <- state.visitCreate(id, None, ())
         } yield state2,
       expected = expectedVal,
     )
@@ -770,8 +770,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       interaction = s1 =>
         for {
           s2 <- Right(s1.beginRollback())
-          s3 <- s2.visitCreate(id, None)
-          s4 <- Right(s3.endRollback())
+          s3 <- s2.visitCreate(id, None, ())
+          s4 <- unitsToRollbackError(s3.endRollback())
         } yield s4,
       expected = expectedVal,
     )
@@ -805,7 +805,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
         for {
           s2 <- Right(s1.beginRollback())
           s3 <- s2.visitFetch(id, None, false)
-          s4 <- Right(s3.endRollback())
+          s4 <- unitsToRollbackError(s3.endRollback())
         } yield s4,
       expected = expectedVal,
     )
@@ -839,7 +839,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
         for {
           s2 <- Right(s1.beginRollback())
           s3 <- s2.visitQueryByKey(gkey(key), Vector.empty[ContractId], Vector.empty[ContractId])
-          s4 <- Right(s3.endRollback())
+          s4 <- unitsToRollbackError(s3.endRollback())
         } yield s4,
       expected = expectedVal,
     )
@@ -873,7 +873,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
         for {
           s2 <- Right(s1.beginRollback())
           s3 <- s2.visitExercise((), id, None, false, false)
-          s4 <- Right(s3.endRollback())
+          s4 <- unitsToRollbackError(s3.endRollback())
         } yield s4,
       expected = expectedVal,
     )
@@ -908,7 +908,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
         for {
           s2 <- Right(s1.beginRollback())
           s3 <- s2.visitExercise((), id, None, false, true)
-          s4 <- Right(s3.endRollback())
+          s4 <- unitsToRollbackError(s3.endRollback())
         } yield s4,
       expected = expectedVal,
     )
@@ -1043,7 +1043,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       root: NodeId,
       resolver: KeyResolver,
       state: ContractStateMachine.State[Unit],
-  ): ErrOr[ContractStateMachine.State[Unit]] = {
+  ): Either[TransactionError, ContractStateMachine.State[Unit]] = {
     val node = nodes(root)
     for {
       next <- node match {
@@ -1055,9 +1055,9 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       afterChildren <- withClue(s"visiting children of $node") {
         visitSubtrees(nodes, children(node).toSeq, resolver, next)
       }
-      exited = node match {
-        case _: Node.Rollback => afterChildren.endRollback()
-        case _ => afterChildren
+      exited <- node match {
+        case _: Node.Rollback => unitsToRollbackError(afterChildren.endRollback())
+        case _ => Right(afterChildren)
       }
     } yield exited
   }
@@ -1074,7 +1074,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       roots: Seq[NodeId],
       resolver: KeyResolver,
       state: ContractStateMachine.State[Unit],
-  ): ErrOr[ContractStateMachine.State[Unit]] =
+  ): Either[TransactionError, ContractStateMachine.State[Unit]] =
     roots match {
       case Seq() => Right(state)
       case root +: tail =>
@@ -1149,7 +1149,7 @@ object ContractStateMachineSpec {
 
   case class UnitTest(
                        name: String,
-                       interaction: State[Unit] => ErrOr[State[Unit]],
+                       interaction: State[Unit] => Either[TransactionError, State[Unit]],
                        expected: Map[ContractStateMachine.Mode, OptStateMachineResult],
                      )
 
@@ -1168,6 +1168,12 @@ object ContractStateMachineSpec {
       ContractStateMachine.Mode.LegacyNUCK -> expected,
     )
   }
+
+  // Only use this to make an .endRollback call return a type-checking Either
+  // by producing an empty TransactionError when Left(Set(...)) is returned
+  // TODO(#31454)
+  private def unitsToRollbackError[A](eOrA: Either[Set[Unit], A]): Either[TransactionError.EffectfulRollback, A] =
+    eOrA.left.map(_ => TransactionError.EffectfulRollback(Set()))
 
   def resolverFromTx(tx: HasTxNodes[_]): KeyResolver = {
     def updateKey(

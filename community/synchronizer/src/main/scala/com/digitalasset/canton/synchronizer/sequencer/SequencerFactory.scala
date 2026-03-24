@@ -7,7 +7,6 @@ import cats.data.EitherT
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -18,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequen
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
@@ -45,7 +45,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
       authenticationServices: Option[AuthenticationServices],

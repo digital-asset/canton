@@ -108,7 +108,7 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
         .value
         .reassignmentStore
 
-      val iou1ReassignmentTargetPSId = {
+      val iou1ReassignmentTargetPsid = {
         // Only reassignment of iou1 is in this store
         val (_, reassignmentId, _) = reassignmentStore
           .findEarliestIncomplete()
@@ -121,18 +121,18 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
           .value
           .unassignmentData
           .value
-          .targetPSId
+          .targetPsid
           .unwrap
       }
 
       // Initial target should be the old synchronizer
-      iou1ReassignmentTargetPSId shouldBe fixture.currentPSId
+      iou1ReassignmentTargetPsid shouldBe fixture.currentPsid
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
       transferTraffic()
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
       }
       oldSynchronizerNodes.all.stop()
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)

@@ -9,7 +9,6 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -29,6 +28,7 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.{
   VerifyActiveRequest,
   VerifyActiveResponse,
 }
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.synchronizer.service.HandshakeValidator
 import com.digitalasset.canton.time.Clock
@@ -57,7 +57,7 @@ class GrpcSequencerConnectService(
     synchronizerTopologyManager: SynchronizerTopologyManager,
     cryptoApi: SynchronizerCryptoClient,
     clock: Clock,
-    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends proto.SequencerConnectServiceGrpc.SequencerConnectService
@@ -168,7 +168,7 @@ class GrpcSequencerConnectService(
       - unnecessary warnings in the logs
       - unnecessary delay for the participant to figure out that onboarding has failed
        */
-      _ <- sequencingTimeLowerBoundExclusive match {
+      _ <- lsuSequencingBounds.map(_.upgradeTime) match {
         case Some(boundExclusive) if now <= boundExclusive =>
           EitherT.leftT[Future, Unit](
             failedPrecondition(

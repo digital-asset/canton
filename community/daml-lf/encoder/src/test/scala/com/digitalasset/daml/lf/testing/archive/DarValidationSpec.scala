@@ -4,12 +4,12 @@
 package com.digitalasset.daml.lf.encoder
 
 import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.language.LanguageVersion as LV
+import com.digitalasset.daml.lf.validation.Validation
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.io.File
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
-import com.digitalasset.daml.lf.validation.Validation
 
 class DarValidationSpec extends AnyFlatSpec with Matchers {
 
@@ -18,7 +18,7 @@ class DarValidationSpec extends AnyFlatSpec with Matchers {
   for (version <- versions) {
 
     s"Generated DAR for version $version" should "pass REPL validation" in {
-      val resourceName = s"test-${version}.dar"
+      val resourceName = s"test-$version.dar"
       val resource = getClass.getClassLoader.getResource(resourceName)
 
       withClue(s"Could not find $resourceName in classpath. Did the plugin generate it?") {

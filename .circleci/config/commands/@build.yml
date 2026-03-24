@@ -128,7 +128,7 @@ checkout_and_restore_precompiled_classes:
         name: Extracting precompiled classes
         command: |
           if [[ << parameters.reset_classes_if_requested >> == true ]] &&
-             grep "^$CIRCLE_BRANCH$" .circleci/branches_to_be_fully_recompiled_in_ci.txt > /dev/null
+             (echo "$CIRCLE_BRANCH" | grep -qEf .circleci/branches_to_be_fully_recompiled_in_ci.txt)
           then
             echo "Do not extract precompiled classes, as a full recompilation has been requested."
             exit 0

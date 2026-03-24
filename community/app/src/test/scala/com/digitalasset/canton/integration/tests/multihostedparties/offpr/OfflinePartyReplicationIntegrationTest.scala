@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
-import com.digitalasset.canton.admin.api.client.data.{FlagSet, PartyOnboardingFlagStatus}
+import com.digitalasset.canton.admin.api.client.data.{FlagNotSet, FlagSet}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{Party, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, HasTempDirectory, SynchronizerAlias, config}
 
 import java.time.Duration
@@ -143,12 +144,12 @@ trait OfflinePartyReplicationIntegrationTestBase
   }
 
   /** Reconnects to synchronizer and unilaterally clears the onboarding flag. */
-  // TODO(#29427): May no longer be needed when the onboarding flag is cleared as part of the reconnect
-  protected[offpr] def reconnectAndRemoveOnboardingFlag(
+  protected[offpr] def reconnectAndEnsureOnboardingClearance(
       clock: DelegatingSimClock,
       party: Party,
       synchronizerAlias: SynchronizerAlias,
-  )(implicit env: TestConsoleEnvironment, traceContext: TraceContext): PartyOnboardingFlagStatus = {
+      providedTargetLedgerEnd: Option[Long] = None,
+  )(implicit env: TestConsoleEnvironment, traceContext: TraceContext): Unit = {
     import env.*
 
     val clockAdvancementStep = Duration.ofSeconds(30)
@@ -156,16 +157,17 @@ trait OfflinePartyReplicationIntegrationTestBase
     // Advance time to allow topology transactions to be processed
     clock.advance(clockAdvancementStep)
 
-    val targetLedgerEnd = target.ledger_api.state.end()
-
+    val targetLedgerEnd = providedTargetLedgerEnd.getOrElse(target.ledger_api.state.end())
+    val psid = getInitializedSynchronizer(synchronizerAlias).physicalSynchronizerId
     target.synchronizers.reconnect(synchronizerAlias)
 
     source.health.ping(target)
 
-    val psid = getInitializedSynchronizer(synchronizerAlias).physicalSynchronizerId
-
-    // Trigger the asynchronous onboarding flag clearance process
-    target.parties.clear_party_onboarding_flag(party, psid.logical, targetLedgerEnd)
+    runIfPv34(
+      // Trigger the asynchronous onboarding flag clearance process
+      target.parties.clear_party_onboarding_flag(party, psid.logical, targetLedgerEnd),
+      otherwise = (),
+    )
 
     // Total duration needed for the asynchronous onboarding flag clearance to complete.
     // Depends on the historical decision timeout and of topology transaction actually removing the onboarding flag
@@ -199,7 +201,11 @@ trait OfflinePartyReplicationIntegrationTestBase
     source.health.ping(target)
     target.health.ping(source)
 
-    target.parties.clear_party_onboarding_flag(party, psid.logical, targetLedgerEnd)
+    target.parties.clear_party_onboarding_flag(
+      party,
+      psid.logical,
+      targetLedgerEnd,
+    ) shouldBe FlagNotSet
   }
 
   protected[offpr] def replicateParty(
@@ -219,10 +225,13 @@ trait OfflinePartyReplicationIntegrationTestBase
       beginOffsetExclusive = beforeActivationOffset,
       exportFilePath = acsSnapshotPath,
     )
-    target.parties.import_party_acsV2(acsSnapshotPath, daId, workflowIdPrefix)
+    target.parties.import_party_acsV2(daId, Some(party), acsSnapshotPath, workflowIdPrefix)
 
-    reconnectAndRemoveOnboardingFlag(clock, party, daName)
+    reconnectAndEnsureOnboardingClearance(clock, party, daName)
   }
+
+  protected[offpr] def runIfPv34(block: => Unit, otherwise: => Unit): Unit =
+    if (testedProtocolVersion == ProtocolVersion.v34) block else otherwise
 
 }
 
@@ -304,24 +313,34 @@ final class OfflinePartyReplicationIntegrationTest
     // Assert ACS snapshot is non-empty (no stakeholder filtering happened)
     repair.acs.read_from_file(acsSnapshotPath) should have size 2
 
-    target.parties.import_party_acsV2(acsSnapshotPath, daId)
+    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
 
     // Advance time to allow topology transactions to be processed
     clock.advance(Duration.ofSeconds(30))
     checkOnboardingFlag(daId, setOnTarget = true)
 
-    val targetLedgerEnd = target.ledger_api.state.end()
+    runIfPv34(
+      {
+        val targetLedgerEnd = target.ledger_api.state.end()
 
-    target.synchronizers.reconnect(daName)
+        target.synchronizers.reconnect(daName)
 
-    source.health.ping(target)
-    target.ledger_api.state.acs.of_party(alice).size shouldBe 2
+        source.health.ping(target)
+        target.ledger_api.state.acs.of_party(alice).size shouldBe 2
 
-    // Trigger the asynchronous onboarding flag clearance process
-    val status = target.parties.clear_party_onboarding_flag(alice, daId, targetLedgerEnd)
-    val expectedTimestamp = computeExpectedDecisionDeadline(getOnboardingEffectiveAt(daId))
+        // Trigger the asynchronous onboarding flag clearance process
+        val status = target.parties.clear_party_onboarding_flag(alice, daId, targetLedgerEnd)
+        val expectedTimestamp = computeExpectedDecisionDeadline(getOnboardingEffectiveAt(daId))
 
-    status shouldBe FlagSet(expectedTimestamp)
+        status shouldBe FlagSet(expectedTimestamp)
+      },
+      otherwise = {
+        target.synchronizers.reconnect(daName)
+
+        source.health.ping(target)
+        target.ledger_api.state.acs.of_party(alice).size shouldBe 2
+      },
+    )
 
     // Assert contract archival and creation continues work even though the onboarding flag
     // has not been cleared yet.
@@ -570,9 +589,9 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
 
     repair.acs.read_from_file(acsSnapshotPath) should have size expectedAcsSnapshotSize
 
-    target.parties.import_party_acsV2(acsSnapshotPath, daId)
+    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
 
-    reconnectAndRemoveOnboardingFlag(clock, alice, daName)
+    reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 
     assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 5)
   }

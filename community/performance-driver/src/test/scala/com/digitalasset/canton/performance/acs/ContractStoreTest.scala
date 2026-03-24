@@ -33,7 +33,7 @@ class MyContractStore(
   def addArchive(contractId: Asset.ContractId): Unit = this.processArchive_(contractId)
 
   def addCreate(create: M.dvp.asset.Asset.Contract): Unit =
-    this.processCreate_(create)
+    this.processCreate_("test")(create)
 
 }
 
@@ -54,6 +54,7 @@ class ContractStoreTest extends AnyWordSpec with BaseTest {
         "p",
         owner.getValue,
         owner.getValue,
+        "l",
       ),
       Set().asJava,
       Set().asJava,
@@ -83,7 +84,7 @@ class ContractStoreTest extends AnyWordSpec with BaseTest {
       st.num(alice) shouldBe 1
       st.num(bob) shouldBe 1
       st.num(charlie) shouldBe 0
-      st.one(alice) should be(Some(aliceA))
+      st.one(alice) should be(Some(("test", aliceA)))
 
       st.find(alice) should have length (1)
       st.find(bob) should have length (1)

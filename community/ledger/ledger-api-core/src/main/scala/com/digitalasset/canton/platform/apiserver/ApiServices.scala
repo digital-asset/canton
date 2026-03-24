@@ -25,7 +25,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.execution.*
 import com.digitalasset.canton.platform.apiserver.services.*
 import com.digitalasset.canton.platform.apiserver.services.admin.*
@@ -117,7 +116,6 @@ object ApiServices {
       userManagementServiceConfig: UserManagementServiceConfig,
       partyManagementServiceConfig: PartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig,
-      engineLoggingConfig: EngineLoggingConfig,
       contractAuthenticator: ContractAuthenticatorFn,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
@@ -192,6 +190,7 @@ object ApiServices {
             acsService = activeContractsService,
             syncService = syncService,
             updateService = updateService,
+            participantId = participantId,
             metrics = metrics,
             telemetry = telemetry,
             loggerFactory = loggerFactory,
@@ -290,7 +289,6 @@ object ApiServices {
           contractStore = contractStore,
           contractAuthenticator = contractAuthenticator,
           metrics = metrics,
-          config = engineLoggingConfig,
           prefetchingRecursionLevel = commandConfig.contractPrefetchingDepth,
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
@@ -304,6 +302,9 @@ object ApiServices {
               syncService = syncService,
               commandInterpreter = commandInterpreter,
               topologyAwarePackageSelectionEnabled = ledgerFeatures.topologyAwarePackageSelection,
+              tapsMaxPassesDefault = ledgerFeatures.tapsMaxPassesDefault,
+              tapsMaxPassesLimit = ledgerFeatures.tapsMaxPassesLimit,
+              metrics = metrics,
               loggerFactory = loggerFactory,
             ),
             new ResolveMaximumLedgerTime(maximumLedgerTimeService, loggerFactory),

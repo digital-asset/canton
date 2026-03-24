@@ -33,7 +33,7 @@ import org.mockito.ArgumentMatchers.eq as isEq
 
 import java.util.UUID
 
-class MediatorEventProcessorTest
+final class MediatorEventProcessorTest
     extends BaseTestWordSpec
     with HasExecutionContext
     with HasTestCloseContext {
@@ -60,6 +60,8 @@ class MediatorEventProcessorTest
 
     val processor = new MediatorEventsProcessor(
       identityClientEventHandler =
+        ApplicationHandler.success[UnsignedEnvelopeBox, DefaultOpenEnvelope](),
+      lsuSequencingTestMessageHandler =
         ApplicationHandler.success[UnsignedEnvelopeBox, DefaultOpenEnvelope](),
       eventHandler,
       deduplicator,

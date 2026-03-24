@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package transaction
 package test
 
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
 
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.collection.immutable.HashMap

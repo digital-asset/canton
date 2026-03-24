@@ -4,6 +4,8 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import cats.data.OptionT
+import com.daml.metrics.api.MetricHandle.Timer
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.{CantonTimestamp, ViewConfirmationParameters, ViewPosition}
@@ -20,6 +22,8 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import pprint.Tree
 
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
 trait ResponseAggregator extends HasLoggerName with Product with Serializable {
@@ -39,6 +43,20 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
   def version: CantonTimestamp
 
   def isFinalized: Boolean
+
+  private val firstResponseReceived = new AtomicReference[Option[CantonTimestamp]](None)
+
+  /** Records the response latency metric */
+  def recordResponseMetric(
+      timer: Timer,
+      responseTimestamp: CantonTimestamp,
+      sender: ParticipantId,
+  ): Unit =
+    firstResponseReceived.getAndUpdate(_.orElse(Some(responseTimestamp))).foreach { firstTs =>
+      timer.update(firstTs.toEpochMilli - responseTimestamp.toEpochMilli, TimeUnit.MILLISECONDS)(
+        new MetricsContext(Map("sender" -> sender.uid.toString))
+      )
+    }
 
   /** Validate the additional confirmation response received and record unless already finalized.
     */

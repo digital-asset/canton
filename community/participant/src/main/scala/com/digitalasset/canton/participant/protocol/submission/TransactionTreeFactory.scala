@@ -29,7 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.transaction.TransactionError
+import com.digitalasset.daml.lf.transaction.TransactionContractError
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -146,7 +146,7 @@ object TransactionTreeFactory {
       prettyOfClass(unnamedParam(_.key))
   }
 
-  final case class ContractKeyResolutionError(error: TransactionError)
+  final case class ContractKeyResolutionError(error: TransactionContractError)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[ContractKeyResolutionError] = prettyOfClass(
       unnamedParam(_.error)
@@ -191,6 +191,12 @@ object TransactionTreeFactory {
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[PackageUnknownTo] = prettyOfString { put =>
       show"Participant $participantId has not vetted ${put.packageId}"
+    }
+  }
+
+  final case object EffectfulRollback extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[Any] = prettyOfString { _ =>
+      show"Tried to roll back effectful node."
     }
   }
 

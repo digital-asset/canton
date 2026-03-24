@@ -53,7 +53,7 @@ class QueueBasedSynchronizerOutbox(
   protected def findPendingTransactions()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    FutureUnlessShutdown.pure(
+    FutureUnlessShutdown.lift(
       synchronizerOutboxQueue
         .dequeue(topologyConfig.broadcastBatchSize)
     )
@@ -258,8 +258,10 @@ class QueueBasedSynchronizerOutbox(
             observed,
             "Did not observe transactions in target synchronizer store.",
           )
+          _ <- EitherT.right[String](
+            FutureUnlessShutdown.lift(synchronizerOutboxQueue.completeCycle())
+          )
         } yield {
-          synchronizerOutboxQueue.completeCycle()
           markDone()
         }
 

@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.health
 
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.data.ParticipantStatus.SubmissionReady
 import com.digitalasset.canton.admin.api.client.data.{
   MediatorStatus,
   ParticipantStatus,
   SequencerStatus,
 }
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{MediatorId, SequencerId}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -34,14 +33,14 @@ private[health] trait StatusIntegrationTestUtil extends Matchers {
   protected def assertSequencerUnconnectedStatus(
       status: SequencerStatus,
       connectedMediators: List[MediatorId],
-      synchronizerAlias: SynchronizerAlias,
+      sequencerId: SequencerId,
       testedProtocolVersion: ProtocolVersion,
   ): Unit = {
     status.connectedParticipants shouldBe List()
     status.connectedMediators shouldBe connectedMediators
 
     status.uptime.toNanos should be > 0L
-    status.uid.identifier.str shouldBe synchronizerAlias.unwrap
+    status.uid shouldBe sequencerId.uid
 
     assertSequencerVersioningInfo(status, testedProtocolVersion)
   }

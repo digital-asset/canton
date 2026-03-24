@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.FrontStack
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.interpretation.Error.FailedAuthorization
@@ -20,7 +21,7 @@ import org.scalatest.matchers.should.Matchers._
 
 import scala.collection.immutable.ArraySeq
 
-class ChoiceAuthorityTest extends AnyFreeSpec with Inside {
+class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLogging {
 
   val transactionSeed = crypto.Hash.hashPrivateKey("ChoiceAuthorityTest.scala")
 
@@ -79,7 +80,6 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside {
       theAut: Set[Ref.Party], // The set of parties lists in the explicit choice authority decl.
       theGoal: Ref.Party, // The signatory of the created Goal template.
   ): Either[SError, SubmittedTransaction] = {
-    import SpeedyTestLib.loggingContext
     val committers = Set(theSig, theCon)
     val example = SEApp(
       pkgs.compiler.unsafeCompile(e"M:call"),
@@ -90,7 +90,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside {
         SParty(theGoal),
       ),
     )
-    val machine = Speedy.Machine.fromUpdateSExpr(pkgs, transactionSeed, example, committers)
+    val machine = Speedy.Machine.fromUpdateSExpr(pkgs, transactionSeed, example, committers, logger = MachineLogger())
     SpeedyTestLib.buildTransaction(machine)
   }
 

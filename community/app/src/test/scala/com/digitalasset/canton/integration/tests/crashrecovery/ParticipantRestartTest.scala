@@ -485,7 +485,7 @@ abstract class ParticipantRestartTest
       .thenReturn(Right(NonEmpty.mk(Seq, SynchronizerConnectionConfigStore.Active)))
 
     // StoredSynchronizerConnectionConfig is final and cannot be mocked.
-    // Therefore, we need to construct the full object, just to "mock" configuredPSId.
+    // Therefore, we need to construct the full object, just to "mock" configuredPsid.
     val activeSynchronizer =
       StoredSynchronizerConnectionConfig(
         SynchronizerConnectionConfig(
@@ -501,7 +501,7 @@ abstract class ParticipantRestartTest
           ),
         ),
         status = SynchronizerConnectionConfigStore.Active,
-        configuredPSId = KnownPhysicalSynchronizerId(daId), // this is the relevant field
+        configuredPsid = KnownPhysicalSynchronizerId(daId), // this is the relevant field
         predecessor = None,
       )
     when(synchronizerConnectionConfigStore.getActive(any[SynchronizerId]))
@@ -1086,7 +1086,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
   }
 
-  "successfully restart during a bong" taggedAs (
+  "successfully restart during a bong" taggedAs
     ReliabilityTest(
       Component("Bong application", "connected to single non-replicated participant"),
       AdverseScenario(
@@ -1098,112 +1098,111 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
         action = "retries on timeouts and connection issues",
       ),
       outcome = "bong can progress whenever the participant is running",
-    )
-  ) in { implicit env =>
-    import env.*
+    ) in { implicit env =>
+      import env.*
 
-    console.set_command_timeout(
-      NonNegativeDuration.tryFromDuration(console.command_timeout.duration.mul(2))
-    )
-
-    startSynchronizers(Seq(EnvironmentDefinition.S1M1))
-
-    val participant1 = startAndGet("participant1")
-    val participant2 = startAndGet("participant2")
-
-    connectToDa(participant1)
-    connectToDa(participant2)
-
-    val stateInspection1 = stateInspectionFor(participant1)
-    val stateInspection2 = stateInspectionFor(participant2)
-
-    val p1_count = grabCountsRemote(daName, stateInspection1)
-    val p2_count = grabCountsRemote(daName, stateInspection2)
-
-    val levels: Int = 6
-    val restartF = Future {
-      val before = poll(40.seconds, 10.milliseconds) {
-        val p1_count2 = grabCountsRemote(daName, stateInspection1)
-        // wait until a quarter of the levels have been dealt with
-        assert(
-          p1_count2.acceptedTransactionCount - p1_count.acceptedTransactionCount >= math
-            .pow(2, (levels + 1d) / 4),
-          s"A quarter of levels have not yet been dealt with",
-        )
-        // make sure the bong hasn't finished
-        assert(
-          p1_count2.acceptedTransactionCount - p1_count.acceptedTransactionCount <= 3 * math
-            .pow(2, (levels + 1d) / 4),
-          s"Bong almost finished",
-        )
-        p1_count2.pcsCount
-      }
-
-      logger.info(s"Restarting $participant1 at pcs count $before")
-      stopAndRestart(participant1)
-      val afterRestartTs = Instant.now()
-      logger.info(s"After restart time chosen: $afterRestartTs")
-      val after = grabCountsRemote(daName, stateInspection1).pcsCount
-
-      logger.info(s"After restart, $participant1 has pcs count $after")
-
-      (before, after, afterRestartTs)
-    }
-
-    val bongF = Future {
-      participant2.testing.bong(
-        targets = Set(participant1.id, participant2.id),
-        validators = Set(participant1.id),
-        levels = levels,
-        timeout = 120.seconds,
+      console.set_command_timeout(
+        NonNegativeDuration.tryFromDuration(console.command_timeout.duration.mul(2))
       )
-    }
 
-    val patience = defaultPatience.copy(timeout = 180.seconds)
-    bongF.futureValue(patience, Position.here)
-    val (contractsBeforeRestart, contractsAfterRestart, afterRestartTs) =
-      restartF.futureValue(patience, Position.here)
+      startSynchronizers(Seq(EnvironmentDefinition.S1M1))
 
-    val bongCounts = IntegrationTestUtilities.expectedGrabbedCountsForBong(levels, validators = 1)
-    assert(
-      contractsBeforeRestart <= contractsAfterRestart,
-      s"More contracts found before restart than after restart",
-    )
-    assert(
-      contractsAfterRestart - p1_count.pcsCount <= bongCounts.pcsCount - 10,
-      s"Restart did not happen in the middle of the bong",
-    )
+      val participant1 = startAndGet("participant1")
+      val participant2 = startAndGet("participant2")
 
-    eventually(2.minutes) {
-      val limit = (math.pow(2, levels + 2d) + 200).toInt
-      val p1_count2 = grabCountsRemote(daName, stateInspection1, limit)
-      val p2_count2 = grabCountsRemote(daName, stateInspection2, limit)
-      assertResult(
-        p1_count.plus(bongCounts),
-        s"For p1: Initial count + bong count should be the final count",
-      )(p1_count2)
-      assertResult(
-        p2_count.plus(bongCounts),
-        s"For p2: Initial count + bong count should be the final count",
-      )(p2_count2)
-      // and final bong got archived
-      stateInspection1
-        .findContracts(daName, None, None, filterTemplate = Some("^Canton.Internal.Bong"), 100)
-        .filter(_._1) shouldBe empty
-    }
+      connectToDa(participant1)
+      connectToDa(participant2)
 
-    eventually(20.seconds) {
-      val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
-      if (!optSafeTs.exists(_.toInstant > afterRestartTs))
-        fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
-      else {
-        logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+      val stateInspection1 = stateInspectionFor(participant1)
+      val stateInspection2 = stateInspectionFor(participant2)
+
+      val p1_count = grabCountsRemote(daName, stateInspection1)
+      val p2_count = grabCountsRemote(daName, stateInspection2)
+
+      val levels: Int = 6
+      val restartF = Future {
+        val before = poll(40.seconds, 10.milliseconds) {
+          val p1_count2 = grabCountsRemote(daName, stateInspection1)
+          // wait until a quarter of the levels have been dealt with
+          assert(
+            p1_count2.acceptedTransactionCount - p1_count.acceptedTransactionCount >= math
+              .pow(2, (levels + 1d) / 4),
+            s"A quarter of levels have not yet been dealt with",
+          )
+          // make sure the bong hasn't finished
+          assert(
+            p1_count2.acceptedTransactionCount - p1_count.acceptedTransactionCount <= 3 * math
+              .pow(2, (levels + 1d) / 4),
+            s"Bong almost finished",
+          )
+          p1_count2.pcsCount
+        }
+
+        logger.info(s"Restarting $participant1 at pcs count $before")
+        stopAndRestart(participant1)
+        val afterRestartTs = Instant.now()
+        logger.info(s"After restart time chosen: $afterRestartTs")
+        val after = grabCountsRemote(daName, stateInspection1).pcsCount
+
+        logger.info(s"After restart, $participant1 has pcs count $after")
+
+        (before, after, afterRestartTs)
       }
-    }
 
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
-  }
+      val bongF = Future {
+        participant2.testing.bong(
+          targets = Set(participant1.id, participant2.id),
+          validators = Set(participant1.id),
+          levels = levels,
+          timeout = 120.seconds,
+        )
+      }
+
+      val patience = defaultPatience.copy(timeout = 180.seconds)
+      bongF.futureValue(patience, Position.here)
+      val (contractsBeforeRestart, contractsAfterRestart, afterRestartTs) =
+        restartF.futureValue(patience, Position.here)
+
+      val bongCounts = IntegrationTestUtilities.expectedGrabbedCountsForBong(levels, validators = 1)
+      assert(
+        contractsBeforeRestart <= contractsAfterRestart,
+        s"More contracts found before restart than after restart",
+      )
+      assert(
+        contractsAfterRestart - p1_count.pcsCount <= bongCounts.pcsCount - 10,
+        s"Restart did not happen in the middle of the bong",
+      )
+
+      eventually(2.minutes) {
+        val limit = (math.pow(2, levels + 2d) + 200).toInt
+        val p1_count2 = grabCountsRemote(daName, stateInspection1, limit)
+        val p2_count2 = grabCountsRemote(daName, stateInspection2, limit)
+        assertResult(
+          p1_count.plus(bongCounts),
+          s"For p1: Initial count + bong count should be the final count",
+        )(p1_count2)
+        assertResult(
+          p2_count.plus(bongCounts),
+          s"For p2: Initial count + bong count should be the final count",
+        )(p2_count2)
+        // and final bong got archived
+        stateInspection1
+          .findContracts(daName, None, None, filterTemplate = Some("^Canton.Internal.Bong"), 100)
+          .filter(_._1) shouldBe empty
+      }
+
+      eventually(20.seconds) {
+        val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
+        if (!optSafeTs.exists(_.toInstant > afterRestartTs))
+          fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
+        else {
+          logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+        }
+      }
+
+      assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
+      assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
+    }
 
   "restart with inflight validation requests" in { implicit env =>
     import env.*
@@ -1503,7 +1502,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
         .incomplete_unassigned_of_party(bob)
 
       withClue("there should be exactly one pending reassignment") {
-        incompleteUnassigned should have length (1)
+        incompleteUnassigned should have length 1
       }
 
       withClue("assignment should succeed") {

@@ -48,7 +48,7 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
   def E(xs: Shape*) = Shape.Exercise(xs.toList)
   def R(xs: Shape*) = Shape.Rollback(xs.toList)
 
-  val List(c1, c2, c3, c4) = List[Long](1, 2, 3, 4).map(Shape.Create)
+  val List(c1, c2, c3, c4) = List[Long](1, 2, 3, 4).map(Shape.Create.apply)
 
   // no normalization required
   test("empty tx")(

@@ -166,7 +166,7 @@ class StartableStoppableLedgerApiDependentServices(
             timeouts = parameters.processingTimeouts,
             futureSupervisor = futureSupervisor,
             topologyManagerO = syncService.lookupTopologyManager,
-            psidLookup = syncService.activePSIdForLSId(_),
+            psidLookup = syncService.activePsidForLsid(_),
             topologyClientO = syncService.lookupTopologyClient,
             syncPersistentStateO = psid => syncService.syncPersistentStateManager.get(psid),
             loggerFactory = loggerFactory,

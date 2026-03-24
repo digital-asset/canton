@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import monocle.macros.syntax.lens.*
 
@@ -89,12 +90,20 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
       )
 
       performSynchronizerNodesLsu(fixture)
-      participant1.parties.export_party_acs(
+
+      val partyActivationOffset = participant1.parties.find_party_max_activation_offset(
         alice,
+        participant2,
         daId,
-        participant2.id,
-        ledgerEndP1,
-        aliceAcs.canonicalPath,
+        onboarding = true,
+        beginOffsetExclusive = ledgerEndP1,
+      )
+
+      participant1.repair.export_acs(
+        parties = Set(alice),
+        ledgerOffset = partyActivationOffset,
+        synchronizerId = Some(daId),
+        exportFilePath = aliceAcs.canonicalPath,
       )
 
       sequencer2.stop() // to prevent reconnect to the synchronizer
@@ -107,15 +116,15 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
         participant2.underlying.value.sync.synchronizerConnectionConfigStore
           .getActive(daId)
           .value
-          .configuredPSId
+          .configuredPsid
           .toOption
-          .value shouldBe fixture.newPSId
+          .value shouldBe fixture.newPsid
       }
 
       val ledgerEndP2 = participant2.ledger_api.state.end()
 
       participant2.synchronizers.disconnect_all()
-      participant2.parties.import_party_acsV2(aliceAcs.canonicalPath, daId)
+      participant2.repair.import_acsV2(daId, aliceAcs.canonicalPath)
 
       sequencer2.start()
       transferTraffic()
@@ -123,14 +132,15 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
       // P1 should eventually connect
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
+        participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
       }
+      waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       participant2.synchronizers.reconnect_all()
       participant2.synchronizers
         .list_connected()
         .loneElement
-        .physicalSynchronizerId shouldBe fixture.newPSId
+        .physicalSynchronizerId shouldBe fixture.newPsid
 
       participant2.ledger_api.state.acs.active_contracts_of_party(alice) should have size 1
 

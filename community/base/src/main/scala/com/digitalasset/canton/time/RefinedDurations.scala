@@ -175,7 +175,7 @@ object PositiveFiniteDuration extends RefinedDurationCompanion[PositiveFiniteDur
     _.duration
   implicit val forgetRefinementFDuration: Transformer[PositiveFiniteDuration, FiniteDuration] =
     _.toScala
-  implicit val toNonNegativeDurationConfig
+  implicit val toPositiveFiniteDurationConfig
       : Transformer[PositiveFiniteDuration, PositiveFiniteDurationConfig] = _.toConfig
 
   override def create(duration: Duration): Either[String, PositiveFiniteDuration] =

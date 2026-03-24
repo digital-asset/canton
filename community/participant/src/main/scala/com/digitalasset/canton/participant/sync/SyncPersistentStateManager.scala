@@ -67,7 +67,7 @@ trait SyncPersistentStateLookup {
       .mapValues(_.maxBy1(_.psid))
       .toMap
 
-  def latestKnownPSId(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
+  def latestKnownPsid(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
   def latestKnownProtocolVersion(synchronizerId: SynchronizerId): Option[ProtocolVersion]
 
   def topologyFactoryFor(psid: PhysicalSynchronizerId): Option[TopologyComponentFactory]
@@ -88,7 +88,7 @@ trait SyncPersistentStateLookup {
       synchronizerAlias: SynchronizerAlias
   ): Option[NonEmpty[Set[PhysicalSynchronizerId]]]
 
-  def allKnownLSIds: Set[SynchronizerId] = getAll.keySet.map(_.logical)
+  def allKnownLsids: Set[SynchronizerId] = getAll.keySet.map(_.logical)
 
   def synchronizerIdForAlias(synchronizerAlias: SynchronizerAlias): Option[SynchronizerId] =
     synchronizerIdsForAlias(synchronizerAlias).map(_.head1.logical)
@@ -208,17 +208,17 @@ class SyncPersistentStateManager(
     }
   }
 
-  def getSynchronizerIdx(
+  private def getSynchronizerIdx(
       synchronizerId: SynchronizerId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[IndexedSynchronizer] =
     IndexedSynchronizer.indexed(this.indexedStringStore)(synchronizerId)
 
-  def getPhysicalSynchronizerIdx(
+  private def getPhysicalSynchronizerIdx(
       synchronizerId: PhysicalSynchronizerId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[IndexedPhysicalSynchronizer] =
     IndexedPhysicalSynchronizer.indexed(this.indexedStringStore)(synchronizerId)
 
-  def getSynchronizerTopologyStoreId(synchronizerId: PhysicalSynchronizerId)(implicit
+  private def getSynchronizerTopologyStoreId(synchronizerId: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[IndexedTopologyStoreId] =
     IndexedTopologyStoreId.indexed(indexedStringStore)(
@@ -344,7 +344,7 @@ class SyncPersistentStateManager(
   ): Option[StaticSynchronizerParameters] =
     get(synchronizerId).map(_.staticSynchronizerParameters)
 
-  override def latestKnownPSId(
+  override def latestKnownPsid(
       synchronizerId: SynchronizerId
   ): Option[PhysicalSynchronizerId] =
     getAll.keySet.filter(_.logical == synchronizerId).maxOption
@@ -374,7 +374,7 @@ class SyncPersistentStateManager(
       val psidToState = for {
         lsid <- logicalPersistentStates.keys
         state <- getAllFor(lsid)
-      } yield (state.psid -> state)
+      } yield state.psid -> state
       psidToState.toMap
     }
 

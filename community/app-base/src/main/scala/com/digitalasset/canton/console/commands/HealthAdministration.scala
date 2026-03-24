@@ -30,7 +30,7 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
 }
-import com.digitalasset.canton.grpc.FileStreamObserver
+import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Context
@@ -87,7 +87,7 @@ abstract class HealthAdministration[S <: NodeStatus.Status](
   ): String = consoleEnvironment.run {
     val file = File(outputFile)
     val responseObserver =
-      new FileStreamObserver[v30.HealthDumpResponse](file, _.chunk)
+      new OutputFileStreamObserver[v30.HealthDumpResponse](file, _.chunk)
 
     def call: ConsoleCommandResult[Context.CancellableContext] =
       adminCommand(new StatusAdminCommands.GetHealthDump(responseObserver, chunkSize))

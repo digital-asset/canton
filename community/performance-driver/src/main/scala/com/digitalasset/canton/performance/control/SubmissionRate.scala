@@ -14,6 +14,7 @@ import com.daml.metrics.api.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.tracing.NoTracing
 import com.google.common.util.concurrent.AtomicDouble
 
@@ -54,6 +55,8 @@ sealed abstract class SubmissionRate(
     */
   def available: Int
 
+  def availableBalanced(shift: Int): Int
+
   def currentRate: Double
   def maxRate: Double
   def pending: Int = pending_.getValue
@@ -81,6 +84,25 @@ object SubmissionRate extends NoTracing {
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
+  trait WithTargetLatency {
+
+    protected def metrics: LabeledMetricsFactory
+    protected def prefix: MetricName
+    protected def startMaxRate: Double
+
+    protected val currentRate_ =
+      metrics.gauge[Double](
+        MetricInfo(prefix :+ "currentRate", "Current rate settings", MetricQualification.Debug),
+        0,
+      )
+    protected val maxRate_ =
+      metrics.gauge[Double](
+        MetricInfo(prefix :+ "maxRate", "Current maximum rate", MetricQualification.Debug),
+        startMaxRate,
+      )
+
+  }
+
   /** This instance aims to reach a given target latency.
     * @param startMaxRate
     *   Initial rate (in submissions/second)
@@ -92,15 +114,16 @@ object SubmissionRate extends NoTracing {
     *   Current time retriever
     */
   class TargetLatency(
-      startMaxRate: Double,
+      val startMaxRate: Double,
       startTargetLatencyMs: Int,
       startAdjustFactor: Double,
-      prefix: MetricName,
-      metrics: LabeledMetricsFactory,
+      val prefix: MetricName,
+      val metrics: LabeledMetricsFactory,
       loggerFactoryE: NamedLoggerFactory,
       now: () => CantonTimestamp,
   )(implicit ec: ExecutionContext)
       extends SubmissionRate(prefix, metrics, now = now)
+      with WithTargetLatency
       with NamedLogging {
 
     val loggerFactory: NamedLoggerFactory = loggerFactoryE
@@ -110,21 +133,13 @@ object SubmissionRate extends NoTracing {
 
     private val adjustFactor = new AtomicDouble(startAdjustFactor)
     private val targetLatencyMs = new AtomicDouble(startTargetLatencyMs.toDouble)
-    private val currentRate_ =
-      metrics.gauge[Double](
-        MetricInfo(prefix :+ "currentRate", "Current rate settings", MetricQualification.Debug),
-        0,
-      )
-    private val maxRate_ =
-      metrics.gauge[Double](
-        MetricInfo(prefix :+ "maxRate", "Current maximum rate", MetricQualification.Debug),
-        startMaxRate,
-      )
 
     private val lastRateReduction = new AtomicReference[CantonTimestamp](now())
 
     override def toString: String =
       s"rate(cur=${"%1.1f" format currentRate}, latency=${"%1.0f" format latencyMs}, max=${"%1.1f" format maxRate}, available=$available, pending=$pending, succeeded=$succeeded, observed=$observed, failed=$failed)"
+
+    override def availableBalanced(shift: Int): Int = available
 
     override def available: Int = {
       val latencyRatio = Math.min(1.0, latencyMs / targetLatencyMs.get())
@@ -269,6 +284,112 @@ object SubmissionRate extends NoTracing {
     }
   }
 
+  /** Approach target latency by controlling the number of pending commands
+    *
+    * @param stepFactor
+    *   step-wise increase in percent per latency observation
+    * @param stepThreshold
+    *   only adjust pending if we are using the bandwidth
+    * @param cutFactor
+    *   decrease factor per failure
+    * @param targetLatencyTolerance
+    *   when do we start to adjust the target pending
+    * @param increaseThreshold
+    *   what is the minimum bandwidth usage before we start increasing
+    */
+  class TargetLatencyViaPending(
+      targetLatencyMs: Int = 5000,
+      stepFactor: Double = 0.02,
+      cutFactor: Double = 0.9,
+      targetLatencyTolerance: Double = 0.05,
+      increaseThreshold: Double = 0.75,
+      val prefix: MetricName,
+      val metrics: LabeledMetricsFactory,
+      val loggerFactory: NamedLoggerFactory,
+      now: () => CantonTimestamp,
+  )(implicit ec: ExecutionContext)
+      extends SubmissionRate(prefix, metrics, now = now)
+      with WithTargetLatency
+      with NamedLogging {
+
+    override protected def startMaxRate: Double = 0.0
+
+    private val targetPending = new AtomicDouble(1.45)
+    private val targetLatencyMs_ = new AtomicDouble(targetLatencyMs.toDouble)
+    private val stepFactor_ = new AtomicDouble(stepFactor)
+    private val cutFactor_ = new AtomicDouble(cutFactor)
+
+    override def toString: String =
+      s"rate(cur=${"%1.1f" format currentRate}, latency=${"%1.0f" format latencyMs}, max=${"%1.1f" format maxRate}, available=$available, pending=$pending, succeeded=$succeeded, observed=$observed, failed=$failed)"
+
+    override def available: Int = availableBalanced(0)
+
+    override def availableBalanced(shift: Int): Int = if (pending == 0) 1
+    else {
+      Math.max(0, Math.round(targetPending.get() + shift).toInt - pending)
+    }
+
+    override def currentRate: Double = pending / (targetLatencyMs_.get() / 1000.0)
+
+    override def maxRate: Double = targetPending.get() / (targetLatencyMs_.get() / 1000.0)
+
+    def updateSettings(
+        targetLatencySettings: SubmissionRateSettings.TargetLatencyNew
+    ): Unit = {
+      targetLatencyMs_.set(targetLatencySettings.targetLatencyMs.toDouble)
+      stepFactor_.set(targetLatencySettings.stepFactor)
+      cutFactor_.set(targetLatencySettings.cutFactor)
+    }
+
+    override def newSubmission(result: Future[Boolean]): Unit = {
+      pending_.updateValue(_ + 1)
+      result.onComplete {
+        case Success(true) => {
+          succeeded_.incrementAndGet().discard
+        }
+        case Success(false) =>
+          val cur = targetPending.updateAndGet(x => Math.max(1, x * cutFactor_.get()))
+          logger.debug(s"Reduced target pending to $cur after failure")
+        case _ => failed_.updateValue(_ + 1)
+      }
+      result.onComplete { _ =>
+        pending_.updateValue(_ - 1)
+      }
+    }
+
+    override def updateRate(now: CantonTimestamp): Unit = {
+      maxRate_.updateValue(maxRate)
+      currentRate_.updateValue(currentRate)
+    }
+
+    override def latencyObservation(durationMs: Long): Unit = {
+      val obs = observed_.incrementAndGet()
+      val tm = now()
+      val last = lastObservation.getAndSet(tm)
+      val tau = targetLatencyMs_.get()
+      val alphaObs = 1.0 / obs
+      val alphaTau = Math.min((tm.toInstant.toEpochMilli - last.toInstant.toEpochMilli) / tau, 1.0)
+      val alpha = Math.max(alphaTau, alphaObs)
+      val avgLatency = alpha * durationMs + (1.0 - alpha) * latency_.getValue
+      latency_.updateValue(avgLatency)
+      // if the measurement was below the threshold, increase the target pending size
+      if (durationMs < targetLatencyMs_.get() * (1.0 - targetLatencyTolerance)) {
+        // increase if we are using capacity
+        if (
+          pending >= targetPending.get() * increaseThreshold ||
+          pending >= Math.round(targetPending.get()) - 2
+        ) {
+          targetPending.updateAndGet(_ * (1.0 + stepFactor_.get())).discard
+        }
+      } else if (durationMs > targetLatencyMs_.get() * (1 + targetLatencyTolerance)) {
+        // don't drop below 1
+        targetPending.updateAndGet(c => Math.max(1.0, c * (1.0 - stepFactor_.get()))).discard
+      }
+
+    }
+
+  }
+
   /** This instance aims at a fixed rate.
     *
     * @param rate
@@ -292,6 +413,7 @@ object SubmissionRate extends NoTracing {
 
     val loggerFactory: NamedLoggerFactory = loggerFactoryE
 
+    override def availableBalanced(shift: Int): Int = available
     override def available: Int = available_.get()
 
     override def currentRate: Double = rate

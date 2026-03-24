@@ -529,10 +529,12 @@ protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBas
           contractImportMode = testContractIdImportMode,
         )
       } else if (useV2ExportImport) {
+        val bank = grabPartyId(participant1, "Bank")
         participant3.parties.import_party_acsV2(
+          synchronizerId.logical,
+          Some(bank),
           acsExportFile.canonicalPath,
           contractImportMode = testContractIdImportMode,
-          synchronizerId = synchronizerId.logical,
         )
       } else {
         participant3.parties.import_party_acs(

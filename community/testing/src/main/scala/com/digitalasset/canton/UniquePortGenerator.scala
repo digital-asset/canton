@@ -30,7 +30,7 @@ object UniquePortGenerator {
   private val SharedPortNumFile: File = File.temp / "canton_tests_unique_port_generator.dat"
 
   SharedPortNumFile.createFileIfNotExists(createParents = true)
-  logger.debug(s"Initialized port file: ${SharedPortNumFile.path.toString}")
+  logger.trace(s"Initialized port file: ${SharedPortNumFile.path.toString}")
 
   private val counter = new UniqueBoundedCounter(
     dataFile = SharedPortNumFile.path,
@@ -48,10 +48,10 @@ object UniquePortGenerator {
     *   unique port for canton tests, throws otherwise
     */
   def next: Port = {
-    logger.debug("Attempting to find unique port ...")
+    logger.trace("Attempting to find unique port ...")
     val start = System.nanoTime()
     val port = Port.tryCreate(counter.incrementAndGet().fold(throw _, identity))
-    logger.debug(
+    logger.trace(
       s"Found unique port $port after ${Duration.ofNanos(System.nanoTime() - start).toMillis} [ms]"
     )
     port
@@ -126,7 +126,7 @@ class UniqueBoundedCounter(
       // Retry only on OverlappingFileLockException which might may occur from lock() due to inter-process contention
       case Failure(e: OverlappingFileLockException) =>
         if (attempt <= maxRetries) {
-          logger.debug(
+          logger.trace(
             s"Retrying operation due to OverlappingFileLockException (Attempt $attempt/$maxRetries), sleeping ${retryDelayMillis}ms ...",
             e,
           )
@@ -162,21 +162,21 @@ class UniqueBoundedCounter(
           // Acquire file lock using blocking lock()
           // This may block and throw OverlappingFileLockException if another OS process holds the lock.
           // This may also throw numerous other exceptions!
-          logger.debug("Attempting to acquire file lock via blocking lock()...")
+          logger.trace("Attempting to acquire file lock via blocking lock()...")
           fileLock = lockChannel.lock()
-          logger.debug("Acquired file lock.")
+          logger.trace("Acquired file lock.")
 
-          logger.debug("Mutating counter...")
+          logger.trace("Mutating counter...")
           val dataAccessResult = mutateCounter(operation)
-          logger.debug("Counter changed.")
+          logger.trace("Counter changed.")
 
           dataAccessResult.fold(throw _, identity)
         } finally {
           if (fileLock != null) {
-            logger.debug("Releasing file lock.")
+            logger.trace("Releasing file lock.")
             Try(fileLock.release())
           } else {
-            logger.debug(
+            logger.trace(
               "Nothing to release. File lock was null because the attempt to acquire the file lock failed " +
                 "with an exception, most likely an OverlappingFileLockException has been thrown."
             )
@@ -192,7 +192,7 @@ class UniqueBoundedCounter(
     */
   private def mutateCounter(updateFn: Int => Int): Try[Int] = Try {
     val currentValue = if (dataFile.isEmpty) {
-      logger.debug(s"Data file empty, using initial value $startValue")
+      logger.trace(s"Data file empty, using initial value $startValue")
       startValue
     } else {
       dataFile.contentAsString(StandardCharsets.UTF_8).toInt

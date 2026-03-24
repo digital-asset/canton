@@ -628,7 +628,7 @@ final class PartyReplicator(
               .leftMap(_.message)
           )
           psid <- EitherT.fromEither[FutureUnlessShutdown](
-            latestSynchronizerConnectionConfig.configuredPSId.toOption
+            latestSynchronizerConnectionConfig.configuredPsid.toOption
               .toRight(
                 s"Latest synchronizer $synchronizerId config $latestSynchronizerConnectionConfig has no physical synchronizer id set"
               )

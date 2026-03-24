@@ -25,7 +25,7 @@ class InsertOrdSetTest extends AnyWordSpec with Matchers {
     "preserve type" in {
       val ios: InsertOrdSet[String] = InsertOrdSet.fromSeq(Seq("a", "b"))
       ios.map(x => x) shouldBe ios
-      ios.map(x => x + "x") shouldBe a[InsertOrdSet[_]]
+      ios.map(x => x + "x") shouldBe a[InsertOrdSet[?]]
     }
   }
 }

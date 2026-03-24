@@ -529,7 +529,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       additionalConfirming: Seq[ParticipantId] = Seq.empty,
       observing: Seq[ParticipantId] = Seq.empty,
   ): EitherT[FutureUnlessShutdown, String, OnboardingTransactions] = {
-    val knownPSIds = reference.synchronizers.list_registered().collect {
+    val knownPsids = reference.synchronizers.list_registered().collect {
       case (_, KnownPhysicalSynchronizerId(psid), _) => psid
     }
 
@@ -557,7 +557,7 @@ private[canton] class ExternalPartiesTestingAdministration(
 
       // Find the first PTP with keys for this party on any known synchronizer
       signingKeys <- EitherT.fromEither[FutureUnlessShutdown](
-        knownPSIds
+        knownPsids
           .flatMap(psid =>
             reference.topology.party_to_participant_mappings
               .list(psid.logical, filterParty = party.partyId.filterString)

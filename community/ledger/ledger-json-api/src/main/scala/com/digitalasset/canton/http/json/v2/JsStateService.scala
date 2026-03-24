@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.protobuf.ByteString
 import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.grpc.stub.StreamObserver
@@ -166,7 +167,7 @@ class JsStateService(
         state_service.GetActiveContractsRequest(
           activeAtOffset = req.activeAtOffset,
           eventFormat = req.eventFormat,
-          streamContinuationToken = None,
+          streamContinuationToken = req.streamContinuationToken,
         )
       case (None, None, _) =>
         throw RequestValidationErrors.InvalidArgument
@@ -184,7 +185,7 @@ class JsStateService(
               verbose = verbose,
             )
           ),
-          streamContinuationToken = None,
+          streamContinuationToken = req.streamContinuationToken,
         )
     }
 
@@ -281,6 +282,7 @@ final case class JsAssignedEvent(
 final case class JsGetActiveContractsResponse(
     workflowId: String,
     contractEntry: JsContractEntry,
+    streamContinuationToken: ByteString,
 )
 
 object JsStateServiceCodecs {

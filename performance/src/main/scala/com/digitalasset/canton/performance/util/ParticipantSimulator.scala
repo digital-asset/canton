@@ -544,23 +544,22 @@ class ParticipantSimulator(
       }
     }
 
-    val sequencerAggregator = new SequencerAggregator(
-      crypto.pureCrypto,
-      nodeParameters.sequencerClient.eventInboxSize,
-      loggerFactoryForParticipant,
-      MessageAggregationConfig(None, sequencerTrustThreshold),
-      _ => (),
-      env.environment.config.parameters.timeouts.processing,
-      environment.futureSupervisor,
-      useNewConnectionPool = true,
-    )
     val aggregationHandler = new PostAggregationHandlerImpl(
-      sequencerAggregator,
       addToFlushAndLogError _,
       nodeParameters.sequencerClient.eventInboxSize,
       eventBatchProcessor = batchProcessor,
       hasSynchronizeWithClosing = this,
       loggerFactory = loggerFactoryForParticipant,
+    )
+    val sequencerAggregator = new SequencerAggregator(
+      aggregationHandler,
+      crypto.pureCrypto,
+      nodeParameters.sequencerClient.eventInboxSize,
+      loggerFactoryForParticipant,
+      MessageAggregationConfig(sequencerTrustThreshold),
+      _ => (),
+      env.environment.config.parameters.timeouts.processing,
+      environment.futureSupervisor,
     )
 
     val subscriptionHandlerFactory = new SubscriptionHandlerXFactoryImpl(

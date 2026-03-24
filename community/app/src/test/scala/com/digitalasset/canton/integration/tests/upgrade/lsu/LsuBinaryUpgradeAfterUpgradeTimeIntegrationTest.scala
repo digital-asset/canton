@@ -115,7 +115,7 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
         import env.*
 
         val fixture = fixtureWithDefaults()
-        fixture.newPSId.protocolVersion.isDev shouldBe true
+        fixture.newPsid.protocolVersion.isDev shouldBe true
 
         val iouSignedByP2 = IouSyntax.createIou(participant2)(
           payer = participant2.adminParty,
@@ -139,12 +139,12 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
             eventually() {
               // need to keep advancing the clock to trigger the scheduled synchronizer connect retry attempts
               environment.simClock.value.advance(Duration.ofSeconds(1))
-              participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
+              participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
               // no dev support
-              participant2.synchronizers.is_connected(fixture.newPSId) shouldBe false
+              participant2.synchronizers.is_connected(fixture.newPsid) shouldBe false
 
-              participant1.synchronizers.is_connected(fixture.currentPSId) shouldBe false
-              participant2.synchronizers.is_connected(fixture.currentPSId) shouldBe false
+              participant1.synchronizers.is_connected(fixture.currentPsid) shouldBe false
+              participant2.synchronizers.is_connected(fixture.currentPsid) shouldBe false
             }
 
             oldSynchronizerNodes.all.stop()
@@ -174,7 +174,7 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
             participant3.synchronizers.reconnect_all()
 
             eventually() {
-              participant3.synchronizers.is_connected(fixture.newPSId) shouldBe true
+              participant3.synchronizers.is_connected(fixture.newPsid) shouldBe true
             }
 
           },
@@ -195,12 +195,12 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
           (
             LogEntryOptionality.Required,
             _.errorMessage should (include(
-              s"Unable to perform handshake with ${fixture.newPSId}"
+              s"Unable to perform handshake with ${fixture.newPsid}"
             ) and include("Trust threshold of 1 is no longer reachable")),
           ),
           (
             LogEntryOptionality.Required,
-            _.errorMessage should (include(s"Upgrade to ${fixture.newPSId} failed") and include(
+            _.errorMessage should (include(s"Upgrade to ${fixture.newPsid} failed") and include(
               "Trust threshold of 1 is no longer reachable"
             )),
           ),

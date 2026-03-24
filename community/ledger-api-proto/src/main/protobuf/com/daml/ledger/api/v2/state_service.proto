@@ -108,6 +108,13 @@ message GetActiveContractsResponse {
     // unassigned event before or at the active_at_offset.
     IncompleteAssigned incomplete_assigned = 4;
   }
+
+  // Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+  // of the active contracts snapshot.
+  // Only populated for the streaming ``GetActiveContracts`` rpc call.
+  //
+  // Optional: can be empty
+  bytes stream_continuation_token = 5;
 }
 
 message ActiveContract {

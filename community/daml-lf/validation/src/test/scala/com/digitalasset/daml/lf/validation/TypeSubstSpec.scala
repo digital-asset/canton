@@ -3,11 +3,11 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.testing.parser.Implicits._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 class TypeSubstSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {
@@ -15,7 +15,7 @@ class TypeSubstSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matc
   private[this] implicit val parserParameters: ParserParameters[this.type] =
     ParserParameters.default
 
-  import SpecUtil._
+  import SpecUtil.*
 
   "A TypeSubst" should {
     "should be idempotent on terms that do not contain variable from its domain." in {

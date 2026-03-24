@@ -64,7 +64,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
       DefaultProcessingTimeouts.testing,
       storage,
       sequencerStore,
-      sequencingTimeLowerBoundExclusive = None,
+      lsuSequencingBounds = None,
       clock,
       sequencerId,
       crypto,
@@ -93,7 +93,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
       val testSequencerWrapper =
         TestDatabaseSequencerWrapper(sequencer.asInstanceOf[DatabaseSequencer])
 
-      val requestSigner = RequestSigner(crypto, testedProtocolVersion, loggerFactory)
+      val requestSigner = RequestSigner(crypto, loggerFactory)
 
       for {
         signedRequest <- valueOrFail(

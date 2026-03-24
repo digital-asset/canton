@@ -3,29 +3,26 @@
 
 package com.digitalasset.daml.lf.typesig
 
-import java.{util => j}
-
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.{Numeric, Ref}
 
-import scala.jdk.CollectionConverters._
+import java.util as j
+import scala.jdk.CollectionConverters.*
 
-/** [[Type]] is an intermediate form from
-  * which record/variant objects or type aliases are generated from.
+/** [[Type]] is an intermediate form from which record/variant objects or type aliases are generated
+  * from.
   *
-  * The [[Type]] structure defined in this module defines all types that
-  * can validly have a Scala data structure generated from them.
-  * It contains type variables which, when present, are used to generate
-  * polymorphic Scala data structures.
+  * The [[Type]] structure defined in this module defines all types that can validly have a Scala
+  * data structure generated from them. It contains type variables which, when present, are used to
+  * generate polymorphic Scala data structures.
   */
 sealed abstract class Type extends Product with Serializable {
 
-  /** Handle the possible Types without missing one or casting. Meant to be used
-    * from Java.
+  /** Handle the possible Types without missing one or casting. Meant to be used from Java.
     *
-    * @note Normally [[Type]]'s recursive occurrences would be replaced with
-    *       `Z`, but we have not done that for closer analogy to pattern
-    *       matching.
+    * @note
+    *   Normally [[Type]]'s recursive occurrences would be replaced with `Z`, but we have not done
+    *   that for closer analogy to pattern matching.
     */
   def fold[Z](
       typeCon: TypeCon => Z,
@@ -64,7 +61,7 @@ final case class TypeCon(tycon: TypeConId, typArgs: ImmArraySeq[Type])
       if (defn.typeVars.isEmpty) { // optimization
         defn.dataType
       } else {
-        val paramsMap = Map(defn.typeVars.zip(typArgs): _*)
+        val paramsMap = Map(defn.typeVars.zip(typArgs)*)
         val instantiateFWT: Type => Type = _.mapTypeVars(v => paramsMap.getOrElse(v.name, v))
         defn.dataType.bimap(instantiateFWT, instantiateFWT)
       }
@@ -84,7 +81,7 @@ object Type {
   /** Java-friendly typArgs getter. */
   sealed trait HasTypArgs {
     def typArgs: ImmArraySeq[Type]
-    def getTypArgs: j.List[_ <: Type] = typArgs.asJava
+    def getTypArgs: j.List[? <: Type] = typArgs.asJava
   }
 }
 
@@ -100,7 +97,7 @@ sealed abstract class PrimType extends TypeConIdOrPrimType {
 
   /** Named pattern match for Java. */
   def fold[Z](v: PrimTypeVisitor[Z]): Z = {
-    import v._, PrimType._
+    import v.*, PrimType.*
     this match {
       case Bool => bool
       case Int64 => int64

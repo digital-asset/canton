@@ -4,8 +4,7 @@
 package com.digitalasset.daml.lf
 package validation
 
-import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 
 private[validation] object Util {
 

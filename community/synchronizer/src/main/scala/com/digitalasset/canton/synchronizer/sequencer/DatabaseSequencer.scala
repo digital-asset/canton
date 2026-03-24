@@ -43,6 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
   SequencerMemberValidator,
   SequencerStore,
 }
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -77,7 +78,7 @@ object DatabaseSequencer {
       timeouts: ProcessingTimeout,
       storage: Storage,
       sequencerStore: SequencerStore,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       clock: Clock,
       topologyClientMember: Member,
       cryptoApi: SynchronizerCryptoClient,
@@ -118,7 +119,7 @@ object DatabaseSequencer {
       metrics,
       loggerFactory,
       blockSequencerMode = false,
-      sequencingTimeLowerBoundExclusive = sequencingTimeLowerBoundExclusive,
+      lsuSequencingBounds = lsuSequencingBounds,
       rateLimitManagerO = None,
     )
   }
@@ -143,7 +144,7 @@ class DatabaseSequencer(
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     blockSequencerMode: Boolean,
-    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     rateLimitManagerO: Option[SequencerRateLimitManager],
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
@@ -177,7 +178,7 @@ class DatabaseSequencer(
     protocolVersion,
     loggerFactory,
     blockSequencerMode,
-    sequencingTimeLowerBoundExclusive,
+    lsuSequencingBounds,
     metrics,
   )
 
@@ -263,7 +264,7 @@ class DatabaseSequencer(
       cryptoApi,
       eventSignaller,
       topologyClientMember,
-      sequencingTimeBoundExclusiveO = sequencingTimeLowerBoundExclusive,
+      lsuSequencingBounds,
       metrics,
       timeouts,
       loggerFactory,
@@ -330,7 +331,8 @@ class DatabaseSequencer(
     writer.blockSequencerWrite(outcome)
 
   override protected def sendAsyncSignedInternal(
-      signedSubmission: SignedContent[SubmissionRequest]
+      signedSubmission: SignedContent[SubmissionRequest],
+      skipLsuChecks: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
@@ -498,10 +500,7 @@ class DatabaseSequencer(
           DbExceptionRetryPolicy,
         )
     )
-    waitForWatermarkToPassTimestamp
-      .flatMap { _ =>
-        snapshot(timestamp)
-      }
+    waitForWatermarkToPassTimestamp.flatMap(_ => snapshot(timestamp))
   }
 
   override def onClosed(): Unit =
@@ -577,4 +576,10 @@ class DatabaseSequencer(
       "Traffic control is not supported by the database sequencer"
     )
 
+  override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+    throw new UnsupportedOperationException(
+      "LSU sanity check is not supported by the database sequencer"
+    )
 }

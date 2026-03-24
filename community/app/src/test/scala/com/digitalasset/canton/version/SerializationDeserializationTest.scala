@@ -10,6 +10,7 @@ import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.data.ActiveContractOld
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.{
+  OnboardingClearanceOperation,
   PartyReplicationSourceParticipantMessage,
   PartyReplicationTargetParticipantMessage,
 }
@@ -100,6 +101,8 @@ final class SerializationDeserializationTest
         if (version >= ProtocolVersion.v35) {
           testContext(AcsCommitmentProtocolMessage, version, version)
         }
+        testContext(LsuSequencingTestMessage, version, version)
+        test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
         test(ConfirmationResponses, version)
         testContext(
@@ -117,6 +120,7 @@ final class SerializationDeserializationTest
         )
         test(ConfirmationResultMessage, version)
         test(PendingHandshakeWithLsuSuccessor, version)
+        test(OnboardingClearanceOperation, version)
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)

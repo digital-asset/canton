@@ -41,5 +41,20 @@ message EnvelopeContent {
     v30.AssignmentMediatorMessage assignment_mediator_message = 4;
     v30.RootHashMessage root_hash_message = 5;
     v30.TopologyTransactionsBroadcast topology_transactions_broadcast = 6;
+    v30.LsuSequencingTestMessage lsu_sequencing_test_message = 7;
   }
+}
+
+message LsuSequencingTestMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  bytes content = 1;
+  com.digitalasset.canton.crypto.v30.Signature signatures = 2;
+}
+
+message LsuSequencingTestMessageContent {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  string physical_synchronizer_id = 1;
+  string sender = 2;
 }

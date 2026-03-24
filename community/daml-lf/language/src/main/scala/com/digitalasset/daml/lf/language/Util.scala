@@ -4,9 +4,9 @@
 package com.digitalasset.daml.lf
 package language
 
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.language.Ast._
 import com.daml.nameof.NameOf
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.language.Ast.*
 
 import scala.annotation.tailrec
 import scala.collection.immutable.HashMap
@@ -151,7 +151,7 @@ object Util {
   @throws[IllegalArgumentException]
   def dependenciesInTopologicalOrder(
       pkgIds: List[Ref.PackageId],
-      packages: PartialFunction[Ref.PackageId, GenPackage[_]],
+      packages: PartialFunction[Ref.PackageId, GenPackage[?]],
   ): List[Ref.PackageId] = {
 
     @tailrec
@@ -285,7 +285,7 @@ object Util {
         ModuleSignature(
           name = name,
           definitions = definitions.transform {
-            case (_, dvalue: GenDValue[_]) => dvalue.copy(body = ())
+            case (_, dvalue: GenDValue[?]) => dvalue.copy(body = ())
             case (_, dataType: DDataType) => dataType
             case (_, typeSyn: DTypeSyn) => typeSyn
           },
@@ -337,11 +337,11 @@ object Util {
       version: Ref.PackageVersion,
   ) {
     override def toString: String =
-      s"${pkgId} (${name} v${version})"
+      s"$pkgId ($name v$version)"
   }
 
   object PkgIdWithNameAndVersion {
-    def apply(idWithPkg: (Ref.PackageId, Ast.GenPackage[_])): PkgIdWithNameAndVersion =
+    def apply(idWithPkg: (Ref.PackageId, Ast.GenPackage[?])): PkgIdWithNameAndVersion =
       PkgIdWithNameAndVersion(
         idWithPkg._1,
         idWithPkg._2.metadata.name,

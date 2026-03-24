@@ -233,6 +233,9 @@ trait Sequencer
       config: Option[IndividualThroughputCapConfig],
   )(implicit traceContext: TraceContext): Unit = ()
 
+  def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
 }
 
 /** Sequencer pruning interface.

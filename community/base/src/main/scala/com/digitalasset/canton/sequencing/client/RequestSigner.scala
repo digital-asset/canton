@@ -11,11 +11,13 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 trait RequestSigner {
+  // TODO(#31060): Ensure that if `maxSequencingTime` falls outside the usable validity window of a
+  // session signing key, we fall back to signing with the long-term
+  // key (even if the session key is newly generated).
   def signRequest[A <: HasCryptographicEvidence](
       request: A,
       hashPurpose: HashPurpose,
@@ -30,7 +32,6 @@ trait RequestSigner {
 object RequestSigner {
   def apply(
       topologyClient: SynchronizerCryptoClient,
-      protocolVersion: ProtocolVersion,
       loggerFactoryP: NamedLoggerFactory,
   ): RequestSigner = new RequestSigner with NamedLogging {
     override val loggerFactory: NamedLoggerFactory = loggerFactoryP
@@ -56,7 +57,7 @@ object RequestSigner {
           Some(snapshot.ipsSnapshot.timestamp),
           approximateTimestampOverride,
           hashPurpose,
-          protocolVersion,
+          topologyClient.protocolVersion,
         )
         .leftMap(_.toString)
     }

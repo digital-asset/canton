@@ -47,7 +47,6 @@ trait SimpleFunctionalNodesTest
 
   "Temporarily stop sequencer and participant re-send topology after restart" in { implicit env =>
     import env.*
-    val usingPool = participant1.config.sequencerClient.useNewConnectionPool
     loggerFactory.assertLogsUnorderedOptional(
       {
 
@@ -89,8 +88,7 @@ trait SimpleFunctionalNodesTest
       (
         LogEntryOptionality.OptionalMany,
         _.warningMessage should include(
-          if (usingPool) "Request failed for server-sequencer1-0. Is the server running?"
-          else "Request failed for sequencer. Is the server running?"
+          "Request failed for server-sequencer1-0. Is the server running?"
         ),
       ),
       (

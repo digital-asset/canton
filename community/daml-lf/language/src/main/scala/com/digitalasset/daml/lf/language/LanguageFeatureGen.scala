@@ -84,24 +84,30 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
-  val featureUCKKeyBuiltins: Feature = Feature(
-    name = "Old style (UCK) key builtins (fetchByKey, exerciseByKey, lookupByKey, ...)",
+  val featureUCKBuiltins: Feature = Feature(
+    name =
+      "Old style (UCK) key builtins (fetchByKey, exerciseByKey (UCK semantics), lookupByKey (UCK semantics), ...)",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+  )
+
+  val featureNUCK: Feature = Feature(
+    name = "Non-unique contract keys",
+    versionRange = VersionRange.From(v2_3_1), // dev whilst developing, then 2.3(-rcn)
   )
 
   val featureFetchBykey: Feature = Feature(
     name = "Fetch by key",
-    versionRange = featureUCKKeyBuiltins.versionRange,
+    versionRange = featureNUCK.versionRange,
   )
 
   val featureExerciseBykey: Feature = Feature(
     name = "Exercise by key",
-    versionRange = featureUCKKeyBuiltins.versionRange,
+    versionRange = featureNUCK.versionRange,
   )
 
   val featureLookupBykey: Feature = Feature(
     name = "Lookup by key",
-    versionRange = featureUCKKeyBuiltins.versionRange,
+    versionRange = featureUCKBuiltins.versionRange,
   )
 
   val featureContractKeys: Feature = Feature(
@@ -144,13 +150,6 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     versionRange = VersionRange.Until(v2_1),
   )
 
-  // TODO(#30571): move nuck to staging (also update in proto)
-  // manually added since generation broken since shuffle
-  val featureNUCK: Feature = Feature(
-    name = "Non-unique contract keys",
-    versionRange = VersionRange.From(v2_3_1), // dev whilst developing, then 2.3(-rcn)
-  )
-
   val featureExtendedCryptoPrimitives: Feature = Feature(
     name = "Extended crypto primitives",
     versionRange = VersionRange.From(v2_3_1),
@@ -164,7 +163,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     featureExtendedInterfaces,
     featureChoiceFuncs,
     featureTemplateTypeRepToText,
-    featureUCKKeyBuiltins,
+    featureUCKBuiltins,
     featureFetchBykey,
     featureExerciseBykey,
     featureLookupBykey,

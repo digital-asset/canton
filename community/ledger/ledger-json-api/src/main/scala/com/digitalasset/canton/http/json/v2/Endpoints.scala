@@ -152,22 +152,22 @@ trait Endpoints extends NamedLogging {
       wsConfig.httpListMaxElementsLimit + 1,
     )
 
-  def asList[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, StreamList[INPUT], CustomError, Seq[
-        OUTPUT
+  def asList[Input, Output, R](
+      endpoint: Endpoint[CallerContext, StreamList[Input], CustomError, Seq[
+        Output
       ], R],
-      service: CallerContext => TracedInput[Unit] => Flow[INPUT, OUTPUT, Any],
-      timeoutOpenEndedStream: INPUT => Boolean = (_: INPUT) => false,
+      service: CallerContext => TracedInput[Unit] => Flow[Input, Output, Any],
+      timeoutOpenEndedStream: Input => Boolean = (_: Input) => false,
   )(implicit
       wsConfig: WebsocketConfig,
       materializer: Materializer,
       authInterceptor: AuthInterceptor,
   ) =
     endpoint
-      .mapIn(traceHeadersMapping[StreamList[INPUT]]())
+      .mapIn(traceHeadersMapping[StreamList[Input]]())
       .serverSecurityLogic(validateJwtToken(endpoint))
       .serverLogic(caller =>
-        (tracedInput: TracedInput[StreamList[INPUT]]) => {
+        (tracedInput: TracedInput[StreamList[Input]]) => {
           implicit val tc = caller.traceContext()
           val flow = service(caller)(tracedInput.copy(in = ()))
           val limit = tracedInput.in.limit
@@ -201,9 +201,9 @@ trait Endpoints extends NamedLogging {
         }
       )
 
-  private def handleListLimit[R, OUTPUT, INPUT](
+  private def handleListLimit[R, Output, Input](
       systemListElementsLimit: Long,
-      elements: Seq[OUTPUT],
+      elements: Seq[Output],
   )(implicit traceContext: TraceContext) = {
     def belowSystemLimit = elements.size <= systemListElementsLimit
 
@@ -222,18 +222,18 @@ trait Endpoints extends NamedLogging {
     }
   }
 
-  def asPagedList[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, PagedList[INPUT], (StatusCode, JsCantonError), OUTPUT, R],
-      service: CallerContext => TracedInput[PagedList[INPUT]] => Future[
-        Either[JsCantonError, OUTPUT]
+  def asPagedList[Input, Output, R](
+      endpoint: Endpoint[CallerContext, PagedList[Input], (StatusCode, JsCantonError), Output, R],
+      service: CallerContext => TracedInput[PagedList[Input]] => Future[
+        Either[JsCantonError, Output]
       ],
   )(implicit
       authInterceptor: AuthInterceptor
   ): Full[CallerContext, CallerContext, TracedInput[
-    PagedList[INPUT]
-  ], (StatusCode, JsCantonError), OUTPUT, R, Future] =
+    PagedList[Input]
+  ], (StatusCode, JsCantonError), Output, R, Future] =
     endpoint
-      .mapIn(traceHeadersMapping[PagedList[INPUT]]())
+      .mapIn(traceHeadersMapping[PagedList[Input]]())
       .serverSecurityLogic(validateJwtToken(endpoint))
       .serverLogic(caller =>
         tracedInput => {
@@ -243,14 +243,14 @@ trait Endpoints extends NamedLogging {
         }
       )
 
-  def withServerLogic[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, CustomError, OUTPUT, R],
-      service: CallerContext => TracedInput[INPUT] => Future[Either[JsCantonError, OUTPUT]],
+  def withServerLogic[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, CustomError, Output, R],
+      service: CallerContext => TracedInput[Input] => Future[Either[JsCantonError, Output]],
   )(implicit
       authInterceptor: AuthInterceptor
-  ): Full[CallerContext, CallerContext, TracedInput[INPUT], CustomError, OUTPUT, R, Future] =
+  ): Full[CallerContext, CallerContext, TracedInput[Input], CustomError, Output, R, Future] =
     endpoint
-      .mapIn(traceHeadersMapping[INPUT]())
+      .mapIn(traceHeadersMapping[Input]())
       .serverSecurityLogic(validateJwtToken(endpoint))
       .serverLogic(caller =>
         tracedInput => {
@@ -306,13 +306,13 @@ trait Endpoints extends NamedLogging {
     * @param closeDelay
     *   if true then server will close websocket after a delay when no new elements appear in stream
     */
-  protected def prepareSingleWsStream[REQ, RESP, JSRESP](
-      stream: (REQ, StreamObserver[RESP]) => Unit,
-      mapToJs: RESP => Future[JSRESP],
+  protected def prepareSingleWsStream[Req, Resp, JSResp](
+      stream: (Req, StreamObserver[Resp]) => Unit,
+      mapToJs: Resp => Future[JSResp],
   )(implicit
       esf: ExecutionSequencerFactory
-  ): Flow[REQ, JSRESP, NotUsed] =
-    Flow[REQ]
+  ): Flow[Req, JSResp, NotUsed] =
+    Flow[Req]
       .take(1) // we take only single request elem
       .flatMapConcat { req =>
         ClientAdapter
@@ -513,9 +513,9 @@ object Endpoints {
   def error[R](error: JsCantonError): Future[Either[JsCantonError, R]] =
     Future.successful(Left(error))
 
-  private def addStreamListParamsAndDescription[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), Seq[
-        OUTPUT
+  private def addStreamListParamsAndDescription[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Seq[
+        Output
       ], R]
   ) = endpoint
     .in(
@@ -528,17 +528,17 @@ object Endpoints {
         "timeout to complete and send result if no new elements are received (for open ended streams)"
       )
     )
-    .mapIn(new Mapping[(INPUT, Option[Long], Option[Long]), StreamList[INPUT]] {
+    .mapIn(new Mapping[(Input, Option[Long], Option[Long]), StreamList[Input]] {
       override def rawDecode(
-          in: (INPUT, Option[Long], Option[Long])
-      ): DecodeResult[StreamList[INPUT]] = DecodeResult.Value(
-        StreamList[INPUT](in._1, in._2, in._3)
+          in: (Input, Option[Long], Option[Long])
+      ): DecodeResult[StreamList[Input]] = DecodeResult.Value(
+        StreamList[Input](in._1, in._2, in._3)
       )
 
-      override def encode(h: StreamList[INPUT]): (INPUT, Option[Long], Option[Long]) =
+      override def encode(h: StreamList[Input]): (Input, Option[Long], Option[Long]) =
         (h.input, h.limit, h.waitTime)
 
-      override def validator: Validator[StreamList[INPUT]] = Validator.pass
+      override def validator: Validator[StreamList[Input]] = Validator.pass
     })
     .description(
       endpoint.info.description match {
@@ -555,8 +555,8 @@ object Endpoints {
       }
     )
 
-  private def addPagedListParams[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), OUTPUT, R]
+  private def addPagedListParams[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R]
   ) = endpoint
     .in(
       query[Option[Int]]("pageSize").description(
@@ -568,30 +568,30 @@ object Endpoints {
         "token - to continue results from a given page, leave empty to start from the beginning of the list, obtain token from the result of previous page"
       )
     )
-    .mapIn(new Mapping[(INPUT, Option[Int], Option[String]), PagedList[INPUT]] {
+    .mapIn(new Mapping[(Input, Option[Int], Option[String]), PagedList[Input]] {
       override def rawDecode(
-          in: (INPUT, Option[Int], Option[String])
-      ): DecodeResult[PagedList[INPUT]] = DecodeResult.Value(
-        PagedList[INPUT](in._1, in._2, in._3)
+          in: (Input, Option[Int], Option[String])
+      ): DecodeResult[PagedList[Input]] = DecodeResult.Value(
+        PagedList[Input](in._1, in._2, in._3)
       )
 
-      override def encode(h: PagedList[INPUT]): (INPUT, Option[Int], Option[String]) =
+      override def encode(h: PagedList[Input]): (Input, Option[Int], Option[String]) =
         (h.input, h.pageSize, h.pageToken)
 
-      override def validator: Validator[PagedList[INPUT]] = Validator.pass
+      override def validator: Validator[PagedList[Input]] = Validator.pass
     })
 
-  implicit class StreamListOps[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), Seq[
-        OUTPUT
+  implicit class StreamListOps[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Seq[
+        Output
       ], R]
   ) {
     def inStreamListParamsAndDescription() = addStreamListParamsAndDescription(endpoint)
 
   }
 
-  implicit class PagedListOps[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), OUTPUT, R]
+  implicit class PagedListOps[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R]
   ) {
 
     def inPagedListParams() = addPagedListParams(endpoint)
@@ -600,13 +600,13 @@ object Endpoints {
   def createProtoRef(methodDescriptor: io.grpc.MethodDescriptor[?, ?]): String =
     ProtoLink(methodDescriptor).toString
 
-  implicit class ProtoRefOps[INPUT, OUTPUT, R](
-      endpoint: Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), OUTPUT, R]
+  implicit class ProtoRefOps[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R]
   ) {
 
     def protoRef(
         methodDescriptor: io.grpc.MethodDescriptor[?, ?]
-    ): Endpoint[CallerContext, INPUT, (StatusCode, JsCantonError), OUTPUT, R] =
+    ): Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R] =
       endpoint.description(createProtoRef(methodDescriptor))
   }
 
@@ -616,9 +616,9 @@ trait DocumentationEndpoints {
   def documentation: Seq[AnyEndpoint]
 }
 
-final case class StreamList[INPUT](input: INPUT, limit: Option[Long], waitTime: Option[Long])
+final case class StreamList[Input](input: Input, limit: Option[Long], waitTime: Option[Long])
 
-final case class PagedList[INPUT](input: INPUT, pageSize: Option[Int], pageToken: Option[String])
+final case class PagedList[Input](input: Input, pageSize: Option[Int], pageToken: Option[String])
 
 final case class ProtoLink(file: String, service: String, method: String) {
 

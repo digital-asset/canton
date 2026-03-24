@@ -3,6 +3,7 @@
 
 package com.digitalasset.daml.lf.data
 
+import com.daml.logging.entries.{LoggingKey, LoggingValue, ToLoggingKey, ToLoggingValue}
 import com.digitalasset.daml.lf.data.Ref.{
   IdTypeConRef,
   Identifier,
@@ -12,7 +13,6 @@ import com.digitalasset.daml.lf.data.Ref.{
   TypeConRef,
 }
 import com.digitalasset.daml.lf.data.Time.Timestamp
-import com.daml.logging.entries.{LoggingKey, LoggingValue, ToLoggingKey, ToLoggingValue}
 
 package object logging {
 

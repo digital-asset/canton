@@ -245,7 +245,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
       validScenario(scenario) shouldBe false
     }
 
-    "reject a scenario that declares an non-exhaustive query by key that is exhaustive" in {
+    "validate a scenario that declares an non-exhaustive query by key that returns all active contracts" in {
       val scenario = Parser.assertParseScenario("""
         |Scenario
         |  Topology
@@ -258,7 +258,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [2,1] exhaustive=false
         |""".stripMargin)
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe true
     }
   }
 }

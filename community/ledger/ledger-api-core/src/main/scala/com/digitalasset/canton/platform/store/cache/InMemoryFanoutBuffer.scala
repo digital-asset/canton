@@ -95,11 +95,11 @@ class InMemoryFanoutBuffer(
     * @return
     *   A slice of the series of events as an ordered vector satisfying the input bounds.
     */
-  def slice[FILTER_RESULT](
+  def slice[FilterResult](
       startInclusive: Offset,
       endInclusive: Offset,
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
-  ): BufferSlice[(Offset, FILTER_RESULT)] = {
+      filter: TransactionLogUpdate => Option[FilterResult],
+  ): BufferSlice[(Offset, FilterResult)] = {
     val vectorSnapshot = _bufferLog
 
     val bufferStartSearchResult = vectorSnapshot.view.map(_._1).search(startInclusive)
@@ -121,6 +121,53 @@ class InMemoryFanoutBuffer(
         BufferSlice.Inclusive(
           filterAndChunkSlice(bufferSlice.view, filter, maxBufferedChunkSize)
         )
+    }
+  }
+
+  /** Returns a slice of events from the buffer in reverse order.
+    *
+    * @param startInclusive
+    *   The start inclusive bound of the requested range.
+    * @param endInclusive
+    *   The end inclusive bound of the requested range.
+    * @param filter
+    *   A lambda function that allows pre-filtering the buffered elements before assembling
+    *   `maxBufferedChunkSize`-sized slices.
+    * @return
+    *   A slice of the series of events as a reverse ordered vector satisfying the input bounds. The
+    *   slice is FinalSlice if all the requested data was in IMFO and was returned. and PartialSlice
+    *   if some data might be outside of the IMFO or the chunk was trimmed. In such case another
+    *   call to sliceBackwards should be made, if slice non empty. If slice is empty, then
+    *   persistence fetch must be done.
+    */
+  def sliceBackwards[FilterResult](
+      startInclusive: Offset,
+      endInclusive: Offset,
+      filter: TransactionLogUpdate => Option[FilterResult],
+  ): BackwardBufferSlice[(Offset, FilterResult)] = {
+    val vectorSnapshot = _bufferLog
+
+    val bufferEndSearchResult = vectorSnapshot.view.map(_._1).search(endInclusive)
+    val bufferEndExclusiveIdx = indexAfter(bufferEndSearchResult)
+
+    val bufferStartSearchResult = vectorSnapshot.view.map(_._1).search(startInclusive)
+    val bufferStartInclusiveIdx = indexAt(bufferStartSearchResult)
+
+    val filteredBufferSlice = filterAndChunkSlice(
+      vectorSnapshot.slice(bufferStartInclusiveIdx, bufferEndExclusiveIdx).view.reverse,
+      filter,
+      maxBufferedChunkSize,
+    )
+
+    noTracingLogger.debug(s"Insertion point: $bufferStartSearchResult")
+    if (
+      filteredBufferSlice.sizeIs < maxBufferedChunkSize && bufferStartSearchResult != InsertionPoint(
+        0
+      )
+    ) {
+      BackwardBufferSlice.FinalSlice(filteredBufferSlice)
+    } else {
+      BackwardBufferSlice.PartialSlice(filteredBufferSlice)
     }
   }
 
@@ -231,8 +278,8 @@ class InMemoryFanoutBuffer(
 private[platform] object InMemoryFanoutBuffer {
 
   /** Specialized slice representation of a Vector */
-  private[platform] sealed trait BufferSlice[+ELEM] extends Product with Serializable {
-    def slice: Vector[ELEM]
+  private[platform] sealed trait BufferSlice[+Elem] extends Product with Serializable {
+    def slice: Vector[Elem]
   }
 
   object BufferSlice {
@@ -240,16 +287,31 @@ private[platform] object InMemoryFanoutBuffer {
     /** A slice of a vector that is inclusive (start index of the slice in the source vector is gteq
       * to 1)
       */
-    private[platform] final case class Inclusive[ELEM](slice: Vector[ELEM])
-        extends BufferSlice[ELEM]
+    private[platform] final case class Inclusive[Elem](slice: Vector[Elem])
+        extends BufferSlice[Elem]
 
     /** A slice of a vector that is a suffix of the requested window (i.e. start index of the slice
       * in the source vector is 0)
       */
-    private[platform] final case class LastBufferChunkSuffix[ELEM](
+    private[platform] final case class LastBufferChunkSuffix[Elem](
         bufferedStartExclusive: Offset,
-        slice: Vector[ELEM],
-    ) extends BufferSlice[ELEM]
+        slice: Vector[Elem],
+    ) extends BufferSlice[Elem]
+  }
+
+  private[platform] sealed trait BackwardBufferSlice[+T] {
+    def slice: Vector[T]
+  }
+
+  private[platform] object BackwardBufferSlice {
+
+    /** The returned slice does not cover the whole requested range, another request is needed. If
+      * slice.isEmpty, switch to persistence
+      */
+    final case class PartialSlice[+T](slice: Vector[T]) extends BackwardBufferSlice[T]
+
+    /** The returned slice covers the whole requested range. No further actions needed. */
+    final case class FinalSlice[+T](slice: Vector[T]) extends BackwardBufferSlice[T]
   }
 
   private[cache] final case class UnorderedException[O](first: O, second: O)
@@ -269,22 +331,22 @@ private[platform] object InMemoryFanoutBuffer {
       case Found(foundIndex) => foundIndex + 1
     }
 
-  private[cache] def filterAndChunkSlice[FILTER_RESULT](
+  private[cache] def filterAndChunkSlice[FilterResult](
       sliceView: View[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
+      filter: TransactionLogUpdate => Option[FilterResult],
       maxChunkSize: Int,
-  ): Vector[(Offset, FILTER_RESULT)] =
+  ): Vector[(Offset, FilterResult)] =
     sliceView
       .flatMap { case (offset, entry) => filter(entry).map(offset -> _) }
       .take(maxChunkSize)
       .toVector
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
-  private[cache] def lastFilteredChunk[FILTER_RESULT](
+  private[cache] def lastFilteredChunk[FilterResult](
       bufferSlice: Vector[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
+      filter: TransactionLogUpdate => Option[FilterResult],
       maxChunkSize: Int,
-  ): BufferSlice.LastBufferChunkSuffix[(Offset, FILTER_RESULT)] = {
+  ): BufferSlice.LastBufferChunkSuffix[(Offset, FilterResult)] = {
     val lastChunk =
       filterAndChunkSlice(bufferSlice.view.reverse, filter, maxChunkSize + 1).reverse
 

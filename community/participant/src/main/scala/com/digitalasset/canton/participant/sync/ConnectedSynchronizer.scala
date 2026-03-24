@@ -12,7 +12,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
@@ -32,6 +32,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
+import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.*
@@ -40,6 +41,8 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmissionResult,
 }
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.protocol.reassignment.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   ReassignmentProcessorError,
@@ -258,7 +261,6 @@ class ConnectedSynchronizer(
       packageResolver,
       engine,
       EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
-      parameters.engine.validationPhaseLogging,
       loggerFactory,
     )
 
@@ -852,6 +854,15 @@ class ConnectedSynchronizer(
         ephemeral.markAsRecovered()
         logger.debug("Sync synchronizer is ready.")(initializationTraceContext)
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          schedulePendingOnboardingClearances(
+            ephemeral.onboardingClearanceScheduler,
+            persistent.pendingOnboardingClearanceStore,
+          )(
+            initializationTraceContext
+          ),
+          "Pending onboarding flag clearances scheduling",
+        )
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           completeAssignment,
           "Failed to complete outstanding assignments on startup. " +
             "You may have to complete the assignments manually.",
@@ -859,6 +870,76 @@ class ConnectedSynchronizer(
         ()
       }).value
     }
+
+  private def schedulePendingOnboardingClearances(
+      onboardingClearanceScheduler: OnboardingClearanceScheduler,
+      pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
+  )(implicit
+      initializationTraceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val processAndSchedule = synchronizeWithClosing("schedulePendingOnboardingClearances") {
+      for {
+        pendingOperations <- EitherT.right(
+          pendingOnboardingClearanceStore.getAll(
+            operationName = OnboardingClearanceOperation.operationName,
+            synchronizerId = Some(psid.logical),
+          )
+        )
+
+        // Extract PartyId from the key and effective time from the operation
+        pendingClearances = pendingOperations.flatMap { pending =>
+          val partyId = OnboardingClearanceOperation.partyIdFromKey(pending.key)
+          val effectiveTimeO = pending.operation.onboardingEffectiveAt
+
+          (partyId, effectiveTimeO) match {
+            case (Right(partyId), Some(effectiveTime)) =>
+              Some(partyId -> effectiveTime)
+
+            case (Right(partyId), None) =>
+              // A missing effective time can happen for two reasons:
+              // 1. Expected (Offline Party Replication): The operator ran a party ACS import.
+              //    Because there is no effective PTP mapping transaction yet, the effective time cannot be stored.
+              //    It will only be known after reconnecting to the synchronizer.
+              // 2. Crash: Topology terminate processor processed an onboarding event, but the participant crashed
+              //    just before updating the pending operation record with the effective time.
+              //    This self-heals if the transaction is re-processed upon reconnecting. Otherwise, it results in
+              //    a dangling record requiring manual clearance.
+              logger.info(
+                s"Skipping clearance scheduling for party $partyId (missing effective time). " +
+                  s"This will self-heal upon synchronizer reconnect if due to offline party replication. " +
+                  s"Otherwise (for example after a crash), please manually call the onboarding flag clearance endpoint " +
+                  s"after (re)connecting to the synchronizer."
+              )
+              None
+
+            case (Left(error), _) =>
+              logger.error(
+                s"Failed to parse party ID from pending operation key '${pending.key}'. Skipping clearance scheduling. Error: $error"
+              )
+              None
+          }
+        }
+
+        _ = if (pendingClearances.nonEmpty) {
+          logger.info(
+            s"Scheduling ${pendingClearances.size} pending onboarding clearances upon synchronizer connection."
+          )
+        }
+
+        _ <- MonadUtil.sequentialTraverse_(pendingClearances) { case (party, activationTs) =>
+          onboardingClearanceScheduler
+            .requestClearance(party, activationTs, maxInitialRetries = NonNegativeInt.three)
+            .leftMap { err =>
+              // Log the error but don't fail the whole traversal
+              logger.warn(s"Failed to schedule onboarding clearance for party $party: $err")
+              err
+            }
+        }
+      } yield ()
+    }
+
+    processAndSchedule.value.map(_ => ())
+  }
 
   private def completeAssignment(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
 
@@ -905,7 +986,7 @@ class ConnectedSynchronizer(
           case Right(()) => ()
         }
 
-        pendingReassignments.lastOption.map(t => t.unassignmentTs -> t.sourcePSId.map(_.logical))
+        pendingReassignments.lastOption.map(t => t.unassignmentTs -> t.sourcePsid.map(_.logical))
       }
 
       resF.map {
