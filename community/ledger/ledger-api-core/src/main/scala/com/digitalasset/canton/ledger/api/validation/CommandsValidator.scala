@@ -18,6 +18,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
 }
 import com.daml.ledger.api.v2.reassignment_commands.{ReassignmentCommand, ReassignmentCommands}
 import com.digitalasset.canton.LfTimestamp
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.messages.command.submission
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
@@ -82,6 +83,7 @@ final class CommandsValidator(
         prepareRequest.packageIdSelectionPreference
       )
       prefetchKeys <- validatePrefetchContractKeys(prepareRequest.prefetchContractKeys)
+      tapsMaxPasses <- validateTapsMaxPasses(prepareRequest.tapsMaxPasses)
     } yield Commands(
       // Not used for external submissions
       workflowId = None,
@@ -109,6 +111,7 @@ final class CommandsValidator(
         } else
           packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
+      tapsMaxPasses = tapsMaxPasses,
     )
 
   def validateCommands(
@@ -144,6 +147,7 @@ final class CommandsValidator(
         commands.packageIdSelectionPreference
       )
       prefetchKeys <- validatePrefetchContractKeys(commands.prefetchContractKeys)
+      tapsMaxPasses <- validateTapsMaxPasses(commands.tapsMaxPasses)
     } yield Commands(
       workflowId = workflowId,
       userId = userId,
@@ -168,6 +172,7 @@ final class CommandsValidator(
         } else
           packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
+      tapsMaxPasses = tapsMaxPasses,
     )
 
   def validateReassignmentCommands(
@@ -439,6 +444,19 @@ final class CommandsValidator(
     } yield ApiContractKey(templateRef, validatedKey)
   }
 
+  private def validateTapsMaxPasses(
+      tapsMaxPasses: Option[Int]
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Option[PositiveInt]] =
+    tapsMaxPasses.traverse(tapsMaxPasses =>
+      PositiveInt
+        .create(tapsMaxPasses)
+        .left
+        .map(_ =>
+          invalidArgument(s"taps_max_passes must be strictly positive, but got $tapsMaxPasses.")
+        )
+    )
 }
 
 object CommandsValidator {

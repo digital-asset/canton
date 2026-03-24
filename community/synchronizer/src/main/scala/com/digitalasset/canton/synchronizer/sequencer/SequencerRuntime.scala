@@ -147,7 +147,7 @@ class SequencerRuntime(
           .flatMap { snapshot =>
             val ipsSnapshot = snapshot.ipsSnapshot
             ipsSnapshot
-              .signingKeys(sequencerId, SigningKeyUsage.SequencerAuthenticationOnly)
+              .signingKeys(sequencerId, SigningKeyUsage.ProtocolOnly)
               .map { keys =>
                 Either.cond(
                   keys.nonEmpty,

@@ -101,6 +101,7 @@ class BlockSequencer(
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
     batchingConfig: BatchingConfig,
+    useLegacyEventSignaller: Boolean,
 )(implicit executionContext: ExecutionContext, materializer: Materializer, val tracer: Tracer)
     extends DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
@@ -108,10 +109,16 @@ class BlockSequencer(
       blockSequencerConfig.toDatabaseSequencerConfig,
       None,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
-      new LocalSequencerStateEventSignaller(
-        processingTimeouts,
-        loggerFactory,
-      ),
+      if (useLegacyEventSignaller)
+        new LocalSequencerStateEventBroadcast(
+          processingTimeouts,
+          loggerFactory,
+        )
+      else
+        new LocalSequencerStateEventSignaller(
+          processingTimeouts,
+          loggerFactory,
+        ),
       None,
       None,
       processingTimeouts,

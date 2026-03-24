@@ -51,8 +51,8 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable.SortedSet
-import scala.concurrent.Promise
 import scala.concurrent.duration.*
+import scala.concurrent.{Future, Promise}
 
 class SequencerReaderTest
     extends FixtureAsyncWordSpec
@@ -94,6 +94,8 @@ class SequencerReaderTest
       .buffer(1, OverflowStrategy.dropHead)
       .preMaterialize()
 
+    override def isLegacySignaller: Boolean = false
+
     override protected def timeouts: ProcessingTimeout = SequencerReaderTest.this.timeouts
 
     def signalRead(): Unit = queue.offer(ReadSignal).discard[QueueOfferResult]
@@ -110,7 +112,8 @@ class SequencerReaderTest
 
     override protected def logger: TracedLogger = SequencerReaderTest.this.logger
 
-    override def notifyOfLocalWrite(notification: WriteNotification): Unit = ()
+    override def notifyOfLocalWrite(notification: WriteNotification): Future[Unit] =
+      Future.unit
   }
 
   class Env extends FlagCloseableAsync {

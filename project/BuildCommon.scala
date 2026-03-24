@@ -2247,6 +2247,16 @@ object BuildCommon {
             (Test / damlDarOutput).value / "foo-4.0.0.dar",
             "com.digitalasset.canton.damltests.foo.v4",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Qux" / "V1",
+            (Test / damlDarOutput).value / "qux-1.0.0.dar",
+            "com.digitalasset.canton.damltests.qux.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Qux" / "V2",
+            (Test / damlDarOutput).value / "qux-2.0.0.dar",
+            "com.digitalasset.canton.damltests.qux.v2",
+          ),
         ),
       )
   }

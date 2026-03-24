@@ -137,6 +137,7 @@ final case class Commands(
     // Used to indicate the package map against which package resolution was performed.
     packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
     prefetchKeys: Seq[ApiContractKey],
+    tapsMaxPasses: Option[PositiveInt],
 ) extends PrettyPrinting {
 
   override protected def pretty: Pretty[Commands] = {
@@ -153,6 +154,7 @@ final case class Commands(
       paramIfDefined("workflowId", _.workflowId.filter(_ != commandId).map(_.unwrap)),
       paramIfDefined("synchronizerId", _.synchronizerId),
       paramIfNonEmpty("prefetchKeys", _.prefetchKeys.map(_.toString.unquoted)),
+      paramIfDefined("tapsMaxPasses", _.tapsMaxPasses.map(_.value)),
       indicateOmittedFields,
     )
   }

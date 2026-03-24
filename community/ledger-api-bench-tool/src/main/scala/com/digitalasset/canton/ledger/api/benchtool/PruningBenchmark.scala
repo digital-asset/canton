@@ -54,6 +54,7 @@ class PruningBenchmark(reportingPeriod: FiniteDuration) {
         synchronizerId = "",
         packageIdSelectionPreference = Nil,
         prefetchContractKeys = Nil,
+        tapsMaxPasses = None,
       )
     )
     durationMetric = MetricsSet.createTotalRuntimeMetric[Unit](pruningConfig.maxDurationObjective)

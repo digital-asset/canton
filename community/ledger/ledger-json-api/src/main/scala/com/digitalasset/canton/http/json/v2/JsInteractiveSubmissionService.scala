@@ -188,6 +188,7 @@ final case class JsPrepareSubmissionRequest(
     prefetchContractKeys: Seq[js.PrefetchContractKey] = Seq.empty,
     maxRecordTime: Option[com.google.protobuf.timestamp.Timestamp],
     estimateTrafficCost: Option[interactive_submission_service.CostEstimationHints] = None,
+    tapsMaxPasses: Option[Int] = None,
 )
 
 final case class JsPrepareSubmissionResponse(

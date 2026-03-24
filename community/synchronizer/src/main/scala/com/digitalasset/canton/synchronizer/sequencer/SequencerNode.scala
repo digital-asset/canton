@@ -660,6 +660,7 @@ class SequencerNodeBootstrap(
             useExponentialRandomTokenExpiration =
               config.publicApi.useExponentialRandomTokenExpiration,
             parameters.processingTimeouts,
+            arguments.metrics,
             synchronizerLoggerFactory,
             topologyProcessor,
           )

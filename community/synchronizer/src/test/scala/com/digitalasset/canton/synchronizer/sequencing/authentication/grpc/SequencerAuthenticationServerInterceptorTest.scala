@@ -22,6 +22,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth.TokenFetcher
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencing.authentication.{
   MemberAuthenticationService,
   MemberAuthenticationStore,
@@ -78,6 +79,7 @@ class SequencerAuthenticationServerInterceptorTest
       _ => (),
       FutureUnlessShutdown.unit,
       DefaultProcessingTimeouts.testing,
+      SequencerMetrics.noop(getClass.getSimpleName),
       loggerFactory,
     ) {
       override protected def isParticipantActive(participant: ParticipantId)(implicit

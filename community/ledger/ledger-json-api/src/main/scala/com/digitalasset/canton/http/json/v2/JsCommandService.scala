@@ -316,6 +316,7 @@ final case class JsCommands(
     synchronizerId: Option[String] = None,
     packageIdSelectionPreference: Seq[String] = Seq.empty,
     prefetchContractKeys: Seq[js.PrefetchContractKey] = Seq.empty,
+    tapsMaxPasses: Option[Int] = None,
 )
 
 object JsCommandService extends DocumentationEndpoints {

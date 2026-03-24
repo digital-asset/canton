@@ -299,6 +299,13 @@ messages:
           In that case, the token's user-id will be used for the request's user_id.
 
           Optional
+        taps_max_passes: |-
+          The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+          Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+          If unset, this defaults to the value defined in the participant configuration.
+          The provided value must not exceed the limit specified in the participant configuration.
+
+          Optional
         prefetch_contract_keys: |-
           Fetches the contract keys into the caches to speed up the command processing.
           Should only contain contract keys that are expected to be resolved during interpretation of the commands.
@@ -2550,6 +2557,13 @@ messages:
           When true, the response will contain additional details on how the transaction was encoded and hashed
           This can be useful for troubleshooting of hash mismatches. Should only be used for debugging.
           Defaults to false
+
+          Optional
+        taps_max_passes: |-
+          The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+          Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+          If unset, this defaults to the value defined in the participant configuration.
+          The provided value must not exceed the limit specified in the participant configuration.
 
           Optional
         prefetch_contract_keys: |-

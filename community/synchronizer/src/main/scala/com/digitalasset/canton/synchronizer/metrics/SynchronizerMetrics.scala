@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.metrics
 
 import cats.Eval
 import com.daml.metrics.HealthMetrics
+import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{
@@ -45,6 +46,18 @@ class SequencerHistograms(val parent: MetricName)(implicit
   private[metrics] val sequencerClient = new SequencerClientHistograms(parent)
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
   private[metrics] val bftOrdering: BftOrderingHistograms = new BftOrderingHistograms(prefix)
+
+  private[metrics] val isActiveDuration: Item = Item(
+    prefix :+ "is-active-duration",
+    summary = "Time to run the activeness check in MemberAuthenticationService",
+    qualification = MetricQualification.Debug,
+  )
+
+  private[metrics] val fetchNonceDuration: Item = Item(
+    prefix :+ "fetch-nonce-duration",
+    summary = "Time to fetch a given nonce from the MemberAuthenticationStore",
+    qualification = MetricQualification.Debug,
+  )
 }
 
 class SequencerMetrics(
@@ -219,6 +232,11 @@ class SequencerMetrics(
       0L,
     )
 
+  val isActiveDuration: Timer = openTelemetryMetricsFactory.timer(histograms.isActiveDuration.info)
+
+  val fetchNonceDuration: Timer =
+    openTelemetryMetricsFactory.timer(histograms.fetchNonceDuration.info)
+
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
 
@@ -301,6 +319,7 @@ class SequencerMetrics(
   }
   // TODO(i14580): add testing
   val trafficControl = new TrafficControlMetrics
+
 }
 
 object SequencerMetrics {

@@ -4865,6 +4865,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PrefetchContractKey'
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
     JsContractEntry:
       title: JsContractEntry
       description: |-
@@ -5391,6 +5401,16 @@ components:
             To turn off cost estimation, set the CostEstimationHints#disabled field to true
 
             Optional
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'

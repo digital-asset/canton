@@ -529,6 +529,8 @@ class LedgerApiServer(
       )
     ),
     topologyAwarePackageSelection = serverConfig.topologyAwarePackageSelection.enabled,
+    tapsMaxPassesDefault = serverConfig.topologyAwarePackageSelection.maxPassesDefault,
+    tapsMaxPassesLimit = serverConfig.topologyAwarePackageSelection.maxPassesLimit,
   )
 
   private def startHttpApiIfEnabled(

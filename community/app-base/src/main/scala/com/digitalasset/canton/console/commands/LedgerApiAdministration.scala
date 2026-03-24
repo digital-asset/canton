@@ -675,6 +675,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
           maxRecordTime: Option[CantonTimestamp] = None,
           estimateTrafficCost: Option[CostEstimationHints] = None,
+          tapsMaxPasses: Option[Int] = None,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -692,6 +693,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               prefetchContractKeys,
               maxRecordTime,
               estimateTrafficCost,
+              tapsMaxPasses,
             )
           )
         }
@@ -912,6 +914,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           includeCreatedEventBlob: Boolean = false,
           customEventFormat: Option[EventFormat] = None,
+          tapsMaxPasses: Option[Int] = None,
       ): ApiTransaction = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -943,6 +946,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                */
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
               customEventFormat = customEventFormat,
+              tapsMaxPasses = tapsMaxPasses,
             )
 
           case _ =>
@@ -964,6 +968,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   transactionShape,
                   includeCreatedEventBlob = includeCreatedEventBlob,
                   customEventFormat = customEventFormat,
+                  tapsMaxPasses,
                 )
               )
             }
@@ -989,6 +994,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           userId: String = userId,
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
+          tapsMaxPasses: Option[Int] = None,
       ): Unit = consoleEnvironment.run {
         ledgerApiCommand(
           LedgerApiCommands.CommandSubmissionService.Submit(
@@ -1004,6 +1010,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             synchronizerId,
             userId,
             userPackageSelectionPreference,
+            tapsMaxPasses,
           )
         )
       }
@@ -1300,6 +1307,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             // External party specifics
             verboseHashing: Boolean = false,
             customEventFormat: Option[EventFormat] = None,
+            tapsMaxPasses: Option[Int] = None,
         ): ApiTransaction = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1314,6 +1322,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference = userPackageSelectionPreference,
             verboseHashing = verboseHashing,
             prefetchContractKeys = Seq(),
+            tapsMaxPasses = tapsMaxPasses,
           )
 
           submit_prepared(
@@ -2506,6 +2515,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
             maxRecordTime: Option[CantonTimestamp] = None,
             estimateTrafficCost: Option[CostEstimationHints] = None,
+            tapsMaxPasses: Option[Int] = None,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2523,6 +2533,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
                 maxRecordTime,
                 estimateTrafficCost,
+                tapsMaxPasses,
               )
             )
           }
@@ -2563,6 +2574,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
             includeCreatedEventBlob: Boolean = false,
             customEventFormat: Option[EventFormat] = None,
+            tapsMaxPasses: Option[Int] = None,
         ): Transaction = {
           val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -2589,6 +2601,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userPackageSelectionPreference,
                 includeCreatedEventBlob = includeCreatedEventBlob,
                 customEventFormat = customEventFormat,
+                tapsMaxPasses = tapsMaxPasses,
               )
 
             case _ =>
@@ -2610,6 +2623,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                     transactionShape,
                     includeCreatedEventBlob = includeCreatedEventBlob,
                     customEventFormat = customEventFormat,
+                    tapsMaxPasses,
                   )
                 )
               }
@@ -2746,6 +2760,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
               includeCreatedEventBlob: Boolean = false,
               customEventFormat: Option[EventFormat] = None,
+              tapsMaxPasses: Option[Int] = None,
           ): Transaction = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -2766,6 +2781,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference = userPackageSelectionPreference,
               includeCreatedEventBlob = includeCreatedEventBlob,
               customEventFormat = customEventFormat,
+              tapsMaxPasses = tapsMaxPasses,
             )
 
             javab.data.Transaction.fromProto(ApiTransaction.toJavaProto(tx))

@@ -1237,6 +1237,7 @@ final class SingleParticipantTestContext private[participant] (
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
       estimateTrafficCost = estimateTrafficCost,
+      tapsMaxPasses = None,
     )
 
   override def executeSubmissionRequest(

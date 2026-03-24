@@ -1400,6 +1400,7 @@ object LedgerApiCommands {
     def synchronizerId: Option[SynchronizerId]
     def userId: String
     def packageIdSelectionPreference: Seq[LfPackageId]
+    def tapsMaxPasses: Option[Int]
 
     protected def mkCommand: Commands = Commands(
       workflowId = workflowId,
@@ -1427,6 +1428,7 @@ object LedgerApiCommands {
       synchronizerId = synchronizerId.map(_.toProtoPrimitive).getOrElse(""),
       packageIdSelectionPreference = packageIdSelectionPreference.map(_.toString),
       prefetchContractKeys = Nil,
+      tapsMaxPasses = tapsMaxPasses,
     )
 
     override protected def pretty: Pretty[this.type] =
@@ -1462,6 +1464,7 @@ object LedgerApiCommands {
         override val synchronizerId: Option[SynchronizerId],
         override val userId: String,
         override val packageIdSelectionPreference: Seq[LfPackageId],
+        override val tapsMaxPasses: Option[Int],
     ) extends SubmitCommand
         with BaseCommand[SubmitRequest, SubmitResponse, Unit] {
       override protected def createRequest(): Either[String, SubmitRequest] =
@@ -1598,6 +1601,7 @@ object LedgerApiCommands {
         prefetchContractKeys: Seq[PrefetchContractKey],
         maxRecordTime: Option[CantonTimestamp],
         costEstimationHints: Option[CostEstimationHints],
+        tapsMaxPasses: Option[Int],
     ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
@@ -1623,6 +1627,7 @@ object LedgerApiCommands {
             prefetchContractKeys = prefetchContractKeys,
             maxRecordTime = maxRecordTime.map(_.toProtoTimestamp),
             estimateTrafficCost = costEstimationHints,
+            tapsMaxPasses = tapsMaxPasses,
           )
         )
 
@@ -1913,6 +1918,7 @@ object LedgerApiCommands {
         transactionShape: TransactionShape,
         includeCreatedEventBlob: Boolean,
         customEventFormat: Option[EventFormat],
+        override val tapsMaxPasses: Option[Int],
     ) extends SubmitCommand
         with BaseCommand[
           SubmitAndWaitForTransactionRequest,

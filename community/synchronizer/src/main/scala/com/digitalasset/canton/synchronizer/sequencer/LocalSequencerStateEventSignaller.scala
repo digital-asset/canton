@@ -23,6 +23,7 @@ import org.apache.pekko.stream.scaladsl.Source
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
+import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
@@ -45,6 +46,8 @@ class LocalSequencerStateEventSignaller(
     with FlagCloseableAsync
     with NamedLogging {
 
+  override def isLegacySignaller: Boolean = false
+
   private val memberQueues =
     new TrieMap[
       SequencerMemberId,
@@ -57,7 +60,7 @@ class LocalSequencerStateEventSignaller(
 
   override def notifyOfLocalWrite(
       notification: WriteNotification
-  ): Unit = {
+  ): Future[Unit] = {
     val membersToNotify =
       if (notification.isBroadcast) memberQueues.iterator
       else
@@ -87,6 +90,7 @@ class LocalSequencerStateEventSignaller(
         memberQueues.updateWith(member)(_.filter(queues => queues.nonEmpty)).discard
       }
     }
+    Future.unit
   }
 
   override def readSignalsForMember(

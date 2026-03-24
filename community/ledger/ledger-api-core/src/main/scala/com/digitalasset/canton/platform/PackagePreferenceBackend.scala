@@ -14,12 +14,7 @@ import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.PackagePreferenceBackend.*
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.Clock
@@ -27,7 +22,7 @@ import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion, LfPartyId}
+import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId}
 import com.digitalasset.daml.lf.language.Ast
 
 import scala.collection.immutable.SortedSet
@@ -98,13 +93,18 @@ class PackagePreferenceBackend(
         prescribedSynchronizer = synchronizerId,
         routingSynchronizerState = routingSynchronizerState,
       )
+      packageIdMap = packageMetadataSnapshot.packageIdVersionMap
+      packageReferencesForRequest = packageMapForRequest.map { case (syncId, partyVettingMap) =>
+        syncId -> partyVettingMap.map { case (party, vettingState) =>
+          party -> vettingState.flatMap(_.toPackageReference(packageIdMap))
+        }
+      }
       synchronizerCandidates = PackagePreferenceBackend
         .computePerSynchronizerPackageCandidates(
-          synchronizersPartiesVettingState = packageMapForRequest,
+          synchronizersPartiesVettingState = packageReferencesForRequest,
           packageMetadataSnapshot = packageMetadataSnapshot,
           packageFilter = packageFilter,
           requirements = MapsUtil.transpose(packageVettingRequirements.value),
-          logger = logger,
         )
         .view
         .mapValues((candidates: MapView[LfPackageName, Candidate[SortedPreferences]]) =>
@@ -189,8 +189,7 @@ class PackagePreferenceBackend(
 }
 
 object PackagePreferenceBackend {
-  type SortedPreferences = NonEmpty[SortedSet[PackageReference] /* most preferred last */ ]
-  private type PackageIndex = Map[LfPackageId, (LfPackageName, LfPackageVersion)]
+  type SortedPreferences = NonEmpty[SortedSet[PackageReference]] // most preferred last
   // A candidate refers to a value T that:
   //   - wraps the value in a Right if it is valid for package preferences computation OR
   //   - wraps the value's discarded reason in a Left
@@ -222,21 +221,17 @@ object PackagePreferenceBackend {
 
   def computePerSynchronizerPackageCandidates(
       synchronizersPartiesVettingState: Map[PhysicalSynchronizerId, Map[LfPartyId, Set[
-        LfPackageId
+        PackageReference
       ]]],
       packageMetadataSnapshot: PackageMetadata,
       requirements: Map[LfPartyId, Set[LfPackageName]],
       packageFilter: PackageFilter,
-      logger: TracedLogger,
-  )(implicit
-      traceContext: TraceContext
-  ): Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[SortedPreferences]]] = {
-    val packageIndex = packageMetadataSnapshot.packageIdVersionMap
+  ): Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[SortedPreferences]]] =
     synchronizersPartiesVettingState.view
       .mapValues(
         _.view
           // Resolve to full package references
-          .mapValues(resolveAndOrderPackageReferences(_, packageIndex, logger))
+          .mapValues(groupAndSortPackageLineages)
           .toMap
           .pipe((candidates: Map[LfPartyId, Map[LfPackageName, SortedPreferences]]) =>
             // Mark candidates for which there is no vetted package satisfying a vetting requirement (party <-> package-name)
@@ -254,7 +249,6 @@ object PackagePreferenceBackend {
           .pipe(filterPackages(packageFilter, _))
       )
       .toMap
-  }
 
   // Preserve for each package-name all the package-ids that are vetted and all their dependencies are vetted
   private def preserveDeeplyVetted(
@@ -340,24 +334,10 @@ object PackagePreferenceBackend {
           )
       })
 
-  private def resolveAndOrderPackageReferences(
-      pkgIds: Set[LfPackageId],
-      packageIndex: PackageIndex,
-      logger: TracedLogger,
-  )(implicit
-      traceContext: TraceContext
+  private def groupAndSortPackageLineages(
+      pkgRefs: Set[PackageReference]
   ): Map[LfPackageName, SortedPreferences] =
-    pkgIds.view
-      .flatMap { pkgId =>
-        pkgId
-          .toPackageReference(packageIndex)
-          .tap { pkgRefO =>
-            if (pkgRefO.isEmpty)
-              logger.trace(
-                show"Discarding package ID $pkgId as it doesn't exist in the participant's package store."
-              )
-          }
-      }
+    pkgRefs
       .groupBy(_.packageName)
       .view
       .map { case (pkgName, pkgRefs) =>

@@ -21,5 +21,10 @@ package object metrics {
         ev: EitherT[FutureUnlessShutdown, E, A]
     ): EitherT[FutureUnlessShutdown, E, A] =
       EitherT(FutureUnlessShutdown(Timed.future(timer, ev.value.unwrap)))
+
+    def timeFUS[A](
+        ev: FutureUnlessShutdown[A]
+    ): FutureUnlessShutdown[A] =
+      FutureUnlessShutdown(Timed.future(timer, ev.unwrap))
   }
 }

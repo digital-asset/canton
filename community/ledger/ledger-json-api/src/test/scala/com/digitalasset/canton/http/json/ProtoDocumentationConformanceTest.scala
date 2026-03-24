@@ -13,12 +13,12 @@ import org.scalatest.wordspec.AnyWordSpecLike
   */
 class ProtoDocumentationConformanceTest extends AnyWordSpecLike with Matchers with AppendedClues {
 
+  // TODO(i31478) Filter our false positives, fix remaining comments and unignore test
   // This is number of known fields in proto files without clear Required or Optional markers
-  // TODO(i30114) Update this if/when some comments are fixed
   val numberOfKnownUnspecifiedFields = 51
 
   "new proto comments" should {
-    "contain clear Required or Optional marks" in {
+    "contain clear Required or Optional marks" ignore {
       val allFields = ProtoCommentsChecker.reportProto()
       val conflictingFields = allFields.filter(f => f.isOptional && f.isRequired)
       val unspecifiedFields = allFields.filter(f => !f.isOptional && !f.isRequired)

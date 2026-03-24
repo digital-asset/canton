@@ -90,6 +90,8 @@ class SequencerWriterSourceTest
     private val listenerRef =
       new AtomicReference[Option[WriteNotification => Unit]](None)
 
+    override def isLegacySignaller: Boolean = false
+
     def attachWriteListener(listener: WriteNotification => Unit): AutoCloseable = {
       if (!listenerRef.compareAndSet(None, Some(listener))) {
         // suggests something is screwed up with the test
@@ -101,8 +103,8 @@ class SequencerWriterSourceTest
 
     override def notifyOfLocalWrite(
         notification: WriteNotification
-    ): Unit =
-      listenerRef.get().foreach(listener => listener(notification))
+    ): Future[Unit] =
+      Future.successful(listenerRef.get().foreach(listener => listener(notification)))
 
     override def readSignalsForMember(
         member: Member,

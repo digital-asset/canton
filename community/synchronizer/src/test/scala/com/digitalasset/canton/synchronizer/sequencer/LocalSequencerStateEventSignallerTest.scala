@@ -79,7 +79,7 @@ class LocalSequencerStateEventSignallerTest
     import env.*
 
     (0 until 3001).toList.foreach(_ =>
-      signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId)))
+      signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId))).futureValue
     )
     for {
       // none of the previously produced signals are retained for future subscriptions
@@ -108,7 +108,9 @@ class LocalSequencerStateEventSignallerTest
         Source
           .tick(0.seconds, 100.millis, ())
           .take(numSignals.toLong)
-          .map(_ => signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId, bobId))))
+          .mapAsync(1)(_ =>
+            signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId, bobId)))
+          )
           .toMat(Sink.ignore)(Keep.right),
         errorLogMessagePrefix = "notifier",
       )
