@@ -858,21 +858,39 @@ object UpdateWatermarkFlow {
 object NotifyEventSignallerFlow {
   def apply(
       eventSignaller: EventSignaller
+  )(implicit
+      executionContext: ExecutionContext
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
+    if (eventSignaller.isLegacySignaller) legacyFlow(eventSignaller)
+    else newFlow(eventSignaller)
+
+  private def newFlow(
+      eventSignaller: EventSignaller
   ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
     Flow[Traced[BatchWritten]].alsoTo(
       // `alsoTo` propagates backpressure coming from the sink, but backpressure shouldn't happen
       // because of the async+conflate construction
       Flow[Traced[BatchWritten]]
-        .map(_.value.notifies)
-        // combine multiple event signals
-        .conflate(_ union _)
         // decouple the main sequencer writer flow from the event notification
         .async
         .addAttributes(Attributes.inputBuffer(1, 1))
+        .map(_.value.notifies)
+        // combine multiple event signals
+        .conflate(_ union _)
         // this could also be dispatched in parallel
-        .map(eventSignaller.notifyOfLocalWrite)
+        .mapAsync(1)(eventSignaller.notifyOfLocalWrite)
         .to(Sink.ignore)
     )
+
+  private def legacyFlow(eventSignaller: EventSignaller)(implicit
+      executionContext: ExecutionContext
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
+    Flow[Traced[BatchWritten]]
+      .mapAsync(1)(_.withTraceContext { implicit traceContext => batchWritten =>
+        eventSignaller.notifyOfLocalWrite(batchWritten.notifies) map { _ =>
+          Traced(batchWritten)
+        }
+      })
 
 }
 

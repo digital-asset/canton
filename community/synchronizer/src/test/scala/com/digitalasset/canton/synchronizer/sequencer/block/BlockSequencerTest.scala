@@ -201,6 +201,7 @@ class BlockSequencerTest
         exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,
         batchingConfig = BatchingConfig(),
+        useLegacyEventSignaller = false,
       )
 
     override def close(): Unit = {

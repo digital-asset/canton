@@ -685,6 +685,7 @@ class JsonV2Tests
             minLedgerTimeRel = None,
             disclosedContracts = Seq.empty,
             packageIdSelectionPreference = Seq.empty,
+            tapsMaxPasses = None,
           )
         }
 

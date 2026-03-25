@@ -41,6 +41,7 @@ object MockMessages {
       synchronizerId = "",
       packageIdSelectionPreference = Nil,
       prefetchContractKeys = Nil,
+      tapsMaxPasses = None,
     )
 
   val reassignmentCommands: ReassignmentCommands =

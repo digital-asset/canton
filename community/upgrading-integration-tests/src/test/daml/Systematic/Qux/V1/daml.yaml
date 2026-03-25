@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+sdk-version: 3.4.11
+build-options:
+- --target=2.1
+name: qux
+source: Qux.daml
+version: 1.0.0
+dependencies:
+- daml-prim
+- daml-stdlib

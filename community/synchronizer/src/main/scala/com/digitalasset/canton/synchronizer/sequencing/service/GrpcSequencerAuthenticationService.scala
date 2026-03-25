@@ -152,6 +152,7 @@ class GrpcSequencerAuthenticationService(
       case MemberAuthentication.NoKeysWithCorrectUsageRegistered(_, _) => maliciousOrFaulty()
       case MemberAuthentication.FailedToSign(_, _) => maliciousOrFaulty()
       case MemberAuthentication.MissingNonce(_) => maliciousOrFaulty()
+      case MemberAuthentication.ExpiredNonce(_, _, _, _) => maliciousOrFaulty()
       case MemberAuthentication.InvalidSignature(_) => maliciousOrFaulty()
       case MemberAuthentication.MissingToken(_) => maliciousOrFaulty()
       case MemberAuthentication.TokenVerificationException(_) => maliciousOrFaulty()

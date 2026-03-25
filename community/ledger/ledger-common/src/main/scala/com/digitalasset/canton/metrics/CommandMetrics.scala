@@ -4,7 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.daml.metrics.api.HistogramInventory.Item
-import com.daml.metrics.api.MetricHandle.{Counter, LabeledMetricsFactory, Meter, Timer}
+import com.daml.metrics.api.MetricHandle.{Counter, Histogram, LabeledMetricsFactory, Meter, Timer}
 import com.daml.metrics.api.{HistogramInventory, MetricInfo, MetricName, MetricQualification}
 
 final class CommandHistograms(val prefix: MetricName)(implicit
@@ -44,6 +44,13 @@ final class CommandHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Latency,
   )
 
+  val taps_package_selection = Item(
+    prefix :+ "taps_package_selection",
+    summary = "The time spent on package selection in a single TAPS pass.",
+    description = """The time spent on package selection in a single pass of the Topology-Aware
+                      |Package Selection, before the command is handed to the Daml Engine for interpretation.""",
+    qualification = MetricQualification.Latency,
+  )
 }
 
 // Private constructor to avoid being instantiated multiple times by accident
@@ -60,6 +67,7 @@ final class CommandMetrics private[metrics] (
 
   val submissions: Timer = factory.timer(inventory.submissions.info)
   val interactivePrepares: Timer = factory.timer(inventory.interactive_prepares.info)
+  val tapsPackageSelection: Timer = factory.timer(inventory.taps_package_selection.info)
 
   val submissionsRunning: Counter = factory.counter(
     MetricInfo(
@@ -134,6 +142,16 @@ final class CommandMetrics private[metrics] (
       summary = "The maximum number of Daml commands that can await completion.",
       description =
         "The maximum number of Daml commands that can await completion in the Command Service.",
+      qualification = MetricQualification.Debug,
+    )
+  )
+
+  val tapsPasses: Histogram = factory.histogram(
+    MetricInfo(
+      inventory.prefix :+ "taps_passes",
+      summary = "The number of TAPS passes during processing of a command.",
+      description =
+        """The number of Topology-Aware Package Selection passes during processing of a command.""",
       qualification = MetricQualification.Debug,
     )
   )

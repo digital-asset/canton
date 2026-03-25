@@ -1290,7 +1290,14 @@ object TopologyStateWriteThroughCache {
         )
         .toSeq
         .sortBy(c =>
-          (c.validFrom, c.validUntil, c.transaction.serial, c.transaction.signatures.size)
+          // the sorting should really be `(c.validFrom, c.batchIndex)`, but batchIndex is not yet available in `StoredTopologyTransaction`.
+          (
+            c.validFrom,
+            c.validUntil
+              .getOrElse(EffectiveTime.MaxValue), // return the currently valid transaction last
+            c.transaction.serial,
+            c.transaction.signatures.size,
+          )
         )
     }
 

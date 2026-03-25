@@ -14,7 +14,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.daml.ledger.javaapi.data.Transaction
-import com.digitalasset.canton.LfPackageName
+import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
@@ -28,7 +28,10 @@ import com.digitalasset.canton.damltests.foo.v2.java.foo.Foo as FooV2
 import com.digitalasset.canton.damltests.foo.v3.java.foo.Foo as FooV3
 import com.digitalasset.canton.damltests.foo.v4.java.foo.Foo as FooV4
 import com.digitalasset.canton.damltests.ibaz.v1.java.ibaz.IBaz
-import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
+import com.digitalasset.canton.damltests.qux.v1.java.qux.Qux
+import com.digitalasset.canton.damltests.qux.v1.java.qux.Qux as QuxV1
+import com.digitalasset.canton.damltests.qux.v2.java.qux.Qux as QuxV2
+import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.tests.upgrading.UpgradingBaseTest.Syntax.*
 import com.digitalasset.canton.integration.util.PartiesAllocator
@@ -37,12 +40,16 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.PackageSelectionFailed
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
+  Interpreter,
+  PackageSelectionFailed,
+}
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.{LfPackageId, LfPackageName}
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 import scala.jdk.OptionConverters.RichOption
@@ -279,6 +286,17 @@ class SystematicTopologyAwareUpgradingIntegrationTest
               )
             ),
           )
+          // Fails because it needs 3 passes
+          testError(
+            expectedErrorCode =
+              TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId,
+            expectedErrorMessage = "Some packages are not known to all informees on synchronizer",
+            tapsMaxPasses = Some(2),
+          )
+
+          // 1st pass selects Foo V3 and Baz V2 -> Routing fails because Bob has not vetted Baz V2.
+          // 2nd pass selects Foo V2 and Bar V2 -> Routing fails because Bob has not vetted Bar V2.
+          // 3rd pass selects Foo V2 and Bar V1 -> Success
           test(
             bobSees = Some(BarV1.PACKAGE_ID),
             expectedExerciseVersion = FooV2.PACKAGE_ID,
@@ -288,47 +306,26 @@ class SystematicTopologyAwareUpgradingIntegrationTest
 
     // Negative test case
     "alice did not vet Foo V1 and bob vetted only Bar V2" should {
-
-      /** Limitation: Package selection in pass 2 checks that all dependencies of a package are
-        * vetted by all parties interested in the dependency's package-name. See
-        * [[com.digitalasset.canton.platform.PackagePreferenceBackend]] ScalaDoc for more details.
-        */
-      "fail" in { implicit env =>
+      "succeed using Foo V2 and Bar V2" in { implicit env =>
         SetupPackageVetting(
           AllDars,
           Map(
-            env.daId -> AllVettedUpToV3
-              .updated(
-                bobParticipant,
-                Set(BarV2.PACKAGE_ID.toPackageId.withNoVettingBounds),
-              )
-              .updated(
-                aliceParticipant,
-                Set(
-                  FooV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
-                  FooV3.PACKAGE_ID.toPackageId.withNoVettingBounds,
-                  BarV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
-                  BazV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
-                ),
-              )
+            env.daId -> Map(
+              aliceParticipant -> Set(
+                FooV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
+                FooV3.PACKAGE_ID.toPackageId.withNoVettingBounds,
+                BarV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
+                BazV2.PACKAGE_ID.toPackageId.withNoVettingBounds,
+              ),
+              bobParticipant -> Set(BarV2.PACKAGE_ID.toPackageId.withNoVettingBounds),
+            )
           ),
         )
+        // 1st pass selects Foo V3 and Baz V2 -> Routing fails because Bob has not vetted Baz V1.
+        // 2nd pass selects Foo V2 and Bar V2 -> Success
         test(
-          bobSees = None,
-          assertExerciseResult = exercise => {
-            assertThrowsAndLogsCommandFailures(
-              exercise(),
-              entry => {
-                entry.shouldBeCantonErrorCode(PackageSelectionFailed)
-                entry.message should include regex
-                  s"""No synchronizers satisfy the topology requirements for the submitted command.*
-                       |.*${env.daId}: Failed to select package-id for package-name '${FooV1.PACKAGE_NAME}' appearing in a command root node due to: Packages with dependencies not vetted by all interested parties.*${FooV2.PACKAGE_ID.toPackageId.show} ->.*${BarV1.PACKAGE_ID.toPackageId.show}.*""".stripMargin
-              },
-            )
-            None
-          },
-          // Doesn't matter, we expect an error
-          expectedExerciseVersion = FooV1.PACKAGE_ID,
+          bobSees = Some(BarV2.PACKAGE_ID),
+          expectedExerciseVersion = FooV2.PACKAGE_ID,
         )
       }
     }
@@ -348,6 +345,18 @@ class SystematicTopologyAwareUpgradingIntegrationTest
               )
             ),
           )
+
+          // Fails because it needs 3 passes
+          testError(
+            expectedErrorCode =
+              TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId,
+            expectedErrorMessage = "Some packages are not known to all informees on synchronizer",
+            tapsMaxPasses = Some(2),
+          )
+
+          // 1st pass selects Foo V3 and Baz V2 -> Routing fails because Bob has not vetted Baz V2.
+          // 2nd pass selects Foo V2 and Bar V2 -> Routing fails because Bob has not vetted Bar V2.
+          // 3rd pass selects Foo V2 and Bar V1 -> Success
           test(
             bobSees = Some(BarV1.PACKAGE_ID),
             expectedExerciseVersion = FooV2.PACKAGE_ID,
@@ -424,41 +433,27 @@ class SystematicTopologyAwareUpgradingIntegrationTest
 
     // Negative test case
     "bob doesn't vet anything" should {
+      "succeed using Foo V1" in { implicit env =>
+        SetupPackageVetting(
+          AllDars,
+          Map(env.daId -> AllVettedUpToV3.updated(bobParticipant, Set.empty)),
+        )
 
-      /** Limitation: In pass 2, the vetting checks only consider package-names that parties are
-        * interested in. Hence, if bob does not vet any package for a package-name that appears as a
-        * dependency to the package on which the selection is being performed, the preference is
-        * considered valid even though its usage in a Daml transaction might create a child action
-        * node that exposes the unvetted dependency package to bob. See
-        * [[com.digitalasset.canton.platform.PackagePreferenceBackend]] ScalaDoc for more details.
-        *
-        * In the example below, pass 1 chooses Foo V3 which imposes IBaz to bob, which bob did not
-        * vet. In pass 2, Foo V3 is discarded since Foo V3's dependency IBaz has not been vetted by
-        * bob (the draft transaction introduces the bob <-> IBaz/Baz requirement). The next
-        * candidate is Foo V2, which brings IBar/Bar V1 into bob's view. But since bob did not vet
-        * any of IBar/Bar, it is considered that bob does not have an interest in the package-name,
-        * thus its vetting state is not considered when deciding the vetting requirements for Foo
-        * V2's dependencies (of interest, Bar V1 and IBar here). Then, Foo V2 is selected.
-        */
-      "fail synchronizer routing since pass 2 still picks Foo V2 which involves bob with Bar V1" in {
-        implicit env =>
-          SetupPackageVetting(
-            AllDars,
-            Map(env.daId -> AllVettedUpToV3.updated(bobParticipant, Set.empty)),
-          )
-          test(
-            bobSees = None,
-            assertExerciseResult = exercise => {
-              assertThrowsAndLogsCommandFailures(
-                exercise(),
-                _.shouldBeCantonErrorCode(InvalidPrescribedSynchronizerId),
-              )
-              None
-            },
-            expectedExerciseVersion =
-              // Doesn't matter, we expect an error
-              FooV1.PACKAGE_ID,
-          )
+        // Fails because it needs 3 passes
+        testError(
+          expectedErrorCode =
+            TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId,
+          expectedErrorMessage = "Some packages are not known to all informees on synchronizer",
+          tapsMaxPasses = Some(2),
+        )
+
+        // 1st pass selects Foo V3 and Baz V2 -> Routing fails because Bob has not vetted Baz V2.
+        // 2nd pass selects Foo V2 and Bar V2 -> Routing fails because Bob has not vetted Bar V2.
+        // 3rd pass selects Foo V1 -> Success.
+        test(
+          bobSees = None,
+          expectedExerciseVersion = FooV1.PACKAGE_ID,
+        )
       }
     }
 
@@ -504,28 +499,18 @@ class SystematicTopologyAwareUpgradingIntegrationTest
               )
             ),
           )
-          test(
-            bobSees = Some(BarV1.PACKAGE_ID),
-            expectedExerciseVersion = FooV2.PACKAGE_ID,
+          testError(
+            expectedErrorCode = PackageSelectionFailed,
+            expectedErrorMessage =
+              s"""|No synchronizers satisfy the topology requirements for the submitted command: Discarded synchronizers:.*
+                  |.*$daId: Failed to select package-id for package-name '${FooV1.PACKAGE_NAME}' appearing in a command root node due to: No vetted package candidate satisfies the package-id filter 'Commands.package_id_selection_preference'=.*foo -> ${FooV3.PACKAGE_ID.toPackageId.show}.*
+                  |.*Candidates:.*${FooV2.PACKAGE_ID.toPackageId.show}.*""".stripMargin,
             vettingRequirementsForPreferencesInjection = Some(
               Map(
                 Foo.PACKAGE_NAME.toPackageName -> Set(alice),
                 BarV1.PACKAGE_NAME.toPackageName -> Set(bob),
               )
             ),
-            assertExerciseResult = exercise => {
-              assertThrowsAndLogsCommandFailures(
-                exercise(),
-                entry => {
-                  entry.shouldBeCantonErrorCode(PackageSelectionFailed)
-                  entry.message should include regex
-                    s"""No synchronizers satisfy the topology requirements for the submitted command: Discarded synchronizers:.*
-                       |.*$daId: Failed to select package-id for package-name '${FooV1.PACKAGE_NAME}' appearing in a command root node due to: No vetted package candidate satisfies the package-id filter 'Commands.package_id_selection_preference'=.*foo -> ${FooV3.PACKAGE_ID.toPackageId.show}.*
-                       |.*Candidates:.*${FooV2.PACKAGE_ID.toPackageId.show}.*""".stripMargin
-                },
-              )
-              None
-            },
           )
         }
       }
@@ -588,58 +573,72 @@ class SystematicTopologyAwareUpgradingIntegrationTest
     }
   }
 
+  private def testError(
+      expectedErrorCode: ErrorCode,
+      expectedErrorMessage: String,
+      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]] = None,
+      tapsMaxPasses: Option[Int] = None,
+  ): Unit = {
+    val fooCid = createFoo()
+    assertThrowsAndLogsCommandFailures(
+      exerciseFoo(
+        fooCid,
+        vettingRequirementsForPreferencesInjection,
+        addCharlie = false,
+        tapsMaxPasses,
+      ),
+      entry => {
+        entry.shouldBeCantonErrorCode(expectedErrorCode)
+        entry.message should include regex expectedErrorMessage
+      },
+    )
+  }
+
   private def test(
       bobSees: Option[String],
       expectedExerciseVersion: String,
-      assertExerciseResult: (() => Transaction) => Option[Transaction] = _().pipe(Some(_)),
       vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]] = None,
       charlieSees: Option[String] = None,
+      tapsMaxPasses: Option[Int] = None,
   ): Unit = {
     val addCharlie = charlieSees.isDefined
+    val fooCid = createFoo()
+    val tx =
+      exerciseFoo(fooCid, vettingRequirementsForPreferencesInjection, addCharlie, tapsMaxPasses)
+    tx.getEvents.asScala.headOption.value.toProtoEvent.getExercised.getTemplateId.getPackageId shouldBe expectedExerciseVersion
 
-    val fooCid = aliceParticipant.ledger_api.javaapi.commands
-      .submit(
-        Seq(alice),
-        new Foo(alice.toProtoPrimitive).create().commands().asScala.toList,
-      )
-      .getEvents
-      .asScala
-      .loneElement
-      .toProtoEvent
-      .getCreated
-      .getContractId
-      .pipe(new FooV4.ContractId(_))
-
-    val packagePreferencesO = vettingRequirementsForPreferencesInjection
-      .map(vettingRequirements =>
-        aliceParticipant.ledger_api.interactive_submission.preferred_packages(vettingRequirements)
-      )
-      .map(_.packageReferences.map(_.packageId.toPackageId))
-
-    assertExerciseResult(() =>
-      aliceParticipant.ledger_api.javaapi.commands
-        .submit(
-          Seq(alice),
-          fooCid
-            .exerciseFoo_Exe(
-              alice.toProtoPrimitive,
-              bob.toProtoPrimitive,
-              Option.when(addCharlie)(charlie.toProtoPrimitive).toJava,
-            )
-            .commands()
-            .asScala
-            .toList,
-          transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
-          userPackageSelectionPreference = packagePreferencesO.getOrElse(Seq.empty),
+    val updateId = tx.getUpdateId
+    val bobsCreatePkgId =
+      // There is one template per package-id, so we can just check the package-id of the create event
+      // for a deterministic assertion
+      bobParticipant.ledger_api.updates
+        .update_by_id(
+          updateId,
+          updateFormat = UpdateFormat(
+            Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map(bob.toProtoPrimitive -> Filters(Nil)),
+                    filtersForAnyParty = None,
+                    verbose = false,
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            None,
+            None,
+          ),
         )
-    ).foreach { tx =>
-      tx.getEvents.asScala.headOption.value.toProtoEvent.getExercised.getTemplateId.getPackageId shouldBe expectedExerciseVersion
+        .flatMap(_.createEvents.toSeq.loneElement.templateId.map(_.packageId))
 
-      val updateId = tx.getUpdateId
-      val bobsCreatePkgId =
-        // There is one template per package-id, so we can just check the package-id of the create event
-        // for a deterministic assertion
-        bobParticipant.ledger_api.updates
+    // If bob doesn't see any of the packages, we expect the update to not contain any events
+    bobsCreatePkgId shouldBe bobSees
+
+    if (addCharlie) {
+      val charliesCreatePkgId =
+        charlieParticipant.ledger_api.updates
           .update_by_id(
             updateId,
             updateFormat = UpdateFormat(
@@ -647,7 +646,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
                 TransactionFormat(
                   eventFormat = Some(
                     EventFormat(
-                      filtersByParty = Map(bob.toProtoPrimitive -> Filters(Nil)),
+                      filtersByParty = Map(charlie.toProtoPrimitive -> Filters(Nil)),
                       filtersForAnyParty = None,
                       verbose = false,
                     )
@@ -661,35 +660,109 @@ class SystematicTopologyAwareUpgradingIntegrationTest
           )
           .flatMap(_.createEvents.toSeq.loneElement.templateId.map(_.packageId))
 
-      // If bob doesn't see any of the packages, we expect the update to not contain any events
-      bobsCreatePkgId shouldBe bobSees
+      charliesCreatePkgId shouldBe charlieSees
+    }
+  }
 
-      if (addCharlie) {
-        val charliesCreatePkgId =
-          charlieParticipant.ledger_api.updates
-            .update_by_id(
-              updateId,
-              updateFormat = UpdateFormat(
-                Some(
-                  TransactionFormat(
-                    eventFormat = Some(
-                      EventFormat(
-                        filtersByParty = Map(charlie.toProtoPrimitive -> Filters(Nil)),
-                        filtersForAnyParty = None,
-                        verbose = false,
-                      )
-                    ),
-                    transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
-                  )
-                ),
-                None,
-                None,
-              ),
-            )
-            .flatMap(_.createEvents.toSeq.loneElement.templateId.map(_.packageId))
+  private def createFoo(): FooV4.ContractId = {
+    val contractId = aliceParticipant.ledger_api.javaapi.commands
+      .submit(
+        Seq(alice),
+        new Foo(alice.toProtoPrimitive).create().commands().asScala.toList,
+      )
+      .getEvents
+      .asScala
+      .loneElement
+      .toProtoEvent
+      .getCreated
+      .getContractId
+    new FooV4.ContractId(contractId)
+  }
 
-        charliesCreatePkgId shouldBe charlieSees
-      }
+  private def exerciseFoo(
+      fooCid: FooV4.ContractId,
+      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]],
+      addCharlie: Boolean,
+      tapsMaxPasses: Option[Int],
+  ): Transaction = {
+    val packagePreferencesO = vettingRequirementsForPreferencesInjection
+      .map(vettingRequirements =>
+        aliceParticipant.ledger_api.interactive_submission.preferred_packages(vettingRequirements)
+      )
+      .map(_.packageReferences.map(_.packageId.toPackageId))
+    aliceParticipant.ledger_api.javaapi.commands
+      .submit(
+        Seq(alice),
+        fooCid
+          .exerciseFoo_Exe(
+            alice.toProtoPrimitive,
+            bob.toProtoPrimitive,
+            Option.when(addCharlie)(charlie.toProtoPrimitive).toJava,
+          )
+          .commands()
+          .asScala
+          .toList,
+        transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+        userPackageSelectionPreference = packagePreferencesO.getOrElse(Seq.empty),
+        tapsMaxPasses = tapsMaxPasses,
+      )
+  }
+
+  /* Limitation: TAPS fails as soon as it interprets a transaction requiring a missing submitter,
+   * even if it could fallback on another version of the same package that do not require this new
+   * submitter.
+   *
+   * This test uses a simplistic Qux template with a single signatory and a single observer:
+   * `template Qux with owner: Party, obs: Party`
+   *
+   * Qux_Exe is a choice on Qux. The number of controllers change between two versions of the package:
+   * (V1) `controller owner`
+   * (V2) `controller [owner, obs]`
+   */
+  "Systematic topology-aware upgrading test with added controllers" when {
+    "fails because of missing submitter during interpretation" in { implicit env =>
+      val quxDars = Set(UpgradingBaseTest.QuxV1, UpgradingBaseTest.QuxV2)
+      val vettedPackages =
+        Set(QuxV1.PACKAGE_ID, QuxV2.PACKAGE_ID).map(_.toPackageId.withNoVettingBounds)
+      val vettingState: Map[ParticipantReference, Set[VettedPackage]] =
+        Seq(aliceParticipant, bobParticipant).map(_ -> vettedPackages).toMap
+      SetupPackageVetting(quxDars, Map(env.daId -> vettingState))
+
+      val quxCid = aliceParticipant.ledger_api.javaapi.commands
+        .submit(
+          Seq(alice),
+          new Qux(alice.toProtoPrimitive, bob.toProtoPrimitive).create().commands().asScala.toList,
+        )
+        .getEvents
+        .asScala
+        .loneElement
+        .toProtoEvent
+        .getCreated
+        .getContractId
+        .pipe(new QuxV2.ContractId(_))
+
+      def exercise(packagePreferences: Seq[LfPackageId]): Transaction =
+        aliceParticipant.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          quxCid.exerciseQux_Exe().commands().asScala.toList,
+          transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+          userPackageSelectionPreference = packagePreferences,
+        )
+
+      // Failed interpretation because TAPS pass 1 selects Qux V2
+      assertThrowsAndLogsCommandFailures(
+        exercise(packagePreferences = Seq.empty),
+        entry => {
+          entry.shouldBeCantonErrorCode(Interpreter.AuthorizationError)
+          entry.message should include regex s"Interpretation error: Error: node .* \\(${QuxV2.PACKAGE_ID}:Qux:Qux\\) requires authorizers ${alice.toProtoPrimitive},${bob.toProtoPrimitive}, but only ${alice.toProtoPrimitive} were given"
+        },
+      )
+
+      // Succeed with Qux V1 as preferred package
+      val tx = exercise(packagePreferences = Seq(LfPackageId.assertFromString(QuxV1.PACKAGE_ID)))
+      val exercisedPackageId =
+        tx.getEvents.asScala.headOption.value.toProtoEvent.getExercised.getTemplateId.getPackageId
+      exercisedPackageId shouldBe QuxV1.PACKAGE_ID
     }
   }
 }

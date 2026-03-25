@@ -90,6 +90,7 @@ object CommunityConfigValidations extends ConfigValidations with NamedLogging {
       warnIfUnsafeMinProtocolVersion,
       adminTokenSafetyCheckParticipants,
       adminTokenConfigsMatchOnParticipants,
+      topologyAwarePackageSelectionCheckParticipants,
       eitherUserListsOrPrivilegedTokensOnParticipants,
       validateSelectedSchemes,
       sessionSigningKeysOnlyWithKms,
@@ -365,6 +366,18 @@ object CommunityConfigValidations extends ConfigValidations with NamedLogging {
         )
       )(
         s"if both ledger-api.admin-token-config.fixed-admin-token and admin-api.admin-token-config.fixed-admin-token provided, they must match for participant ${name.unwrap}"
+      )
+    }
+    toValidated(errors)
+  }
+
+  private def topologyAwarePackageSelectionCheckParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
+      val tapsConfig = participantConfig.ledgerApi.topologyAwarePackageSelection
+      Option.when(tapsConfig.maxPassesLimit < tapsConfig.maxPassesDefault)(
+        s"For participant ${name.unwrap}, topology-aware-package-selection.max-passes-limit (${tapsConfig.maxPassesLimit}) must be greater than or equal to max-passes-default (${tapsConfig.maxPassesDefault})"
       )
     }
     toValidated(errors)

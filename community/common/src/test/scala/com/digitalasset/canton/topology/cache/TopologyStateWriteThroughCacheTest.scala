@@ -7,7 +7,7 @@ import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.BatchAggregatorConfig
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -34,8 +34,14 @@ import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   ParticipantPermission,
   PartyToParticipant,
+  SynchronizerParametersState,
 }
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Namespace, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  Namespace,
+  SynchronizerId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -263,7 +269,57 @@ class TopologyStateWriteThroughCacheTest
           c4 shouldBe Seq(tx2) // should return history lookup
           c5 shouldBe empty
         }
+      }
 
+      "correctly return the history of a mapping" in { f =>
+        import f.*
+        val tx1 = toStored(
+          mkAdd(
+            SynchronizerParametersState(SynchronizerId(uid1a), defaultSynchronizerParameters),
+            SigningKeys.key1,
+          ),
+          ts(0),
+          Some(ts(0)),
+        )
+        val tx2 = toStored(
+          mkAdd(
+            SynchronizerParametersState(
+              SynchronizerId(uid1a),
+              defaultSynchronizerParameters.update(confirmationRequestsMaxRate = NonNegativeInt.one),
+            ),
+            SigningKeys.key1,
+            serial = PositiveInt.two,
+          ),
+          ts(0),
+          Some(ts(0)),
+        )
+        val tx3 = toStored(
+          mkAdd(
+            SynchronizerParametersState(
+              SynchronizerId(uid1a),
+              defaultSynchronizerParameters.update(confirmationRequestsMaxRate = NonNegativeInt.two),
+            ),
+            SigningKeys.key1,
+            serial = PositiveInt.two,
+          ),
+          ts(0),
+          None,
+        )
+
+        expect(Seq(Seq(tx3), Seq(tx1, tx2))*).foreach(_._2.outcome_(()))
+
+        for {
+          c1 <- cache
+            .lookupHistoryForUid(
+              ts(1),
+              asOfInclusive = false,
+              uid1a,
+              Code.SynchronizerParametersState,
+            )
+            .failOnShutdown
+        } yield {
+          c1 shouldBe Seq(tx1, tx2, tx3)
+        }
       }
 
       "synchronise on multiple fetches" in { f =>

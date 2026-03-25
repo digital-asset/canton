@@ -220,6 +220,14 @@ message PrepareSubmissionRequest {
   //
   // Optional
   optional CostEstimationHints estimate_traffic_cost = 16;
+
+  // The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+  // Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+  // If unset, this defaults to the value defined in the participant configuration.
+  // The provided value must not exceed the limit specified in the participant configuration.
+  //
+  // Optional
+  optional uint32 taps_max_passes = 18;
 }
 
 // [docs-entry-start: HashingSchemeVersion]

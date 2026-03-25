@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.authentication
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -64,6 +65,15 @@ object MemberAuthentication extends MemberAuthentication {
       extends AuthenticationError(
         s"Member $member has not been previously assigned a handshake nonce",
         "MissingNonce",
+      )
+  final case class ExpiredNonce(
+      member: Member,
+      expireAt: CantonTimestamp,
+      now: CantonTimestamp,
+      generatedAt: CantonTimestamp,
+  ) extends AuthenticationError(
+        s"The nonce of member $member has expired at $expireAt (generated: $generatedAt, now: $now)",
+        "ExpiredNonce",
       )
   final case class InvalidSignature(member: Member)
       extends AuthenticationError(

@@ -162,6 +162,7 @@ class TestEngine(
         synchronizerId = "",
         packageIdSelectionPreference = Nil,
         prefetchContractKeys = Nil,
+        tapsMaxPasses = None,
       )
 
     val engineCommands: com.digitalasset.canton.ledger.api.Commands =

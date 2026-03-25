@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.authentication
 
 import cats.data.EitherT
-import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
@@ -16,9 +15,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.*
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -26,6 +27,7 @@ import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.EitherTUtil
 
 import java.time.Duration
 import scala.concurrent.ExecutionContext
@@ -60,6 +62,7 @@ class MemberAuthenticationService(
     invalidateMemberCallback: Traced[Member] => Unit,
     isTopologyInitialized: FutureUnlessShutdown[Unit],
     override val timeouts: ProcessingTimeout,
+    metrics: SequencerMetrics,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -118,14 +121,26 @@ class MemberAuthenticationService(
     for {
       _ <- EitherT.right(waitForInitialized)
       _ <- isActive(member)
-      value <- EitherT
-        .fromEither(
-          ignoreExpired(
-            store.fetchAndRemoveNonce(member, providedNonce)
-          ).toRight(MissingNonce(member): AuthenticationError)
+
+      storedNonce <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          metrics.fetchNonceDuration
+            .time(
+              store
+                .fetchAndRemoveNonce(member, providedNonce)
+                .toRight(MissingNonce(member): AuthenticationError)
+            )
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
-      StoredNonce(_, nonce, generatedAt, _expireAt) = value
+      StoredNonce(_, nonce, generatedAt, expireAt) = storedNonce
+
+      _ <- {
+        val now = clock.now
+        EitherTUtil.condUnitET[FutureUnlessShutdown](
+          expireAt > now,
+          ExpiredNonce(member, expireAt, now, generatedAt),
+        )
+      }
+
       authentication <- EitherT.fromEither[FutureUnlessShutdown](MemberAuthentication(member))
       hash = authentication.hashSynchronizerNonce(nonce, synchronizerId, cryptoApi.pureCrypto)
       snapshot <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
@@ -216,9 +231,6 @@ class MemberAuthenticationService(
       }
     } yield res
 
-  private def ignoreExpired[A <: HasExpiry](itemO: Option[A]): Option[A] =
-    itemO.filter(_.expireAt > clock.now)
-
   private def scheduleExpirations(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Unit = {
@@ -263,11 +275,16 @@ class MemberAuthenticationService(
   protected def isMemberActive(check: TopologySnapshot => FutureUnlessShutdown[Boolean])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
-    // we are a bit more conservative here. a member needs to be active NOW and the head state (i.e. effective in the future)
-    Seq(FutureUnlessShutdown.pure(cryptoApi.headSnapshot), cryptoApi.currentSnapshotApproximation)
-      .map(_.map(_.ipsSnapshot))
-      .parTraverse(_.flatMap(check(_)))
-      .map(_.forall(identity))
+    metrics.isActiveDuration.timeFUS(
+      // we are a bit more conservative here. a member needs to be active NOW and the head state (i.e. effective in the future)
+      Seq(
+        FutureUnlessShutdown.pure(cryptoApi.headSnapshot),
+        cryptoApi.currentSnapshotApproximation,
+      )
+        .map(_.map(_.ipsSnapshot))
+        .parTraverse(_.flatMap(check(_)))
+        .map(_.forall(identity))
+    )
 
   protected def isParticipantActive(participant: ParticipantId)(implicit
       traceContext: TraceContext
@@ -288,7 +305,7 @@ class MemberAuthenticationService(
   )(memberId: T)(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     isActiveCheck(memberId).map { isActive =>
       if (!isActive) {
-        logger.debug(s"Expiring all auth-tokens of $memberId")
+        logger.info(s"Expiring all auth-tokens of $memberId")
         // first, remove all auth tokens
         store.invalidateMember(memberId)
         // second, ensure the sequencer client gets disconnected
@@ -329,6 +346,7 @@ class MemberAuthenticationServiceImpl(
     invalidateMemberCallback: Traced[Member] => Unit,
     isTopologyInitialized: FutureUnlessShutdown[Unit],
     timeouts: ProcessingTimeout,
+    metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends MemberAuthenticationService(
@@ -342,6 +360,7 @@ class MemberAuthenticationServiceImpl(
       invalidateMemberCallback,
       isTopologyInitialized,
       timeouts,
+      metrics,
       loggerFactory,
     )
     with TopologyTransactionProcessingSubscriber {
@@ -409,6 +428,7 @@ object MemberAuthenticationServiceFactory {
       maxTokenExpirationInterval: Duration,
       useExponentialRandomTokenExpiration: Boolean,
       timeouts: ProcessingTimeout,
+      metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
       topologyTransactionProcessor: TopologyTransactionProcessor,
   ): MemberAuthenticationServiceFactory =
@@ -430,6 +450,7 @@ object MemberAuthenticationServiceFactory {
           invalidateMemberCallback,
           isTopologyInitialized,
           timeouts,
+          metrics,
           loggerFactory,
         )
         topologyTransactionProcessor.subscribe(service)

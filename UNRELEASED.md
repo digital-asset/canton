@@ -4,10 +4,19 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
+## Until 2026-03-25
+### Minor Improvements
+- Fixed the sequencer’s initialization key check to look for a `Protocol` key instead of a `SequencerAuthentication`
+  key, because a sequencer does not require a key with `SequencerAuthentication` and the check may fail wrongly.
+
+### Bug Fixes
+- TopologyClient now returns the correct order of dynamic synchronizer parameter changes for the genesis timestamp.
+
+
 ## Until 2026-03-18
 ### Minor Improvements
-- Internal: Removed the usage of BroadcastHub for the sequencer's internal mechanism, with which it signals new events to subscribers,
-  and replaced it with an implementation with better runtime characteristics.
+- Internal: Replaced the sequencer's internal event signaller based on Pekko's `BroadcastHub` with an implementation with better runtime characteristics.
+  The old event signaller can be turned on again with `canton.sequencers.<sequencer>.parameters.use-legacy-event-signaller = true`.
 
 ## Until 2026-03-11
 ### Minor Improvements
@@ -72,6 +81,13 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 - Removed the excessive no longer needed debug logging around the sequencer event signaller
 - Added `keep-alive-without-calls` and `idle-timeout` config values in the keep alive gRPC client configuration. See https://grpc.io/docs/guides/keepalive/#keepalive-configuration-specification for details.
   Note that when `keep-alive-without-calls` is enabled, `permit-keep-alive-without-calls` must be enabled on the server side, and `permit-keep-alive-time` adjusted to allow for a potentially higher frequency of keep alives coming from the client.
+- Topology-Aware Package Selection (TAPS) refinement for handling inconsistent vetting states:
+  - The algorithm now considers a party's package vetting state only for packages required by that party in the interpreted transaction. 
+    It starts with a minimal set of restrictions derived from the command's root nodes and progressively accumulates more restrictions over a configurable number of passes.
+    This iterative process increases the likelihood of finding a valid package selection set for the routing of the transaction.
+  - The maximum number of TAPS passes can be set at the request-level via the optional `taps_max_passes` field in `Commands` or `PrepareSubmissionRequest` messages.
+    If not specified, the default value is taken from the participant configuration via `participants.participant.ledger-api.topology-aware-package-selection.max-passes-default` (defaults to `3`).
+    A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
 
 > [!IMPORTANT]
 > `keep-alive-without-calls` can have a negative performance impact. Be cautious when turning it on, and in general prefer using `idle-timeout` when possible.

@@ -39,8 +39,7 @@ class ApiRequestLogger(
   ): ServerCall.Listener[ReqT] = {
     val requestTraceContext: TraceContext = TraceContextGrpc.fromGrpcContextOrNew("logger")
 
-    val sender = Option(call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR).toString)
-      .getOrElse("unknown sender")
+    val sender = ApiRequestLogger.GrpcAddressHelper.extractClientIP(call, headers)
     val method = call.getMethodDescriptor.getFullMethodName
 
     def createLogMessage(message: String): String =
@@ -132,6 +131,43 @@ class ApiRequestLogger(
       delegate.close(enhancedStatus, trailers)
     }
   }
+}
+
+object ApiRequestLogger {
+
+  object GrpcAddressHelper {
+
+    // Standard header set by reverse proxies and load balancers to convey the original client IP.
+    // Contains a comma-separated list of IPs when multiple proxies are involved; the first entry
+    // is the original client IP. See https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For
+    private val X_FORWARDED_FOR_KEY: Metadata.Key[String] =
+      Metadata.Key.of("x-forwarded-for", Metadata.ASCII_STRING_MARSHALLER)
+
+    // Set by Envoy proxy to a single trusted client IP, derived from x-forwarded-for after
+    // stripping untrusted hops based on Envoy's trusted-hop configuration.
+    // Preferred over x-forwarded-for when present as it is already sanitised by Envoy.
+    // See https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#x-envoy-external-address
+    private val X_ENVOY_EXTERNAL_ADDRESS_KEY: Metadata.Key[String] =
+      Metadata.Key.of("x-envoy-external-address", Metadata.ASCII_STRING_MARSHALLER)
+
+    def extractClientIP[ReqT, RespT](
+        call: ServerCall[ReqT, RespT],
+        headers: Metadata,
+    ): String =
+      extractProxyAddress(headers)
+        .getOrElse {
+          val remoteAddr = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
+          if (remoteAddr != null) remoteAddr.toString else "unknown"
+        }
+
+    private def extractProxyAddress(headers: Metadata) = {
+      val envoyAddr = Option(headers.get(X_ENVOY_EXTERNAL_ADDRESS_KEY))
+      val forwardedFor = Option(headers.get(X_FORWARDED_FOR_KEY)).map(_.split(",").head.trim)
+      envoyAddr.orElse(forwardedFor)
+    }
+
+  }
+
 }
 
 /** Base class for building gRPC API request loggers. Used in Canton network to build a client-side

@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   NonMatchingSynchronizerId,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -57,6 +58,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       memberT => invalidateMemberCallback(memberT.value),
       FutureUnlessShutdown.unit,
       DefaultProcessingTimeouts.testing,
+      SequencerMetrics.noop(getClass.getSimpleName),
       loggerFactory,
     ) {
       override def isParticipantActive(participant: ParticipantId)(implicit

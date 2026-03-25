@@ -10,11 +10,15 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.concurrent.Future
+
 /** Who gets notified that a event has been written */
 sealed trait WriteNotification {
   def union(notification: WriteNotification): WriteNotification
   def memberIds: Set[SequencerMemberId]
   def isBroadcast: Boolean
+  final def isBroadcastOrIncludes(member: SequencerMemberId): Boolean =
+    isBroadcast || memberIds.contains(member)
 }
 
 object WriteNotification {
@@ -50,7 +54,8 @@ case object ReadSignal extends ReadSignal
   * attempt fetching events from its store.
   */
 trait EventSignaller extends AutoCloseable {
-  def notifyOfLocalWrite(notification: WriteNotification): Unit
+  def isLegacySignaller: Boolean
+  def notifyOfLocalWrite(notification: WriteNotification): Future[Unit]
   def readSignalsForMember(member: Member, memberId: SequencerMemberId)(implicit
       traceContext: TraceContext
   ): Source[ReadSignal, NotUsed]

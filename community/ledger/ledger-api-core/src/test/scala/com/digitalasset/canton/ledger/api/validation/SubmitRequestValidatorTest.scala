@@ -105,6 +105,7 @@ class SubmitRequestValidatorTest
       synchronizerId = synchronizerId,
       prefetchContractKeys = Seq.empty,
       disclosedContracts = Nil,
+      tapsMaxPasses = None,
     )
   }
 
@@ -192,6 +193,7 @@ class SubmitRequestValidatorTest
       synchronizerId = Some(SynchronizerId.tryFromString(api.synchronizerId)),
       packageMap = packageMap,
       prefetchKeys = prefetchKeys,
+      tapsMaxPasses = None,
     )
   }
 

@@ -41,6 +41,8 @@ trait SequencerParameters {
   *   maximum number of auth tokens and nonces per member
   * @param maxSubscriptionsPerMember
   *   maximum number of subscriptions per member
+  * @param useLegacyEventSignaller
+  *   whether to use the old (BroadcastHub-based) event signaller
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -55,6 +57,7 @@ final case class SequencerNodeParameters(
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     progressSupervisor: Option[ProgressSupervisorConfig] = None,
+    useLegacyEventSignaller: Boolean = false,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

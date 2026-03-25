@@ -136,6 +136,7 @@ class DriverBlockSequencerFactory[C](
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
       batchingConfig = batchingConfig,
+      useLegacyEventSignaller = nodeParameters.useLegacyEventSignaller,
     )
 }
 

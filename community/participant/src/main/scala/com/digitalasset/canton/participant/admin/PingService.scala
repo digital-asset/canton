@@ -167,6 +167,7 @@ class PingService(
         synchronizerId = synchronizerId.map(_.toProtoPrimitive).getOrElse(""),
         packageIdSelectionPreference = Nil,
         prefetchContractKeys = Nil,
+        tapsMaxPasses = None,
       ),
       timeout.duration.toScala,
     )
