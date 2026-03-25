@@ -181,7 +181,8 @@ sealed trait OnboardingConsortiumPartyIntegrationTest extends ConsortiumPartyInt
 
           logger.debug("Onboarding: Import ACS to P4 (an empty participant)")
           participant4.ledger_api.state.acs.of_all() shouldBe empty
-          participant4.parties.import_party_acsV2(acsFilename, daId)
+          // TODO(#29427) - Potentially worthwhile to swtich back parties.import_party_acsV2
+          participant4.repair.import_acsV2(daId, acsFilename)
 
           logger.debug(s"Onboarding: Connect P4 to the synchronizer $daName")
           participant4.synchronizers.connect_local(sequencer1, daName)

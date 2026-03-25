@@ -66,8 +66,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 import scala.util.chaining.*
 
-private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
-    ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
+private[platform] final case class ParallelIndexerSubscription[DbBatch](
+    ingestionStorageBackend: IngestionStorageBackend[DbBatch],
     parameterStorageBackend: ParameterStorageBackend,
     contractStorageBackend: ContractStorageBackend,
     eventStorageBackend: EventStorageBackend,
@@ -191,8 +191,8 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           inputMappingParallelism = inputMappingParallelism,
           inputMapper = inputMapperExecutor.execute(
             inputMapper(
-              metrics,
-              mapInSpan(
+              metrics = metrics,
+              toDbDto = mapInSpan(
                 UpdateToDbDto(
                   participantId = participantId,
                   translation = translation,
@@ -200,19 +200,19 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
                   metrics = metrics,
                 )
               ),
-              EventMetricsUpdater(metrics.indexer.meteredEventsMeter),
-              logger,
+              eventMetricsUpdater = EventMetricsUpdater(metrics.indexer.meteredEventsMeter),
+              toDistinctRawStrings = inMemoryState.stringInterningView.distinctNewRawStrings,
+              logger = logger,
             )
           ),
           seqMapperZero = seqMapperZero(initialLedgerEnd),
           seqMapper = seqMapper(
-            internize = dtos =>
-              inMemoryState.stringInterningView
-                .internize(DbDtoToStringsForInterning(dtos)),
+            internize = inMemoryState.stringInterningView.internize,
             metrics = metrics,
             clock = clock,
             logger = logger,
             ledgerEndCache = inMemoryState.ledgerEndCache,
+            activeContracts = mutable.LinkedHashMap.empty,
           ),
           dbPrepareParallelism = dbPrepareParallelism,
           dbPrepare = dbPrepare(
@@ -249,11 +249,11 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           ),
           maxTailerBatchSize = maxTailerBatchSize,
           ingestTail =
-            if (repairMode) { (batchOfBatches: Vector[Batch[DB_BATCH]]) =>
-              aggregateLedgerEndForRepair[DB_BATCH](aggregatedLedgerEndForRepair)(batchOfBatches)
+            if (repairMode) { (batchOfBatches: Vector[Batch[DbBatch]]) =>
+              aggregateLedgerEndForRepair[DbBatch](aggregatedLedgerEndForRepair)(batchOfBatches)
               Future.successful(batchOfBatches)
             } else
-              ingestTail[DB_BATCH](
+              ingestTail[DbBatch](
                 storeLedgerEnd = storeLedgerEndF,
                 executionContext = executionContext,
                 logger = logger,
@@ -275,7 +275,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           Flow.apply
         } else {
           Flow.apply.mapAsync(1)(
-            ingestPostProcessEnd[DB_BATCH](
+            ingestPostProcessEnd[DbBatch](
               storePostProcessingEndF,
               executionContext,
               logger,
@@ -354,8 +354,6 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
 }
 
 object ParallelIndexerSubscription {
-  val EmptyActiveContracts: mutable.LinkedHashMap[SynCon, ActivationRef] =
-    mutable.LinkedHashMap.empty
 
   /** Batch wraps around a T-typed batch, enriching it with processing relevant information.
     *
@@ -367,10 +365,6 @@ object ParallelIndexerSubscription {
     *   Size of the batch measured in number of updates. Needed for metrics population.
     * @param offsetsUpdates
     *   The Updates with Offsets, the source of the batch.
-    * @param activeContracts
-    *   The active contracts at the head of the ledger - the ones which are not persisted yet. Key
-    *   is the Synchronizer ID of activation and the Contract ID, and the value is the
-    *   event_sequential_id of the activation.
     * @param missingDeactivatedActivations
     *   The set of deactivations need to be looked up at dbPrepare stage. It is optional as this is
     *   where the lookup-results are stored as well.
@@ -385,8 +379,8 @@ object ParallelIndexerSubscription {
       batch: T,
       batchSize: Int,
       offsetsUpdates: Vector[(Offset, Update)],
-      activeContracts: mutable.LinkedHashMap[SynCon, ActivationRef],
       missingDeactivatedActivations: Map[SynCon, Option[ActivationRef]],
+      distinctRawStrings: Iterable[String],
       eventCount: Long,
       batchTraceContext: TraceContext,
   )
@@ -534,6 +528,7 @@ object ParallelIndexerSubscription {
       metrics: LedgerApiServerMetrics,
       toDbDto: Offset => Update => Iterator[DbDto],
       eventMetricsUpdater: Iterable[(Offset, Update)] => Unit,
+      toDistinctRawStrings: Iterable[DbDto] => Iterable[String],
       logger: TracedLogger,
   ): Iterable[(Offset, Update)] => Batch[Vector[DbDto]] = { input =>
     metrics.indexer.inputMapping.batchSize.update(input.size)(MetricsContext.Empty)
@@ -565,8 +560,8 @@ object ParallelIndexerSubscription {
       batch = batch,
       batchSize = input.size,
       offsetsUpdates = input.toVector,
-      activeContracts = EmptyActiveContracts, // will be overridden later
       missingDeactivatedActivations = Map.empty, // will be filled later
+      distinctRawStrings = toDistinctRawStrings(batch),
       eventCount = 0L, // will be filled later
       batchTraceContext = TraceContext.ofBatch("indexer_update_batch")(
         input.iterator.map(_._2)
@@ -582,19 +577,19 @@ object ParallelIndexerSubscription {
       batch = Vector.empty,
       batchSize = 0,
       offsetsUpdates = Vector.empty,
-      activeContracts =
-        mutable.LinkedHashMap.empty, // this mutable will propagate forward in sequential mapping
       missingDeactivatedActivations = Map.empty, // will be populated later
       batchTraceContext = TraceContext.empty, // will be populated later
       eventCount = 0L, // will be populated later
+      distinctRawStrings = Nil, // will be populated later
     )
 
   def seqMapper(
-      internize: Iterable[DbDto] => Iterable[(Int, String)],
+      internize: Iterable[String] => Iterable[(Int, String)],
       metrics: LedgerApiServerMetrics,
       clock: Clock,
       logger: TracedLogger,
       ledgerEndCache: LedgerEndCache,
+      activeContracts: mutable.LinkedHashMap[SynCon, ActivationRef],
   )(
       previous: Batch[Vector[DbDto]],
       current: Batch[Vector[DbDto]],
@@ -615,7 +610,6 @@ object ParallelIndexerSubscription {
           next
         }
 
-        val activeContracts = previous.activeContracts
         val missingDeactivatedActivationsBuilder =
           Map.newBuilder[SynCon, Option[ActivationRef]]
         def setActivation(dbDto: DbDto.EventActivate): Unit = {
@@ -690,7 +684,7 @@ object ParallelIndexerSubscription {
         }
 
         val (newLastStringInterningId, dbDtosWithStringInterning) =
-          internize(batchWithSeqIdsAndPublicationTime)
+          internize(current.distinctRawStrings)
             .map(DbDto.StringInterningDto.from)
             .pipe(newEntries =>
               newEntries.lastOption.fold(
@@ -700,11 +694,7 @@ object ParallelIndexerSubscription {
 
         // prune active contracts so, that only activations remain which are not visible on DB yet
         ledgerEndCache().foreach(ledgerEnd =>
-          activeContracts.iterator
-            .takeWhile(_._2.eventSeqId <= ledgerEnd.lastEventSeqId)
-            .map(_._1)
-            .toList
-            .foreach(activeContracts.remove(_).discard)
+          mutableDropWhile(activeContracts)(_.eventSeqId <= ledgerEnd.lastEventSeqId)
         )
 
         current.copy(
@@ -714,12 +704,26 @@ object ParallelIndexerSubscription {
             lastPublicationTime = publicationTime,
           ),
           batch = dbDtosWithStringInterning,
-          activeContracts = activeContracts,
           missingDeactivatedActivations = missingDeactivatedActivationsBuilder.result(),
           eventCount = eventSeqId - previous.ledgerEnd.lastEventSeqId,
+          distinctRawStrings = Nil, // not needed anymore
         )
       },
     )
+
+  @SuppressWarnings(Array("org.wartremover.warts.While"))
+  def mutableDropWhile[T, U](
+      linkedHashMap: mutable.LinkedHashMap[T, U]
+  )(predicate: U => Boolean): Unit =
+    while (
+      linkedHashMap.headOption match {
+        case Some((key, value)) if predicate(value) =>
+          linkedHashMap.remove(key).discard
+          true
+
+        case _ => false
+      }
+    ) {}
 
   def dbPrepare(
       lastActivations: Iterable[(SynchronizerId, Long)] => Connection => Map[
@@ -830,11 +834,11 @@ object ParallelIndexerSubscription {
     batch.copy(batch = dbDtosWithDeactivationReferences)
   }
 
-  def batcher[DB_BATCH](
-      batchF: Vector[DbDto] => DB_BATCH,
+  def batcher[DbBatch](
+      batchF: Vector[DbDto] => DbBatch,
       logger: TracedLogger,
       metrics: LedgerApiServerMetrics,
-  )(inBatch: Batch[Vector[DbDto]]): Batch[DB_BATCH] = {
+  )(inBatch: Batch[Vector[DbDto]]): Batch[DbBatch] = {
     val dbBatch = inBatch
       .pipe(refillMissingDeactivatedActivations(metrics, logger))
       .batch
@@ -842,15 +846,15 @@ object ParallelIndexerSubscription {
     inBatch.copy(batch = dbBatch)
   }
 
-  def ingester[DB_BATCH](
-      ingestFunction: (Connection, DB_BATCH) => Unit,
+  def ingester[DbBatch](
+      ingestFunction: (Connection, DbBatch) => Unit,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
-      zeroDbBatch: DB_BATCH,
+      zeroDbBatch: DbBatch,
       dbDispatcher: DbDispatcher,
       executionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
       logger: TracedLogger,
-  ): Batch[DB_BATCH] => Future[Batch[DB_BATCH]] = { batch =>
+  ): Batch[DbBatch] => Future[Batch[DbBatch]] = { batch =>
     LoggingContextWithTrace.withNewLoggingContext(
       "updateOffsets" -> batch.offsetsUpdates.map(_._1)
     ) { implicit loggingContext =>
@@ -874,13 +878,13 @@ object ParallelIndexerSubscription {
   ): Map[SynchronizerId, SynchronizerIndex] =
     synchronizerIndexes.groupMapReduce(_._1)(_._2)(_ max _)
 
-  def ingestTail[DB_BATCH](
+  def ingestTail[DbBatch](
       storeLedgerEnd: (LedgerEnd, Map[SynchronizerId, SynchronizerIndex]) => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): Vector[Batch[DB_BATCH]] => Future[Vector[Batch[DB_BATCH]]] = { batchOfBatches =>
+  ): Vector[Batch[DbBatch]] => Future[Vector[Batch[DbBatch]]] = { batchOfBatches =>
     batchOfBatches.lastOption match {
       case Some(lastBatch) =>
         storeLedgerEnd(
@@ -930,11 +934,11 @@ object ParallelIndexerSubscription {
           }
       }
 
-  def aggregateLedgerEndForRepair[DB_BATCH](
+  def aggregateLedgerEndForRepair[DbBatch](
       aggregatedLedgerEnd: AtomicReference[
         Option[(LedgerEnd, Map[SynchronizerId, SynchronizerIndex])]
       ]
-  ): Vector[Batch[DB_BATCH]] => Unit =
+  ): Vector[Batch[DbBatch]] => Unit =
     batchOfBatches =>
       batchOfBatches.lastOption.foreach(lastBatch =>
         discard(aggregatedLedgerEnd.updateAndGet { aggregated =>
@@ -955,10 +959,10 @@ object ParallelIndexerSubscription {
         })
       )
 
-  def postProcess[DB_BATCH](
+  def postProcess[DbBatch](
       processor: (Vector[PostPublishData], TraceContext) => Future[Unit],
       executionContext: ExecutionContext,
-  ): Batch[DB_BATCH] => Future[Batch[DB_BATCH]] = { batch =>
+  ): Batch[DbBatch] => Future[Batch[DbBatch]] = { batch =>
     val postPublishData = batch.offsetsUpdates.flatMap { case (offset, update) =>
       PostPublishData.from(
         update,
@@ -969,22 +973,22 @@ object ParallelIndexerSubscription {
     processor(postPublishData, batch.batchTraceContext).map(_ => batch)(executionContext)
   }
 
-  def sequentialPostProcess[DB_BATCH](
+  def sequentialPostProcess[DbBatch](
       sequentialPostProcessor: Update => Unit
-  ): Batch[DB_BATCH] => Batch[DB_BATCH] = { batch =>
+  ): Batch[DbBatch] => Batch[DbBatch] = { batch =>
     batch.offsetsUpdates.foreach { case (_, update) =>
       sequentialPostProcessor(update)
     }
     batch
   }
 
-  def ingestPostProcessEnd[DB_BATCH](
+  def ingestPostProcessEnd[DbBatch](
       storePostProcessingEnd: Offset => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): Vector[Batch[DB_BATCH]] => Future[Vector[Batch[DB_BATCH]]] = { batchOfBatches =>
+  ): Vector[Batch[DbBatch]] => Future[Vector[Batch[DbBatch]]] = { batchOfBatches =>
     batchOfBatches.lastOption match {
       case Some(lastBatch) =>
         storePostProcessingEnd(lastBatch.ledgerEnd.lastOffset)
@@ -1057,13 +1061,12 @@ object ParallelIndexerSubscription {
     }
   }
 
-  private def cleanUnusedBatch[DB_BATCH](
-      zeroDbBatch: DB_BATCH
-  ): Batch[DB_BATCH] => Batch[DB_BATCH] =
+  private def cleanUnusedBatch[DbBatch](
+      zeroDbBatch: DbBatch
+  ): Batch[DbBatch] => Batch[DbBatch] =
     _.copy(
       batch = zeroDbBatch, // not used anymore
       batchSize = 0, // not used anymore
-      activeContracts = EmptyActiveContracts, // not used anymore
       missingDeactivatedActivations = Map.empty, // not used anymore
     )
 

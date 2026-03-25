@@ -4,19 +4,21 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.data.EitherT
+import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.Commands
 import com.digitalasset.canton.ledger.api.PackageReference.*
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SyncService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.{LfPackageRef, checked}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{FullReference, PackageName, Party}
 import com.digitalasset.daml.lf.engine.Blinding
-import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 
 import scala.concurrent.ExecutionContext
 
@@ -50,11 +52,15 @@ import scala.concurrent.ExecutionContext
   *   - '''Party-level vetted package''': A package that is vetted by every participant hosting a
   *     specific party. Also referred to as a consistently-vetted package for a party.
   *
-  *   - '''Party interest in a package-name''': A party is interested in a package-name if it has
-  *     vetted any package ID pertaining to that package name.
+  *   - '''Submitter interest in a package-name''': A submitter is interested in a package-name if
+  *     it has vetted any package ID pertaining to that package name.
+  *
+  *   - '''Informee interest in a package-name''': An informee, other than a submitter, is
+  *     interested in a package-name if it requires the package-name in the transaction, as
+  *     interpreted from the previous pass.
   *
   *   - '''Commonly-vetted package''': A package that is vetted by all parties interested in the
-  *     package's package name and whose direct and transitive dependencies are commonly-vetted.
+  *     package lineage and whose direct and transitive dependencies are commonly-vetted.
   *
   * Since each package ID has a unique package name, the package-name-to-package ID resolution can
   * simply be represented by its image: a set of package IDs whose package names are all different.
@@ -65,11 +71,11 @@ import scala.concurrent.ExecutionContext
   * choice remains hidden from the Engine, the provided package preference set ensures compliance
   * with topology constraints of the selected synchronizer.
   *
-  * As part of command execution, there are two TAPS attempts:
-  *   - A first - approximation - pass that uses information derived only from the submitted command
-  *     for computing the package preference set.
-  *   - A second - refinement - pass that uses the information derived from the interpreted
-  *     transaction obtained from the first pass for computing a more accurate package preference
+  * As part of command execution, there are several TAPS attempts:
+  *   - An initial - approximation - pass that uses information derived only from the submitted
+  *     command for computing the package preference set.
+  *   - Subsequent - refinement - passes that use the information derived from the interpreted
+  *     transaction obtained from the previous passes to compute a more accurate package preference
   *     set.
   *
   * Each TAPS pass generally performs the following steps:
@@ -95,7 +101,7 @@ import scala.concurrent.ExecutionContext
   *
   *   1. '''Process Package Preference Set''': The per-synchronizer package preference set is then
   *      processed into the package preference set used for interpretation (which differs between
-  *      Pass 1 and Pass 2).
+  *      Initial Pass and Subsequent Passes).
   *
   *   1. '''Interpret Commands''': The Daml Engine interprets the submitted commands using the
   *      computed package preference set (see [[com.digitalasset.daml.lf.engine.Engine.submit]]
@@ -106,9 +112,9 @@ import scala.concurrent.ExecutionContext
   *      [[com.digitalasset.canton.ledger.participant.state.SyncService.selectRoutingSynchronizer]]).
   *      If found, the transaction is routed for protocol synchronization.
   *
-  * The two passes of the algorithm differ as follows:
+  * The two types of passes of the algorithm differ as follows:
   *
-  * ==Pass 1==
+  * ==Initial Pass==
   *
   * The input topology requirements are derived from the submitter party, which is conventionally
   * the first party of `Commands.act_as`. This party is considered the submitter and sole informee
@@ -117,20 +123,31 @@ import scala.concurrent.ExecutionContext
   * submitter-party -> Set[command_root_nodes_packages]. The resulting per-synchronizer preference
   * set is merged into a single package preference set by selecting the highest-versioned package
   * across all admissible synchronizers for the submitter's vetted package names. If synchronizer
-  * routing in this pass doesn't yield a valid synchronizer, the algorithm proceeds to Pass 2.
+  * routing in this pass doesn't yield a valid synchronizer, the algorithm proceeds to the next
+  * pass.
   *
-  * ==Pass 2==
+  * ==Subsequent Passes==
   *
-  * In this pass, the topology requirements are derived from the Daml transaction obtained during
-  * the command interpretation resulting from the first pass, referred to below as the '''draft
-  * transaction'''. These new requirements stipulate that every informee of the draft transaction
-  * must have vetted a package ID corresponding to each package name used in the transaction. The
-  * root-level package names are the same as in the first pass. The package preference set for
-  * interpretation in Pass 2 is derived from the per-synchronizer package preference sets by
-  * selecting the one associated with the highest-ranked admissible synchronizer (see
+  * In this pass, the topology requirements are derived from the Daml transactions obtained during
+  * the command interpretation from the previous passes, referred to below as the '''draft
+  * transactions'''. These new requirements stipulate that every informee of the previous draft
+  * transactions has expressed interest in specific packages. As such their vetting state will
+  * constrain the selection of those packages. This ensures that TAPS converges after a finite
+  * number of passes. The package preference set for interpretation in this pass is derived from the
+  * per-synchronizer package preference sets by selecting the one associated with the highest-ranked
+  * admissible synchronizer (see
   * [[com.digitalasset.canton.ledger.participant.state.SyncService.computeHighestRankedSynchronizerFromAdmissible]]).
-  * If the resulting Daml transaction after interpretation in Pass 2 cannot be routed to a valid
-  * synchronizer, command submission fails.
+  * If the resulting Daml transaction after interpretation in this pass cannot be routed to a valid
+  * synchronizer, the algorithm loop with this transaction as the new draft transaction for the next
+  * pass.
+  *
+  * The algorithm terminates successfully as soon as the interpreted transaction can be routed to a
+  * valid synchronizer.
+  *
+  * The algorithm fails if:
+  *   - Interpretation fails.
+  *   - A pass fails to make progress (the set of required packages is not growing).
+  *   - The number of passes has reached the configured maximum (default: 3).
   *
   * '''Note''': When `Commands.package_id_selection_preference` is specified, it acts as a
   * restriction in the package preference set computation for both passes. If this restriction
@@ -139,7 +156,10 @@ import scala.concurrent.ExecutionContext
 private[execution] class TopologyAwareCommandExecutor(
     syncService: SyncService,
     commandInterpreter: CommandInterpreter,
-    val loggerFactory: NamedLoggerFactory,
+    maxPassesDefault: PositiveInt,
+    maxPassesLimit: PositiveInt,
+    metrics: LedgerApiServerMetrics,
+    override val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContext
 ) extends NamedLogging
@@ -154,9 +174,18 @@ private[execution] class TopologyAwareCommandExecutor(
       loggingContext: LoggingContextWithTrace
   ): EitherT[FutureUnlessShutdown, ErrorCause, CommandExecutionResult] = {
     val packageMetadataSnapshot = syncService.getPackageMetadataSnapshot
-
     val packageIndex = packageMetadataSnapshot.packageIdVersionMap
 
+    val maxNumberOfPass = commands.tapsMaxPasses match {
+      case None => maxPassesDefault
+      case Some(commandMaxPasses) =>
+        if (commandMaxPasses > maxPassesLimit) {
+          logger.info(
+            s"Requested max TAPS passes $commandMaxPasses in `max_taps_passes` of the submitted command exceeds the participant-configured limit $maxPassesLimit. Using the participant-configured limit."
+          )
+          maxPassesLimit
+        } else commandMaxPasses
+    }
     val rootLevelPackageNames = apiCommandsRootPackageNames(commands)
 
     val tapsExecutionFactory = new TapsCommandExecutionFactory(
@@ -169,14 +198,13 @@ private[execution] class TopologyAwareCommandExecutor(
       routingSynchronizerState = routingSynchronizerState,
       submissionSeed = submissionSeed,
       syncService = syncService,
+      metrics = metrics,
     )
-    def tapsPass1(): FutureUnlessShutdown[TapsResult] = {
-      val requiredSubmitter =
-        commands.actAs.headOption.getOrElse(sys.error("act_as must be non-empty"))
+    def firstPass(passInput: PassInput): FutureUnlessShutdown[TapsResult] =
       tapsExecutionFactory.executePass(
-        tapsPassDescription = "1st TAPS pass",
-        requiredSubmitters = Set(requiredSubmitter),
-        partyPackageRequirements = Map(requiredSubmitter -> rootLevelPackageNames),
+        tapsPassDescription = "TAPS pass 1",
+        requiredSubmitters = passInput.requiredSubmitters,
+        partyPackageRequirements = passInput.partyPackageRequirements,
         computePackagePreferenceSet = perSynchronizerPreferenceSet =>
           FutureUnlessShutdown.pure(
             perSynchronizerPreferenceSet.values.flatten
@@ -191,52 +219,120 @@ private[execution] class TopologyAwareCommandExecutor(
               .toSet
           ),
       )
-    }
 
-    def tapsPass2(passInput: CommandInterpretationResult): FutureUnlessShutdown[TapsResult] = {
-      val partyPackageRequirements = Blinding
-        .partyPackages(passInput.transaction)
-        .map { case (party, pkgIds) =>
-          party -> pkgIds.map(
-            // It is fine to use unsafe here since the package must have been indexed on the participant
-            // if it appeared in the draft transaction
-            _.unsafeToPackageReference(packageIndex).packageName
+    def loop(
+        previousInput: PassInput,
+        passResult: TapsResult,
+        passNumber: PositiveInt,
+    ): FutureUnlessShutdown[(TapsResult, PositiveInt)] =
+      passResult match {
+        case routingFailed: TapsResult.RoutingFailed if passNumber >= maxNumberOfPass =>
+          logger.info(
+            s"Phase 1 [TAPS pass $passNumber]: Stopping after routing failure because it reached the maximum number of passes."
           )
-        }
-      tapsExecutionFactory.executePass(
-        tapsPassDescription = "2nd TAPS pass",
-        requiredSubmitters = rootNodesRequiredAuthorizers(passInput.transaction),
-        partyPackageRequirements = partyPackageRequirements,
-        computePackagePreferenceSet = perSynchronizerPreferenceSet =>
-          syncService
-            .computeHighestRankedSynchronizerFromAdmissible(
-              submitterInfo = passInput.submitterInfo,
-              transaction = passInput.transaction,
-              transactionMeta = passInput.transactionMeta,
-              admissibleSynchronizers = perSynchronizerPreferenceSet.keySet,
-              disclosedContractIds = passInput.processedDisclosedContracts.map(_.contractId).toList,
-              routingSynchronizerState = routingSynchronizerState,
+          FutureUnlessShutdown.pure((routingFailed, passNumber))
+        case routingFailed @ TapsResult.RoutingFailed(interpretationResult, _) =>
+          val nextInput = buildNextInput(previousInput, interpretationResult, packageIndex)
+          if (nextInput.hasMorePackageRequirementsThan(previousInput)) {
+            val nextPassNumber = passNumber + PositiveInt.one
+            tapsExecutionFactory
+              .executePass(
+                tapsPassDescription = s"TAPS pass $nextPassNumber",
+                requiredSubmitters = nextInput.requiredSubmitters,
+                partyPackageRequirements = nextInput.partyPackageRequirements,
+                computePackagePreferenceSet = perSynchronizerPreferenceSet =>
+                  syncService
+                    .computeHighestRankedSynchronizerFromAdmissible(
+                      submitterInfo = interpretationResult.submitterInfo,
+                      transaction = interpretationResult.transaction,
+                      transactionMeta = interpretationResult.transactionMeta,
+                      admissibleSynchronizers = perSynchronizerPreferenceSet.keySet,
+                      disclosedContractIds =
+                        interpretationResult.processedDisclosedContracts.map(_.contractId).toList,
+                      routingSynchronizerState = routingSynchronizerState,
+                    )
+                    .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
+                    .merge
+                    .map(highestRankedSync =>
+                      checked(perSynchronizerPreferenceSet(highestRankedSync))
+                    ),
+              )
+              .flatMap(nextResult => loop(nextInput, nextResult, nextPassNumber))
+          } else {
+            logger.info(
+              s"Phase 1 [TAPS pass $passNumber]: Stopping after routing failure because no new package requirements were found. TAPS cannot make further progress."
             )
-            .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
-            .merge
-            .map { highestRankedSync =>
-              checked(perSynchronizerPreferenceSet(highestRankedSync))
-            },
-      )
-    }
-
-    val result = for {
-      pass1Result <- tapsPass1()
-      pass2Result <- pass1Result match {
-        case TapsResult.RoutingFailed(interpretation, _) => tapsPass2(interpretation)
-        case successOrFailure => FutureUnlessShutdown.pure(successOrFailure)
+            FutureUnlessShutdown.pure((routingFailed, passNumber))
+          }
+        case successOrFailure => FutureUnlessShutdown.pure((successOrFailure, passNumber))
       }
-    } yield pass2Result.toSubmissionResult
+
+    val requiredSubmitter =
+      commands.actAs.headOption.getOrElse(sys.error("act_as must be non-empty"))
+    val initialInput = PassInput(
+      requiredSubmitters = Set(requiredSubmitter),
+      partyPackageRequirements = Map(requiredSubmitter -> rootLevelPackageNames),
+    )
+    val result = for {
+      firstResult <- firstPass(initialInput)
+      (finalResult, passNumber) <- loop(initialInput, firstResult, PositiveInt.one)
+    } yield {
+      val metricsContext = finalResult match {
+        case _: TapsResult.Succeeded => MetricsContext("status" -> "success")
+        case _: TapsResult.InterpretationFailed =>
+          MetricsContext("status" -> "interpretation_failed")
+        case _: TapsResult.RoutingFailed => MetricsContext("status" -> "routing_failed")
+      }
+      metrics.commands.tapsPasses.update(passNumber.value)(metricsContext)
+      finalResult.toSubmissionResult
+    }
     EitherT(result)
   }
 
-  private def rootNodesRequiredAuthorizers(transaction: SubmittedTransaction): Set[Party] =
-    transaction.rootNodes.iterator.flatMap(_.requiredAuthorizers).toSet
+  private def buildNextInput(
+      previousInput: PassInput,
+      interpretation: CommandInterpretationResult,
+      packageIndex: Map[LfPackageId, (PackageName, LfPackageVersion)],
+  ): PassInput =
+    // Merge with previous requirements to avoid oscillating between two different failing
+    // requirement sets. Narrowing down the number of package candidates ensures we reach either
+    // a valid configuration or a terminal error state.
+    previousInput
+      .addPartyPackageRequirements(
+        Blinding.partyPackages(interpretation.transaction).view.mapValues { pkgIds =>
+          pkgIds.map(
+            // It is fine to use unsafe here since the package must have been indexed on the participant
+            // if it appeared in the draft transaction.
+            _.unsafeToPackageReference(packageIndex).packageName
+          )
+        }
+      )
+      .withRequiredSubmitters(
+        interpretation.transaction.rootNodes.iterator.flatMap(_.requiredAuthorizers).toSet
+      )
+
+  private case class PassInput(
+      requiredSubmitters: Set[Party],
+      partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
+  ) {
+    def withRequiredSubmitters(newRequiredSubmitters: Set[Party]): PassInput =
+      copy(requiredSubmitters = newRequiredSubmitters)
+
+    def addPartyPackageRequirements(
+        newPartyPackageRequirements: Iterable[(LfPartyId, Set[LfPackageName])]
+    ): PassInput =
+      copy(
+        partyPackageRequirements = newPartyPackageRequirements
+          .foldLeft(partyPackageRequirements) { case (acc, (k, v)) =>
+            acc.updated(k, acc.getOrElse(k, Set.empty) ++ v)
+          }
+      )
+
+    def hasMorePackageRequirementsThan(other: PassInput): Boolean =
+      partyPackageRequirements.exists { case (party, packages) =>
+        (packages -- other.partyPackageRequirements.getOrElse(party, Set.empty)).nonEmpty
+      }
+  }
 
   // Note: This method also collect package-names for interfaces in case of exercise-by-interface commands
   //       even though interfaces are not upgradeable. However, this is fine

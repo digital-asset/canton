@@ -7,12 +7,14 @@ import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
+  MediatorGroupRecipient,
+  MemberRecipient,
   MemberRecipientOrBroadcast,
   SequencerDeliverError,
   SequencersOfSynchronizer,
@@ -29,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   SequencedBeforeOrAtLowerBound,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.synchronizer.sequencer.{
   AnnouncedLsu,
@@ -106,12 +109,11 @@ object BlockUpdateGenerator {
 }
 
 class BlockUpdateGeneratorImpl(
-    protocolVersion: ProtocolVersion,
     synchronizerSyncCryptoApi: SynchronizerCryptoClient,
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
-    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     getAnnouncedLsu: => Option[AnnouncedLsu],
     producePostOrderingTopologyTicks: Boolean,
     metrics: SequencerMetrics,
@@ -126,15 +128,15 @@ class BlockUpdateGeneratorImpl(
   import BlockUpdateGeneratorImpl.*
 
   private val epsilon = synchronizerSyncCryptoApi.staticSynchronizerParameters.topologyChangeDelay
+  private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
 
   private val blockChunkProcessor =
     new BlockChunkProcessor(
-      protocolVersion,
       synchronizerSyncCryptoApi,
       sequencerId,
       rateLimitManager,
       orderingTimeFixMode,
-      sequencingTimeLowerBoundExclusive,
+      lsuSequencingBounds,
       batchingConfig,
       loggerFactory,
       metrics,
@@ -151,6 +153,26 @@ class BlockUpdateGeneratorImpl(
       state.latestBlock.latestPendingTopologyTransactionTimestamp,
     inFlightAggregations = state.inFlightAggregations,
   )
+
+  /*
+  False only for a send whose recipients are only synchronizer nodes
+   */
+  private def shouldRespectLsuLowerBound(event: LedgerBlockEvent): Boolean =
+    event match {
+      case Send(_, signedSubmissionRequest, _, _) =>
+        signedSubmissionRequest.content.batch.allRecipients.exists {
+          // cover participants
+          case MemberRecipient(_: ParticipantId) => true
+          case AllMembersOfSynchronizer => true
+          // only synchronizer nodes
+          case MemberRecipient(_: SequencerId) => false
+          case MemberRecipient(_: MediatorId) => false
+          case _: MediatorGroupRecipient => false
+          case SequencersOfSynchronizer => false
+        }
+
+      case _: Acknowledgment => true
+    }
 
   override def extractBlockEvents(tracedBlock: Traced[RawLedgerBlock]): Traced[BlockEvents] =
     withSpan("BlockUpdateGenerator.extractBlockEvents") { blockTraceContext => _ =>
@@ -169,18 +191,31 @@ class BlockUpdateGeneratorImpl(
               None
 
             case Right(event) =>
-              sequencingTimeLowerBoundExclusive match {
-                case Some(boundExclusive)
-                    if !LogicalUpgradeTime.canProcessKnowingPastUpgrade(
-                      upgradeTime = Some(boundExclusive),
-                      sequencingTime = event.timestamp,
-                    ) =>
-                  SequencedBeforeOrAtLowerBound
-                    .Error(event.timestamp, boundExclusive, event.toString)
-                    .log()
-                  None
+              lsuSequencingBounds match {
+                case Some(lsuSequencingBounds) =>
+                  /*
+                    For an event with sequencing time `ts`:
+                    - If `ts <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive`, then message should be dropped
+                    - If `lsuSequencingBounds.lowerBoundSequencingTimeExclusive < ts <= lsuSequencingBounds.upgradeTime`,
+                      then message should be delivered only if `shouldRespectLsuLowerBound(event)` is true
+                      (basically deliver only if recipients are synchronizer nodes).
+                    - If `ts > upgradeTime`, then always deliver
+                   */
 
-                case _ => Some(Traced(event))
+                  if (event.timestamp <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive)
+                    None
+                  else if (event.timestamp <= lsuSequencingBounds.upgradeTime) {
+                    if (shouldRespectLsuLowerBound(event)) {
+                      SequencedBeforeOrAtLowerBound
+                        .Error(event.timestamp, lsuSequencingBounds.upgradeTime, event.toString)
+                        .log()
+                      None
+                    } else {
+                      Some(Traced(event))
+                    }
+                  } else Some(Traced(event))
+
+                case None => Some(Traced(event))
               }
           }
         }(tracedEvent.traceContext, tracer)

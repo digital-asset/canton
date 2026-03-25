@@ -43,6 +43,6 @@ object ConfiguredPhysicalSynchronizerId {
       : SetParameter[ConfiguredPhysicalSynchronizerId] =
     (psid: ConfiguredPhysicalSynchronizerId, pp: PositionedParameters) => pp >> psid.toOption
 
-  implicit val configuredPSIdOrdering: Ordering[ConfiguredPhysicalSynchronizerId] =
+  implicit val configuredPsidOrdering: Ordering[ConfiguredPhysicalSynchronizerId] =
     Ordering.by(_.toOption)
 }

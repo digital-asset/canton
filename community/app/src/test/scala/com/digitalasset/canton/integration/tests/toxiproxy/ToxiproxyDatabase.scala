@@ -28,7 +28,6 @@ import com.digitalasset.canton.integration.tests.toxiproxy.ToxiproxyHelpers.{
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   IsolatedEnvironments,
   TestConsoleEnvironment,
@@ -74,9 +73,6 @@ trait ToxiproxyDatabase
         )
         connectParticipants(env)
       }
-      .addConfigTransforms(
-        ConfigTransforms.enableReplicatedAllNodes*
-      )
 
   val toxiProxy = new UseToxiproxy(ToxiproxyConfig(List(proxyConf)))
 

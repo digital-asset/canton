@@ -5,11 +5,11 @@ package com.digitalasset.daml.lf
 package testing.snapshot
 
 import com.digitalasset.daml.lf.data.Ref
-import org.scalatest.{Assertion, BeforeAndAfterAll}
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Assertion, BeforeAndAfterAll}
 
-import java.nio.file.{Files, FileSystems, Path}
+import java.nio.file.{FileSystems, Files, Path}
 
 class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
@@ -21,7 +21,7 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
     assume(
       Seq("DAR_FILE", "SCRIPT_NAME", "SNAPSHOT_DIR")
         .forall(envVar => sys.env.contains(envVar)),
-      "The environment variables DAR_FILE, SCRIPT_NAME and SNAPSHOT_DIR all need to be set"
+      "The environment variables DAR_FILE, SCRIPT_NAME and SNAPSHOT_DIR all need to be set",
     )
 
     snapshotBaseDir = Path.of(sys.env("SNAPSHOT_DIR"))
@@ -36,13 +36,12 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
       .getDefault()
       .getPathMatcher(s"glob:$snapshotDir/snapshot-$participantId*.bin")
 
-  private def runWhenEnvVarSet(name: String)(testFun: => Assertion): Unit = {
+  private def runWhenEnvVarSet(name: String)(testFun: => Assertion): Unit =
     if (sys.env.get("STANDALONE").nonEmpty) {
       name.in(testFun)
     } else {
       name.ignore(testFun)
     }
-  }
 
   runWhenEnvVarSet("Extract choices from snapshot data") {
     println(s"Using snapshot data ${darFile.getFileName}/${scriptEntryPoint.name}")

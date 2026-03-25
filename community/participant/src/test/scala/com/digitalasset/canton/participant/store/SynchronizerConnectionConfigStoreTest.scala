@@ -23,7 +23,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   NoActiveSynchronizer,
   SynchronizerIdAlreadyAdded,
   UnknownAlias,
-  UnknownPSId,
+  UnknownPsid,
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryRegisteredSynchronizersStore
 import com.digitalasset.canton.participant.synchronizer.{
@@ -201,11 +201,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
     "when storing connection configs" should {
 
       "be able to store and retrieve a config successfully" in {
-        val synchronizerId2 = PhysicalSynchronizerId(
-          psid.logical,
-          psid.serial.increment.toNonNegative,
-          psid.protocolVersion,
-        )
+        val psid2 = psid.incrementSerial
 
         val predecessor = SynchronizerPredecessor(
           psid = psid,
@@ -216,24 +212,24 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
         for {
           sut <- mk
           _ <- valueOrFail(
-            sut.put(config, Active, KnownPhysicalSynchronizerId(synchronizerId2), Some(predecessor))
+            sut.put(config, Active, KnownPhysicalSynchronizerId(psid2), Some(predecessor))
           )(
             "failed to add config to synchronizer config store"
           )
 
           _ = sut
-            .get(daAlias, KnownPhysicalSynchronizerId(synchronizerId2))
+            .get(daAlias, KnownPhysicalSynchronizerId(psid2))
             .value
             .config shouldBe config
 
           expectedResult = StoredSynchronizerConnectionConfig(
             config,
             Active,
-            KnownPhysicalSynchronizerId(synchronizerId2),
+            KnownPhysicalSynchronizerId(psid2),
             Some(predecessor),
           )
 
-        } yield sut.get(synchronizerId2).value shouldBe expectedResult
+        } yield sut.get(psid2).value shouldBe expectedResult
       }
 
       "store the same config twice for idempotency" in {
@@ -320,7 +316,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
         }
       }
 
-      "return an error if the predecessor has incompatible PSId" in {
+      "return an error if the predecessor has incompatible psid" in {
         val predecessor = SynchronizerPredecessor(
           psid = daStable,
           upgradeTime = CantonTimestamp.now(),
@@ -354,7 +350,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           _ = sut
             .getActive(daName)
             .value
-            .configuredPSId shouldBe KnownPhysicalSynchronizerId(daStable)
+            .configuredPsid shouldBe KnownPhysicalSynchronizerId(daStable)
 
           unknownAlias <- sut.setPhysicalSynchronizerId(acmeName, acmeStable).value
           _ = unknownAlias.left.value shouldBe MissingConfigForSynchronizer(
@@ -366,7 +362,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
         } yield succeed
       }
 
-      "return an error when trying to store a PSId which is incompatible with the predecessor" in {
+      "return an error when trying to store a psid which is incompatible with the predecessor" in {
         val predecessor =
           SynchronizerPredecessor(acmeStable, CantonTimestamp.now(), isLateUpgrade = false)
 
@@ -406,7 +402,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             .put(c2, Active, UnknownPhysicalSynchronizerId, None)
             .valueOrFail("second store of config")
 
-          // PSId synchronizer id already used for c1.alias
+          // psid synchronizer id already used for c1.alias
           setIdError <- sut.setPhysicalSynchronizerId(c2.synchronizerAlias, psid).value
 
         } yield setIdError.left.value shouldBe SynchronizerIdAlreadyAdded(psid, daAlias)
@@ -625,8 +621,8 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
 
           _ = error.left.value shouldBe InconsistentLogicalSynchronizerIds(
             daName,
-            newPSId = acmeStable,
-            existingPSId = daStable,
+            newPsid = acmeStable,
+            existingPsid = daStable,
           )
 
           _ <- sut
@@ -713,10 +709,10 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
 
         def getSequencerId(
             alias: SequencerAlias
-        ): EitherT[FutureUnlessShutdown, UnknownPSId, Option[SequencerId]] =
+        ): EitherT[FutureUnlessShutdown, UnknownPsid, Option[SequencerId]] =
           for {
             sut <- EitherT
-              .liftF[FutureUnlessShutdown, UnknownPSId, SynchronizerConnectionConfigStore](sutF)
+              .liftF[FutureUnlessShutdown, UnknownPsid, SynchronizerConnectionConfigStore](sutF)
             storedConfig <- EitherT.fromEither[FutureUnlessShutdown](sut.get(daStable))
           } yield storedConfig.config.sequencerConnections.aliasToConnection
             .get(alias)
@@ -734,7 +730,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             .value
 
           _ = failureUnset.left.value shouldBe MissingConfigForSynchronizer(
-            ConfigIdentifier.WithPSId(daStable)
+            ConfigIdentifier.WithPsid(daStable)
           )
 
           _ <- sut
@@ -777,7 +773,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             .value
 
           _ = failureInconsistent.left.value shouldBe InconsistentSequencerIds(
-            ConfigIdentifier.WithPSId(daStable),
+            ConfigIdentifier.WithPsid(daStable),
             Map(sequencerAlias1 -> s3Id),
             "Mismatch",
           )

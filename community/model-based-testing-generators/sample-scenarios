@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Launcher script for the SampleScenarios tool.
+#
+# On first run (or when --recompile is passed), the script:
+#   1. Compiles the model-based-testing-generators project via sbt.
+#   2. Extracts the full compile classpath from sbt and caches it to a file
+#      under the project's target/ directory.
+#
+# On subsequent runs, the script skips sbt entirely and launches the JVM
+# directly using the cached classpath, making startup near-instant.
+#
+# Recompilation is triggered automatically if the main class file or the
+# cached classpath file is missing. Pass --recompile to force it after
+# code changes. All other flags are forwarded to the SampleScenarios tool.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PROJECT="model-based-testing-generators"
+MAIN_CLASS="com.digitalasset.canton.testing.modelbased.tool.SampleScenarios"
+CLASSES_DIR="$REPO_ROOT/community/$PROJECT/target/scala-2.13/classes"
+CLASS_FILE="$CLASSES_DIR/com/digitalasset/canton/testing/modelbased/tool/SampleScenarios.class"
+CP_CACHE="$REPO_ROOT/community/$PROJECT/target/.sample-scenarios-cp"
+
+recompile=false
+tool_args=()
+
+# Extract --recompile from arguments before passing the rest to the tool
+for arg in "$@"; do
+  if [[ "$arg" == "--recompile" ]]; then
+    recompile=true
+  else
+    tool_args+=("$arg")
+  fi
+done
+
+if [[ "$recompile" == true ]] || [[ ! -f "$CLASS_FILE" ]] || [[ ! -f "$CP_CACHE" ]]; then
+  echo "Compiling $PROJECT..." >&2
+  cd "$REPO_ROOT"
+  sbt --batch "$PROJECT/compile" 2>&1 | tail -1 >&2
+
+  echo "Caching classpath..." >&2
+  sbt --batch "show $PROJECT/Compile/fullClasspath" 2>&1 \
+    | grep -oP '(?<=Attributed\().*?(?=\))' \
+    | tr '\n' ':' \
+    > "$CP_CACHE"
+  echo "Done." >&2
+fi
+
+CP="$(cat "$CP_CACHE")"
+exec java -cp "$CP" "$MAIN_CLASS" "${tool_args[@]}"

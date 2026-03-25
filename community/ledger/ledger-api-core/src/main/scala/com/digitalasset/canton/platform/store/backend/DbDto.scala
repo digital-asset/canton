@@ -4,6 +4,10 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.scalautil.NeverEqualsOverride
+import com.digitalasset.canton.platform.store.interning.{
+  StringInterningBuilder,
+  StringInterningProvider,
+}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref.{
   ChoiceName,
@@ -18,6 +22,7 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 
 sealed trait DbDto
     extends NeverEqualsOverride
+    with StringInterningProvider
     with Product
     with Serializable // to aid type inference for case class implementors
 
@@ -49,7 +54,15 @@ object DbDto {
       notPersistedContractId: ContractId, // just needed for processing
       internal_contract_id: Long,
       create_key_hash: Option[String],
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      submitters.foreach(_.foreach(builder.addParty))
+      builder.addSynchronizerId(synchronizer_id)
+      additional_witnesses.foreach(_.foreach(builder.addParty))
+      source_synchronizer_id.foreach(builder.addSynchronizerId)
+      builder.addPackageId(representative_package_id)
+    }
+  }
   final case class IdFilterActivateStakeholder(idFilter: IdFilter) extends IdFilterDbDto
   final case class IdFilterActivateWitness(idFilter: IdFilter) extends IdFilterDbDto
 
@@ -91,7 +104,20 @@ object DbDto {
       package_id: PackageId,
       stakeholders: Set[Party],
       ledger_effective_time: Option[Long],
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      submitters.foreach(_.foreach(builder.addParty))
+      builder.addSynchronizerId(synchronizer_id)
+      additional_witnesses.foreach(_.foreach(builder.addParty))
+      exercise_choice.foreach(builder.addChoiceName)
+      exercise_choice_interface_id.foreach(builder.addInterfaceId)
+      exercise_actors.foreach(_.foreach(builder.addParty))
+      target_synchronizer_id.foreach(builder.addSynchronizerId)
+      builder.addTemplateId(template_id)
+      builder.addPackageId(package_id)
+      stakeholders.foreach(builder.addParty)
+    }
+  }
   final case class IdFilterDeactivateStakeholder(idFilter: IdFilter) extends IdFilterDbDto
   final case class IdFilterDeactivateWitness(idFilter: IdFilter) extends IdFilterDbDto
 
@@ -129,8 +155,19 @@ object DbDto {
       template_id: Option[NameTypeConRef],
       package_id: Option[PackageId],
       ledger_effective_time: Option[Long],
-  ) extends DbDto
-
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      submitters.foreach(_.foreach(builder.addParty))
+      builder.addSynchronizerId(synchronizer_id)
+      additional_witnesses.foreach(builder.addParty)
+      exercise_choice.foreach(builder.addChoiceName)
+      exercise_choice_interface_id.foreach(builder.addInterfaceId)
+      exercise_actors.foreach(_.foreach(builder.addParty))
+      template_id.foreach(builder.addTemplateId)
+      representative_package_id.foreach(builder.addPackageId)
+      package_id.foreach(builder.addPackageId)
+    }
+  }
   final case class IdFilterVariousWitness(idFilter: IdFilter) extends IdFilterDbDto
 
   sealed trait IdFilterDbDto extends DbDto {
@@ -150,6 +187,11 @@ object DbDto {
         case IdFilterVariousWitness(idFilter) =>
           IdFilterVariousWitness(idFilterWithEventSequentialId(idFilter))
       }
+    }
+
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      builder.addTemplateId(idFilter.template_id)
+      builder.addParty(idFilter.party_id)
     }
   }
   final case class IdFilter(
@@ -176,7 +218,13 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       record_time: Long,
       trace_context: Array[Byte],
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      builder.addParty(party_id)
+      builder.addParticipantId(participant_id)
+      builder.addSynchronizerId(synchronizer_id)
+    }
+  }
 
   final case class PartyEntry(
       ledger_offset: Long,
@@ -186,7 +234,10 @@ object DbDto {
       typ: String,
       rejection_reason: Option[String],
       is_local: Option[Boolean],
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
+      party.foreach(builder.addParty)
+  }
 
   final case class CommandCompletion(
       completion_offset: Long,
@@ -207,12 +258,20 @@ object DbDto {
       message_uuid: Option[String],
       is_transaction: Boolean,
       trace_context: Array[Byte],
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
+      builder.addUserId(user_id)
+      submitters.foreach(builder.addParty)
+      builder.addSynchronizerId(synchronizer_id)
+    }
+  }
 
   final case class StringInterningDto(
       internalId: Int,
       externalString: String,
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit = ()
+  }
 
   object StringInterningDto {
     def from(entry: (Int, String)): StringInterningDto =
@@ -227,9 +286,15 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       event_sequential_id_first: Long,
       event_sequential_id_last: Long,
-  ) extends DbDto
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
+      builder.addSynchronizerId(synchronizer_id)
+  }
 
-  final case class SequencerIndexMoved(synchronizerId: SynchronizerId) extends DbDto
+  final case class SequencerIndexMoved(synchronizerId: SynchronizerId) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
+      builder.addSynchronizerId(synchronizerId)
+  }
 
   def createDbDtos(
       // update related columns

@@ -51,8 +51,6 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
             .replace(config.NonNegativeFiniteDuration.ofMillis(0))
             .focus(_.maxConnectionRetryDelay)
             .replace(config.NonNegativeFiniteDuration.ofMillis(250))
-            .focus(_.useNewConnectionPool) // works for both
-            .replace(true)
             .focus(_.enableAmplificationImprovements) // should be true anyway
             .replace(true)
         ),
@@ -112,6 +110,7 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
           stats.sizeIs >= 4 && stats.forall {
             case c: DriverStatus.TraderStatus =>
               c.mode == "THROUGHPUT"
+            case _: DriverStatus.TransferStatus => true
             case _: DriverStatus.MasterStatus => true
           }
         }

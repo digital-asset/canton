@@ -260,16 +260,22 @@ nightly_integration_test_bftordering_only:
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
+        timeout: "60m"
 
 model_based_test:
   executor: canton-xlarge-docker-with-postgres
   steps:
+    # TODO(#30398): remove once the default PV supports NUCK
+    - set_canton_protocol_version:
+        protocol_version: "dev" # NUCK only works in dev for now
     - run_tests:
         command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: "cat" # cat acts as identity filter
         num_test_buckets: ""
         num_parallel_tasks: "1"
-        timeout: "60m"
+        timeout: "90m"
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: "U05KX5V7KJN" # Paul
 
 toxiproxy_test_fast:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -546,3 +552,12 @@ test_scala3:
     - execute_sbt_command:
         cmd: "\"++3.3;wartremover-extension/test\""
     - cleanup_build_job
+
+smoke_test:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"community-app/testOnly *.SimplestPingBftOrderingIntegrationTestPostgres\""
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"

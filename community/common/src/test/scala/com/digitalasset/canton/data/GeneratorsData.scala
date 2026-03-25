@@ -524,8 +524,8 @@ final class GeneratorsData(
   implicit val assignmentCommonDataArb: Arbitrary[AssignmentCommonData] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
-      sourcePSId <- Arbitrary.arbitrary[Source[PhysicalSynchronizerId]]
-      targetPSId <- Arbitrary.arbitrary[Target[PhysicalSynchronizerId]]
+      sourcePsid <- Arbitrary.arbitrary[Source[PhysicalSynchronizerId]]
+      targetPsid <- Arbitrary.arbitrary[Target[PhysicalSynchronizerId]]
 
       targetMediator <- Arbitrary.arbitrary[MediatorGroupRecipient]
 
@@ -542,8 +542,8 @@ final class GeneratorsData(
     } yield AssignmentCommonData
       .create(hashOps)(
         salt,
-        sourcePSId,
-        targetPSId,
+        sourcePsid,
+        targetPsid,
         targetMediator,
         stakeholders,
         uuid,

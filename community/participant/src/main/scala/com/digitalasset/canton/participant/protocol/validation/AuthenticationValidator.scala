@@ -43,7 +43,6 @@ import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -99,10 +98,9 @@ private[protocol] object AuthenticationValidator {
             viewTree = rootView,
             submitterMetadata = submitterMetadata,
             topology = parsedRequest.snapshot,
-            protocolVersion = synchronizerId.protocolVersion,
             reInterpretationET = reInterpretationET,
             requestId = parsedRequest.requestId,
-            synchronizerId = synchronizerId,
+            physicalSynchronizerId = synchronizerId,
             transactionEnricher = transactionEnricher,
             createNodeEnricher = createNodeEnricher,
             logger = logger,
@@ -265,9 +263,8 @@ private[protocol] object AuthenticationValidator {
       viewTree: FullTransactionViewTree,
       submitterMetadata: SubmitterMetadata,
       topology: SynchronizerSnapshotSyncCryptoApi,
-      protocolVersion: ProtocolVersion,
       reInterpretationET: LazyAsyncReInterpretation,
-      synchronizerId: PhysicalSynchronizerId,
+      physicalSynchronizerId: PhysicalSynchronizerId,
       transactionEnricher: TransactionEnricher,
       createNodeEnricher: ContractEnricher,
       requestId: RequestId,
@@ -307,9 +304,8 @@ private[protocol] object AuthenticationValidator {
               commandId = submitterMetadata.commandId.unwrap,
               transactionUUID = viewTree.transactionUuid,
               mediatorGroup = viewTree.mediator.group.value,
-              synchronizerId = synchronizerId.logical,
+              physicalSynchronizerId = physicalSynchronizerId,
               maxRecordTime = externalAuthorization.maxRecordTime,
-              protocolVersion = protocolVersion,
               transactionEnricher = transactionEnricher,
               contractEnricher = createNodeEnricher,
               hashTracer = hashTracer.getOrElse[HashTracer](HashTracer.NoOp),

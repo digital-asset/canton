@@ -381,6 +381,7 @@ class JsUpdateService(
           beginExclusive = req.beginExclusive,
           endInclusive = req.endInclusive,
           updateFormat = req.updateFormat,
+          descendingOrder = req.descendingOrder,
         )
       case (None, None, _) =>
         throw RequestValidationErrors.InvalidArgument
@@ -393,6 +394,7 @@ class JsUpdateService(
           beginExclusive = req.beginExclusive,
           endInclusive = req.endInclusive,
           updateFormat = Some(toUpdateFormat(filter, verbose, forTrees)),
+          descendingOrder = req.descendingOrder,
         )
     }
 

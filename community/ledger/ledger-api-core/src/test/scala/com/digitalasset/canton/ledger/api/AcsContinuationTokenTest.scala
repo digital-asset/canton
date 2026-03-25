@@ -68,6 +68,21 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     )
   }
 
+  it should "fail if not the same activeAt is used" in {
+    val requestWithToken = originalRequest.copy(
+      activeAtOffset = originalRequest.activeAtOffset + 1,
+      streamContinuationToken = Some(encodedToken),
+    )
+    val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
+    val decodedToken =
+      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
+    decodedToken.left.value.getStatus.getDescription should equal(
+      "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in " +
+        "ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
+        "with the same Canton participant running the same Canton version."
+    )
+  }
+
   it should "reject an invalid token" in {
     val tamperedToken = encodedToken.substring(5)
     val requestWithToken = originalRequest.copy(streamContinuationToken = Some(tamperedToken))

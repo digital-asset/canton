@@ -63,6 +63,11 @@ service SequencerAdministrationService {
   // Generate an authentication token for a member.
   // Only use for troubleshooting purposes. Requires canton.features.enable-testing-commands = yes
   rpc GenerateAuthenticationToken(GenerateAuthenticationTokenRequest) returns (GenerateAuthenticationTokenResponse);
+
+  // Sequence a small message to the designated mediator group.
+  // Used to test the new sequencer during LSU (before upgrade time)
+  // Note: The send is asynchronous (i.e., the call completes before the message gets sequenced)
+  rpc PerformLsuSequencingTest(PerformLsuSequencingTestRequest) returns (PerformLsuSequencingTestResponse);
 }
 
 message GenerateAuthenticationTokenRequest {
@@ -243,3 +248,8 @@ message DisableMemberRequest {
 }
 
 message DisableMemberResponse {}
+
+message PerformLsuSequencingTestRequest {
+  int32 recipient_mediator_group = 1;
+}
+message PerformLsuSequencingTestResponse {}

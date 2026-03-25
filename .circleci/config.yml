@@ -148,7 +148,7 @@ commands:
             - run:
                 command: |
                     if [[ << parameters.reset_classes_if_requested >> == true ]] &&
-                       grep "^$CIRCLE_BRANCH$" .circleci/branches_to_be_fully_recompiled_in_ci.txt > /dev/null
+                       (echo "$CIRCLE_BRANCH" | grep -qEf .circleci/branches_to_be_fully_recompiled_in_ci.txt)
                     then
                       echo "Do not extract precompiled classes, as a full recompilation has been requested."
                       exit 0
@@ -1042,52 +1042,61 @@ commands:
                 name: Enable QEMU emulation
     slack_red_main_with_volunteer:
         parameters:
+            fixed_volunteer:
+                default: ""
+                description: If set, skip random selection and always ping this Slack user ID.
+                type: string
             webhook_url:
                 default: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
                 type: string
         steps:
             - run:
                 command: |
-                    members=(
-                      # Architecture
-                      "U9AGNADBJ" # Andreas L.
-                      "U056R7C1H1A" # Cristina
-                      # Security
-                      "U03RK2ZNZFH" # Christian
-                      "U03A208N537" # João Sá
-                      "U990L3H0R" # Matthias
-                      "U0A0VU32CS0" # Simran
-                      "U276HDDB6" # Soren
-                      "U03NCGBFCDP" # Thibault
-                      "UPED4TSGN" # Simon
-                      # Protocol
-                      "U5LC1FB6D" # Gerolf
-                      "U046D8XGD7H" # Kirill
-                      # "U03FH83LRNH" # Meriam
-                      "UF766DLN4" # Oliver
-                      "U020XUXADCP" # Raf
-                      "UDDVDCKD0" # Raphael
-                      "U04DC4NAK1S" # Yves
-                      # LAPI
-                      "U08LBV2U75H" # Adrien
-                      "U03HVEFHGLU" # Andreas T.
-                      "U9AM249RP" # Andris
-                      "U1CNLNUV7" # Gergely
-                      "U029VGVV25Q" # Jarek
-                      "U57BTEKR9" # Marcin
-                      "U01A2K1NWAX" # Marton
-                      "U01B2BD2CP4" # Tudor
-                      # BFT
-                      "U04S25SG9D5" # Daniel
-                      "U04TG4XMJ" # Danilo
-                      "USE2D5GB1" # Fabio
-                      "U04P9CS4F6Z" # Tom
-                    )
+                    FIXED="<< parameters.fixed_volunteer >>"
+                    if [ -n "$FIXED" ]; then
+                      SELECTED_VOLUNTEER="$FIXED"
+                    else
+                      members=(
+                        # Architecture
+                        "U9AGNADBJ" # Andreas L.
+                        "U056R7C1H1A" # Cristina
+                        # Security
+                        "U03RK2ZNZFH" # Christian
+                        "U03A208N537" # João Sá
+                        "U990L3H0R" # Matthias
+                        "U0A0VU32CS0" # Simran
+                        "U276HDDB6" # Soren
+                        "U03NCGBFCDP" # Thibault
+                        "UPED4TSGN" # Simon
+                        # Protocol
+                        "U5LC1FB6D" # Gerolf
+                        "U046D8XGD7H" # Kirill
+                        "U03FH83LRNH" # Meriam
+                        "UF766DLN4" # Oliver
+                        "U020XUXADCP" # Raf
+                        "UDDVDCKD0" # Raphael
+                        "U04DC4NAK1S" # Yves
+                        # LAPI
+                        "U08LBV2U75H" # Adrien
+                        "U03HVEFHGLU" # Andreas T.
+                        "U9AM249RP" # Andris
+                        "U1CNLNUV7" # Gergely
+                        "U029VGVV25Q" # Jarek
+                        "U57BTEKR9" # Marcin
+                        "U01A2K1NWAX" # Marton
+                        "U01B2BD2CP4" # Tudor
+                        # BFT
+                        "U04S25SG9D5" # Daniel
+                        "U04TG4XMJ" # Danilo
+                        "USE2D5GB1" # Fabio
+                        "U04P9CS4F6Z" # Tom
+                      )
 
-                    # Takes the first bytes of the sha and convert to and int
-                    WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
+                      # Takes the first bytes of the sha and convert to and int
+                      WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
 
-                    SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+                      SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+                    fi
 
                     echo "$SELECTED_VOLUNTEER"
                     echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
@@ -1911,12 +1920,16 @@ jobs:
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
         steps:
+            - set_canton_protocol_version:
+                protocol_version: dev
             - run_tests:
                 command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: cat
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
-                timeout: 60m
+                timeout: 90m
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U05KX5V7KJN
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -1937,6 +1950,7 @@ jobs:
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
+                timeout: 60m
     nightly_integration_test_sequencer_only:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -1970,7 +1984,7 @@ jobs:
                 location: community/app/target/release
             - run:
                 command: |
-                    performance/bundle-performance.sh
+                    performance/pack-performance.sh -s
                 name: Package performance runner
             - run:
                 command: |
@@ -2273,6 +2287,14 @@ jobs:
                 exclude_unstable_tests: true
                 execution_context_size: "1"
                 num_parallel_tasks: "4"
+    smoke_test:
+        executor: canton-xlarge-docker-with-postgres
+        steps:
+            - run_tests:
+                command: dumpClassPath "community-app/testOnly *.SimplestPingBftOrderingIntegrationTestPostgres"
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
     stability_crash_recovery_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 64
@@ -2821,8 +2843,26 @@ workflows:
                     - aws_kms_testing
                     - gcp_kms_testing
                 filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
                     tags:
                         only: /^v.*/
+                requires:
+                    - compile
+            - smoke_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        only:
+                            - /^gh-readonly-queue\/main\/.*/
                 requires:
                     - compile
             - test:
@@ -3524,6 +3564,33 @@ workflows:
             and:
                 - equal:
                     - release-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_smoke_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - smoke_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - smoke-test
                     - << pipeline.parameters.manual_job >>
                 - not:
                     equal:

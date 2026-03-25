@@ -86,7 +86,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.ConcurrentLinkedQueue
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -926,10 +925,10 @@ object InMemoryStateUpdaterSpec {
           batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
-          activeContracts = mutable.LinkedHashMap.empty,
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           batchTraceContext = tc,
+          distinctRawStrings = Nil,
         ): Batch[?]
       })
         .via(inMemoryStateUpdater(false))
@@ -1158,10 +1157,10 @@ object InMemoryStateUpdaterSpec {
           batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
-          activeContracts = mutable.LinkedHashMap.empty,
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           batchTraceContext = emptyTraceContext,
+          distinctRawStrings = Nil,
         )
       )
       .via(
@@ -1283,6 +1282,7 @@ object InMemoryStateUpdaterSpec {
       reasonTemplate = FinalReason(new Status()),
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp.assertFromLong(t),
+      isTransaction = true,
     )
 
   private def sequencerIndexMoved(

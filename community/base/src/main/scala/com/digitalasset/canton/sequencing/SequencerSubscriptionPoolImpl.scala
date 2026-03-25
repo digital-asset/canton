@@ -375,7 +375,11 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
           s"below liveness margin: $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}," +
             s" liveness margin = ${currentConfig.livenessMargin}"
         )
-      case _ if !pool.isThresholdStillReachable(currentConfig.trustThreshold, Set.empty) =>
+      case _
+          if !isClosing && !pool.isThresholdStillReachable(
+            currentConfig.trustThreshold,
+            Set.empty,
+          ) =>
         val reason = s"Trust threshold ${currentConfig.trustThreshold} is no longer reachable"
         completeWithReason(Success(UnrecoverableError(reason)), _.fatalOccurred(_))
       case nb =>

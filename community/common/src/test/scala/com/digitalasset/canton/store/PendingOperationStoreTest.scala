@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.store
 
-import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -119,26 +118,58 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
       } yield notUpdated shouldBe None
     }
 
-    "retrieve only operations matching operation name" in withStore { store =>
+    "retrieve operations applying optional filters" in withStore { store =>
       val da = SynchronizerId.tryFromString("da::default")
       val acme = SynchronizerId.tryFromString("acme::default")
       val onpr = NonEmptyString.tryCreate("onpr")
       val offpr = NonEmptyString.tryCreate("offpr")
+
       val onprDa = (1 to 5).toList.map(i => createOp(onpr.unwrap, s"key$i", s"onpr$i", da))
       val offprDa = (6 to 10).toList.map(i => createOp(offpr.unwrap, s"key$i", s"offpr$i", da))
       val onprAcme = (11 to 15).toList.map(i => createOp(onpr.unwrap, s"key$i", s"onpr$i", acme))
       val offprAcme = (16 to 20).toList.map(i => createOp(offpr.unwrap, s"key$i", s"offpr$i", acme))
+
       val allOperations = onprDa ++ offprDa ++ onprAcme ++ offprAcme
 
       for {
-        empty <- EitherT.right[ConflictingPendingOperationError](store.getAll(onpr))
-        _ <- MonadUtil.sequentialTraverse(allOperations)(store.insert)
-        onprs <- EitherT.right[ConflictingPendingOperationError](store.getAll(onpr))
-        offprs <- EitherT.right[ConflictingPendingOperationError](store.getAll(offpr))
+        empty <- store.getAll(onpr)
+        _ <- MonadUtil.sequentialTraverse(allOperations)(store.insert).value
+
+        // Query just by name (should return operations for both synchronizers)
+        onprs <- store.getAll(onpr)
+        offprs <- store.getAll(offpr)
+
+        // Query by name and synchronizerId
+        onprsDaFiltered <- store.getAll(onpr, synchronizerId = Some(da))
+        offprsAcmeFiltered <- store.getAll(offpr, synchronizerId = Some(acme))
+
+        // Query by name, synchronizerId, and operationKey
+        singleOpFiltered <- store.getAll(
+          onpr,
+          synchronizerId = Some(da),
+          operationKey = Some("key3"),
+        )
+
+        // Query by name and operationKey (ignoring synchronizerId)
+        keyOnlyFiltered <- store.getAll(
+          onpr,
+          operationKey = Some("key11"),
+        ) // key11 is only in onprAcme
+
       } yield {
         empty shouldBe Set.empty
-        onprs shouldBe onprDa.toSet ++ onprAcme
-        offprs shouldBe offprDa.toSet ++ offprAcme.toSet
+
+        // Test name-only filtering
+        onprs shouldBe (onprDa.toSet ++ onprAcme.toSet)
+        offprs shouldBe (offprDa.toSet ++ offprAcme.toSet)
+
+        // Test synchronizer filtering
+        onprsDaFiltered shouldBe onprDa.toSet
+        offprsAcmeFiltered shouldBe offprAcme.toSet
+
+        // Test key filtering (with and without synchronizerId)
+        singleOpFiltered.map(_.key) shouldBe Set("key3")
+        keyOnlyFiltered.map(_.key) shouldBe Set("key11")
       }
     }
 

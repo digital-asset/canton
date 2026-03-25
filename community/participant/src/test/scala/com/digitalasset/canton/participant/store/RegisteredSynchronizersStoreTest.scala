@@ -50,7 +50,7 @@ trait RegisteredSynchronizersStoreTest extends FailOnShutdown {
 
       val psid0 = id("foo", serial = 0)
       val psid1 = id("foo", serial = 1)
-      val incompatiblePSId = id("incompatible")
+      val incompatiblePsid = id("incompatible")
 
       for {
         _ <- valueOrFail(sut.addMapping(alias("alias"), psid0))("foo 0")
@@ -62,10 +62,10 @@ trait RegisteredSynchronizersStoreTest extends FailOnShutdown {
         )
         _ = queried1 shouldBe expectedResult
 
-        res <- sut.addMapping(alias("alias"), incompatiblePSId).value
+        res <- sut.addMapping(alias("alias"), incompatiblePsid).value
         _ = res.left.value shouldBe InconsistentLogicalSynchronizerIds(
           alias("alias"),
-          incompatiblePSId,
+          incompatiblePsid,
           psid0,
         )
 
@@ -83,8 +83,8 @@ trait RegisteredSynchronizersStoreTest extends FailOnShutdown {
       } yield result shouldBe Left(
         InconsistentLogicalSynchronizerIds(
           alias("alias"),
-          newPSId = id("bar"),
-          existingPSId = id("foo"),
+          newPsid = id("bar"),
+          existingPsid = id("foo"),
         )
       )
     }

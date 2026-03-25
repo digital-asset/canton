@@ -503,14 +503,6 @@ object Deliver {
       trafficReceipt,
     )(None)
 
-  def fromSequencedEvent[Env <: Envelope[?]](
-      deliverEvent: SequencedEvent[Env]
-  ): Option[Deliver[Env]] =
-    deliverEvent match {
-      case deliver @ Deliver(_, _, _, _, _, _, _) => Some(deliver)
-      case _: DeliverError => None
-    }
-
   def openEnvelopes(
       deliver: Deliver[ClosedEnvelope]
   )(protocolVersion: ProtocolVersion, hashOps: HashOps): (

@@ -206,7 +206,7 @@ final case class Signature private (
     * key's fingerprint is stored inside `signatureDelegation.delegatingKeyId`.
     */
   def authorizingLongTermKey: Fingerprint =
-    signatureDelegation.map(_.delegatingKeyId).getOrElse(signedBy)
+    Signature.authorizingLongTermKey(signedBy, signatureDelegation)
 
   def toProtoV30: v30.Signature =
     // The signature delegation protobuf does not contain a `signedBy` field. Because of this, if a signature
@@ -269,14 +269,7 @@ final case class Signature private (
     case SignatureFormat.Raw => throw new IllegalStateException("Original signature has Raw format")
   })
 
-  override protected def pretty: Pretty[Signature] =
-    prettyOfClass(
-      param("signature", _.signature),
-      param("format", _.format),
-      param("signedBy", _.signedBy),
-      param("signingAlgorithmSpec", _.signingAlgorithmSpec),
-      param("signatureDelegation", _.signatureDelegation, _.signatureDelegation.isDefined),
-    )
+  override protected def pretty: Pretty[Signature] = Signature.prettyInstance
 
   /** Access to the raw signature, must NOT be used for serialization */
   private[crypto] def unwrap: ByteString = signature
@@ -289,6 +282,23 @@ final case class Signature private (
 object Signature
     extends HasVersionedMessageCompanion[Signature]
     with HasVersionedMessageCompanionDbHelpers[Signature] {
+
+  private val prettyInstance = {
+    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+    prettyOfClass[Signature](
+      param("signature", _.signature),
+      param("format", _.format),
+      param("signedBy", _.signedBy),
+      param("signingAlgorithmSpec", _.signingAlgorithmSpec),
+      param("signatureDelegation", _.signatureDelegation, _.signatureDelegation.isDefined),
+    )
+  }
+
+  def authorizingLongTermKey(
+      signedBy: Fingerprint,
+      signatureDelegation: Option[SignatureDelegation],
+  ): Fingerprint = signatureDelegation.map(_.delegatingKeyId).getOrElse(signedBy)
+
   val noSignature: Signature =
     Signature.create(
       SignatureFormat.Symbolic,

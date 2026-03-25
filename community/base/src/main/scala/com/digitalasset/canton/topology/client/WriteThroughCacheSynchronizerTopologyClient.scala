@@ -518,15 +518,15 @@ class ValidatingTopologySnapshot(
   ): FutureUnlessShutdown[Seq[DynamicSynchronizerParametersWithValidity]] =
     verify("listDynamicSynchronizerParameterChanges")(_.listDynamicSynchronizerParametersChanges())
 
-  override def synchronizerUpgradeOngoing()(implicit
+  override def announcedLsu()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
-    verify("synchronizerUpgradeOngoing")(_.synchronizerUpgradeOngoing())
+    verify("announcedLsu")(_.announcedLsu())
 
-  override def sequencerConnectionSuccessors()(implicit
+  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
-    verify("sequencerConnectionSuccessors")(_.sequencerConnectionSuccessors())
+    verify("sequencerConnectionSuccessors")(_.sequencerConnectionSuccessors(successorPsid))
 
   override private[client] def findUnvettedPackagesOrDependencies(
       participant: ParticipantId,

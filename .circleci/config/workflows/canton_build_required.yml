@@ -111,6 +111,24 @@ jobs:
       filters:
         tags:
           only: /^v.*/
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs, we run the smoke_test instead
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - smoke_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          only:
+            - /^gh-readonly-queue\/main\/.*/ # Only run a smoke test on GH merge queue branches to speed up merge queue jobs
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - test:

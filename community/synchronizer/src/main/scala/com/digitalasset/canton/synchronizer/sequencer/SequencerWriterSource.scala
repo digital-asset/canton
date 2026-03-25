@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   SequencedBeforeOrAtLowerBound,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.*
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
@@ -76,16 +77,6 @@ final case class BatchWritten(
     latestTimestamp: CantonTimestamp,
     events: Seq[NonEmpty[Seq[Sequenced[BytesPayload]]]],
 )
-object BatchWritten {
-
-  /** Assumes events are ordered by timestamp */
-  def apply(events: NonEmpty[Seq[Sequenced[BytesPayload]]]): BatchWritten =
-    BatchWritten(
-      notifies = WriteNotification(events),
-      latestTimestamp = events.last1.timestamp,
-      events = Seq(events),
-    )
-}
 
 /** Base class for exceptions intentionally thrown during Pekko stream to flag errors */
 sealed abstract class SequencerWriterException(message: String) extends RuntimeException(message)
@@ -203,7 +194,7 @@ object SequencerWriterSource {
       protocolVersion: ProtocolVersion,
       metrics: SequencerMetrics,
       blockSequencerMode: Boolean,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -266,15 +257,13 @@ object SequencerWriterSource {
 
     val eventsSequenced = payloadsWrittenWithKeepAlive
       .mapMaterializedValue(new SequencerWriterQueues(eventGenerator, loggerFactory)(_))
-      .via(
-        AssertMonotonicBlockSequencerTimestampsFlow(loggerFactory)
-      )
+      .via(AssertMonotonicBlockSequencerTimestampsFlow(loggerFactory))
       .via(
         SequenceWritesFlow(
           writerConfig,
           store,
           eventTimestampGenerator,
-          sequencingTimeLowerBoundExclusive,
+          lsuSequencingBounds,
           loggerFactory,
           protocolVersion,
           blockSequencerMode,
@@ -522,7 +511,7 @@ object SequenceWritesFlow {
       writerConfig: SequencerWriterConfig,
       store: SequencerWriterStore,
       eventTimestampGenerator: PartitionedTimestampGenerator,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
       blockSequencerMode: Boolean,
@@ -546,7 +535,7 @@ object SequenceWritesFlow {
             event
           })
         val notifies =
-          events.fold[WriteNotification](WriteNotification.None)(WriteNotification(_))
+          events.fold[WriteNotification](WriteNotification.NoTarget)(WriteNotification.forEvents(_))
         for {
           // if this write batch had any events then save them
           _ <- events.fold(FutureUnlessShutdown.unit)(eventsWithPayload =>
@@ -614,17 +603,22 @@ object SequenceWritesFlow {
       def checkSequencingTimeLowerBound(
           event: Presequenced[StoreEvent[BytesPayload]]
       ): Either[CantonBaseError, Unit] =
-        sequencingTimeLowerBoundExclusive match {
-          case Some(bound) =>
+        lsuSequencingBounds match {
+          case Some(lsuSequencingBounds) =>
             Either.cond(
               LogicalUpgradeTime.canProcessKnowingPastUpgrade(
-                upgradeTime = Some(bound),
+                /*
+                 On the write side, we consider lowerBoundSequencingTimeExclusive and not upgradeTime.
+                 It allows to perform testing of the new synchronizer before upgrade time. Such messages
+                 are filtered out on the read side for participants.
+                 */
+                upgradeTime = Some(lsuSequencingBounds.lowerBoundSequencingTimeExclusive),
                 sequencingTime = timestamp,
               ),
               (),
               SequencedBeforeOrAtLowerBound.Error(
                 timestamp,
-                bound,
+                lsuSequencingBounds.lowerBoundSequencingTimeExclusive,
                 event.event.description,
               ),
             )
@@ -693,8 +687,7 @@ object SequenceWritesFlow {
                   messageId = deliver.messageId,
                 ),
               )
-          case _ =>
-            Right(())
+          case _ => Right(())
         }
 
       val resultE = for {
@@ -872,12 +865,12 @@ object NotifyEventSignallerFlow {
       // `alsoTo` propagates backpressure coming from the sink, but backpressure shouldn't happen
       // because of the async+conflate construction
       Flow[Traced[BatchWritten]]
-        .map(_.value.notifies)
-        // combine multiple event signals
-        .conflate(_ union _)
         // decouple the main sequencer writer flow from the event notification
         .async
         .addAttributes(Attributes.inputBuffer(1, 1))
+        .map(_.value.notifies)
+        // combine multiple event signals
+        .conflate(_ union _)
         // this could also be dispatched in parallel
         .map(eventSignaller.notifyOfLocalWrite)
         .to(Sink.ignore)

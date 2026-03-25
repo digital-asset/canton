@@ -21,7 +21,6 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl.*
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
@@ -44,12 +43,16 @@ import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyInput,
   NegativeKeyLookup,
 }
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, CreationTime}
+import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
+  CreationTime,
+  TransactionContractError,
+  TransactionError,
+}
 import io.scalaland.chimney.dsl.*
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
-import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
@@ -304,34 +307,38 @@ class TransactionTreeFactoryImpl(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, TransactionView] = {
-    state.signalRollbackScope(view.rbContext.rollbackScope)
-
-    // reset to a fresh state with projected resolver before visiting the subtree
-    val previousCsmState = state.csmState
-    val previousResolver = state.currentResolver
-    state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
-    state.csmState = initialCsmState
-
-    // Process core nodes and subviews
-    val coreCreatedBuilder =
-      List.newBuilder[(LfNodeCreate, RollbackScope)] // contract IDs have already been suffixed
-    val coreOtherBuilder = // contract IDs have not yet been suffixed
-      List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
-    val childViewsBuilder = Seq.newBuilder[TransactionView]
-    val subViewKeyResolutions =
-      mutable.Map.empty[LfGlobalKey, LfVersioned[SerializableKeyResolution]]
-
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var createIndex = 0
 
-    val nbSubViews = view.allNodes.count {
-      case _: TransactionViewDecomposition.NewView => true
-      case _ => false
-    }
-    val subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
-    val createdInView = mutable.Set.empty[LfContractId]
-
     for {
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        state.signalRollbackScope(view.rbContext.rollbackScope)
+      )
+
+      // reset to a fresh state with projected resolver before visiting the subtree
+      previousCsmState = state.csmState
+      previousResolver = state.currentResolver
+      _ = {
+        state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
+        state.csmState = initialCsmState
+      }
+
+      // Process core nodes and subviews
+      coreCreatedBuilder =
+        List.newBuilder[(LfNodeCreate, RollbackScope)] // contract IDs have already been suffixed
+      coreOtherBuilder = // contract IDs have not yet been suffixed
+        List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
+      childViewsBuilder = Seq.newBuilder[TransactionView]
+      subViewKeyResolutions =
+        mutable.Map.empty[LfGlobalKey, LfVersioned[SerializableKeyResolution]]
+
+      nbSubViews = view.allNodes.count {
+        case _: TransactionViewDecomposition.NewView => true
+        case _ => false
+      }
+      subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
+      createdInView = mutable.Set.empty[LfContractId]
+
       // Compute salts
       viewCommonDataSalt <- EitherT.fromEither[FutureUnlessShutdown](state.nextSalt())
       viewParticipantDataSalt <- EitherT.fromEither[FutureUnlessShutdown](state.nextSalt())
@@ -388,7 +395,7 @@ class TransactionTreeFactoryImpl(
               state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
             }
 
-            _ = state.signalRollbackScope(rbScope)
+            _ <- EitherT.fromEither[FutureUnlessShutdown](state.signalRollbackScope(rbScope))
 
             _ <- EitherT.fromEither[FutureUnlessShutdown]({
               for {
@@ -401,7 +408,10 @@ class TransactionTreeFactoryImpl(
                 }
                 nextState <- state.csmState
                   .handleNode((), suffixedNode, resolutionForModeOff)
-                  .leftMap(ContractKeyResolutionError.apply)
+                  .leftMap {
+                    case e: TransactionContractError => ContractKeyResolutionError(e)
+                    case _: TransactionError.EffectfulRollback => EffectfulRollback
+                  }
               } yield {
                 state.csmState = nextState
               }
@@ -409,7 +419,9 @@ class TransactionTreeFactoryImpl(
           } yield ()
         }
       }
-      _ = state.signalRollbackScope(view.rbContext.rollbackScope)
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        state.signalRollbackScope(view.rbContext.rollbackScope)
+      )
 
       coreCreatedNodes = coreCreatedBuilder.result()
       // Translate contract ids in untranslated core nodes
@@ -466,7 +478,10 @@ class TransactionTreeFactoryImpl(
             else previousResolver,
             state.csmState,
           )
-          .leftMap(ContractKeyResolutionError(_): TransactionTreeConversionError)
+          .leftMap {
+            case e: TransactionContractError => ContractKeyResolutionError(e)
+            case _: TransactionError.EffectfulRollback => EffectfulRollback
+          }
       )
     } yield {
       // Compute the result
@@ -763,12 +778,13 @@ class TransactionTreeFactoryImpl(
     } yield createdContract.contract.contractId
 
     val createdInSubviews = createdInSubviewsSeq.toSet
-    val createdInSameViewOrSubviews = createdInSubviewsSeq ++ created.map(_.contract.contractId)
+    val createdInSameViewOrSubviews = createdInSubviews ++ created.map(_.contract.contractId)
 
-    val usedCore = SortedSet.from(coreOtherNodes.flatMap { case (node, _) =>
-      LfTransactionUtil.usedContractId(node)
-    })
-    val coreInputs = usedCore -- createdInSameViewOrSubviews
+    val coreInputs = coreOtherNodes.view
+      .flatMap { case (node, _) =>
+        LfTransactionUtil.usedContractId(node)
+      }
+      .filterNot(createdInSameViewOrSubviews.contains)
     val createdInSubviewArchivedInCore = consumedInCore intersect createdInSubviews
 
     def withInstance(
@@ -824,7 +840,7 @@ class TransactionTreeFactoryImpl(
     val viewLocallyCreated = transactionView.createdContracts.keySet
     val stateLocallyCreated = csmState.locallyCreated
     ErrorUtil.requireState(
-      viewLocallyCreated == stateLocallyCreated,
+      viewLocallyCreated == stateLocallyCreated.keySet,
       show"Failed to reconstruct created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreated\n  Expected: $stateLocallyCreated",
     )
     val viewInputContractIds = transactionView.inputContracts.keySet
@@ -1068,11 +1084,24 @@ object TransactionTreeFactoryImpl {
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     private var rollbackScope: RollbackScope = RollbackScope.empty
 
-    def signalRollbackScope(target: RollbackScope): Unit = {
+    def signalRollbackScope(
+        target: RollbackScope
+    ): Either[TransactionTreeConversionError, Unit] = {
       val (pops, pushes) = RollbackScope.popsAndPushes(rollbackScope, target)
-      for (_ <- 1 to pops) { csmState = csmState.endRollback() }
-      for (_ <- 1 to pushes) { csmState = csmState.beginRollback() }
-      rollbackScope = target
+      MonadUtil
+        .sequentialTraverse(1 to pops) { _ =>
+          csmState.endRollback() match {
+            case Left(rollbackErr) =>
+              Left(EffectfulRollback)
+            case Right(popState) =>
+              csmState = popState
+              Right(())
+          }
+        }
+        .map { _ =>
+          for (_ <- 1 to pushes) { csmState = csmState.beginRollback() }
+          rollbackScope = target
+        }
     }
   }
 }

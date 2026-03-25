@@ -679,7 +679,7 @@ class DeclarativeParticipantApi(
         synchronizerConnectionConfig <- config.toSynchronizerConnectionConfig
         _ <- queryAdminApi(
           ParticipantAdminCommands.SynchronizerConnectivity.ModifySynchronizerConnection(
-            // TODO(#25344) Allow to specify the PSId for declarative configs
+            // TODO(#25344) Allow to specify the psid for declarative configs
             synchronizerId = None,
             synchronizerConnectionConfig,
             sequencerConnectionValidation = SequencerConnectionValidation.Active,

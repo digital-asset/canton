@@ -24,7 +24,7 @@ addCommandAlias("makeOpenDocs", "; compile; community-app/bundle; docs-open/make
 
 addCommandAlias(
   "pingTest",
-  "community-app/testOnly com.digitalasset.canton.integration.tests.SimplestPingIntegrationTestH2",
+  "community-app/testOnly com.digitalasset.canton.integration.tests.SimplestPingBftOrderingIntegrationTestH2",
 )
 
 /*

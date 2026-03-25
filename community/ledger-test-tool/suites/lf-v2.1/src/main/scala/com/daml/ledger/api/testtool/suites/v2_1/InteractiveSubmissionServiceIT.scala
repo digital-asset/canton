@@ -45,6 +45,7 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.Intera
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidField
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound.PackageNamesNotFound
 import com.digitalasset.canton.ledger.error.groups.{ConsistencyErrors, RequestValidationErrors}
+import com.digitalasset.canton.topology.Synchronizer
 import com.google.protobuf.timestamp.Timestamp
 
 import java.time.Instant
@@ -165,11 +166,22 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
             for {
               response <- ledger.prepareSubmission(prepareRequest)
               tx = response.preparedTransaction
-              hash = response.preparedTransactionHash
             } yield {
+              // The prepared synchronizer ID can be either logical or physical depending on the PV
+              // We can only compare it to the LSId though here because that's what synchronizerId from connectedSynchronizers() is
+              val synchronizerIdResponse = Synchronizer
+                .fromLogicalOrPhysicalString(
+                  tx.value.metadata.value.synchronizerId,
+                  "synchronizer_id",
+                )
+                .getOrElse(
+                  fail(s"Invalid synchronizer ID ${tx.value.metadata.value.synchronizerId}")
+                )
+                .logical
+                .toProtoPrimitive
               assert(
-                tx.value.metadata.value.synchronizerId == synchronizerId,
-                "Unexpected synchronizer ID.",
+                synchronizerIdResponse == synchronizerId,
+                s"Unexpected synchronizer ID, expected $synchronizerId, got $synchronizerIdResponse",
               )
             }
           }
@@ -635,7 +647,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
       failure,
       RequestValidationErrors.InvalidField,
       Some(
-        s"Invalid field synchronizer_id: Invalid unique identifier `$invalidSynchronizerId` with missing namespace."
+        s"Invalid field synchronizer_id: Unable to convert field `synchronizer_id`: Unable to parse `invalidSynchronizerId` as physical synchronizer id"
       ),
       checkDefiniteAnswerMetadata = true,
     )
@@ -669,7 +681,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
       failure,
       RequestValidationErrors.InvalidField,
       Some(
-        s"Invalid field synchronizer_id: Invalid unique identifier `$invalidSynchronizerId` with missing namespace."
+        s"Invalid field synchronizer_id: Unable to convert field `synchronizer_id`: Unable to parse `$invalidSynchronizerId` as physical synchronizer id"
       ),
       checkDefiniteAnswerMetadata = true,
     )
@@ -954,6 +966,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
           beginExclusive = ledger.begin,
           endInclusive = Some(end),
           updateFormat = Some(formatByPartyAndTemplate(owner, DummyFlexibleController.TEMPLATE_ID)),
+          descendingOrder = false,
         )
       )
       tx = assertSingleton("Owners' transactions", witnessTxs)

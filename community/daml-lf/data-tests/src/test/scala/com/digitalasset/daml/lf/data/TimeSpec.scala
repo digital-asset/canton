@@ -3,15 +3,15 @@
 
 package com.digitalasset.daml.lf.data
 
+import com.digitalasset.daml.lf.data.Time.*
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
+
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoField
 import java.time.{Duration, Instant, LocalDate}
 import java.util.concurrent.TimeUnit
-
-import com.digitalasset.daml.lf.data.Time._
-import org.scalatest.prop.TableDrivenPropertyChecks
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.freespec.AnyFreeSpec
 
 class TimeSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
 
@@ -28,19 +28,19 @@ class TimeSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks 
     "Date.fromLong fails if it overflows" in {
       val max = Date.MaxValue.days
       val min = Date.MinValue.days
-      Date.fromDaysSinceEpoch(max) shouldBe a[Right[_, _]]
-      Date.fromDaysSinceEpoch(max + 1) shouldBe a[Left[_, _]]
-      Date.fromDaysSinceEpoch(min) shouldBe a[Right[_, _]]
-      Date.fromDaysSinceEpoch(min - 1) shouldBe a[Left[_, _]]
+      Date.fromDaysSinceEpoch(max) shouldBe a[Right[?, ?]]
+      Date.fromDaysSinceEpoch(max + 1) shouldBe a[Left[?, ?]]
+      Date.fromDaysSinceEpoch(min) shouldBe a[Right[?, ?]]
+      Date.fromDaysSinceEpoch(min - 1) shouldBe a[Left[?, ?]]
     }
 
     "Date.fromString fails if it overflows" in {
       val max = Date.MaxValue.toString
       val min = Date.MinValue.toString
-      Date.fromString(max) shouldBe a[Right[_, _]]
-      Date.fromString(LocalDate.parse(max).plusDays(1).toString) shouldBe a[Left[_, _]]
-      Date.fromString(min) shouldBe a[Right[_, _]]
-      Date.fromString(LocalDate.parse(min).plusDays(-1).toString) shouldBe a[Left[_, _]]
+      Date.fromString(max) shouldBe a[Right[?, ?]]
+      Date.fromString(LocalDate.parse(max).plusDays(1).toString) shouldBe a[Left[?, ?]]
+      Date.fromString(min) shouldBe a[Right[?, ?]]
+      Date.fromString(LocalDate.parse(min).plusDays(-1).toString) shouldBe a[Left[?, ?]]
     }
 
     "toString produces an ISO 8601 compliant string" in {
@@ -72,19 +72,19 @@ class TimeSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks 
     "Timestamp.fromLong fails if it overflows" in {
       val max = Timestamp.MaxValue.micros
       val min = Timestamp.MinValue.micros
-      Timestamp.fromLong(max) shouldBe a[Right[_, _]]
-      Timestamp.fromLong(max + 1) shouldBe a[Left[_, _]]
-      Timestamp.fromLong(min) shouldBe a[Right[_, _]]
-      Timestamp.fromLong(min - 1) shouldBe a[Left[_, _]]
+      Timestamp.fromLong(max) shouldBe a[Right[?, ?]]
+      Timestamp.fromLong(max + 1) shouldBe a[Left[?, ?]]
+      Timestamp.fromLong(min) shouldBe a[Right[?, ?]]
+      Timestamp.fromLong(min - 1) shouldBe a[Left[?, ?]]
     }
 
     "Timestamp.fromString fails if it overflows" in {
       val max = Timestamp.MaxValue.toString
       val min = Timestamp.MinValue.toString
-      Timestamp.fromString(max) shouldBe a[Right[_, _]]
-      Timestamp.fromString(Instant.parse(max).plusMillis(1).toString) shouldBe a[Left[_, _]]
-      Timestamp.fromString(min) shouldBe a[Right[_, _]]
-      Timestamp.fromString(Instant.parse(min).plusMillis(-1).toString) shouldBe a[Left[_, _]]
+      Timestamp.fromString(max) shouldBe a[Right[?, ?]]
+      Timestamp.fromString(Instant.parse(max).plusMillis(1).toString) shouldBe a[Left[?, ?]]
+      Timestamp.fromString(min) shouldBe a[Right[?, ?]]
+      Timestamp.fromString(Instant.parse(min).plusMillis(-1).toString) shouldBe a[Left[?, ?]]
     }
 
     "add increments the timestamp" in {

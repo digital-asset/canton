@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast
@@ -23,9 +24,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -84,6 +83,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
         transactionSeed = txSeed,
         updateSE = SExpr.SEApp(pkgs.compiler.unsafeCompile(e), agrs.view.to(ArraySeq)),
         committers = committers,
+        logger = MachineLogger(),
         limits = limits,
       ),
       getContract = contracts,
@@ -541,10 +541,10 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
   }
 
   private def asSParties(parties: Iterable[Ref.Party]) =
-    SValue.SList(parties.map(SValue.SParty).to(FrontStack))
+    SValue.SList(parties.map(SValue.SParty.apply).to(FrontStack))
 
   private def asSCids(cids: Iterable[Value.ContractId]) =
-    SValue.SList(cids.map(SValue.SContractId).to(FrontStack))
+    SValue.SList(cids.map(SValue.SContractId.apply).to(FrontStack))
 
   private val txSeed = crypto.Hash.hashPrivateKey(this.getClass.getCanonicalName)
 
@@ -565,8 +565,8 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
       arg = Value.ValueRecord(
         None,
         ImmArray(
-          None -> Value.ValueList(signatories.view.map(Value.ValueParty).to(FrontStack)),
-          None -> Value.ValueList(observers.view.map(Value.ValueParty).to(FrontStack)),
+          None -> Value.ValueList(signatories.view.map(Value.ValueParty.apply).to(FrontStack)),
+          None -> Value.ValueList(observers.view.map(Value.ValueParty.apply).to(FrontStack)),
         ),
       ),
       signatories = signatories,

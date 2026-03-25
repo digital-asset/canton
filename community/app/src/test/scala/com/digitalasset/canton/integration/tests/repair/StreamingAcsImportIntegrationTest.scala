@@ -93,10 +93,10 @@ sealed trait StreamingAcsImportIntegrationTest
       participant2.synchronizers.disconnect(daName)
 
       // Test with real ACS
-      participant2.parties.import_party_acsV2(acsFile.canonicalPath, daId)
+      participant2.parties.import_party_acsV2(daId, Some(alice), acsFile.canonicalPath)
 
       // Test with empty ACS
-      participant2.parties.import_party_acsV2(emptyAcsFile.canonicalPath, daId)
+      participant2.parties.import_party_acsV2(daId, Some(alice), emptyAcsFile.canonicalPath)
 
       participant2.synchronizers.reconnect(daName)
 
@@ -106,10 +106,10 @@ sealed trait StreamingAcsImportIntegrationTest
       participant3.synchronizers.disconnect(daName)
 
       // Test with real ACS
-      participant3.repair.import_acsV2(acsFile.canonicalPath, daId)
+      participant3.repair.import_acsV2(daId, acsFile.canonicalPath)
 
       // Test with empty ACS
-      participant3.repair.import_acsV2(emptyAcsFile.canonicalPath, daId)
+      participant3.repair.import_acsV2(daId, emptyAcsFile.canonicalPath)
 
       participant3.synchronizers.reconnect(daName)
 

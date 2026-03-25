@@ -202,7 +202,7 @@ trait KmsMigrationIntegrationTest
       )
 
       // Import to new participant
-      participantNew.repair.import_acsV2(acsFileName, newKmsSynchronizerId.logical)
+      participantNew.repair.import_acsV2(newKmsSynchronizerId.logical, acsFileName)
     }
 
     // Kill/stop the old participant

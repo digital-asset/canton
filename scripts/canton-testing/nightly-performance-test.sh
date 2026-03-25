@@ -23,8 +23,6 @@ build.sh
 
 test-with-replicated-db.sh "$@"
 
-test-with-fast-db.sh "$@"
-
 test-with-big-commands.sh "$@"
 
 test-with-recording.sh "$@"

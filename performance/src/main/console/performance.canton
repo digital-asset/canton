@@ -17,7 +17,6 @@ Seq("performance-driver_", "performance_").foreach { jar =>
 
 import com.digitalasset.canton.performance.scenarios.LongRunning
 
-
 val (mc, psc) = try {
     LongRunning.startup()
 } catch {

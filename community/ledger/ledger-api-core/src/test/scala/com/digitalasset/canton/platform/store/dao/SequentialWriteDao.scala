@@ -12,7 +12,6 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
-  DbDtoToStringsForInterning,
   IngestionStorageBackend,
   ParameterStorageBackend,
   UpdateToDbDto,
@@ -20,7 +19,6 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.{
-  DomainStringIterators,
   InternizingStringInterningView,
   StringInterning,
 }
@@ -67,19 +65,17 @@ object SequentialWriteDao {
           )(mc)(offset),
         ledgerEndCache = ledgerEndCache,
         stringInterningView = stringInterningView,
-        dbDtosToStringsForInterning = DbDtoToStringsForInterning(_),
       )
     }
 
 }
 
-private[dao] final case class SequentialWriteDaoImpl[DB_BATCH](
-    ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
+private[dao] final case class SequentialWriteDaoImpl[DbBatch](
+    ingestionStorageBackend: IngestionStorageBackend[DbBatch],
     parameterStorageBackend: ParameterStorageBackend,
     updateToDbDtos: Offset => Update => Iterator[DbDto],
     ledgerEndCache: MutableLedgerEndCache,
     stringInterningView: StringInterning with InternizingStringInterningView,
-    dbDtosToStringsForInterning: Iterable[DbDto] => DomainStringIterators,
 ) extends SequentialWriteDao {
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -155,7 +151,7 @@ private[dao] final case class SequentialWriteDaoImpl[DB_BATCH](
 
       val dbDtosWithStringInterning =
         dbDtos
-          .pipe(dbDtosToStringsForInterning)
+          .pipe(stringInterningView.distinctNewRawStrings)
           .pipe(stringInterningView.internize)
           .map(DbDto.StringInterningDto.from)
           .pipe(newEntries =>

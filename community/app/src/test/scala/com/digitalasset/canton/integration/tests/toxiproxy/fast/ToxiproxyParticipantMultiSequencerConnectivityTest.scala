@@ -164,7 +164,7 @@ class ToxiproxyParticipantMultiSequencerConnectivityTest
           daName,
           // This time around demand that all sequencers be up
           // In addition to specifying SequencerConnectionValidation.All, increase the
-          // threshold to 3 so that the reconnect also waits to connect to all sequencers.
+          // threshold to 4 so that the reconnect also waits to connect to all sequencers.
           synchronizerConnectionConfig => {
             val sc = synchronizerConnectionConfig.sequencerConnections
             synchronizerConnectionConfig.copy(sequencerConnections =
@@ -173,15 +173,13 @@ class ToxiproxyParticipantMultiSequencerConnectivityTest
                   sc.connections,
                   // TODO(#19911) Reduce this to one once the desired number of connections can be configured separately
                   sequencerTrustThreshold =
-                    if (participant1.config.sequencerClient.useNewConnectionPool) {
-                      // The connection pool obtains (trustThreshold + livenessMargin) subscriptions, so we need 4 to ensure sequencer1 is among them
-                      PositiveInt.tryCreate(4)
-                    } else PositiveInt.three,
+                    // The connection pool obtains (trustThreshold + livenessMargin) subscriptions, so we need 4 to ensure sequencer1 is among them
+                    PositiveInt.tryCreate(4),
                   sequencerLivenessMargin = NonNegativeInt.zero,
                   submissionRequestAmplification = sc.submissionRequestAmplification,
                   sequencerConnectionPoolDelays = sc.sequencerConnectionPoolDelays,
                 )
-                .getOrElse(fail("Must succeed increasing threshold to two with 4 sequencers"))
+                .getOrElse(fail("Must succeed increasing threshold to 4 with 4 sequencers"))
             )
           },
           SequencerConnectionValidation.All,

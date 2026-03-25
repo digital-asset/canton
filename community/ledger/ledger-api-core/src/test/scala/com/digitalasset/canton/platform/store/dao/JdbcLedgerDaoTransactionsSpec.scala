@@ -278,6 +278,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
     } yield {
@@ -312,6 +313,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
       resultForBob <- transactionsOf(
@@ -325,6 +327,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
       resultForCharlie <- transactionsOf(
@@ -338,6 +341,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
     } yield {
@@ -375,6 +379,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
     } yield {
@@ -415,6 +420,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
       resultPartyWildcard <- transactionsOf(
@@ -431,6 +437,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
 
@@ -481,6 +488,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
       resultPartyWildcard <- transactionsOf(
@@ -500,6 +508,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
     } yield {
@@ -548,6 +557,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
       resultPartyWildcard <- transactionsOf(
@@ -566,6 +576,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
       )
     } yield {
@@ -600,6 +611,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
           ),
+          descendingOrder = false,
         )
         .runWith(Sink.seq)
     } yield {
@@ -636,6 +648,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
           ),
+          descendingOrder = false,
         )
         .runWith(Sink.seq)
 
@@ -670,6 +683,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
           ),
+          descendingOrder = false,
         )
         .runWith(Sink.seq)
         .failed
@@ -730,6 +744,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                 verbose = true
               )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             ),
+            descendingOrder = false,
           )
           .runWith(Sink.seq)
       )(ResourceContext(executionContext))
@@ -783,6 +798,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
                   verbose = true
                 )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
               ),
+              descendingOrder = false,
             )
             .runWith(Sink.seq)
           readOffsets = response flatMap { case (_, gtr) => Seq(gtr.getTransaction.offset) }

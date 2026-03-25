@@ -37,7 +37,7 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 
 import scala.concurrent.ExecutionContext
@@ -161,33 +161,28 @@ class SyncCryptoVerifier(
           .map(_.values.flatMap(_.toSeq).toMap)
     }
 
-  private def verifySignatureWithLongTermKey(
+  private def determineLongTermKeyForVerification(
       validKeys: Map[Fingerprint, SigningPublicKey],
-      hash: Hash,
-      signature: Signature,
+      authorizingLongTermKey: Fingerprint,
       signerStr: String,
-      usage: NonEmpty[Set[SigningKeyUsage]],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, SigningPublicKey] =
     (for {
       _ <- Either.cond(
         validKeys.nonEmpty,
         (),
         SignerHasNoValidKeys(
-          s"There are no valid keys for $signerStr but received message signed with ${signature.authorizingLongTermKey}"
+          s"There are no valid keys for $signerStr but received message signed with $authorizingLongTermKey"
         ),
       )
       keyToUse <- validKeys
-        .get(signature.authorizingLongTermKey)
+        .get(authorizingLongTermKey)
         .toRight(
           SignatureWithWrongKey(
-            s"Key ${signature.authorizingLongTermKey} used to generate signature is not a valid key for $signerStr. " +
+            s"Key $authorizingLongTermKey used to generate signature is not a valid key for $signerStr. " +
               s"Valid keys are ${validKeys.values.map(_.fingerprint.unwrap)}"
           )
         )
-      _ <- verifyPublicApiWithLongTermKeys.verifySignature(hash, keyToUse, signature, usage)
-    } yield ()).toEitherT[FutureUnlessShutdown]
+    } yield keyToUse).toEitherT[FutureUnlessShutdown]
 
   private def verifySignatureWithSessionKey(
       signatureDelegation: SignatureDelegation,
@@ -200,40 +195,73 @@ class SyncCryptoVerifier(
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit
       traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    for {
+      _ <- determineSessionKeyIsValid(
+        signatureDelegation,
+        topologySnapshot,
+        validKeysO,
+        signers,
+        signerStr,
+        usage,
+      )
+      _ <- verifyPublicApiSoftwareBased
+        .verifySignature(hash, signatureDelegation.sessionKey, signature, usage)
+        .toEitherT[FutureUnlessShutdown]
+    } yield ()
+
+  /** Checks if the session key used is still valid
+    *
+    * For a session key to be valid, we need the following conditions:
+    *   - The key must be valid for the given timestamp, according to the validity period
+    *   - The key must have been authorized by a long term key which is valid for the given members
+    *     and the given time.
+    *   - The signatures on the delegation are correct.
+    *
+    * A valid signatureDelegation (sessionKey, authorizing key, signature) will be cached so that
+    * subsequent requests will not require another signature evaluation.
+    */
+  private def determineSessionKeyIsValid(
+      signatureDelegation: SignatureDelegation,
+      topologySnapshot: TopologySnapshot,
+      validKeysO: Option[Map[Fingerprint, SigningPublicKey]],
+      signers: Seq[Member],
+      signerStr: String,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] = {
+
     val SignatureDelegation(sessionKey, validityPeriod, _) = signatureDelegation
     val currentTimestamp = topologySnapshot.timestamp
-
-    def verifyWithValidSessionKey =
-      verifyPublicApiSoftwareBased
-        .verifySignature(hash, sessionKey, signature, usage)
-        .toEitherT[FutureUnlessShutdown]
-
     def invalidSessionKey =
-      EitherT.leftT[FutureUnlessShutdown, Unit](
-        SignatureCheckError.InvalidSignatureDelegation(
-          "The current signature delegation " +
-            s"is only valid from ${validityPeriod.fromInclusive} to ${validityPeriod.toExclusive} while the " +
-            s"current timestamp is $currentTimestamp"
-        ): SignatureCheckError
-      )
+      SignatureCheckError.InvalidSignatureDelegation(
+        "The current signature delegation " +
+          s"is only valid from ${validityPeriod.fromInclusive} to ${validityPeriod.toExclusive} while the " +
+          s"current timestamp is $currentTimestamp"
+      ): SignatureCheckError
 
-    def verifySessionKey(validKeys: Map[Fingerprint, SigningPublicKey]) =
+    def verifySessionKey(
+        longTermKey: SigningPublicKey,
+        doNotCacheAndWarn: Boolean,
+    ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
       for {
-        _ <- verifySignatureWithLongTermKey(
-          validKeys,
-          SignatureDelegation.generateHash(
-            synchronizerId,
-            signatureDelegation.sessionKey,
-            signatureDelegation.validityPeriod,
-          ),
-          signatureDelegation.signature,
-          signerStr,
-          usage,
-        ).leftMap[SignatureCheckError](err =>
-          SignatureCheckError.InvalidSignatureDelegation(err.show)
-        )
-        _ <- verifyWithValidSessionKey
+        // validate signature of delegation (key validity is tested below)
+        _ <- verifyPublicApiWithLongTermKeys
+          .verifySignature(
+            SignatureDelegation.generateHash(
+              synchronizerId,
+              signatureDelegation.sessionKey,
+              signatureDelegation.validityPeriod,
+            ),
+            longTermKey,
+            signatureDelegation.signature,
+            usage,
+          )
+          .leftMap[SignatureCheckError] { err =>
+            SignatureCheckError.InvalidSignatureDelegation(err.show)
+          }
+          .toEitherT[FutureUnlessShutdown]
         dynamicSynchronizerParameters <- EitherT(
           topologySnapshot.findDynamicSynchronizerParameters()
         )
@@ -252,16 +280,23 @@ class SyncCryptoVerifier(
          */
         retentionTimeMillis = expirationTime.toMillis + safetyMargin.toMillis + 30.seconds.toMillis
 
-        /* The signature delegation is valid, so we can store it for future use. Since
-         * the delegation signature is not added at the moment of creation, it may be stored in the cache
-         * for longer than its validity period. We can accept this because, even though the key is in the cache,
-         * it is invalid and cannot be used.
-         */
-        _ = sessionKeysVerificationCache.put(
-          sessionKey.id,
-          (signatureDelegation, FiniteDuration(retentionTimeMillis, MILLISECONDS)),
-        )
-      } yield ()
+      } yield {
+        if (doNotCacheAndWarn)
+          logger.warn(
+            s"Session key ${sessionKey.id} -> ${signatureDelegation.delegatingKeyId} is associated with more than one delegation. This is not wrong, but suspicious."
+          )
+        else {
+          /* The signature delegation is valid, so we can store it for future use. Since
+           * the delegation signature is not added at the moment of creation, it may be stored in the cache
+           * for longer than its validity period. We can accept this because, even though the key is in the cache,
+           * it is invalid and cannot be used.
+           */
+          sessionKeysVerificationCache.put(
+            sessionKey.id,
+            (signatureDelegation, FiniteDuration(retentionTimeMillis, MILLISECONDS)),
+          )
+        }
+      }
 
     // we store the received and validated signature delegation in a cache to avoid re-verifying it
     val cachedSignatureDelegationO =
@@ -274,23 +309,34 @@ class SyncCryptoVerifier(
           s"Session signing keys are not supposed to be used for non-protocol messages. Requested usage: $usage"
         ),
       )
+
       // get the current long-term valid keys
       validKeys <- validKeysO.fold(
         getValidKeys(topologySnapshot, signers, usage)
       )(validKeys => EitherT.rightT[FutureUnlessShutdown, SignatureCheckError](validKeys))
 
-      // delegation is in the cache, and it's valid, so we can use it to directly verify the signature
+      // check if the delegation is no longer valid for this timestamp
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        signatureDelegation.isValidAt(currentTimestamp),
+        invalidSessionKey,
+      )
+
+      // check if the delegation is using a valid key according to the topology state
+      longTermKey <- determineLongTermKeyForVerification(
+        validKeys,
+        signatureDelegation.signature.authorizingLongTermKey,
+        signerStr,
+      )
+      // if there is no delegation in the cache so we need to validate the session key with the long-term key
+      // and store the delegation for future use
       _ <-
-        if (
-          cachedSignatureDelegationO.contains(signatureDelegation) &&
-          signatureDelegation.isValidAt(currentTimestamp) &&
-          validKeys.contains(signatureDelegation.delegatingKeyId)
-        ) verifyWithValidSessionKey
-        // the delegation is no longer valid for this timestamp
-        else if (!signatureDelegation.isValidAt(currentTimestamp)) invalidSessionKey
-        // there is no delegation in the cache so we need to validate the session key with the long-term key
-        // and store the delegation for future use
-        else verifySessionKey(validKeys)
+        if (!cachedSignatureDelegationO.contains(signatureDelegation)) {
+          verifySessionKey(longTermKey, cachedSignatureDelegationO.nonEmpty)
+        } else {
+          // otherwise we know that the delegation itself is correct in terms of signatures
+          // and as we just validated that the keys used in there are still valid, we can skip any further test
+          EitherTUtil.unitUS[SignatureCheckError]
+        }
     } yield ()
   }
 
@@ -321,13 +367,14 @@ class SyncCryptoVerifier(
       case None =>
         for {
           validKeys <- getValidKeys(topologySnapshot, signers, usage)
-          _ <- verifySignatureWithLongTermKey(
+          keyToUse <- determineLongTermKeyForVerification(
             validKeys,
-            hash,
-            signature,
+            signature.authorizingLongTermKey,
             signerStr,
-            usage,
           )
+          _ <- verifyPublicApiWithLongTermKeys
+            .verifySignature(hash, keyToUse, signature, usage)
+            .toEitherT[FutureUnlessShutdown]
         } yield ()
     }
 
@@ -376,6 +423,35 @@ class SyncCryptoVerifier(
         usage,
       )
     )
+
+  /** Only verifies key usage, not the actual signature */
+  def verifyKeyUsage(
+      topologySnapshot: TopologySnapshot,
+      signer: Member,
+      signedBy: Fingerprint,
+      signatureDelegationO: Option[SignatureDelegation],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    signatureDelegationO match {
+      case Some(signatureDelegation) =>
+        determineSessionKeyIsValid(
+          signatureDelegation,
+          topologySnapshot,
+          validKeysO = None,
+          signers = Seq(signer),
+          signerStr = signer.toString,
+          usage: NonEmpty[Set[SigningKeyUsage]],
+        )
+      case None =>
+        for {
+          validKeys <- getValidKeys(topologySnapshot, Seq(signer), usage)
+          _ <- determineLongTermKeyForVerification(
+            validKeys,
+            Signature.authorizingLongTermKey(signedBy, signatureDelegationO),
+            signer.toString,
+          )
+        } yield ()
+    }
 
   /** Verifies multiple group signatures using the currently active signing keys of the different
     * signers in the current topology state.

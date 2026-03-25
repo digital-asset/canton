@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf.language
 package iterable
 
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 
 private[lf] object TypeIterable {
   that =>
@@ -26,7 +26,7 @@ private[lf] object TypeIterable {
         fields.values
     }
 
-  private def iterator(expr0: Expr): Iterator[Type] = {
+  private def iterator(expr0: Expr): Iterator[Type] =
     expr0 match {
       case ERecCon(tycon, fields @ _) =>
         Iterator(toType(tycon)) ++
@@ -112,7 +112,6 @@ private[lf] object TypeIterable {
           ETyAbs(_, _) | EExperimental(_, _) =>
         ExprIterable.iterator(expr0).flatMap(iterator(_))
     }
-  }
 
   private def iterator(update: Update): Iterator[Type] =
     update match {
@@ -149,7 +148,8 @@ private[lf] object TypeIterable {
       case UpdateEmbedExpr(typ, body) =>
         Iterator(typ) ++
           iterator(body)
-      case UpdateGetTime | UpdateLedgerTimeLT(_) | UpdateFetchByKey(_) | UpdateLookupByKey(_) | UpdateQueryNByKey(_) =>
+      case UpdateGetTime | UpdateLedgerTimeLT(_) | UpdateFetchByKey(_) | UpdateLookupByKey(_) |
+          UpdateQueryNByKey(_) =>
         ExprIterable.iterator(update).flatMap(iterator(_))
       case UpdateTryCatchV1(typ, body, binder @ _, handler) =>
         Iterator(typ) ++

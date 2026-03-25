@@ -236,7 +236,7 @@ class GrpcSequencerInitializationService(
       )
 
       physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters)
-      expectedUpgradePSIdO = genesisState
+      expectedUpgradePsidO = genesisState
         .collectOfMapping[LsuAnnouncement]
         .collectLatestByUniqueKey
         .collectOfType[
@@ -248,13 +248,13 @@ class GrpcSequencerInitializationService(
 
       // If there's an announcement in the topology snapshot, we expect that the sequencer being initialized is the successor
       _ <- EitherT.fromEither[Future](
-        expectedUpgradePSIdO.fold(Right(()): Either[RpcError, Unit])(expectedUpgradePSId =>
+        expectedUpgradePsidO.fold(Right(()): Either[RpcError, Unit])(expectedUpgradePsid =>
           Either.cond(
-            expectedUpgradePSId == physicalSynchronizerId,
+            expectedUpgradePsid == physicalSynchronizerId,
             (),
             TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
               physicalSynchronizerId,
-              expectedUpgradePSId,
+              expectedUpgradePsid,
             ),
           )
         )

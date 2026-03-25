@@ -149,15 +149,27 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Syn
     OptionT.apply(storage.query(selectAction, functionFullName))
   }
 
-  override def getAll(operationName: NonEmptyString)(implicit
+  override def getAll(
+      operationName: NonEmptyString,
+      synchronizerId: Option[SId] = None,
+      operationKey: Option[String] = None,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[PendingOperation[Op, SId]]] = {
-    val selectAction =
+
+    import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain.*
+
+    val baseQuery =
       sql"""
         select operation_name, operation_key, operation, synchronizer_id
         from common_pending_operations
         where operation_name = ${operationName.unwrap}
-      """.as[PendingOperation[Op, SId]]
+      """
+
+    val syncFilter = synchronizerId.fold(sql"")(id => sql" and synchronizer_id = $id")
+    val keyFilter = operationKey.fold(sql"")(key => sql" and operation_key = $key")
+
+    val selectAction = (baseQuery ++ syncFilter ++ keyFilter).as[PendingOperation[Op, SId]]
     storage.query(selectAction, functionFullName).map(_.toSet)
   }
 }

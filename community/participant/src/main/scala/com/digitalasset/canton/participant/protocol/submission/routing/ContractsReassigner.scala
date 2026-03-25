@@ -40,9 +40,9 @@ private[routing] class ContractsReassigner(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit] =
     if (synchronizerRankTarget.reassignments.nonEmpty) {
-      val targetPSId = synchronizerRankTarget.synchronizerId
+      val targetPsid = synchronizerRankTarget.synchronizerId
       logger.info(
-        s"Automatic transaction reassignment to synchronizer $targetPSId"
+        s"Automatic transaction reassignment to synchronizer $targetPsid"
       )
 
       def getStakeholders(
@@ -86,13 +86,13 @@ private[routing] class ContractsReassigner(
                 synchronizerState.getTopologySnapshotFor(sourceSynchronizerId)
               )
               targetTopology <- EitherT.fromEither[FutureUnlessShutdown](
-                synchronizerState.getTopologySnapshotFor(targetPSId)
+                synchronizerState.getTopologySnapshotFor(targetPsid)
               )
 
               _ <- perform(
                 Source(sourceSynchronizerId),
                 Source(sourceTopology),
-                Target(targetPSId),
+                Target(targetPsid),
                 Target(targetTopology),
                 ReassignmentSubmitterMetadata(
                   submitter = lfParty,

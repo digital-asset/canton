@@ -10,6 +10,8 @@ import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
   AcsCounterParticipantConfigStore,
   AcsInspection,
@@ -25,8 +27,10 @@ import com.digitalasset.canton.store.{
   IndexedStringStore,
   IndexedSynchronizer,
   IndexedTopologyStoreId,
+  PendingOperationStore,
   SendTrackerStore,
 }
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.tracing.NoTracing
@@ -94,8 +98,22 @@ class DbLogicalSyncPersistentState(
     loggerFactory,
   )
 
+  override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
+    PendingOperationStore(
+      storage,
+      timeouts,
+      loggerFactory,
+      OnboardingClearanceOperation,
+      SynchronizerId.fromString,
+    )
+
   override def close(): Unit =
-    LifeCycle.close(activeContractStore, acsCommitmentStore)(logger)
+    LifeCycle.close(
+      activeContractStore,
+      acsCommitmentStore,
+      reassignmentStore,
+      pendingOnboardingClearanceStore,
+    )(logger)
 }
 
 class DbPhysicalSyncPersistentState(

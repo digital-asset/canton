@@ -6,6 +6,7 @@ package engine
 
 import cats.Order
 import cats.data.NonEmptySet
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data._
@@ -34,7 +35,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrivenPropertyChecks {
+class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
 
   import TransactionBuilder.Implicits.{defaultPackageId => _, _}
 
@@ -148,7 +149,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
         }
     """ (defaultParserParameters.copy(defaultPackageId = pkgId3))
 
-  private[this] val engine = Engine.DevEngine
+  private[this] val engine = Engine.DevEngine(loggerFactory)
 
   def preloadPackage(pkgId: Ref.PackageId, pkg: Ast.Package): Unit =
     engine
@@ -315,7 +316,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
         record: Value,
     ): CommittedTransaction = {
 
-      val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId)
+      val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId.apply)
 
       // We want the same node ids used each time for this test to create a new tree builder
       val txBuilder = new TreeTransactionBuilder {

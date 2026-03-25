@@ -5,7 +5,6 @@ package com.digitalasset.canton.performance.elements
 
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.javaapi.data.Party
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.LfPartyId
@@ -14,7 +13,6 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.acs.ContractStore
 import com.digitalasset.canton.performance.control.{LatencyMonitor, SubmissionRate}
-import com.digitalasset.canton.performance.elements.DriverStatus.{StepStatus, TraderStatus}
 import com.digitalasset.canton.performance.elements.dvp.TraderStats
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.performance.model.java.orchestration.TestProbeData
@@ -22,9 +20,7 @@ import com.digitalasset.canton.performance.{ActivePartyRole, Connectivity, RateS
 import com.digitalasset.canton.topology.SynchronizerId
 import org.apache.pekko.actor.ActorSystem
 
-import java.time.Instant
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters.*
 
@@ -69,6 +65,12 @@ abstract class ParticipantDriver(
           targetLatencySettings.targetLatencyMs,
           targetLatencySettings.adjustFactor,
         )
+
+      case (
+            targetLatencySettings: SubmissionRateSettings.TargetLatencyNew,
+            targetLatency: SubmissionRate.TargetLatencyViaPending,
+          ) =>
+        targetLatency.updateSettings(targetLatencySettings)
 
       case (_: SubmissionRateSettings.FixedRate, _: SubmissionRate) =>
         ()
@@ -123,6 +125,18 @@ abstract class ParticipantDriver(
   )
 
   protected val rate: SubmissionRate = role.settings.submissionRateSettings match {
+    case rs: SubmissionRateSettings.TargetLatencyNew =>
+      new SubmissionRate.TargetLatencyViaPending(
+        targetLatencyMs = rs.targetLatencyMs,
+        stepFactor = rs.stepFactor,
+        cutFactor = rs.cutFactor,
+        targetLatencyTolerance = rs.targetLatencyTolerance,
+        increaseThreshold = rs.increaseThreshold,
+        prefix = prefix,
+        metrics = metricsFactory,
+        loggerFactory = loggerFactory,
+        () => CantonTimestamp.now(),
+      )
     case targetLatency: SubmissionRateSettings.TargetLatency =>
       new SubmissionRate.TargetLatency(
         targetLatency.startRate,
@@ -170,17 +184,19 @@ abstract class ParticipantDriver(
   protected def registerIfNecessary(): EitherT[Future, String, Unit] =
     if (testResult.one(()).isEmpty && participantRequest.one(()).isEmpty) {
       val reference = s"requesting to registering $party with master"
+      val subF = submitCommand(
+        "registration-request",
+        new M.orchestration.ParticipationRequest(
+          party.getValue,
+          role.role,
+          masterParty.getValue,
+        ).create.commands.asScala.toSeq,
+        reference,
+        synchronizerId = Some(baseSynchronizerId),
+      )
+      rate.newSubmission(subF)
       val pr = mapCommand(
-        submitCommand(
-          "registration-request",
-          new M.orchestration.ParticipationRequest(
-            party.getValue,
-            role.role,
-            masterParty.getValue,
-          ).create.commands.asScala.toSeq,
-          reference,
-          synchronizerId = Some(baseSynchronizerId),
-        ),
+        subF,
         reference,
       )
       for {
@@ -188,16 +204,17 @@ abstract class ParticipantDriver(
         _ <-
           if (registerGenerator) {
             val reference = s"creating trade generator for $party"
-
+            val subF = submitCommand(
+              "trade-generator",
+              new M.generator.Generator(
+                party.getValue,
+                List().asJava,
+              ).create.commands.asScala.toSeq,
+              reference,
+            )
+            rate.newSubmission(subF)
             mapCommand(
-              submitCommand(
-                "trade-generator",
-                new M.generator.Generator(
-                  party.getValue,
-                  List().asJava,
-                ).create.commands.asScala.toSeq,
-                reference,
-              ),
+              subF,
               reference,
             )
           } else
@@ -208,7 +225,7 @@ abstract class ParticipantDriver(
     }
 
   protected def ensureFlag(flag: M.orchestration.ParticipantFlag): Unit =
-    testResult.one(()).foreach { res =>
+    testResult.one(()).foreach { case (_, res) =>
       if (res.data.flag != flag) {
         updateFlag(res, flag)
       }
@@ -230,6 +247,7 @@ abstract class ParticipantDriver(
         cmd,
         s"signalling to master change of my state from ${participant.data.flag} to $newFlag",
       )
+    rate.newSubmission(submissionF)
     setPending(testResult, participant.id, submissionF)
   }
 
@@ -242,21 +260,25 @@ trait StatsUpdater {
   protected def sendStatsUpdates(
       res: M.orchestration.TestParticipant.Contract,
       master: M.orchestration.TestRun.Contract,
-      proposalStats: TraderStats,
-      acceptanceStats: TraderStats,
+      proposalStats: Option[TraderStats],
+      acceptanceStats: Option[TraderStats],
   ): Unit = {
 
-    val prop = buildTestProbe(
-      proposalStats,
-      M.orchestration.ProbeType.PROPOSAL,
-      res.data.proposed,
-      master.data,
+    val prop = proposalStats.toList.flatMap(
+      buildTestProbe(
+        _,
+        M.orchestration.ProbeType.PROPOSAL,
+        res.data.proposed,
+        master.data,
+      )
     )
-    val accUp = buildTestProbe(
-      acceptanceStats,
-      M.orchestration.ProbeType.ACCEPTANCE,
-      res.data.accepted,
-      master.data,
+    val accUp = acceptanceStats.toList.flatMap(
+      buildTestProbe(
+        _,
+        M.orchestration.ProbeType.ACCEPTANCE,
+        res.data.accepted,
+        master.data,
+      )
     )
 
     if (prop.nonEmpty || accUp.nonEmpty) {
@@ -273,6 +295,7 @@ trait StatsUpdater {
 
       val cmd = res.id.exerciseUpdateStats((prop ++ accUp).toList.asJava).commands.asScala.toSeq
       val submissionF = submitCommand("update-stats", cmd, s"Updating test results " + textStr)
+      rate.newSubmission(submissionF)
       setPending(testResult, res.id, submissionF)
     }
   }
@@ -299,44 +322,6 @@ trait StatsUpdater {
       ) ++ buildTestProbe(stats, typ, obsIdx.toLong, master)
     } else
       Seq.empty
-  }
-
-  protected def updateTraderStats(
-      mode: M.orchestration.Mode,
-      proposalStats: TraderStats,
-      proposalsOpen: Int,
-      acceptanceStats: TraderStats,
-      acceptsOpen: Int,
-      issuerStats: Seq[(Party, Int, Int)],
-      counterPartyStats: Seq[(Party, Int, Int)],
-  ): Unit = {
-
-    val lastStatsUpdate = currentStatus.get() match {
-      case Some(ts: TraderStatus) => ts.timestamp
-      case _ => Instant.MIN
-    }
-    if (lastStatsUpdate < Instant.now.minusMillis(500)) {
-      currentStatus.set(
-        Some(
-          TraderStatus(
-            name = name,
-            timestamp = Instant.now,
-            mode = mode.toString,
-            currentRate = rate.currentRate,
-            maxRate = rate.maxRate,
-            latencyMs = rate.latencyMs,
-            pending = rate.pending,
-            failed = rate.failed,
-            proposals =
-              StepStatus(proposalStats.submitted, proposalStats.observed, open = proposalsOpen),
-            accepts =
-              StepStatus(acceptanceStats.submitted, acceptanceStats.observed, open = acceptsOpen),
-            counterParties = counterPartyStats,
-            issuers = issuerStats,
-          )
-        )
-      )
-    }
   }
 
   protected def currentMaxTestResult(): (Int, Int) = {

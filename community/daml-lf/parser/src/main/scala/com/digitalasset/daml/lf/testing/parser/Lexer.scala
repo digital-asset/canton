@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf.testing.parser
 
 import com.digitalasset.daml.lf.data
 import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.testing.parser.Token._
+import com.digitalasset.daml.lf.testing.parser.Token.*
 
 import scala.util.Try
 import scala.util.matching.Regex
@@ -16,12 +16,11 @@ private[parser] object Lexer extends RegexParsers {
 
   protected override val whiteSpace: Regex = """(\s|//.*|(?m)/\*(\*(?!/)|[^*])*\*/)+""".r
 
-  def lex(s: String): List[(Position, Token)] = {
+  def lex(s: String): List[(Position, Token)] =
     parseAll(phrase(rep(positionedToken)), s) match {
       case Success(l, _) => l
       case f: NoSuccess => throw LexingError(f.msg)
     }
-  }
 
   val keywords: Map[String, Token] = Map(
     "Cons" -> `cons`,

@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package language
 
 import com.digitalasset.daml.lf.data.{Numeric, Ref}
-import com.digitalasset.daml.lf.language.{Util => AstUtil}
+import com.digitalasset.daml.lf.language.Util as AstUtil
 
 import scala.collection.immutable.ArraySeq
 
@@ -95,7 +95,7 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
   self =>
 
   import TypeDestructor.SerializableTypeF
-  import SerializableTypeF._
+  import SerializableTypeF.*
 
   // Only set shouldCheckDataSerializable as false in daml-script, for a temporary (fixed in 3.4) workaround
   def destruct(
@@ -118,7 +118,10 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
     typ0 match {
       case Ast.TSynApp(tysyn, synArgs) =>
         for {
-          synDef <- pkgInterface.lookupTypeSyn(tysyn).left.map(TypeDestructor.Error.LookupError.apply)
+          synDef <- pkgInterface
+            .lookupTypeSyn(tysyn)
+            .left
+            .map(TypeDestructor.Error.LookupError.apply)
           params = synDef.params
           subst <- Either.cond(
             params.length == synArgs.length,
@@ -135,7 +138,10 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
             .left
             .map(TypeDestructor.Error.LookupError.apply)
           pkgName = pkg.metadata.name
-          dataDef <- pkgInterface.lookupDataType(tycon).left.map(TypeDestructor.Error.LookupError.apply)
+          dataDef <- pkgInterface
+            .lookupDataType(tycon)
+            .left
+            .map(TypeDestructor.Error.LookupError.apply)
           _ <- Either.cond(
             dataDef.serializable || !shouldCheckDataSerializable,
             (),

@@ -59,12 +59,11 @@ object Config {
 
 object ReplayProfile {
 
-  def main(args: Array[String]) = {
+  def main(args: Array[String]) =
     Config.parse(args) match {
       case None => sys.exit(1)
       case Some(config) => run(config)
     }
-  }
 
   def run(config: Config) = {
     val Array(modNameStr, tmplNameStr, name) = config.choiceName.split(":")
@@ -81,7 +80,8 @@ object ReplayProfile {
         choice,
         0,
         Some(config.profileDir),
-        contractIdVersion = ContractIdVersion.V1)
+        contractIdVersion = ContractIdVersion.V1,
+      )
     val benchmark = config.darFile match {
       case Some(path) =>
         val loadedPackages = TransactionSnapshot.loadDar(path)

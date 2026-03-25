@@ -91,8 +91,6 @@ class SynchronizerDisconnectAndReconnectTestPostgres
   registerPlugin(
     new UseConfigTransforms(
       Seq(
-        // Enable replication to use the DbStorageMulti
-        ConfigTransforms.enableReplicatedParticipants("participant1", "participant2"),
         // Limit the number of connections available to increase the likelihood of connection starving
         // and triggering a `NoActiveConnectionAvailable`
         ConfigTransforms.setParticipantMaxConnections(PositiveInt.one),

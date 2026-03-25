@@ -58,7 +58,7 @@ trait ResetStorageBackend {
   def resetAll(connection: Connection): Unit
 }
 
-trait IngestionStorageBackend[DB_BATCH] {
+trait IngestionStorageBackend[DbBatch] {
 
   /** The CPU intensive batching operation hides the batching logic, and the mapping to the database
     * specific representation of the inserted data. This should be pure CPU logic without IO.
@@ -70,7 +70,7 @@ trait IngestionStorageBackend[DB_BATCH] {
     * @return
     *   the database-specific batch DTO, which can be inserted via insertBatch
     */
-  def batch(dbDtos: Vector[DbDto], stringInterning: StringInterning): DB_BATCH
+  def batch(dbDtos: Vector[DbDto], stringInterning: StringInterning): DbBatch
 
   /** Using a JDBC connection, a batch will be inserted into the database. No significant CPU load,
     * mostly blocking JDBC communication with the database backend.
@@ -80,7 +80,7 @@ trait IngestionStorageBackend[DB_BATCH] {
     * @param batch
     *   to be inserted
     */
-  def insertBatch(connection: Connection, batch: DB_BATCH): Unit
+  def insertBatch(connection: Connection, batch: DbBatch): Unit
 
   /** Deletes all partially ingested data, written during a non-graceful stop of previous indexing.
     * No significant CPU load, mostly blocking JDBC communication with the database backend.

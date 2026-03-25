@@ -31,6 +31,8 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   OnboardingStateResponse,
   OnboardingStateV2Request,
   OnboardingStateV2Response,
+  PerformLsuSequencingTestRequest,
+  PerformLsuSequencingTestResponse,
   SetLsuTrafficControlStateRequest,
   SetLsuTrafficControlStateResponse,
   SetThroughputCapRequest,
@@ -39,7 +41,7 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   SetTrafficPurchasedResponse,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
+import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, SubmissionRequestType}
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
@@ -539,6 +541,24 @@ class GrpcSequencerAdministrationService(
         )
       }
     mapErrNewEUS(wrapErrUS(result))
+  }
 
+  override def performLsuSequencingTest(
+      request: PerformLsuSequencingTestRequest
+  ): Future[PerformLsuSequencingTestResponse] = {
+    implicit val traceContext = TraceContextGrpc.fromGrpcContext
+
+    val result: EitherT[FutureUnlessShutdown, RpcError, PerformLsuSequencingTestResponse] = for {
+      mediatorGroup <- wrapErrUS(
+        ProtoConverter.parseNonNegativeInt(
+          "recipient_mediator_group",
+          request.recipientMediatorGroup,
+        )
+      ).map(MediatorGroupRecipient(_))
+
+      _ <- sequencer.performLsuSequencingTest(mediatorGroup).leftMap(_.toCantonRpcError)
+    } yield PerformLsuSequencingTestResponse()
+
+    mapErrNewEUS(result)
   }
 }

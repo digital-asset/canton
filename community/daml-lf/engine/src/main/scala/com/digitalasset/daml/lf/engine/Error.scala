@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.transaction.NodeId
@@ -108,8 +109,12 @@ object Error {
         location: String,
         override val message: String,
         cause: Option[Throwable],
-    ) extends Error
-        with InternalError
+    )(implicit loggingContext: ErrorLoggingContext) extends Error with InternalError {
+      protected override def logError(): Unit = {
+        loggingContext.error(s"LF internal error in $location: $message")
+        cause.foreach(err => loggingContext.error(s"root cause: ${err.getMessage}", err))
+      }
+    }
 
     final case class Lookup(lookupError: language.LookupError) extends Error {
       override def message: String = lookupError.pretty

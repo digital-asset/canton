@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy._
@@ -39,12 +38,6 @@ object ScriptEngine {
   type ExtendedValueTypeRep = GenValue.TypeRep[SPAP]
   val ExtendedValueTypeRep: GenValue.TypeRep.type = GenValue.TypeRep
   type ExtendedValue = GenValue[GenValue.Extension[SPAP]]
-
-  type TraceLog = speedy.TraceLog
-  type WarningLog = speedy.WarningLog
-
-  def newTraceLog = Machine.newTraceLog
-  def newWarningLog = Machine.newWarningLog
 
   val defaultCompilerConfig: Compiler.Config = {
     import Compiler._
@@ -140,12 +133,9 @@ object ScriptEngine {
       computationMode: ExtendedValueComputationMode,
       cancelled: () => Option[RuntimeException],
       compiledPackages: CompiledPackages,
+      logger: MachineLogger,
       iterationsBetweenInterruptions: Long = Long.MaxValue,
-      traceLog: TraceLog = newTraceLog,
-      warningLog: WarningLog = newWarningLog,
       convertLegacyExceptions: Boolean = true,
-  )(implicit
-      loggingContext: LoggingContext
   ): Either[Either[RuntimeException, SError], ExtendedValue] = {
     val translator = new ExtendedValueTranslator(compiledPackages.pkgInterface)
     @nowarn("msg=dead code following this construct")
@@ -166,9 +156,8 @@ object ScriptEngine {
       machine = Machine.fromPureSExpr(
         compiledPackages,
         sExpr,
+        logger,
         iterationsBetweenInterruptions,
-        traceLog,
-        warningLog,
         Machine.newProfile,
         convertLegacyExceptions,
       )

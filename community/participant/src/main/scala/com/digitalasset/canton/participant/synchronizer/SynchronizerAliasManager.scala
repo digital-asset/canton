@@ -51,7 +51,7 @@ class SynchronizerAliasManager private (
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerAliasManager.Error, Unit] = {
     val mappingExists =
-      synchronizers.get().aliasToPSIds.get(synchronizerAlias).exists(_.contains(synchronizerId))
+      synchronizers.get().aliasToPsids.get(synchronizerAlias).exists(_.contains(synchronizerId))
 
     if (mappingExists)
       EitherT.rightT[FutureUnlessShutdown, SynchronizerAliasManager.Error](())
@@ -70,13 +70,13 @@ class SynchronizerAliasManager private (
   override def physicalSynchronizerIds(id: SynchronizerId): Set[PhysicalSynchronizerId] = {
     val s = synchronizers.get()
 
-    Option(s.aliasToId.inverse().get(id)).map(s.aliasToPSIds).map(_.forgetNE).getOrElse(Set.empty)
+    Option(s.aliasToId.inverse().get(id)).map(s.aliasToPsids).map(_.forgetNE).getOrElse(Set.empty)
   }
 
   override def synchronizerIdsForAlias(
       alias: SynchronizerAlias
   ): Option[NonEmpty[Set[PhysicalSynchronizerId]]] =
-    synchronizers.get.aliasToPSIds.get(alias)
+    synchronizers.get.aliasToPsids.get(alias)
 
   /** Return known synchronizer aliases
     *
@@ -84,7 +84,7 @@ class SynchronizerAliasManager private (
     * [[com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore]] to check the
     * status
     */
-  override def aliases: Set[SynchronizerAlias] = synchronizers.get().aliasToPSIds.keySet
+  override def aliases: Set[SynchronizerAlias] = synchronizers.get().aliasToPsids.keySet
 
   /** Return known synchronizer physical ids
     *
@@ -93,7 +93,7 @@ class SynchronizerAliasManager private (
     * status
     */
   override def physicalSynchronizerIds: Set[PhysicalSynchronizerId] =
-    synchronizers.get().aliasToPSIds.values.flatten.toSet
+    synchronizers.get().aliasToPsids.values.flatten.toSet
 
   /** Return known logical synchronizer ids
     *
@@ -102,7 +102,7 @@ class SynchronizerAliasManager private (
     * status
     */
   override def logicalSynchronizerIds: Set[SynchronizerId] =
-    synchronizers.get().aliasToPSIds.values.map(_.map(_.logical)).toSet.flatten
+    synchronizers.get().aliasToPsids.values.map(_.map(_.logical)).toSet.flatten
 
   private def addMapping(
       synchronizerAlias: SynchronizerAlias,
@@ -143,7 +143,7 @@ object SynchronizerAliasManager {
     }
 
   private final case class Synchronizers(
-      aliasToPSIds: Map[SynchronizerAlias, NonEmpty[Set[PhysicalSynchronizerId]]],
+      aliasToPsids: Map[SynchronizerAlias, NonEmpty[Set[PhysicalSynchronizerId]]],
       aliasToId: BiMap[SynchronizerAlias, SynchronizerId],
   )
 
@@ -151,7 +151,7 @@ object SynchronizerAliasManager {
     def apply(
         aliasToIds: Map[SynchronizerAlias, NonEmpty[Set[PhysicalSynchronizerId]]]
     ): Synchronizers = Synchronizers(
-      aliasToPSIds = aliasToIds,
+      aliasToPsids = aliasToIds,
       aliasToId = HashBiMap.create[SynchronizerAlias, SynchronizerId](
         aliasToIds.view.mapValues(_.head1.logical).toMap.asJava
       ),

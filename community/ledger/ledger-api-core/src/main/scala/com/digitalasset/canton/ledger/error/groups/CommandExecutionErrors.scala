@@ -423,6 +423,25 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
     }
 
     @Explanation(
+      """This error occurs if a Daml transaction fails due to a rollback of an effectful node."""
+    )
+    @Resolution("This error type occurs if there is an application error.")
+    object EffectfulRollback
+        extends ErrorCode(
+          id = "DAML_EFFECTFUL_ROLLBACK_ERROR",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      final case class Reject(
+          override val cause: String
+      )(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause = cause
+          )
+    }
+
+    @Explanation(
       """This error occurs when trying to hash an ill-formed contract."""
     )
     @Resolution(

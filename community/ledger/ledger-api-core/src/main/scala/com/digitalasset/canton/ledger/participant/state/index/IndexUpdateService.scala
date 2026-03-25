@@ -21,6 +21,7 @@ trait IndexUpdateService extends LedgerEndService {
       begin: Option[Offset],
       endAt: Option[Offset],
       updateFormat: UpdateFormat,
+      descendingOrder: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed]
 
   def getUpdateBy(

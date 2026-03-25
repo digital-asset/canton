@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package engine
 
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
@@ -36,7 +37,8 @@ class ValidateContractInstanceSpec
     with EitherValues
     with Matchers
     with TableDrivenPropertyChecks
-    with Inside {
+    with Inside
+    with SuppressingLogging {
 
   implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
@@ -154,7 +156,8 @@ class ValidateContractInstanceSpec
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId1 -> pkg1, pkgId2 -> pkg2), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange)
+    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    loggerFactory,
   )
 
   val alice = Party.assertFromString("alice")

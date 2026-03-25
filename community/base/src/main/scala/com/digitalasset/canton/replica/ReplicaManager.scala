@@ -81,6 +81,9 @@ abstract class ReplicaManager(
         if (replicaStateRef.get().contains(newState)) {
           logger.debug(s"Replica already in state $newState, ignoring replica state change")
           FutureUnlessShutdown.unit
+        } else if (replicaStateRef.get().isEmpty) {
+          logger.info(s"Replica not yet initialized, ignoring replica state change to $newState")
+          FutureUnlessShutdown.unit
         } else {
           if (setNewStateEagerly) {
             // Set the state to transition from one state to another before running the body
@@ -182,4 +185,7 @@ sealed trait ReplicaState extends Product with Serializable
 object ReplicaState {
   case object Active extends ReplicaState
   case object Passive extends ReplicaState
+
+  /** An explicit initialization state from which we can trigger a transition to active */
+  case object Init extends ReplicaState
 }

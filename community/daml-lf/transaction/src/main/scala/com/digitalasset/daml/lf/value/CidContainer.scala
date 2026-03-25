@@ -14,14 +14,13 @@ trait CidContainer[+A] {
 
   def mapCid(f: ContractId => ContractId): A
 
-  def foreachCid(f: ContractId => Unit) = {
-    discard(mapCid(cid => {
+  def foreachCid(f: ContractId => Unit) =
+    discard(mapCid { cid =>
       f(cid)
       cid
-    }))
-  }
+    })
 
-  def cids: Set[ContractId] = collectCids(Set.empty)
+  lazy val cids: Set[ContractId] = collectCids(Set.empty)
 
   def collectCids(acc: Set[ContractId]): Set[ContractId] = {
     var acc_ = acc

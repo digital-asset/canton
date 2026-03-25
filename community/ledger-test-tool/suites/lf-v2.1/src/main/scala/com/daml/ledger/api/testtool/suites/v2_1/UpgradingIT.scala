@@ -1020,6 +1020,7 @@ object UpgradingIT {
           includeTopologyEvents = None,
         )
       ),
+      descendingOrder = false,
     )
 
   def eventFormat(

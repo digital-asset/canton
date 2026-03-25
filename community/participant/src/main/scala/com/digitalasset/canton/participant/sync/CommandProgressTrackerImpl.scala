@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
+import com.digitalasset.canton.ledger.participant.state.{SynchronizerUpdate, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.CommandProgressTrackerConfig.{
   defaultMaxFailed,
@@ -110,7 +111,7 @@ class CommandProgressTrackerImpl(
           .updateAndGet(x =>
             x.copy(timings =
               (
-                prevStage.description,
+                stage.description,
                 TimeUnit.NANOSECONDS.toMillis(cur - prevTime).toInt,
               ) +: x.timings
             )
@@ -164,7 +165,7 @@ class CommandProgressTrackerImpl(
       )
 
     def succeeded(): Unit = {
-      recordProgress(Phase7_publishing)
+      recordProgress(Phase7b_indexing)
       updateWithStatus(CompletionFromTransaction.OkStatus, CommandState.COMMAND_STATE_SUCCEEDED)
     }
 
@@ -440,6 +441,24 @@ class CommandProgressTrackerImpl(
   override def validationVerdict(rootHash: RootHash): Unit =
     pendingByRootHash.get(rootHash.unwrap).foreach(_.recordProgress(Phase56_MediatorVerdict))
 
+  override def indexingStarts(update: Update): Unit = update match {
+    case update: SynchronizerUpdate =>
+      update match {
+        case accepted: Update.TransactionAccepted =>
+          accepted.completionInfoO.foreach { completion =>
+            val key = (
+              completion.commandId,
+              completion.userId,
+              completion.actAs.map(_.toString).toSet,
+              completion.submissionId,
+            )
+            pending.get(key).foreach(_.recordProgress(Phase7a_recordordering))
+          }
+        case _ => ()
+      }
+    case _ => ()
+  }
+
 }
 
 object CommandProgressTrackerImpl {
@@ -447,18 +466,20 @@ object CommandProgressTrackerImpl {
 
   private object Phase_Begin extends OrderedStage(ord = 0, "<begin>")
 
-  private object Phase1a_Interpretation extends OrderedStage(ord = 1, "interpretation")
+  private object Phase1a_Interpretation extends OrderedStage(ord = 1, "1a_interpretation")
 
-  private object Phase1b_ViewBuilding extends OrderedStage(ord = 2, "request-generation")
+  private object Phase1b_ViewBuilding extends OrderedStage(ord = 2, "1b_request-generation")
 
-  private object Phase2_Sequencing extends OrderedStage(ord = 3, "sequencing")
-  private object Phase2b_Queueing extends OrderedStage(ord = 4, "validation-queue")
-  private object Phase3_ConformanceChecking extends OrderedStage(ord = 5, "validation-conformance")
+  private object Phase2_Sequencing extends OrderedStage(ord = 3, "2a_sequencing")
+  private object Phase2b_Queueing extends OrderedStage(ord = 4, "2b_validation-queue")
+  private object Phase3_ConformanceChecking
+      extends OrderedStage(ord = 5, "3_validation-conformance")
 
-  private object Phase4_ConflictDetection extends OrderedStage(ord = 6, "validation-conflict")
+  private object Phase4_ConflictDetection extends OrderedStage(ord = 6, "4_validation-conflict")
 
-  private object Phase56_MediatorVerdict extends OrderedStage(ord = 7, "mediator-verdict")
+  private object Phase56_MediatorVerdict extends OrderedStage(ord = 7, "6_mediator-verdict")
 
-  private object Phase7_publishing extends OrderedStage(ord = 8, "publishing")
+  private object Phase7a_recordordering extends OrderedStage(ord = 8, "7a_recordordering")
+  private object Phase7b_indexing extends OrderedStage(ord = 9, "7b_indexing")
 
 }

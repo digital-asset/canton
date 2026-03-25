@@ -539,7 +539,7 @@ object TopologyTransactionProcessor {
 
   def createProcessorAndClientForSynchronizer(
       topologyStore: TopologyStore[TopologyStoreId.SynchronizerStore],
-      synchronizerUpgradeTime: Option[CantonTimestamp],
+      upgradeTimeFromPredecessor: Option[CantonTimestamp],
       pureCrypto: SynchronizerCryptoPureApi,
       parameters: CantonNodeParameters,
       topologyConfig: TopologyConfig,
@@ -584,7 +584,7 @@ object TopologyTransactionProcessor {
       staticSynchronizerParameters,
       topologyStore,
       cache,
-      synchronizerUpgradeTime,
+      upgradeTimeFromPredecessor,
       NoPackageDependencies,
       parameters.cachingConfigs,
       parameters.enableAdditionalConsistencyChecks,

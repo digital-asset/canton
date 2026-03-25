@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.speedy.SExpr._
@@ -18,9 +19,7 @@ import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import scala.collection.immutable.ArraySeq
 import scala.jdk.CollectionConverters._
 
-class ProfilerTest extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class ProfilerTest extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyChecks with SuppressingLogging {
 
   private implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
   private val pkgId = parserParameters.defaultPackageId
@@ -74,7 +73,7 @@ class ProfilerTest extends AnyWordSpec with Matchers with ScalaCheckDrivenProper
     val se = compiledPackages.compiler.unsafeCompile(e)
     val example: SExpr = SEApp(se, ArraySeq(SParty(party)))
     val machine =
-      Speedy.Machine.fromUpdateSExpr(compiledPackages, transactionSeed, example, Set(party))
+      Speedy.Machine.fromUpdateSExpr(compiledPackages, transactionSeed, example, Set(party), MachineLogger())
     val res = machine.run()
     res match {
       case SResultFinal(_) =>

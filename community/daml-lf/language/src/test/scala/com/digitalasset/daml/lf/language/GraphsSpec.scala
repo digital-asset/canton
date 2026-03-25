@@ -3,15 +3,15 @@
 
 package com.digitalasset.daml.lf.language
 
-import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.HashMap
 
 class GraphsSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
 
-  import Graphs._
+  import Graphs.*
 
   "topoSort" should {
 
@@ -43,7 +43,7 @@ class GraphsSpec extends AnyWordSpec with Matchers with TableDrivenPropertyCheck
     "successfully sort all edges of directed acyclic graph" in {
       dags.forEvery { dag =>
         val result = topoSort(dag)
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
 
         val Right(sortedEdges) = result
 
@@ -61,7 +61,7 @@ class GraphsSpec extends AnyWordSpec with Matchers with TableDrivenPropertyCheck
     "fail on cyclic graph and return a proper cycle" in {
       dcgs.forEvery { dcg =>
         val result = topoSort(dcg)
-        result shouldBe a[Left[_, _]]
+        result shouldBe a[Left[?, ?]]
 
         val Left(Cycle(loop)) = result
 

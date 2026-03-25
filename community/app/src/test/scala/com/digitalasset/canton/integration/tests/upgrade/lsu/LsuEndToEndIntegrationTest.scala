@@ -11,6 +11,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 
 import java.time.Duration
 import scala.jdk.CollectionConverters.*
@@ -68,11 +69,12 @@ sealed trait LsuEndToEndIntegrationTest extends LsuBase {
 
       eventually() {
         environment.simClock.foreach(_.advance(Duration.ofSeconds(1)))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
-        participants.all.forall(_.synchronizers.is_connected(fixture.currentPSId)) shouldBe false
+        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture.currentPsid)) shouldBe false
       }
 
       oldSynchronizerNodes.all.stop()
+      waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       /*
       We do several ping, disconnect, reconnect because reconnect comes with crash-recovery

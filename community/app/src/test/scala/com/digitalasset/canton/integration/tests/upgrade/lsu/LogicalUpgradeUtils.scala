@@ -44,9 +44,9 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     */
   protected def exportNodesData(
       nodes: SynchronizerNodes,
-      successorPSId: PhysicalSynchronizerId,
+      successorPsid: PhysicalSynchronizerId,
   ): File = {
-    val exportDirectory: File = File.newTemporaryDirectory(s"$testName-$successorPSId")
+    val exportDirectory: File = File.newTemporaryDirectory(s"$testName-$successorPsid")
 
     logger.info(s"Starting to export nodes data for upgrade into directory $exportDirectory")(
       TraceContext.empty
@@ -105,13 +105,10 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       )
     }
 
-    def writeSequencerGenesisState(sequencer: SequencerReference): Unit = {
-      val genesisState = sequencer.topology.transactions.sequencer_lsu_state()
-      BinaryFileUtil.writeByteStringToFile(
-        s"${exportDirectory / sequencer.name}-genesis-state",
-        genesisState,
+    def writeSequencerGenesisState(sequencer: SequencerReference): Unit =
+      sequencer.topology.transactions.sequencer_lsu_state(
+        outputFile = s"${exportDirectory / sequencer.name}-genesis-state"
       )
-    }
 
     exportDirectory
   }
@@ -180,7 +177,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     val files = UpgradeDataFiles.from(oldNodeName, exportDirectory)
     initializeSequencer(
       migratedSequencer,
-      files.genesisState,
+      files.genesisStateFile.pathAsString,
       newStaticSynchronizerParameters,
     )
   }
@@ -196,7 +193,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     */
   def migrateMediator(
       migratedMediator: MediatorReference,
-      newPSId: PhysicalSynchronizerId,
+      newPsid: PhysicalSynchronizerId,
       newSequencers: Seq[SequencerReference],
       exportDirectory: File,
       oldNodeName: String,
@@ -206,7 +203,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     migrateNodeGeneric(migratedMediator, exportDirectory, oldNodeName)
 
     migratedMediator.setup.assign(
-      newPSId,
+      newPsid,
       SequencerConnections.tryMany(
         newSequencers
           .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
@@ -243,13 +240,13 @@ trait LogicalUpgradeUtils extends FutureHelpers {
 
   private def initializeSequencer(
       migrated: SequencerReference,
-      genesisState: ByteString,
+      genesisStateFile: String,
       staticSynchronizerParameters: StaticSynchronizerParameters,
   ): Unit = {
     migrated.health.wait_for_ready_for_initialization()
     migrated.setup.initialize_from_lsu_predecessor(
-      genesisState,
-      staticSynchronizerParameters,
+      inputFile = genesisStateFile,
+      synchronizerParameters = staticSynchronizerParameters,
     )
   }
 }
@@ -280,9 +277,6 @@ object LogicalUpgradeUtils {
 
     def authorizedStore: ByteString =
       BinaryFileUtil.tryReadByteStringFromFile(authorizedStoreFile.canonicalPath)
-
-    def genesisState: ByteString =
-      BinaryFileUtil.tryReadByteStringFromFile(genesisStateFile.canonicalPath)
   }
 
   object UpgradeDataFiles {

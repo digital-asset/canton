@@ -470,6 +470,7 @@ object TopologyAdminCommands {
     final case class ListLsuSequencerConnectionSuccessor(
         query: BaseQuery,
         filterSequencerId: String,
+        filterSuccessorPhysicalSynchronizerId: String,
     ) extends BaseCommand[
           v30.ListLsuSequencerConnectionSuccessorRequest,
           v30.ListLsuSequencerConnectionSuccessorResponse,
@@ -482,6 +483,7 @@ object TopologyAdminCommands {
           new ListLsuSequencerConnectionSuccessorRequest(
             baseQuery = Some(query.toProtoV1),
             filterSequencerId = filterSequencerId,
+            filterSuccessorPhysicalSynchronizerId = filterSuccessorPhysicalSynchronizerId,
           )
         )
 

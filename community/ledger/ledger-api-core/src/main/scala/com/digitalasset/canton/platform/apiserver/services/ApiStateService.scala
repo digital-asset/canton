@@ -7,7 +7,7 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.logging.entries.LoggingEntries
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.ledger.api.ValidationLogger
+import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
 import com.digitalasset.canton.ledger.api.validation.{
@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   FormatValidator,
   ParticipantOffsetValidator,
 }
+import com.digitalasset.canton.ledger.api.{AcsContinuationToken, ValidationLogger}
 import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.ledger.participant.state.index.{
   IndexActiveContractsService as ACSBackend,
@@ -44,6 +45,7 @@ final class ApiStateService(
     syncService: SyncService,
     updateService: IndexUpdateService,
     metrics: LedgerApiServerMetrics,
+    participantId: LedgerParticipantId,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -66,6 +68,11 @@ final class ApiStateService(
       val result = for {
         eventFormatProto <- requirePresence(request.eventFormat, "event_format")
         eventFormat <- FormatValidator.validate(eventFormatProto)
+        checksum = AcsContinuationToken.calcChecksum(request, participantId)
+        continuationToken <- AcsContinuationToken.decodeAndValidate(
+          checksum,
+          request.streamContinuationToken,
+        )
 
         activeAt <- ParticipantOffsetValidator.validateNonNegative(
           request.activeAtOffset,
@@ -82,7 +89,9 @@ final class ApiStateService(
             .getActiveContracts(
               eventFormat = eventFormat,
               activeAt = activeAt,
+              continuationToken = continuationToken,
             )
+            .map(_.apply(checksum))
         }
       }
       result

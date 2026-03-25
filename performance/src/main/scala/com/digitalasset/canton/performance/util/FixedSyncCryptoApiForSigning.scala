@@ -227,11 +227,11 @@ class FixedSyncCryptoApiForSigning(
         traceContext: TraceContext
     ): FutureUnlessShutdown[Seq[DynamicSynchronizerParametersWithValidity]] = notImplementedUS
 
-    override def synchronizerUpgradeOngoing()(implicit
+    override def announcedLsu()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] = notImplementedUS
 
-    override def sequencerConnectionSuccessors()(implicit
+    override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] = notImplementedUS
 
@@ -269,6 +269,14 @@ class FixedSyncCryptoApiForSigning(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] = notImplementedE
+
+  override def verifyKeyUsage(
+      signer: Member,
+      signedBy: Fingerprint,
+      signatureDelegation: Option[SignatureDelegation],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    notImplementedE
 
   override def verifyMediatorSignatures(
       hash: Hash,
@@ -308,4 +316,5 @@ class FixedSyncCryptoApiForSigning(
     FutureUnlessShutdown.failed(new NotImplementedError())
 
   def notImplementedE[A, B]: EitherT[FutureUnlessShutdown, A, B] = EitherT.right(notImplementedUS)
+
 }

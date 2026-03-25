@@ -37,10 +37,6 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, StaticSynchronizerParameters]
 
-  def getSynchronizerId()(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, PhysicalSynchronizerId]
-
   def handshake(
       request: HandshakeRequest,
       dontWarnOnDeprecatedPV: Boolean,

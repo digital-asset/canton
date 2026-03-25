@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.
   SyncStateInspectionError,
 }
 import com.digitalasset.canton.participant.protocol.RequestJournal
+import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProviderFactory
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail
@@ -1150,6 +1151,14 @@ final class SyncStateInspection(
 
     timeouts.inspection.await(functionFullName)(resultF)
   }
+
+  def lookupDeduplicationData(changeIdHash: ChangeIdHash)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CommandDeduplicationData]] =
+    participantNodePersistentState.value.commandDeduplicationStore
+      .lookup(changeIdHash)
+      .value
+      .failOnShutdownToAbortException("lookupDeduplicationData")
 }
 
 object SyncStateInspection {

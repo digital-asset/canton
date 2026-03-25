@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import cats.syntax.option.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext
@@ -10,7 +11,10 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
-import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice
+import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
+  BackwardBufferSlice,
+  BufferSlice,
+}
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import org.apache.pekko.NotUsed
@@ -34,14 +38,14 @@ import scala.concurrent.{ExecutionContext, Future}
   *   construction.
   * @param executionContext
   *   The execution context
-  * @tparam PERSISTENCE_FETCH_ARGS
+  * @tparam PersistenceFetchArgs
   *   The Ledger API streams filter type of fetches from persistence.
-  * @tparam API_RESPONSE
+  * @tparam ApiResponse
   *   The API stream response type.
   */
-class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
+class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
     inMemoryFanoutBuffer: InMemoryFanoutBuffer,
-    fetchFromPersistence: FetchFromPersistence[PERSISTENCE_FETCH_ARGS, API_RESPONSE],
+    fetchFromPersistence: FetchFromPersistence[PersistenceFetchArgs, ApiResponse],
     bufferedStreamEventsProcessingParallelism: Int,
     metrics: LedgerApiServerMetrics,
     streamName: String,
@@ -68,23 +72,26 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
     *   To Ledger API stream response converter.
     * @param loggingContext
     *   The logging context.
-    * @tparam BUFFER_OUT
+    * @param descendingOrder
+    *   If true then events will be streamed from the most recent ones to the oldest.
+    * @tparam BufferOut
     *   The output type of elements retrieved from the buffer.
     * @return
     *   The Ledger API stream source.
     */
-  def stream[BUFFER_OUT](
+  def stream[BufferOut](
       startInclusive: Offset,
       endInclusive: Offset,
-      persistenceFetchArgs: PERSISTENCE_FETCH_ARGS,
-      bufferFilter: TransactionLogUpdate => Option[BUFFER_OUT],
-      toApiResponse: BUFFER_OUT => Future[API_RESPONSE],
+      persistenceFetchArgs: PersistenceFetchArgs,
+      bufferFilter: TransactionLogUpdate => Option[BufferOut],
+      toApiResponse: BufferOut => Future[ApiResponse],
+      descendingOrder: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, API_RESPONSE), NotUsed] = {
+  ): Source[(Offset, ApiResponse), NotUsed] = {
     def toApiResponseStream(
-        slice: Vector[(Offset, BUFFER_OUT)]
-    ): Source[(Offset, API_RESPONSE), NotUsed] =
+        slice: Vector[(Offset, BufferOut)]
+    ): Source[(Offset, ApiResponse), NotUsed] =
       if (slice.isEmpty) Source.empty
       else
         Source(slice)
@@ -98,42 +105,79 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
             )
           }
 
-    val source = Source
-      .unfoldAsync(startInclusive) {
-        case scanFrom if scanFrom <= endInclusive =>
-          Future {
-            val bufferSlice = Timed.value(
-              bufferReaderMetrics.slice,
-              inMemoryFanoutBuffer.slice(
-                startInclusive = scanFrom,
-                endInclusive = endInclusive,
-                filter = bufferFilter,
-              ),
-            )
+    val source = if (descendingOrder) {
+      Source
+        .unfoldAsync(endInclusive.some) {
+          case Some(end) if startInclusive <= end =>
+            Future {
+              val bufferSlice = Timed.value(
+                bufferReaderMetrics.slice,
+                inMemoryFanoutBuffer.sliceBackwards(
+                  startInclusive = startInclusive,
+                  endInclusive = end,
+                  filter = bufferFilter,
+                ),
+              )
 
-            bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
-
-            bufferSlice match {
-              case BufferSlice.Inclusive(slice) =>
-                val apiResponseSource = toApiResponseStream(slice)
-                val nextSliceStart =
-                  slice.lastOption.map(_._1).getOrElse(endInclusive).increment
-                Some(nextSliceStart -> apiResponseSource)
-
-              case BufferSlice.LastBufferChunkSuffix(bufferedStartExclusive, slice) =>
-                val sourceFromBuffer =
-                  fetchFromPersistence(
-                    startInclusive = scanFrom,
-                    endInclusive = bufferedStartExclusive,
-                    filter = persistenceFetchArgs,
-                  )(loggingContext)
-                    .concat(toApiResponseStream(slice))
-                Some(endInclusive.increment -> sourceFromBuffer)
+              Some(bufferSlice match {
+                case BackwardBufferSlice.FinalSlice(slice) =>
+                  (None, toApiResponseStream(slice))
+                case BackwardBufferSlice.PartialSlice(slice @ _ :+ last) =>
+                  (last._1.decrement, toApiResponseStream(slice))
+                case BackwardBufferSlice.PartialSlice(_) => // empty vector
+                  (
+                    None,
+                    fetchFromPersistence(
+                      startInclusive = startInclusive,
+                      endInclusive = end,
+                      filter = persistenceFetchArgs,
+                      descendingOrder = true,
+                    ),
+                  )
+              })
             }
-          }
-        case _ => Future.successful(None)
-      }
-      .flatMapConcat(identity)
+          case _ => Future.successful(None)
+        }
+        .flatten
+    } else {
+      Source
+        .unfoldAsync(startInclusive) {
+          case scanFrom if scanFrom <= endInclusive =>
+            Future {
+              val bufferSlice = Timed.value(
+                bufferReaderMetrics.slice,
+                inMemoryFanoutBuffer.slice(
+                  startInclusive = scanFrom,
+                  endInclusive = endInclusive,
+                  filter = bufferFilter,
+                ),
+              )
+
+              bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
+              noTracingLogger.debug(s"Got buffer slice: $bufferSlice")
+              bufferSlice match {
+                case BufferSlice.Inclusive(slice) =>
+                  val apiResponseSource = toApiResponseStream(slice)
+                  val nextSliceStart =
+                    slice.lastOption.map(_._1).getOrElse(endInclusive).increment
+                  Some(nextSliceStart -> apiResponseSource)
+
+                case BufferSlice.LastBufferChunkSuffix(bufferedStartExclusive, slice) =>
+                  val sourceFromBuffer =
+                    fetchFromPersistence(
+                      startInclusive = scanFrom,
+                      endInclusive = bufferedStartExclusive,
+                      filter = persistenceFetchArgs,
+                      descendingOrder = false,
+                    )(loggingContext)
+                      .concat(toApiResponseStream(slice))
+                  Some(endInclusive.increment -> sourceFromBuffer)
+              }
+            }
+          case _ => Future.successful(None)
+        }
+        .flatMapConcat(identity)
+    }
 
     Timed
       .source(bufferReaderMetrics.fetchTimer, source)
@@ -145,13 +189,14 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
 }
 
 private[platform] object BufferedStreamsReader {
-  trait FetchFromPersistence[FILTER, API_RESPONSE] {
+  trait FetchFromPersistence[FILTER, ApiResponse] {
     def apply(
         startInclusive: Offset,
         endInclusive: Offset,
+        descendingOrder: Boolean,
         filter: FILTER,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Source[(Offset, API_RESPONSE), NotUsed]
+    ): Source[(Offset, ApiResponse), NotUsed]
   }
 }

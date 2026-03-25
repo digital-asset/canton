@@ -11,8 +11,13 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
 trait ContractObserver {
   def reset(): Unit
-  def processCreate(create: CreatedEvent): Boolean
+  def processCreate(create: CreatedEvent, synchronizerId: String): Boolean
   def processArchive(archive: ArchivedEvent): Boolean
+  def processReassign(
+      create: CreatedEvent,
+      synchronizerId: String,
+      reassignmentCounter: Long,
+  ): Boolean
 }
 
 /** Basic observer for a contract of a particular template.
@@ -26,23 +31,32 @@ abstract class BaseContractObserver[TC <: Contract[TCid, T], TCid <: ContractId[
     companion: ContractCompanion[TC, TCid, T]
 ) extends ContractObserver {
 
-  def processCreate(create: CreatedEvent): Boolean = {
-    val dc = JavaDecodeUtil
-      .decodeCreated[TC](companion)(javaapi.data.CreatedEvent.fromProto(toJavaProto(create)))
-    dc.foreach(processCreate_)
-    dc.isDefined
-  }
+  private def decode(created: CreatedEvent) =
+    JavaDecodeUtil
+      .decodeCreated[TC](companion)(javaapi.data.CreatedEvent.fromProto(toJavaProto(created)))
 
-  protected def processCreate_(create: TC): Unit
+  override def processReassign(
+      create: CreatedEvent,
+      synchronizerId: String,
+      reassignmentCounter: Long,
+  ): Boolean =
+    decode(create).map(processReassign_(synchronizerId, reassignmentCounter)).isDefined
 
-  def processArchive(archive: ArchivedEvent): Boolean = {
-    val dc = JavaDecodeUtil
+  override def processCreate(create: CreatedEvent, synchronizerId: String): Boolean =
+    decode(create).map(processCreate_(synchronizerId)).isDefined
+
+  protected def processCreate_(synchronizerId: String)(create: TC): Unit
+  protected def processReassign_(synchronizerId: String, reassignmentCounter: Long)(
+      contract: TC
+  ): Unit
+
+  def processArchive(archive: ArchivedEvent): Boolean =
+    JavaDecodeUtil
       .decodeArchived[T](companion)(
         javaapi.data.ArchivedEvent.fromProto(ArchivedEvent.toJavaProto(archive))
       )
-    dc.foreach(processArchive_)
-    dc.isDefined
-  }
+      .map(processArchive_)
+      .isDefined
 
   protected def processArchive_(archive: ContractId[T]): Unit
 

@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.language.Ast.Expr
@@ -21,9 +22,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class RollbackTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class RollbackTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   import RollbackTest._
 
@@ -37,7 +36,7 @@ class RollbackTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
   )(e: Expr, party: Party): SubmittedTransaction = {
     val se = pkgs1.compiler.unsafeCompile(e)
     val example = SEApp(se, ArraySeq(SParty(party)))
-    val machine = Speedy.Machine.fromUpdateSExpr(pkgs1, transactionSeed, example, Set(party))
+    val machine = Speedy.Machine.fromUpdateSExpr(pkgs1, transactionSeed, example, Set(party), MachineLogger())
     SpeedyTestLib
       .buildTransaction(machine)
       .fold(e => fail(Pretty.prettyError(e).render(80)), identity)

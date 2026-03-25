@@ -53,6 +53,7 @@ import io.grpc.ManagedChannel
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 import org.slf4j.event.Level
+import org.slf4j.event.Level.WARN
 
 import java.time.Instant
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -502,12 +503,9 @@ trait ReplayedRequestsIntegrationTest
 
     assertPingSucceeds(participant1, participant2)
 
-    loggerFactory.assertLoggedWarningsAndErrorsSeq(
-      {
-        // Move past the expiration of the `maxSequencingTime` for the request submitted by participant1
-        clock.advanceTo(replayRequest.maxSequencingTime.plusSeconds(1))
-        assertPingSucceeds(participant1, participant2, timeoutMillis = 60000)
-      },
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
+      // Move past the expiration of the `maxSequencingTime` for the request submitted by participant1
+      clock.advanceTo(replayRequest.maxSequencingTime.plusSeconds(1)),
       LogEntry.assertLogSeq(
         Seq(
           (_.warningMessage should include("Submission timed out"), "request times out")
@@ -515,7 +513,12 @@ trait ReplayedRequestsIntegrationTest
         Seq.empty,
       ),
     )
-
+    // This ping needs to commence after the clock advancement is visible on participant1 over the sequencer connection,
+    // otherwise the ping might start with the original clock, and immediately timing out as the sequencer clock change
+    // becomes visible.
+    // As the observation of the submission timeout is evidence for this, simply using assertEventuallyLogsSeq above
+    // is enough.
+    assertPingSucceeds(participant1, participant2, timeoutMillis = 60000)
     assertNoExtraCompletion(offsetAtBeginning)
   }
 

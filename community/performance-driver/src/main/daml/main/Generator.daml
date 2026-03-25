@@ -1,9 +1,12 @@
 module Generator where
 
-
+import DA.Foldable
 import DA.List
 import Dvp.Asset
 import Dvp.Trade
+
+expandLocationsAndParties: [Text] -> [Party] -> [(Text, Party)]
+expandLocationsAndParties locations parties = concatMap (\location -> (map (\party -> (location, party)) parties)) locations
 
 template Generator
   with
@@ -24,12 +27,23 @@ template Generator
           transferCid <- exercise assetCid ProposeTransfer with newOwner = counterparty, growthFactor = growthFactor
           create Propose with proposer = owner, transferCid, counterparty = counterparty, issuer = assetData.issuer, bystanderA = bystander
 
+    choice GeneratePreapproval : ()
+        with
+          counterparties : [Party]
+          locations: [Text]
+        controller owner
+        do
+          _ <- create this
+          forA_ (expandLocationsAndParties locations counterparties) (\(location, counterparty) -> create TransferPreapproval with ..)
+
+
     choice RequestAssets : (ContractId Generator, [ContractId AssetRequest])
         with
           quantity : Int
           issuers : [Party]
           ids : [Text]
           payload : Text
+          locations: [Text]
         controller owner
         do
           let filteredIssuers = filter (`notElem` processedIssuers) issuers

@@ -4,8 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.LoggingContext
-import com.digitalasset.daml.lf.data.Ref.Location
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -16,32 +15,12 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
-import scala.collection.mutable.ArrayBuffer
 import scala.util.{Success, Try}
 
-class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks {
-
-  class TestTraceLog extends TraceLog {
-    private val messages: ArrayBuffer[(String, Option[Location])] = new ArrayBuffer()
-
-    override def add(message: String, optLocation: Option[Location])(implicit
-        loggingContext: LoggingContext
-    ) = {
-      messages += ((message, optLocation))
-    }
-
-    def tracePF[X, Y](text: String, pf: PartialFunction[X, Y]): PartialFunction[X, Y] = {
-      case x if { add(text, None)(LoggingContext.ForTesting); pf.isDefinedAt(x) } => pf(x)
-    }
-
-    override def iterator = messages.iterator
-
-    def getMessages: Seq[String] = messages.view.map(_._1).toSeq
-  }
+class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
 
   private[this] implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   private[this] val t0 = Time.Timestamp.now()
   private[this] val t1 = t0.addMicros(1)
@@ -205,14 +184,14 @@ class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDri
     val pkgs = PureCompiledPackages.Empty(compilerConfig)
     val builtinSExpr = pkgs.compiler.unsafeCompile(e"""\(time: Timestamp) -> $builtin time""")
     val seed = crypto.Hash.hashPrivateKey("seed")
-    val traceLog = new TestTraceLog()
+    val recordingLogger = new RecordingMachineLogger(MachineLogger())
     val machine = Speedy.Machine
       .fromUpdateSExpr(
         pkgs,
         seed,
         SEApp(builtinSExpr, ArraySeq(SValue.STimestamp(time))),
         Set.empty,
-        traceLog = traceLog,
+        recordingLogger,
       )
 
     machine.setTimeBoundaries(timeBoundaries)
@@ -220,10 +199,10 @@ class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDri
     val result = Try(
       SpeedyTestLib.run(
         machine,
-        getTime = traceLog.tracePF("queried time", { case () => now }),
+        getTime = recordingLogger.tracePartialFunction("queried time", { case () => now }),
       )
     )
-
-    (result, machine.getTimeBoundaries, traceLog.getMessages)
+  
+    (result, machine.getTimeBoundaries, recordingLogger.recordedMessages)
   }
 }

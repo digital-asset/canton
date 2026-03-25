@@ -56,7 +56,7 @@ trait HashUtilsTest { this: Matchers =>
     Bytes.assertFromString("0050"),
   )
 
-  val sychronizerId: SynchronizerId = SynchronizerId(
+  val synchronizerId: SynchronizerId = SynchronizerId(
     UniqueIdentifier.tryCreate("synchronizer", "id")
   )
 
@@ -65,7 +65,7 @@ trait HashUtilsTest { this: Matchers =>
     commandId = Ref.CommandId.assertFromString("command-id"),
     transactionUUID = transactionUUID,
     mediatorGroup = 0,
-    synchronizerId = sychronizerId,
+    synchronizer = synchronizerId,
     timeBoundaries = LedgerTimeBoundaries(
       Time.Range(
         Time.Timestamp.assertFromLong(0xaaaa),

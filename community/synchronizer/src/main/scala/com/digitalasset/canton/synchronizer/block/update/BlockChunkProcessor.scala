@@ -29,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmission
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
@@ -46,12 +47,11 @@ import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 /** Processes a chunk of events in a block, yielding a [[ChunkUpdate]].
   */
 final class BlockChunkProcessor(
-    protocolVersion: ProtocolVersion,
     synchronizerSyncCryptoApi: SynchronizerCryptoClient,
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
-    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     batchingConfig: BatchingConfig,
     override val loggerFactory: NamedLoggerFactory,
     metrics: SequencerMetrics,
@@ -59,6 +59,8 @@ final class BlockChunkProcessor(
 )(implicit closeContext: CloseContext, tracer: Tracer)
     extends NamedLogging
     with Spanning {
+
+  private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
 
   private val submissionRequestValidator =
     new SubmissionRequestValidator(
@@ -504,7 +506,7 @@ final class BlockChunkProcessor(
     (Map[Member, CantonTimestamp], Seq[(Member, CantonTimestamp, BaseAlarm)])
   ] = {
     val previousTimestampO =
-      state.latestSequencerEventTimestamp.orElse(sequencingTimeLowerBoundExclusive)
+      state.latestSequencerEventTimestamp.orElse(lsuSequencingBounds.map(_.upgradeTime))
     for {
       snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
         synchronizerSyncCryptoApi,
@@ -516,10 +518,10 @@ final class BlockChunkProcessor(
         // In that case, we are forced to use an approximate timestamp.
         warnIfApproximate =
           !(protocolVersion < ProtocolVersion.v35 || state.latestSequencerEventTimestamp.isEmpty &&
-            sequencingTimeLowerBoundExclusive.isEmpty),
+            lsuSequencingBounds.isEmpty),
       )
       synchronizerSuccessorO <- snapshot.ipsSnapshot
-        .synchronizerUpgradeOngoing()
+        .announcedLsu()
         .map(_.map { case (successor, _) => successor })
       allAcknowledgements = fixedTsChanges.collect { case (_, t @ Traced(Acknowledgment(_, ack))) =>
         t.map(_ => ack)

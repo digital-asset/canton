@@ -47,7 +47,6 @@ sealed abstract class ParticipantActiveTransitionStartupIntegrationTest
               mem.copy(parameters = mem.parameters.focus(_.failFastOnStartup).replace(false))
           }
         },
-        ConfigTransforms.enableReplicatedParticipants("participant1"),
         _.focus(_.parameters.timeouts.processing.activeInitRetryDelay)
           .replace(config.NonNegativeDuration.ofMillis(5000)),
 

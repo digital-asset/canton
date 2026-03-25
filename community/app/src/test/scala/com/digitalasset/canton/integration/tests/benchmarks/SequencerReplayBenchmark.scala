@@ -21,7 +21,6 @@ import com.digitalasset.canton.integration.tests.manual.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -190,9 +189,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
               else TracingConfig.Exporter.Disabled,
             sampler = TracingConfig.Sampler.TraceIdRatio(ratio = tracingSamplerRatio),
           )
-        ),
-        // TODO(i26481): Enable new connection pool (test uses replay subscriptions)
-        ConfigTransforms.disableConnectionPool,
+        )
       )
       .withManualStart
 
@@ -254,10 +251,10 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
     // NOTE: throughout this block we'll hold instances for the mediator and participant
     // in a two item list where the mediator always comes first
 
-    // get our replay transport
-    val transports =
+    // get our replay client
+    val replayClients =
       (Seq[SequencerSends]() ++ mediatorSendConfigs.values ++ participantSendConfigs)
-        .parTraverse(_.transport)
+        .parTraverse(_.replayClient)
         .futureValue(
           PatienceConfiguration.Timeout(StartupTimeout),
           PatienceConfiguration.Interval(IdleCheckInterval),
@@ -265,7 +262,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
     // wait for the sequencer transports to read the events that were stored in the sequencer from the original performance test
     // when we've read all events this will provide us
-    val startingTimestamps = transports
+    val startingTimestamps = replayClients
       .parTraverse(_.waitForIdle(IdleDuration))
       .futureValue(
         PatienceConfiguration.Timeout(replayTimeoutMinutes.minutes),
@@ -279,12 +276,12 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
     )
 
     val idlenessMonitors =
-      transports.zip(startingTimestamps).map { case (transport, startingTimestamp) =>
+      replayClients.zip(startingTimestamps).map { case (transport, startingTimestamp) =>
         transport.waitForIdle(IdleDuration, startingTimestamp)
       }
 
     // replay all the sends
-    val sendReports = transports
+    val sendReports = replayClients
       .parTraverse(_.replay(sendReplayParallelism, sendReplayRatePerSecond, sendReplayCycles))
       .futureValue(
         PatienceConfiguration.Timeout(replayTimeoutMinutes.minutes),
@@ -305,7 +302,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
       .zip(sendReports)
       .zip(eventsReceivedReports)
       .zip(
-        transports.map(
+        replayClients.map(
           _.metricReport(env.environment.configuredOpenTelemetry.onDemandMetricsReader.read())
         )
       )
@@ -321,15 +318,15 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
     val participantSendConfigs = replayingParticipants.map(_.sendsConfig)
 
-    val transports =
+    val replayClients =
       participantSendConfigs.toSeq
-        .parTraverse(_.transport)
+        .parTraverse(_.replayClient)
         .futureValue(
           PatienceConfiguration.Timeout(StartupTimeout),
           PatienceConfiguration.Interval(IdleCheckInterval),
         )
 
-    val startingTimestamps = transports
+    val startingTimestamps = replayClients
       .parTraverse(_.waitForIdle(IdleDuration))
       .futureValue(
         PatienceConfiguration.Timeout(replayTimeoutMinutes.minutes),
@@ -338,7 +335,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
       .map(_.finishedAtTimestamp)
 
     val replayReportsF =
-      transports
+      replayClients
         .zip(startingTimestamps)
         .map { case (transport, startingTimestamp) =>
           transport.waitForIdle(IdleDuration, startingTimestamp)
@@ -346,7 +343,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
         .sequence
 
     // replay all sends again to generate load
-    transports
+    replayClients
       .parTraverse(_.replay(sendReplayParallelism, sendReplayRatePerSecond, sendReplayCycles))
       .futureValue(
         PatienceConfiguration.Timeout(replayTimeoutMinutes.minutes),
@@ -355,7 +352,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
     reportSummary("Resubscribing from the beginning")
     val resubscriptionReportsF =
-      transports.map(_.waitForIdle(IdleDuration, startFromTimestamp = None)).sequence
+      replayClients.map(_.waitForIdle(IdleDuration, startFromTimestamp = None)).sequence
 
     // wait for becoming idle after receiving all events (including the ones from the above subscriptions)
     val resubscriptionReports =

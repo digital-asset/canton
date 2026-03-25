@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.interning
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.topology.SynchronizerId
@@ -17,27 +18,16 @@ import com.digitalasset.daml.lf.data.Ref.{
   UserId,
 }
 
+import scala.collection.mutable
 import scala.concurrent.Future
-
-class DomainStringIterators(
-    val parties: Iterator[Party],
-    val templateIds: Iterator[NameTypeConRef],
-    val synchronizerIds: Iterator[SynchronizerId],
-    val packageIds: Iterator[PackageId],
-    val userIds: Iterator[UserId],
-    val participantIds: Iterator[ParticipantId],
-    val choiceNames: Iterator[ChoiceName],
-    val interfaceIds: Iterator[Identifier],
-)
 
 trait InternizingStringInterningView {
 
-  /** Internize strings of different domains. The new entries are returend as prefixed entries for
-    * persistent storage.
-    *
-    * @param domainStringIterators
-    *   iterators of the new entires
-    * @return
+  private[platform] def distinctNewRawStrings(
+      interningProviders: Iterable[StringInterningProvider]
+  ): Iterable[String]
+
+  /** @return
     *   If some of the entries were not part of the view: they will be added, and these will be
     *   returned as a interned-id and raw, prefixed string pairs.
     *
@@ -46,7 +36,7 @@ trait InternizingStringInterningView {
     *   consistency between StringInterning view and persistence.
     */
   private[platform] def internize(
-      domainStringIterators: DomainStringIterators
+      distinctRawStrings: Iterable[String]
   ): Iterable[(Int, String)]
 }
 
@@ -183,29 +173,41 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       from = _.toString,
     )
 
-  override private[platform] def internize(
-      domainStringIterators: DomainStringIterators
-  ): Iterable[(Int, String)] =
-    (lock.exclusive {
-      val allPrefixedStrings =
-        domainStringIterators.parties.map(PartyPrefix + _) ++
-          domainStringIterators.templateIds.map(TemplatePrefix + _) ++
-          domainStringIterators.synchronizerIds
-            .map(_.toProtoPrimitive)
-            .map(SynchronizerIdPrefix + _) ++
-          domainStringIterators.packageIds.map(PackageIdPrefix + _) ++
-          domainStringIterators.userIds.map(UserIdPrefix + _) ++
-          domainStringIterators.participantIds.map(ParticipantIdPrefix + _) ++
-          domainStringIterators.choiceNames.map(ChoicePrefix + _) ++
-          domainStringIterators.interfaceIds.map(InterfacePrefix + _)
-
-      val newEntries = RawStringInterning.newEntries(
-        strings = allPrefixedStrings,
-        rawStringInterning = raw,
+  override private[platform] def distinctNewRawStrings(
+      interningProviders: Iterable[StringInterningProvider]
+  ): Iterable[String] = {
+    val rawSnapshot = raw.map
+    val linkedHashSet = mutable.LinkedHashSet.empty[String]
+    def add(rawString: String): Unit =
+      if (!linkedHashSet.contains(rawString) && !rawSnapshot.contains(rawString)) {
+        linkedHashSet.add(rawString).discard
+      }
+    val builder = new StringInterningBuilder {
+      override def addTemplateId(s: NameTypeConRef): Unit = add(TemplatePrefix + s)
+      override def addPackageId(s: PackageId): Unit = add(PackageIdPrefix + s)
+      override def addParty(s: Party): Unit = add(PartyPrefix + s)
+      override def addSynchronizerId(s: SynchronizerId): Unit = add(
+        SynchronizerIdPrefix + s.toProtoPrimitive
       )
-      updateView(newEntries)
-      newEntries
-    })
+      override def addUserId(s: UserId): Unit = add(UserIdPrefix + s)
+      override def addParticipantId(s: ParticipantId): Unit = add(ParticipantIdPrefix + s)
+      override def addChoiceName(s: ChoiceName): Unit = add(ChoicePrefix + s)
+      override def addInterfaceId(s: Identifier): Unit = add(InterfacePrefix + s)
+    }
+    interningProviders.foreach(_.provideInternedStrings(builder))
+    linkedHashSet
+  }
+
+  override private[platform] def internize(
+      distinctRawStrings: Iterable[String]
+  ): Iterable[(Int, String)] = lock.exclusive {
+    val newEntries = RawStringInterning.newEntries(
+      distinctRawStrings = distinctRawStrings,
+      rawStringInterning = raw,
+    )
+    updateView(newEntries)
+    newEntries
+  }
 
   override def update(lastStringInterningId: Option[Int])(
       loadStringInterningEntries: LoadStringInterningEntries

@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.transaction.checks
 
 import cats.data.EitherT
 import cats.instances.order.*
+import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -21,12 +22,16 @@ import com.digitalasset.canton.topology.cache.TopologyStateLookup
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.store.TopologyTransactionRejection.RequiredMapping as RequiredMappingRejection
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection.RequiredMapping.{
+  LsuSequencerSuccessorInvalidSuccessorPsid,
+  NoLsuAnnounced,
+}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
@@ -254,6 +259,7 @@ class RequiredTopologyMappingChecks(
               relaxChecksForBackwardsCompatibility,
             )
           )
+
       case (Code.SequencerSynchronizerState, None | Some(Code.SequencerSynchronizerState)) =>
         toValidate
           .select[TopologyChangeOp.Replace, SequencerSynchronizerState]
@@ -318,6 +324,14 @@ class RequiredTopologyMappingChecks(
               inStore.flatMap(_.selectMapping[LsuAnnouncement]),
             )
           )
+
+      case (
+            Code.LsuSequencerConnectionSuccessor,
+            None | Some(Code.LsuSequencerConnectionSuccessor),
+          ) =>
+        toValidate
+          .select[TopologyChangeOp.Replace, LsuSequencerConnectionSuccessor]
+          .map(checkLsuSequencerSuccessor(effective, _))
 
       case _otherwise => None
     }
@@ -995,6 +1009,56 @@ class RequiredTopologyMappingChecks(
         ),
       )
 
+    } yield ()
+
+  private def checkLsuSequencerSuccessor(
+      effective: EffectiveTime,
+      toValidate: SignedTopologyTransaction[
+        TopologyChangeOp.Replace,
+        LsuSequencerConnectionSuccessor,
+      ],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
+    for {
+      lsuAnnouncements <- EitherT
+        .liftF[FutureUnlessShutdown, TopologyTransactionRejection, List[LsuAnnouncement]](
+          stateLookup
+            .lookupForUid(
+              asOf = effective,
+              asOfInclusive = false,
+              uid = toValidate.mapping.successorPsid.logical.uid,
+              transactionTypes = Set(Code.LsuAnnouncement),
+              op = Some(TopologyChangeOp.Replace),
+            )
+            .map(
+              StoredTopologyTransactions(_)
+                .collectOfMapping[LsuAnnouncement]
+                .result
+                .map(_.mapping)
+                .toList
+            )
+        )
+
+      _ <- lsuAnnouncements match {
+        case Nil =>
+          EitherT
+            .leftT[FutureUnlessShutdown, Unit](NoLsuAnnounced())
+            .leftWiden[TopologyTransactionRejection]
+        case lsuAnnouncement :: Nil =>
+          EitherTUtil
+            .condUnitET[FutureUnlessShutdown](
+              lsuAnnouncement.successorSynchronizerId == toValidate.mapping.successorPsid,
+              LsuSequencerSuccessorInvalidSuccessorPsid(
+                sequencerId = toValidate.mapping.sequencerId,
+                successorPsid = toValidate.mapping.successorPsid,
+                expectedSuccessorPsid = lsuAnnouncement.successorSynchronizerId,
+              ),
+            )
+            .leftWiden[TopologyTransactionRejection]
+        case _moreThanOne =>
+          ErrorUtil.invalidState("Found more than one LsuAnnouncement mapping")
+      }
     } yield ()
 
   /** Checks whether the given PTP is considered an explicit admin party allocation. This is true if

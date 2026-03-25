@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol
 
+import cats.data.OptionT
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
@@ -17,7 +19,9 @@ import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
@@ -37,6 +41,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -65,11 +70,7 @@ final class ParticipantTopologyTerminateProcessingTest
     )
 
   private lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
-  private lazy val psid2 = PhysicalSynchronizerId(
-    psid1.logical,
-    psid1.serial.increment.toNonNegative,
-    psid1.protocolVersion,
-  )
+  private lazy val psid2 = psid1.incrementSerial
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
     SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 
@@ -82,6 +83,7 @@ final class ParticipantTopologyTerminateProcessingTest
       TopologyStore[TopologyStoreId.SynchronizerStore],
       ArgumentCaptor[CantonTimestamp => Option[FloatingUpdate]],
       RecordOrderPublisher,
+      PendingOnboardingClearanceStore,
   ) = {
 
     val eventCaptor: ArgumentCaptor[CantonTimestamp => Option[FloatingUpdate]] =
@@ -96,6 +98,23 @@ final class ParticipantTopologyTerminateProcessingTest
     )
       .thenReturn(Outcome(Right(())))
 
+    val pendingOnboardingClearanceStoreMock = mock[PendingOnboardingClearanceStore]
+    when(
+      pendingOnboardingClearanceStoreMock.delete(
+        any[SynchronizerId],
+        any[String],
+        any[NonEmptyString],
+      )(any[TraceContext])
+    ).thenReturn(FutureUnlessShutdown.unit)
+
+    when(
+      pendingOnboardingClearanceStoreMock.get(
+        any[SynchronizerId],
+        any[String],
+        any[NonEmptyString],
+      )(any[TraceContext])
+    ).thenReturn(OptionT(FutureUnlessShutdown.pure(Option.empty)))
+
     val proc = new ParticipantTopologyTerminateProcessing(
       recordOrderPublisher,
       store,
@@ -104,10 +123,12 @@ final class ParticipantTopologyTerminateProcessingTest
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
       pendingHandshakesWithSuccessorsStore = mock[PendingHandshakesWithSuccessorsStore],
+      pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
+      onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
       retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
       loggerFactory,
     )
-    (proc, store, eventCaptor, recordOrderPublisher)
+    (proc, store, eventCaptor, recordOrderPublisher, pendingOnboardingClearanceStoreMock)
   }
 
   val factory = new TestingOwnerWithKeys(
@@ -126,6 +147,23 @@ final class ParticipantTopologyTerminateProcessingTest
       Seq(HostingParticipant(participant1, Confirmation)),
     )
   )
+
+  private lazy val party1participant1_ob = mkAdd(
+    PartyToParticipant.tryCreate(
+      party1,
+      PositiveInt.one,
+      Seq(HostingParticipant(participant1, Submission, onboarding = true)),
+    )
+  )
+
+  private lazy val party1participant1_added = mkAdd(
+    PartyToParticipant.tryCreate(
+      party1,
+      PositiveInt.one,
+      Seq(HostingParticipant(participant1, Submission, onboarding = false)),
+    )
+  )
+
   private lazy val party1participant1_2 = mkAdd(
     PartyToParticipant.tryCreate(
       party1,
@@ -210,7 +248,7 @@ final class ParticipantTopologyTerminateProcessingTest
 
   ParticipantTopologyTerminateProcessing.getClass.getSimpleName should {
     "notify of the party rights grant to the first participant" in {
-      val (proc, store, eventCaptor, rop) = mk()
+      val (proc, store, eventCaptor, rop, _) = mk()
       val (cts, sc) = timestampWithCounter(0)
 
       val txs = List(party1participant1)
@@ -244,7 +282,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "notify of the party rights grant to the second participant" in {
-      val (proc, store, eventCaptor, rop) = mk()
+      val (proc, store, eventCaptor, rop, _) = mk()
       val (cts0, _) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)
 
@@ -282,7 +320,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "notify of the party rights changed for the first participant" in {
-      val (proc, store, eventCaptor, rop) = mk()
+      val (proc, store, eventCaptor, rop, _) = mk()
       val (cts0, _) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)
 
@@ -327,7 +365,8 @@ final class ParticipantTopologyTerminateProcessingTest
           synchronizerPredecessor: Option[SynchronizerPredecessor],
           expectedEventsCount: Int,
       ) = {
-        val (proc, store, eventCaptor, rop) = mk(synchronizerPredecessor = synchronizerPredecessor)
+        val (proc, store, eventCaptor, rop, _) =
+          mk(synchronizerPredecessor = synchronizerPredecessor)
 
         for {
           _ <- add(store, cts0, List(party1participant1))
@@ -356,7 +395,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "notify of the party rights revocation from the second participant" in {
-      val (proc, store, eventCaptor, rop) = mk()
+      val (proc, store, eventCaptor, rop, _) = mk()
       val (cts0, _) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)
 
@@ -394,7 +433,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "no events if the party rights threshold change" in {
-      val (proc, store, eventCaptor, _rop) = mk()
+      val (proc, store, eventCaptor, _rop, _) = mk()
       val (cts0, _) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)
 
@@ -413,7 +452,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "no events if no change" in {
-      val (proc, store, eventCaptor, _rop) = mk()
+      val (proc, store, eventCaptor, _rop, _) = mk()
       val (cts0, _) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)
 
@@ -428,7 +467,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "no event publication if below initialRecordTime" in {
-      val (proc, store, _, rop) = mk(initialRecordTime = CantonTimestamp.ofEpochSecond(11))
+      val (proc, store, _, rop, _) = mk(initialRecordTime = CantonTimestamp.ofEpochSecond(11))
       val (cts, sc) = timestampWithCounter(10)
       val (cts1, sc1) = timestampWithCounter(11)
       val (cts2, sc2) = timestampWithCounter(12)
@@ -458,7 +497,7 @@ final class ParticipantTopologyTerminateProcessingTest
 
     "fail if scheduling an event is not possible due to record order is already passed it" in {
       loggerFactory.suppress(terminateProcessingSuppressionRule) {
-        val (proc, store, _, rop) = mk()
+        val (proc, store, _, rop, _) = mk()
         val (cts, sc) = timestampWithCounter(10)
 
         val txs = List(party1participant1)
@@ -487,7 +526,7 @@ final class ParticipantTopologyTerminateProcessingTest
     }
 
     "re-schedule recovery events correctly" in {
-      val (proc, store, eventCaptor, rop) =
+      val (proc, store, eventCaptor, rop, _) =
         mk(initialRecordTime = CantonTimestamp.ofEpochSecond(20))
       val (cts, _) = timestampWithCounter(10)
       val (cts2, _) = timestampWithCounter(12)
@@ -618,6 +657,100 @@ final class ParticipantTopologyTerminateProcessingTest
         ).toSet shouldBe Set(
           (Set(parties(2).toLf), cts5, traceContextMap(cts3))
         )
+      }
+    }
+
+    "query pending operations when local party is onboarded" in {
+      val (proc, store, _, _, pendingOnboardingStore) = mk()
+      val (cts0, _) = timestampWithCounter(0)
+
+      for {
+        _ <- add(store, cts0, List(party1participant1_ob))
+        _ <- proc.terminate(
+          SequencerCounter(0),
+          SequencedTime(cts0),
+          EffectiveTime(cts0),
+        )
+      } yield {
+        // Evaluate the short-circuited logic: only v35+ emits `Onboarding`
+        if (testedProtocolVersion >= ProtocolVersion.v35) {
+          verify(pendingOnboardingStore, times(1)).get(
+            any[SynchronizerId],
+            any[String],
+            any[NonEmptyString],
+          )(any[TraceContext])
+        }
+        succeed
+      }
+    }
+
+    "clear pending operations when onboarding is cleared for a local party" in {
+      val (proc, store, _, _, pendingOnboardingStore) = mk()
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+
+      for {
+        _ <- add(store, cts0, List(party1participant1_ob))
+        _ <- add(store, cts1, List(party1participant1_added))
+        _ <- proc.terminate(
+          sc1,
+          SequencedTime(cts1),
+          EffectiveTime(cts1),
+        )
+      } yield {
+        // Process is only evaluated cleanly if the `clearingOnboardingLocallyHostedParty` flag is hit
+        if (testedProtocolVersion >= ProtocolVersion.v35) {
+          verify(pendingOnboardingStore, times(1)).delete(
+            any[SynchronizerId],
+            any[String],
+            any[NonEmptyString],
+          )(any[TraceContext])
+        }
+        succeed
+      }
+    }
+
+    "not interact with clearance stores for a non-local party" in {
+      val (proc, store, _, _, pendingOnboardingStore) = mk()
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+
+      val party1participant2_ob = mkAdd(
+        PartyToParticipant.tryCreate(
+          party1,
+          PositiveInt.one,
+          Seq(HostingParticipant(participant2, Submission, onboarding = true)),
+        )
+      )
+      val party1participant2_added = mkAdd(
+        PartyToParticipant.tryCreate(
+          party1,
+          PositiveInt.one,
+          Seq(HostingParticipant(participant2, Submission, onboarding = false)),
+        )
+      )
+
+      for {
+        _ <- add(store, cts0, List(party1participant2_ob))
+        _ <- add(store, cts1, List(party1participant2_added))
+        _ <- proc.terminate(
+          sc1,
+          SequencedTime(cts1),
+          EffectiveTime(cts1),
+        )
+      } yield {
+        // Assert that because the participant is non-local, the guard `if (eventInfo.onboardingLocallyHostedParty || eventInfo.clearingOnboardingLocallyHostedParty)` prevents execution
+        verify(pendingOnboardingStore, never).get(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+        verify(pendingOnboardingStore, never).delete(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+        succeed
       }
     }
   }

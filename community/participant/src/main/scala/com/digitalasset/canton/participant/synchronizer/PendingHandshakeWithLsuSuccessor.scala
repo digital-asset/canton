@@ -23,7 +23,7 @@ import com.digitalasset.canton.version.{
   * crash/restart. It will be attempted over and over again until it succeeds (or LSU happens/is
   * cancelled).
   */
-final case class PendingHandshakeWithLsuSuccessor(successorPSId: PhysicalSynchronizerId)(
+final case class PendingHandshakeWithLsuSuccessor(successorPsid: PhysicalSynchronizerId)(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       PendingHandshakeWithLsuSuccessor.type
     ]
@@ -33,17 +33,17 @@ final case class PendingHandshakeWithLsuSuccessor(successorPSId: PhysicalSynchro
 
   private def toProtoV30: v30.PendingHandshakeWithLsuSuccessor =
     v30.PendingHandshakeWithLsuSuccessor(successorPhysicalSynchronizerId =
-      successorPSId.toProtoPrimitive
+      successorPsid.toProtoPrimitive
     )
 
   def toPendingOperation(
-      currentPSId: PhysicalSynchronizerId
+      currentPsid: PhysicalSynchronizerId
   ): PendingOperation[PendingHandshakeWithLsuSuccessor, PhysicalSynchronizerId] =
     PendingOperation(
       name = PendingHandshakeWithLsuSuccessor.operationName,
       key = PendingHandshakeWithLsuSuccessor.operationKey,
       operation = this,
-      synchronizer = currentPSId,
+      synchronizer = currentPsid,
     )
 }
 
@@ -70,12 +70,12 @@ object PendingHandshakeWithLsuSuccessor
       proto: v30.PendingHandshakeWithLsuSuccessor
   ): ParsingResult[PendingHandshakeWithLsuSuccessor] =
     for {
-      successorPSId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      successorPsid <- PhysicalSynchronizerId.fromProtoPrimitive(
         proto.successorPhysicalSynchronizerId,
         "successor_physical_synchronizer_id",
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
 
-    } yield PendingHandshakeWithLsuSuccessor(successorPSId)(rpv)
+    } yield PendingHandshakeWithLsuSuccessor(successorPsid)(rpv)
 
 }

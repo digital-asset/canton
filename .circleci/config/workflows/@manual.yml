@@ -85,6 +85,31 @@ manual_stability_crash_recovery_test:
         requires:
           - print_tests
 
+manual_smoke_test:
+  when:
+    and:
+      - equal: [ smoke-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - smoke_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
 manual_update_canton_build_docker_image:
   when:
     and:

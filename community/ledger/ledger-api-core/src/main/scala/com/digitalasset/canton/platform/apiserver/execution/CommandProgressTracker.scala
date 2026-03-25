@@ -16,6 +16,7 @@ import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
@@ -51,7 +52,7 @@ final case class CommandStatus(
       requestStatistics = Some(requestStatistics),
       updates = Some(updates),
       synchronizerId = synchronizerId.map(_.toProtoPrimitive).getOrElse(""),
-      timings = timings.map { case (desc, millis) => Timing(desc, millis) },
+      timings = timings.reverse.map { case (desc, millis) => Timing(desc, millis) },
     )
 
   override def pretty: Pretty[CommandStatus] = CommandStatus.pretty
@@ -233,7 +234,7 @@ trait CommandProgressTracker {
   def validationResponseCompleted(rootHash: RootHash): Unit = ()
   def validationVerdict(rootHash: RootHash): Unit = ()
   def processLedgerUpdate(update: TransactionLogUpdate): Unit
-
+  def indexingStarts(update: Update): Unit
 }
 
 object CommandProgressTracker {
@@ -261,5 +262,6 @@ object CommandProgressTracker {
       CommandResultHandle.NoOp
 
     override def processLedgerUpdate(update: TransactionLogUpdate): Unit = ()
+    override def indexingStarts(update: Update): Unit = ()
   }
 }

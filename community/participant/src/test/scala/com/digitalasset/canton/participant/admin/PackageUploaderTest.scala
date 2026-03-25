@@ -34,6 +34,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.archive.{DamlLf, Dar, Decode}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.Ast
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -284,6 +285,9 @@ class PackageUploaderTest
         enableLfBeta = false,
         enableStackTraces = false,
         paranoidMode = true,
+        submissionPhaseLogging = EngineLoggingConfig(),
+        validationPhaseLogging = EngineLoggingConfig(),
+        loggerFactory = loggerFactory,
       ),
       enableStrictDarValidation = enableStrictDarValidation,
       packageMetadataView = mutablePackageMetadataViewImpl,

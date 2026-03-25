@@ -7,6 +7,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackageId as LfPackageId
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier}
 import com.digitalasset.daml.lf.engine as LfEngine
 import com.digitalasset.daml.lf.engine.{Engine, Enricher}
@@ -55,6 +56,7 @@ trait LfEnricher {
 }
 
 object LfEnricher {
+  import LoggingContextWithTrace.implicitExtractTraceContext
 
   def apply(
       engine: Engine,
@@ -63,7 +65,7 @@ object LfEnricher {
       packageLoader: DeduplicatingPackageLoader,
       loadPackage: (
           LfPackageId,
-          LoggingContextWithTrace,
+          TraceContext,
       ) => Future[Option[com.digitalasset.daml.lf.archive.DamlLf.Archive]],
   ): LfEnricher =
     new Impl(
@@ -83,7 +85,7 @@ object LfEnricher {
       packageLoader: DeduplicatingPackageLoader,
       loadPackage: (
           LfPackageId,
-          LoggingContextWithTrace,
+          TraceContext,
       ) => Future[Option[com.digitalasset.daml.lf.archive.DamlLf.Archive]],
   ) extends LfEnricher {
 
@@ -139,7 +141,7 @@ object LfEnricher {
           packageLoader
             .loadPackage(
               packageId = packageId,
-              delegate = packageId => loadPackage(packageId, loggingContext),
+              delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
               metric = metrics.index.db.translation.getLfPackage,
             )
             .flatMap(pkgO => consume(resume(pkgO)))

@@ -297,7 +297,7 @@ trait PrettyInstances {
     unnamedParam(_.traceContext),
   )
 
-  implicit val prettyKeyInputError: Pretty[TransactionError] = {
+  implicit val prettyTransactionError: Pretty[TransactionError] = {
     case e: TransactionError.InconsistentContractKey =>
       prettyOfClass[TransactionError.InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
     case e: TransactionError.DuplicateContractKey =>
@@ -306,8 +306,8 @@ trait PrettyInstances {
       prettyOfClass[TransactionError.DuplicateContractId](unnamedParam(_.contractId)).treeOf(e)
     case e: TransactionError.AlreadyConsumed[?] =>
       prettyOfClass[TransactionError.AlreadyConsumed[?]](unnamedParam(_.cid)).treeOf(e)
-    case TransactionError.EffectfulRollbackNotSupported =>
-      Tree.Apply("EffectfulRollbackNotSupported", Iterator())
+    case e: TransactionError.EffectfulRollback =>
+      prettyOfClass[TransactionError.EffectfulRollback](unnamedParam(_.nodeIds)).treeOf(e)
   }
 
   implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)

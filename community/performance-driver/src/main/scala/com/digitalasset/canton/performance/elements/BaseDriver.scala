@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.commands.{Command, Commands}
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event.Event.Event.{Archived, Created, Exercised}
+import com.daml.ledger.api.v2.reassignment.{Reassignment, ReassignmentEvent}
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.javaapi
@@ -222,7 +223,9 @@ abstract class BaseDriver(
               logger.debug(s"Fetching of active contracts took ${LoggerUtil
                   .roundDurationForHumans(Duration.fromNanos(System.nanoTime() - started))}")
               // apply acs to local state
-              acs.foreach(active => processCreate(active.getCreatedEvent).discard[Boolean])
+              acs.foreach(active =>
+                processCreate(active.getCreatedEvent, active.synchronizerId).discard[Boolean]
+              )
               offset
             }
         }
@@ -236,6 +239,7 @@ abstract class BaseDriver(
       logger.debug(s"Subscribing as of $offset")
       val myDriver = driver()
       ErrorUtil.requireArgument(subscription.isEmpty, "subscription should not be set twice?")
+
       subscription
         .putIfAbsent(
           new ResilientLedgerSubscription(
@@ -262,6 +266,33 @@ abstract class BaseDriver(
   def getRecentlyCreatedTransactionRecordTimes: Set[CantonTimestamp] =
     recentlyCreatedTransactionsRecordTimes.asMap().keySet().asScala.toSet
 
+  private def processReassignment(reassignment: Reassignment): Boolean = {
+    logger.info(
+      s"Observed reassignment with commandId=${reassignment.commandId} and updateId=${reassignment.updateId} and offset=${reassignment.offset}"
+    )
+    reassignment.events
+      .map(_.event)
+      .map {
+        case ReassignmentEvent.Event.Empty => false
+        case ReassignmentEvent.Event.Unassigned(_) => false
+        case ReassignmentEvent.Event.Assigned(value) =>
+          value.createdEvent
+            .exists { created =>
+              listeners
+                .map(
+                  _.processReassign(
+                    created,
+                    reassignment.synchronizerId,
+                    value.reassignmentCounter,
+                  )
+                )
+                .exists(identity)
+            }
+      }
+      .exists(identity)
+
+  }
+
   private def processUpdates(transaction: Transaction): Boolean = {
     logger.info(
       s"Observed transaction with commandId=${transaction.commandId} and updateId=${transaction.updateId} and offset=${transaction.offset}"
@@ -276,7 +307,7 @@ abstract class BaseDriver(
           transaction.recordTime
             .flatMap(CantonTimestamp.fromProtoTimestamp(_).toOption)
             .foreach(recentlyCreatedTransactionsRecordTimes.put(_, ()))
-          processCreate(createEvent)
+          processCreate(createEvent, transaction.synchronizerId)
         case Archived(archiveEvent) => listeners.map(_.processArchive(archiveEvent)).exists(x => x)
         case Exercised(_) =>
           logger.warn("Exercised event is not expected here")
@@ -286,8 +317,8 @@ abstract class BaseDriver(
       .exists(x => x)
   }
 
-  private def processCreate(create: CreatedEvent): Boolean =
-    listeners.map(_.processCreate(create)).exists(x => x)
+  private def processCreate(create: CreatedEvent, synchronizerId: String): Boolean =
+    listeners.map(_.processCreate(create, synchronizerId)).exists(x => x)
 
   override def onClosed(): Unit =
     LifeCycle.close(
@@ -299,7 +330,8 @@ abstract class BaseDriver(
     updates.map(_.update).foldLeft(false) {
       case (acc, GetUpdatesResponse.Update.Transaction(transaction)) =>
         processUpdates(transaction) || acc
-      // NOTE: for multi-synchronizer, we'll have to implement tracking of reassignments
+      case (acc, GetUpdatesResponse.Update.Reassignment(reassignment)) =>
+        processReassignment(reassignment) || acc
       case (acc, _) => acc
     }
 
@@ -479,6 +511,7 @@ abstract class BaseDriver(
             synchronizerId = synchronizerId.fold("")(_.toProtoPrimitive),
             packageIdSelectionPreference = Nil,
             prefetchContractKeys = Nil,
+            tapsMaxPasses = None,
           )
         )
 

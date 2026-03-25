@@ -68,15 +68,15 @@ object ProtocolMessage {
     */
   def filterSynchronizerEnvelopes[M <: ProtocolMessage](
       envelopes: Seq[OpenEnvelope[M]],
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
   )(
       onWrongSynchronizer: Seq[OpenEnvelope[M]] => Unit
   ): Seq[OpenEnvelope[M]] = {
-    val (withCorrectSynchronizerId, withWrongSynchronizerId) =
-      envelopes.partition(_.protocolMessage.psid == synchronizerId)
-    if (withWrongSynchronizerId.nonEmpty)
-      onWrongSynchronizer(withWrongSynchronizerId)
-    withCorrectSynchronizerId
+    val (withCorrectPsid, withWrongPsid) =
+      envelopes.partition(_.protocolMessage.psid == psid)
+    if (withWrongPsid.nonEmpty)
+      onWrongSynchronizer(withWrongPsid)
+    withCorrectPsid
   }
 
   trait ProtocolMessageContentCast[A <: ProtocolMessage] {
@@ -105,7 +105,12 @@ object ProtocolMessage {
     envelope.traverse(cast.toKind)
 }
 
-/** Marker trait for [[ProtocolMessage]]s that are not a [[SignedProtocolMessage]] */
+/** Marker trait for [[ProtocolMessage]]s that are not a [[SignedProtocolMessage]]
+  *
+  * Unlike [[SignedProtocolMessage]], the sequencer does not check the signature on a
+  * [[UnsignedProtocolMessage]]. The message itself can contain signatures which are then verified
+  * by the recipient(s).
+  */
 trait UnsignedProtocolMessage extends ProtocolMessage {
   protected[messages] def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent
 
@@ -231,9 +236,10 @@ object SignedProtocolMessage
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SignedProtocolMessage[M]] = {
     val typedMessage = TypedSignedProtocolMessageContent(message)
-    for {
-      signature <- mkSignature(typedMessage, cryptoApi, approximateTimestampOverride)
-    } yield SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature))
+
+    mkSignature(typedMessage, cryptoApi, approximateTimestampOverride).map { signature =>
+      SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature))
+    }
   }
 
   /** @param approximateTimestampOverride
@@ -284,7 +290,6 @@ object SignedProtocolMessage
         "signatures",
         signaturesP,
       )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       signedMessage = SignedProtocolMessage(typedMessage, signatures)
     } yield signedMessage
   }

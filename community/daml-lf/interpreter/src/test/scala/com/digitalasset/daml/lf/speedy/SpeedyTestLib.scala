@@ -5,7 +5,6 @@ package com.digitalasset.daml
 package lf
 package speedy
 
-import com.daml.logging.LoggingContext
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -13,7 +12,6 @@ import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SResult._
-import com.digitalasset.daml.lf.speedy.Speedy.UpdateMachine
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{
@@ -40,8 +38,6 @@ private[speedy] object SpeedyTestLib {
       extends Error(s"unknown package '$packageId'")
 
   final case object UnexpectedSResultScenarioX extends Error("unexpected SResultScenarioX")
-
-  implicit def loggingContext: LoggingContext = LoggingContext.ForTesting
 
   case class ContinuationToken(cids: Vector[FatContractInstance]) extends NeedKeyContinuationToken
 
@@ -183,36 +179,4 @@ private[speedy] object SpeedyTestLib {
       pkg.languageVersion.major,
       StablePackages.stablePackages.packagesMap + (parserParameter.defaultPackageId -> pkg),
     )
-
-  private[speedy] object Implicits {
-
-    implicit class AddTestMethodsToMachine(machine: UpdateMachine) {
-
-      private[lf] def withWarningLog(warningLog: WarningLog): UpdateMachine =
-        new UpdateMachine(
-          sexpr = machine.sexpr,
-          traceLog = machine.traceLog,
-          warningLog = warningLog,
-          compiledPackages = machine.compiledPackages,
-          profile = machine.profile,
-          validating = machine.validating,
-          preparationTime = machine.preparationTime,
-          contractKeyUniqueness = machine.contractKeyUniqueness,
-          contractIdVersion = machine.contractIdVersion,
-          ptx = machine.ptx,
-          committers = machine.committers,
-          readAs = machine.readAs,
-          commitLocation = machine.commitLocation,
-          limits = machine.limits,
-          iterationsBetweenInterruptions = machine.iterationsBetweenInterruptions,
-          packageResolution = Map.empty,
-          costModel = CostModel.Empty,
-          initialGasBudget = None,
-          initialKontStackSize = 128,
-          initialEnvSize = 512,
-          metricPlugins = Seq.empty,
-        )
-
-    }
-  }
 }

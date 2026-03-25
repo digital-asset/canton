@@ -88,9 +88,9 @@ object UnassignmentRequest {
       contracts: ContractsReassignmentBatch,
       contractValidator: ContractValidator,
       submitterMetadata: ReassignmentSubmitterMetadata,
-      sourcePSId: Source[PhysicalSynchronizerId],
+      sourcePsid: Source[PhysicalSynchronizerId],
       sourceMediator: MediatorGroupRecipient,
-      targetPSId: Target[PhysicalSynchronizerId],
+      targetPsid: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
       targetTopology: Target[TopologySnapshot],
   )(implicit
@@ -130,24 +130,24 @@ object UnassignmentRequest {
 
       _ <- UsableSynchronizers
         .checkPackagesVetted(
-          sourcePSId.unwrap,
+          sourcePsid.unwrap,
           sourceTopology.unwrap,
           stakeholders.all.view.map(_ -> contracts.sourcePackageIds.unwrap).toMap,
           sourceTopology.unwrap.referenceTime,
         )
         .leftMap[ReassignmentValidationError](unknownPackage =>
-          PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, sourcePSId.unwrap)
+          PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, sourcePsid.unwrap)
         )
 
       _ <- UsableSynchronizers
         .checkPackagesVetted(
-          targetPSId.unwrap,
+          targetPsid.unwrap,
           targetTopology.unwrap,
           stakeholders.all.view.map(_ -> contracts.targetPackageIds.unwrap).toMap,
           targetTopology.unwrap.referenceTime,
         )
         .leftMap[ReassignmentValidationError](unknownPackage =>
-          PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, targetPSId.unwrap)
+          PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, targetPsid.unwrap)
         )
 
       _ <- ReassignmentValidation.authenticateContracts(
@@ -160,9 +160,9 @@ object UnassignmentRequest {
         submitterMetadata,
         reassigningParticipants,
         contracts,
-        sourcePSId,
+        sourcePsid,
         sourceMediator,
-        targetPSId,
+        targetPsid,
         targetTopology.map(_.timestamp),
       )
 

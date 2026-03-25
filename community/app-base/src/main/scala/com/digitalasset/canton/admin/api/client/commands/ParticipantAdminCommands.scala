@@ -757,6 +757,7 @@ object ParticipantAdminCommands {
         workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
+        party: Option[PartyId],
     ) extends GrpcAdminCommand[
           Unit,
           v30.ImportPartyAcsV2Response,
@@ -791,6 +792,7 @@ object ParticipantAdminCommands {
               contractImportMode = Option.when(isFirst)(contractImportMode.toProtoV30),
               representativePackageIdOverride =
                 Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
+              partyId = Option.when(isFirst)(party.map(_.toProtoPrimitive)).flatten,
             )
           },
           acsSnapshotBytes,
@@ -1328,8 +1330,8 @@ object ParticipantAdminCommands {
     }
 
     final case class PerformLateLsu(
-        currentPSId: PhysicalSynchronizerId,
-        successorPSId: PhysicalSynchronizerId,
+        currentPsid: PhysicalSynchronizerId,
+        successorPsid: PhysicalSynchronizerId,
         upgradeTime: CantonTimestamp,
         successorConfig: SynchronizerConnectionConfig,
         sequencerConnectionValidation: SequencerConnectionValidation,
@@ -1346,10 +1348,10 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, v30.PerformLateLsuRequest] =
         Right(
           v30.PerformLateLsuRequest(
-            physicalSynchronizerId = currentPSId.toProtoPrimitive,
+            physicalSynchronizerId = currentPsid.toProtoPrimitive,
             successor = v30.PerformLateLsuRequest
               .Successor(
-                physicalSynchronizerId = successorPSId.toProtoPrimitive,
+                physicalSynchronizerId = successorPsid.toProtoPrimitive,
                 announcedUpgradeTime = upgradeTime.toProtoTimestamp.some,
                 config = successorConfig.toProtoV30.some,
                 sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,

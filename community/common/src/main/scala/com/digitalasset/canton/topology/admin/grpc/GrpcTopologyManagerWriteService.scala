@@ -54,7 +54,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class GrpcTopologyManagerWriteService(
     managers: => Seq[TopologyManager[TopologyStoreId, BaseCrypto]],
-    physicalSynchronizerIdLookup: PSIdLookup,
+    physicalSynchronizerIdLookup: PsidLookup,
     temporaryStoreRegistry: TemporaryStoreRegistry,
     nodeParameters: CantonNodeParameters,
     override val loggerFactory: NamedLoggerFactory,

@@ -73,7 +73,7 @@ class SValueHashSpec
         "fUnit" -> SV.SUnit,
         "fOpt0" -> SV.SOptional(None),
         "fOpt1" -> SV.SOptional(Some(SV.SText("Some"))),
-        "fList" -> SV.SList(FrontStack("A", "B", "C").map(SV.SText)),
+        "fList" -> SV.SList(FrontStack("A", "B", "C").map(SV.SText.apply)),
         "fVariant" -> SV.SVariant(
           defRef(name = "Variant"),
           Ref.Name.assertFromString("VariantCons"),

@@ -34,6 +34,9 @@ object SubmissionRequestType {
   case object Commitment extends SubmissionRequestType {
     override def name: String = "commitment"
   }
+  case object LsuSequencingTest extends SubmissionRequestType {
+    override def name: String = "test lsu sequencing"
+  }
   case object TopUp extends SubmissionRequestType {
     override def name: String = "top up"
   }
@@ -78,6 +81,7 @@ object SubmissionRequestType {
         case (ParticipantId(_), true, false, false, false) => Commitment
         case (SequencerId(_), true, false, true, false) => TopUp
         case (SequencerId(_), false, true, true, false) => TopUpMed
+        case (SequencerId(_), false, true, false, false) => LsuSequencingTest
         case (_, false, false, false, true) => TopologyTransaction
         case (_, false, false, false, false) => TimeProof
         case _ =>

@@ -106,13 +106,21 @@ class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <
     OptionT(resultF)
   }
 
-  override def getAll(operationName: NonEmptyString)(implicit
+  override def getAll(
+      operationName: NonEmptyString,
+      synchronizerId: Option[SId] = None,
+      operationKey: Option[String] = None,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[PendingOperation[Op, SId]]] = FutureUnlessShutdown.pure {
-    store.iterator.collect { case ((_, _, `operationName`), op) =>
-      op.tryToPendingOperation(opCompanion)
+    store.iterator.collect {
+      case ((sync, key, `operationName`), op)
+          if synchronizerId.forall(_ == sync) && operationKey.forall(_ == key) =>
+        op.tryToPendingOperation(opCompanion)
     }.toSet
   }
+
+  override def close(): Unit = ()
 }
 
 object InMemoryPendingOperationStore {

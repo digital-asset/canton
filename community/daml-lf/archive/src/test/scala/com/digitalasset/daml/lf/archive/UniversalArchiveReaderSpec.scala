@@ -3,11 +3,11 @@
 
 package com.digitalasset.daml.lf.archive
 
-import java.io.File
-
 import org.scalatest.TryValues
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.io.File
 
 class UniversalArchiveReaderSpec extends AnyFlatSpec with Matchers with TryValues {
 
@@ -18,19 +18,19 @@ class UniversalArchiveReaderSpec extends AnyFlatSpec with Matchers with TryValue
   behavior of UniversalArchiveReader.toString
 
   it should "parse a DAR file" in {
-    UniversalArchiveReader.readFile(darFile) shouldBe a[Right[_, _]]
+    UniversalArchiveReader.readFile(darFile) shouldBe a[Right[?, ?]]
   }
 
   it should "parse a DALF file" in {
-    UniversalArchiveReader.readFile(dalfFile) shouldBe a[Right[_, _]]
+    UniversalArchiveReader.readFile(dalfFile) shouldBe a[Right[?, ?]]
   }
 
   it should "parse a DAR file and return language version" in {
-    UniversalArchiveReader.readFile(darFile) shouldBe a[Right[_, _]]
+    UniversalArchiveReader.readFile(darFile) shouldBe a[Right[?, ?]]
   }
 
   it should "parse a DALF file and return language version" in {
-    UniversalArchiveReader.readFile(dalfFile) shouldBe a[Right[_, _]]
+    UniversalArchiveReader.readFile(dalfFile) shouldBe a[Right[?, ?]]
   }
 
   it should "reject a zip bomb with the proper error" in {

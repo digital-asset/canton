@@ -6,7 +6,7 @@ package com.digitalasset.daml
 import com.google.protobuf.Descriptors.FieldDescriptor
 import com.google.protobuf.{AbstractMessageLite, ByteString, CodedOutputStream, Message}
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object SafeProto {
 

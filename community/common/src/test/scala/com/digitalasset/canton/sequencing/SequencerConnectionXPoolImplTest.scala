@@ -289,7 +289,7 @@ class SequencerConnectionXPoolImplTest
         // Changing the expected synchronizer is not supported
         inside(
           pool
-            .updateConfig(pool.config.copy(expectedPSIdO = Some(testSynchronizerId(2))))
+            .updateConfig(pool.config.copy(expectedPsidO = Some(testSynchronizerId(2))))
         ) { case Left(SequencerConnectionXPoolError.InvalidConfigurationError(error)) =>
           error shouldBe "The expected physical synchronizer ID can only be changed during a node restart."
         }

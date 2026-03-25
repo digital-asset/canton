@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing
 
 import cats.Monoid
 import com.digitalasset.canton.DoNotDiscardLikeFuture
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  CanAbortDueToShutdown,
+  FutureUnlessShutdown,
+  UnlessShutdown,
+}
 
 import scala.concurrent.ExecutionContext
 import scala.util.Try
@@ -56,5 +60,10 @@ object AsyncResult {
       override def empty: AsyncResult[A] = AsyncResult(Monoid[FutureUnlessShutdown[A]].empty)
       override def combine(x: AsyncResult[A], y: AsyncResult[A]): AsyncResult[A] =
         AsyncResult(Monoid[FutureUnlessShutdown[A]].combine(x.unwrap, y.unwrap))
+    }
+
+  implicit val asyncResultCanAbortDueToShutdown: CanAbortDueToShutdown[AsyncResult] =
+    new CanAbortDueToShutdown[AsyncResult] {
+      override def abort[A]: AsyncResult[A] = AsyncResult(FutureUnlessShutdown.abortedDueToShutdown)
     }
 }

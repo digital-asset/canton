@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf.data
 
 import org.scalacheck.Gen
-import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
 class Utf8Spec extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyChecks {
@@ -111,7 +111,7 @@ class Utf8Spec extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyCh
     "respect Unicode ordering on complex string" in {
 
       // a naive inefficient Unicode ordering
-      import Ordering.Implicits._
+      import Ordering.Implicits.*
       val naiveOrdering =
         Ordering.by((s: String) => s.codePoints().toArray.toSeq)
 
@@ -145,7 +145,7 @@ class Utf8Spec extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyCh
 
     "reject any surrogate code point" in {
       for (cp <- Character.MIN_SURROGATE to Character.MAX_SURROGATE)
-        Utf8.pack(makeImmArray(cp.toLong)) shouldBe a[Left[_, _]]
+        Utf8.pack(makeImmArray(cp.toLong)) shouldBe a[Left[?, ?]]
     }
 
     "reject too small or too big code points" in {
@@ -161,7 +161,7 @@ class Utf8Spec extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyCh
       )
 
       for (cp <- testCases)
-        Utf8.pack(makeImmArray(cp)) shouldBe a[Left[_, _]]
+        Utf8.pack(makeImmArray(cp)) shouldBe a[Left[?, ?]]
     }
 
     "packs properly" in {

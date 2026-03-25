@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -32,7 +34,8 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
     extends AnyFreeSpec
     with Matchers
     with Inside
-    with TableDrivenPropertyChecks {
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   val helpers = new SerializationVersionTestHelpers
   import helpers._
@@ -242,14 +245,12 @@ private[lf] class SerializationVersionTestHelpers {
       committers: Set[Party] = Set.empty,
       controllers: Set[Party] = Set.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-  ): Either[SError.SError, SubmittedTransaction] = {
-    import SpeedyTestLib.loggingContext
-
+  )(implicit loggingContext: NamedLoggingContext): Either[SError.SError, SubmittedTransaction] = {
     val choiceName = Ref.ChoiceName.assertFromString("Destroy")
     val choiceArg = SExpr.SEValue(SValue.SUnit)
     val speedyContractId = SExpr.SEValue(SValue.SContractId(contractId))
     val speedyControllers =
-      SExpr.SEValue(SValue.SList(FrontStack.from(controllers.map(SValue.SParty))))
+      SExpr.SEValue(SValue.SList(FrontStack.from(controllers.map(SValue.SParty.apply))))
     val speedyObservers = SExpr.SEValue(SValue.SList(FrontStack.Empty))
     val speedyAuthorizers = SExpr.SEValue(SValue.SList(FrontStack.Empty))
     val machine =
@@ -281,6 +282,7 @@ private[lf] class SerializationVersionTestHelpers {
           ),
         ),
         committers = committers,
+        logger = MachineLogger()
       )
 
     SpeedyTestLib.buildTransaction(machine, getContract = getContract)

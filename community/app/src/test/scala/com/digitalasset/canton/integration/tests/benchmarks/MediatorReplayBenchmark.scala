@@ -23,14 +23,13 @@ import com.digitalasset.canton.integration.tests.manual.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerEvents
 import com.digitalasset.canton.sequencing.client.ReplayConfig
-import com.digitalasset.canton.sequencing.client.transports.replay.ReplayingEventsSequencerClientTransport
+import com.digitalasset.canton.sequencing.client.transports.replay.ReplaySequencerSubscriptionX
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeBootstrap
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.util.ShowUtil.*
@@ -81,10 +80,6 @@ class MediatorReplayBenchmark
     EnvironmentDefinition.P0S1M1_Manual
       .clearConfigTransforms() // to disable globally unique ports
       .addConfigTransforms(configTransforms()*)
-      .addConfigTransform(
-        // TODO(i26481): Enable new connection pool (test uses replay subscriptions)
-        ConfigTransforms.disableConnectionPool
-      )
 
   override def afterAll(): Unit = {
     // ensure that we don't leave the replay config on the mediator class that could be erroneously picked up by other tests
@@ -117,21 +112,21 @@ class MediatorReplayBenchmark
       sequencerClient.flush().futureValueUS
       lastFlushTs.set(Instant.now())
 
-      ReplayingEventsSequencerClientTransport.replayStatistics should not be empty withClue
+      ReplaySequencerSubscriptionX.replayStatistics should not be empty withClue
         "Missing replay statistics. Apparently, the sequencer client has not yet finished replaying events."
     }
 
-    val ReplayingEventsSequencerClientTransport.ReplayStatistics(
+    val ReplaySequencerSubscriptionX.ReplayStatistics(
       inputPath,
       numberOfEvents,
       startTime,
       handoverDuration,
     ) =
       Option(
-        ReplayingEventsSequencerClientTransport.replayStatistics.poll(1, TimeUnit.SECONDS)
+        ReplaySequencerSubscriptionX.replayStatistics.poll(1, TimeUnit.SECONDS)
       ).value
 
-    ReplayingEventsSequencerClientTransport.replayStatistics shouldBe empty withClue "Too many replay statistics. The test setup seems broken."
+    ReplaySequencerSubscriptionX.replayStatistics shouldBe empty withClue "Too many replay statistics. The test setup seems broken."
 
     val duration = JDuration.between(startTime.toInstant, lastFlushTs.get())
 

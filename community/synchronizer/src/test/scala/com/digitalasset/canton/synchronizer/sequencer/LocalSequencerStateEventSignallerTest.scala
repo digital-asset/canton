@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.NamedLogging
@@ -79,7 +80,7 @@ class LocalSequencerStateEventSignallerTest
     import env.*
 
     (0 until 3001).toList.foreach(_ =>
-      signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId)))
+      signaller.notifyOfLocalWrite(WriteNotification.forMemberIds(NonEmpty(Set, aliceId)))
     )
     for {
       // none of the previously produced signals are retained for future subscriptions
@@ -108,7 +109,11 @@ class LocalSequencerStateEventSignallerTest
         Source
           .tick(0.seconds, 100.millis, ())
           .take(numSignals.toLong)
-          .map(_ => signaller.notifyOfLocalWrite(WriteNotification.Members(Set(aliceId, bobId))))
+          .map(_ =>
+            signaller.notifyOfLocalWrite(
+              WriteNotification.forMemberIds(NonEmpty(Set, aliceId, bobId))
+            )
+          )
           .toMat(Sink.ignore)(Keep.right),
         errorLogMessagePrefix = "notifier",
       )

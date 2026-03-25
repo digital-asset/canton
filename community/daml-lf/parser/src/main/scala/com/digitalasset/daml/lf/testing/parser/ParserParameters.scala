@@ -13,10 +13,9 @@ case class ParserParameters[P](
 )
 
 object ParserParameters {
-  def default[P]: ParserParameters[P] = {
+  def default[P]: ParserParameters[P] =
     ParserParameters(
       defaultPackageId = Ref.PackageId.assertFromString("-pkgId-"),
       LanguageVersion.defaultLfVersion,
     )
-  }
 }

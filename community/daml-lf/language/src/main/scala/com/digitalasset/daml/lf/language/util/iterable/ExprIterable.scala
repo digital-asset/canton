@@ -4,12 +4,12 @@
 package com.digitalasset.daml.lf.language
 package iterable
 
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 
 private[lf] object ExprIterable {
   that =>
 
-  private[iterable] def iterator(x: Expr): Iterator[Expr] = {
+  private[iterable] def iterator(x: Expr): Iterator[Expr] =
     x match {
       case EVar(_) | EBuiltinFun(_) | EBuiltinCon(_) | EBuiltinLit(_) | EVal(_) | EEnumCon(_, _) |
           // stupid formatter !
@@ -88,9 +88,8 @@ private[lf] object ExprIterable {
       case EChoiceObserver(tpl @ _, choiceName @ _, contract, choiceArg) =>
         Iterator(contract, choiceArg)
     }
-  }
 
-  private[iterable] def iterator(x: Update): Iterator[Expr] = {
+  private[iterable] def iterator(x: Update): Iterator[Expr] =
     x match {
       case UpdatePure(typ @ _, expr) =>
         Iterator(expr)
@@ -121,7 +120,6 @@ private[lf] object ExprIterable {
       case UpdateTryCatchV1(typ @ _, body, binder @ _, handler) =>
         Iterator(body, handler)
     }
-  }
 
   private[iterable] def iterator(x: Definition): Iterator[Expr] =
     x match {

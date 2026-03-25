@@ -42,12 +42,12 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 
@@ -456,9 +456,8 @@ object ModelConformanceChecker {
         commandId: CommandId,
         transactionUUID: UUID,
         mediatorGroup: Int,
-        synchronizerId: SynchronizerId,
+        physicalSynchronizerId: PhysicalSynchronizerId,
         maxRecordTime: Option[CantonTimestamp],
-        protocolVersion: ProtocolVersion,
         transactionEnricher: TransactionEnricher,
         contractEnricher: ContractEnricher,
         hashTracer: HashTracer,
@@ -496,14 +495,14 @@ object ModelConformanceChecker {
                 commandId = commandId,
                 transactionUUID = transactionUUID,
                 mediatorGroup = mediatorGroup,
-                synchronizerId = synchronizerId,
+                synchronizer = physicalSynchronizerId.forExternalTransactionHashing,
                 timeBoundaries = reInterpretationResult.timeBoundaries,
                 preparationTime = reInterpretationResult.metadata.preparationTime.toLf,
                 maxRecordTime = maxRecordTime.map(_.toLf),
                 disclosedContracts = enrichedInputContracts,
               ),
               reInterpretationResult.metadata.seeds,
-              protocolVersion,
+              physicalSynchronizerId.protocolVersion,
               hashTracer = hashTracer,
             )
             .leftMap(_.message)

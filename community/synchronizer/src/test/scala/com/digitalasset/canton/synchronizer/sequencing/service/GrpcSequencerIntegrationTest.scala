@@ -83,8 +83,6 @@ import com.digitalasset.canton.util.{EitherTUtil, PekkoUtil}
 import com.digitalasset.canton.version.{
   IgnoreInSerializationTestExhaustivenessCheck,
   ProtocolVersion,
-  ProtocolVersionCompatibility,
-  ReleaseVersion,
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{config, *}
@@ -138,9 +136,6 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     override protected def timeouts: ProcessingTimeout = self.timeouts
     override protected[this] def logger: TracedLogger = self.logger
   })
-
-  // TODO(i27260): cleanup when the new connection pool is stable
-  val useNewConnectionPool: Boolean = true
 
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
     .thenReturn(FutureUnlessShutdown.pure(mockTopologySnapshot))
@@ -229,7 +224,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     staticSynchronizerParameters = BaseTest.defaultStaticSynchronizerParameters,
     cryptoApi = cryptoApi,
     clock = clock,
-    sequencingTimeLowerBoundExclusive = None,
+    lsuSequencingBounds = None,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,
     loggerFactory = loggerFactory,
   )
@@ -303,8 +298,6 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     )
   val connection = makeConnection(serverPort)
   private val connections = SequencerConnections.single(connection)
-  private val expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]] =
-    NonEmpty.mk(Set, SequencerAlias.Default -> sequencerId).toMap
 
   val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
     clientProtocolVersions = NonEmpty(Seq, BaseTest.testedProtocolVersion),
@@ -327,18 +320,13 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   private val clients = new AtomicReference[Seq[SequencerClient]](Seq.empty)
 
   def makeClient(
-      connections: SequencerConnections,
-      expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-      useNewConnectionPool: Boolean = useNewConnectionPool,
+      connections: SequencerConnections
   ): EitherT[FutureUnlessShutdown, String, RichSequencerClient] = {
-    val clientConfig =
-      SequencerClientConfig(authToken = authConfig, useNewConnectionPool = useNewConnectionPool)
+    val clientConfig = SequencerClientConfig(authToken = authConfig)
     val clientFactory = SequencerClientFactory(
       synchronizerId,
       cryptoApi,
-      cryptoApi.crypto,
       clientConfig,
-      TracingConfig.Propagation.Disabled,
       TestingConfigInternal(),
       BaseTest.defaultStaticSynchronizerParameters,
       DefaultProcessingTimeouts.testing,
@@ -351,27 +339,19 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
       LoggingConfig(),
       exitOnFatalErrors = false,
       loggerFactory,
-      ProtocolVersionCompatibility.supportedProtocols(
-        includeAlphaVersions = BaseTest.testedProtocolVersion.isAlpha,
-        includeBetaVersions = BaseTest.testedProtocolVersion.isBeta,
-        release = ReleaseVersion.current,
-      ),
     )
 
     val poolConfig = SequencerConnectionXPoolConfig.fromSequencerConnections(
       sequencerConnections = connections,
       tracingConfig = TracingConfig(TracingConfig.Propagation.Disabled),
-      expectedPSIdO = None,
+      expectedPsidO = None,
     )
 
     for {
       connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
         connectionPoolFactory.create(poolConfig, name = "test").leftMap(error => error.toString)
       )
-      _ <-
-        if (useNewConnectionPool)
-          connectionPool.start().leftMap(error => error.toString)
-        else EitherTUtil.unitUS
+      _ <- connectionPool.start().leftMap(error => error.toString)
       client <- clientFactory
         .create(
           participant,
@@ -398,7 +378,6 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
           },
           connections,
           synchronizerPredecessor = None,
-          Option.when(!useNewConnectionPool)(expectedSequencers),
           connectionPool = connectionPool,
         )
         .leftMap(error => error.toString)
@@ -408,7 +387,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     }
   }
 
-  def makeDefaultClient = makeClient(connections, expectedSequencers)
+  def makeDefaultClient = makeClient(connections)
 
   override def close(): Unit =
     LifeCycle.close(
@@ -594,10 +573,7 @@ class GrpcSequencerIntegrationTest
               submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
               sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
             )
-            .value,
-          expectedSequencers = NonEmpty
-            .mk(Set, SequencerAlias.Default -> sequencerId, sequencerAlias2 -> sequencerId2)
-            .toMap,
+            .value
         ).leftOrFail("Expected client creation to fail due to traffic state mismatch")
 
         result.futureValueUS should (include("RetryableError") and not(
@@ -677,15 +653,9 @@ class GrpcSequencerIntegrationWithFailingTokenRefreshTest
               .value
               .futureValueUS
           ) { case Left(message) =>
-            if (env.useNewConnectionPool) {
-              // The error message is formatted differently with the connection pool
-              message should include(
-                "GrpcServiceUnavailable: UNAVAILABLE/Authentication token refresh error: test"
-              )
-            } else {
-              message shouldBe
-                "Status{code=UNAVAILABLE, description=Authentication token refresh error: test, cause=null}"
-            }
+            message should include(
+              "GrpcServiceUnavailable: UNAVAILABLE/Authentication token refresh error: test"
+            )
           },
           LogEntry.assertLogSeq(
             Seq(

@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Time}
@@ -13,7 +14,6 @@ import com.digitalasset.daml.lf.ledger.FailedAuthorization.{CreateMissingAuthori
 import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, SerializationVersion, SubmittedTransaction}
 import com.digitalasset.daml.lf.transaction.Transaction.Metadata
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueContractId, ValueList, ValueParty, ValueRecord}
-import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -30,10 +30,8 @@ class AuthPropagationSpecV2 extends AuthPropagationSpec(LanguageVersion.Major.V2
 class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyFreeSpec
     with Matchers
-    with Inside {
-
-  private[this] implicit def loggingContext: LoggingContext = LoggingContext.ForTesting
-
+    with Inside 
+    with SuppressingLogging {
   implicit private def toName(s: String): Name = Name.assertFromString(s)
   implicit private def toParty(s: String): Party = Party.assertFromString(s)
 
@@ -96,9 +94,8 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
   private val contractIdVersion = ContractIdVersion.V1
   private val contractStateMode = ContractStateMachine.Mode.devDefault
 
-  private val testEngine: Engine =
-    Engine.DevEngine
-
+private val testEngine: Engine = Engine.DevEngine(loggerFactory)
+  
   private def go(
       submitters: Set[Party],
       command: ApiCommand,

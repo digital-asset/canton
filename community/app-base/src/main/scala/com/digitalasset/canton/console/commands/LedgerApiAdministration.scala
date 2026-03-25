@@ -197,6 +197,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
           resultFilter: UpdateWrapper => Boolean = _ => true,
           synchronizerFilter: Option[SynchronizerId] = None,
+          descendingOrder: Boolean = false,
       ): Seq[UpdateWrapper] = {
 
         val resultFilterWithSynchronizer = synchronizerFilter match {
@@ -215,6 +216,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             updateFormat,
             beginOffsetExclusive,
             endOffsetInclusive,
+            descendingOrder,
           ),
           "getUpdates",
           observer,
@@ -522,6 +524,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |the pruning offset, this command fails with a `NOT_FOUND` error.
           |If the beginOffset is zero then the participant begin is taken as beginning offset.
           |If the endOffset is None then a continuous stream is returned.
+          |If the descendingOrder is true, then the updates are streamed from the most recent
+          |(endOffsetInclusive) to the oldest. In such case endOffsetInclusive must be defined.
           """
       )
       def subscribe_updates(
@@ -529,6 +533,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           updateFormat: UpdateFormat,
           beginOffsetExclusive: Long = 0L,
           endOffsetInclusive: Option[Long] = None,
+          descendingOrder: Boolean = false,
       ): AutoCloseable =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -537,6 +542,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               beginExclusive = beginOffsetExclusive,
               endInclusive = endOffsetInclusive,
               updateFormat = updateFormat,
+              descendingOrder = descendingOrder,
             )
           )
         }
@@ -704,6 +710,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
           maxRecordTime: Option[CantonTimestamp] = None,
           estimateTrafficCost: Option[CostEstimationHints] = None,
+          tapsMaxPasses: Option[Int] = None,
           hashingSchemeVersion: HashingSchemeVersion =
             HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
       ): PrepareResponseProto =
@@ -723,6 +730,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               prefetchContractKeys,
               maxRecordTime,
               estimateTrafficCost,
+              tapsMaxPasses,
               hashingSchemeVersion,
             )
           )
@@ -963,6 +971,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
           transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           includeCreatedEventBlob: Boolean = false,
+          tapsMaxPasses: Option[Int] = None,
       ): ApiTransaction = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -993,6 +1002,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               does not host the party.
                */
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              tapsMaxPasses = tapsMaxPasses,
             )
 
           case _ =>
@@ -1013,6 +1023,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   userPackageSelectionPreference,
                   transactionShape,
                   includeCreatedEventBlob = includeCreatedEventBlob,
+                  tapsMaxPasses,
                   optTimeout,
                 )
               )
@@ -1038,6 +1049,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           userId: String = userId,
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
+          tapsMaxPasses: Option[Int] = None,
       ): Unit = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -1061,6 +1073,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               disclosedContracts,
               userId,
               userPackageSelectionPreference,
+              tapsMaxPasses = tapsMaxPasses,
             )
 
           case _ =>
@@ -1079,6 +1092,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   synchronizerId,
                   userId,
                   userPackageSelectionPreference,
+                  tapsMaxPasses,
                 )
               )
             }
@@ -1109,12 +1123,22 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
       @Help.Summary("Investigate failed commands")
       @Help.Description(
-        """Same as status(..., state = CommandState.Failed)."""
+        """Same as status(..., state = CommandState.COMMAND_STATE_FAILED)."""
       )
       def failed(commandId: String = "", limit: PositiveInt = PositiveInt.tryCreate(10)): Seq[
         CommandStatus
       ] = check(FeatureFlag.Preview) {
         status(commandId, CommandState.COMMAND_STATE_FAILED, limit)
+      }
+
+      @Help.Summary("Investigate succeeded commands")
+      @Help.Description(
+        """Same as status(..., state = CommandState.COMMAND_STATE_SUCCEEDED)."""
+      )
+      def succeeded(commandId: String = "", limit: PositiveInt = PositiveInt.tryCreate(10)): Seq[
+        CommandStatus
+      ] = check(FeatureFlag.Preview) {
+        status(commandId, CommandState.COMMAND_STATE_SUCCEEDED, limit)
       }
 
       @Help.Summary(
@@ -1408,6 +1432,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
             // External party specifics
             verboseHashing: Boolean = false,
+            tapsMaxPasses: Option[Int] = None,
         ): Unit = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1422,6 +1447,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference = userPackageSelectionPreference,
             verboseHashing = verboseHashing,
             prefetchContractKeys = Seq(),
+            tapsMaxPasses = tapsMaxPasses,
             hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
           )
 
@@ -1452,6 +1478,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             includeCreatedEventBlob: Boolean = false,
             // External party specifics
             verboseHashing: Boolean = false,
+            tapsMaxPasses: Option[Int] = None,
         ): ApiTransaction = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1466,6 +1493,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference = userPackageSelectionPreference,
             verboseHashing = verboseHashing,
             prefetchContractKeys = Seq(),
+            tapsMaxPasses = tapsMaxPasses,
             hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
           )
 
@@ -2815,6 +2843,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
             maxRecordTime: Option[CantonTimestamp] = None,
             estimateTrafficCost: Option[CostEstimationHints] = None,
+            tapsMaxPasses: Option[Int] = None,
             hashingSchemeVersion: HashingSchemeVersion =
               HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
         ): PrepareResponseProto =
@@ -2834,6 +2863,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
                 maxRecordTime,
                 estimateTrafficCost,
+                tapsMaxPasses,
                 hashingSchemeVersion,
               )
             )
@@ -2881,6 +2911,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
             transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
             includeCreatedEventBlob: Boolean = false,
+            tapsMaxPasses: Option[Int] = None,
         ): Transaction = {
           val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -2906,6 +2937,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userId,
                 userPackageSelectionPreference,
                 includeCreatedEventBlob = includeCreatedEventBlob,
+                tapsMaxPasses = tapsMaxPasses,
               )
 
             case _ =>
@@ -2926,6 +2958,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                     userPackageSelectionPreference,
                     transactionShape,
                     includeCreatedEventBlob = includeCreatedEventBlob,
+                    tapsMaxPasses,
                     optTimeout,
                   )
                 )
@@ -3076,6 +3109,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               disclosedContracts: Seq[javab.data.DisclosedContract] = Seq.empty,
               userId: String = userId,
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
+              tapsMaxPasses: Option[Int] = None,
           ): Unit = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -3093,6 +3127,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               disclosedContracts = protoDisclosedContracts,
               userId = userId,
               userPackageSelectionPreference = userPackageSelectionPreference,
+              tapsMaxPasses = tapsMaxPasses,
             )
           }
 
@@ -3110,6 +3145,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId: String = userId,
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
               includeCreatedEventBlob: Boolean = false,
+              tapsMaxPasses: Option[Int] = None,
           ): Transaction = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -3129,6 +3165,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId = userId,
               userPackageSelectionPreference = userPackageSelectionPreference,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              tapsMaxPasses = tapsMaxPasses,
             )
 
             javab.data.Transaction.fromProto(ApiTransaction.toJavaProto(tx))

@@ -6,7 +6,7 @@ package stablepackages
 
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.language.LanguageVersion
-import org.scalatest._
+import org.scalatest.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -27,7 +27,9 @@ class StablePackageTest(majorLanguageVersion: LanguageVersion.Major)
 
     // We rely on the fact a dar generated with target x.dev contains all the stable packages
     lazy val darFile =
-      new File(getClass.getClassLoader.getResource(s"Simple-v${majorLanguageVersion.pretty}dev.dar").toURI)
+      new File(
+        getClass.getClassLoader.getResource(s"Simple-v${majorLanguageVersion.pretty}dev.dar").toURI
+      )
     require(darFile.exists, s"File does not exist: $darFile")
     lazy val depPkgs = DarDecoder.assertReadArchiveFromFile(darFile).dependencies.toMap
 

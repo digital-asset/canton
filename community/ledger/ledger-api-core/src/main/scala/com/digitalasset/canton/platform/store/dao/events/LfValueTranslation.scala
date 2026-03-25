@@ -8,12 +8,7 @@ import com.daml.ledger.api.v2.value
 import com.daml.ledger.api.v2.value.{Record as ApiRecord, Value as ApiValue}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
@@ -29,6 +24,7 @@ import com.digitalasset.canton.platform.{
   PackageId as LfPackageId,
   Value as LfValue,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier}
@@ -75,11 +71,12 @@ final class LfValueTranslation(
     engineO: Option[Engine],
     loadPackage: (
         LfPackageId,
-        LoggingContextWithTrace,
+        TraceContext,
     ) => Future[Option[com.digitalasset.daml.lf.archive.DamlLf.Archive]],
     val loggerFactory: NamedLoggerFactory,
 ) extends LfValueSerialization
     with NamedLogging {
+  import LoggingContextWithTrace.implicitExtractTraceContext
 
   private[this] val packageLoader = new DeduplicatingPackageLoader()
 
@@ -511,9 +508,6 @@ final class LfValueTranslation(
       executionContext: ExecutionContext,
   ): Future[Either[Status, Versioned[Value]]] = Timed.future(
     metrics.index.lfValue.computeInterfaceView, {
-      implicit val errorLogger: ErrorLoggingContext =
-        ErrorLoggingContext(logger, loggingContext)
-
       def goAsync(
           res: LfEngine.Result[Versioned[Value]]
       ): Future[Either[Status, Versioned[Value]]] =
@@ -541,7 +535,7 @@ final class LfValueTranslation(
             packageLoader
               .loadPackage(
                 packageId = packageId,
-                delegate = packageId => loadPackage(packageId, loggingContext),
+                delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
                 metric = metrics.index.db.translation.getLfPackage,
               )
               .map(resume)

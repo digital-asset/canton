@@ -346,6 +346,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         rejection,
         psid.unwrap.logical,
         ts,
+        isTransaction = false,
       )
     )
     (updateO, rootHash.some)
@@ -376,6 +377,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         rejection,
         psid.unwrap.logical,
         pendingReassignment.requestId.unwrap,
+        isTransaction = false,
       )
     )
     Right(updateO)

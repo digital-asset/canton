@@ -196,7 +196,7 @@ object TopologyMapping {
         extends Code("ptk", v30Code.TOPOLOGY_MAPPING_CODE_PARTY_TO_KEY_MAPPING)
 
     case object LsuAnnouncement extends Code("lsu", v30Code.TOPOLOGY_MAPPING_CODE_LSU_ANNOUNCEMENT)
-    case object SequencerConnectionSuccessor
+    case object LsuSequencerConnectionSuccessor
         extends Code("scs", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCER_CONNECTION_SUCCESSOR)
 
     val all: Seq[Code] = Seq(
@@ -214,15 +214,15 @@ object TopologyMapping {
       SequencingDynamicParametersState,
       PartyToKeyMapping,
       LsuAnnouncement,
-      SequencerConnectionSuccessor,
+      LsuSequencerConnectionSuccessor,
     )
 
     val lsuMappings: Set[Code] =
-      Set[Code](Code.LsuAnnouncement, Code.SequencerConnectionSuccessor)
+      Set[Code](Code.LsuAnnouncement, Code.LsuSequencerConnectionSuccessor)
 
     // Note: we keep the effective LSU announcement even after the upgrade has happened
     val lsuMappingsExcludedFromUpgrade: NonEmpty[Set[Code]] =
-      NonEmpty(Set, Code.SequencerConnectionSuccessor: Code)
+      NonEmpty(Set, Code.LsuSequencerConnectionSuccessor: Code)
 
     val mappingsIncludedInUpgrade: Set[Code] = all.toSet -- lsuMappingsExcludedFromUpgrade
 
@@ -409,7 +409,7 @@ object TopologyMapping {
 
     code match {
       // Promote level for LSU-related activity to at least INFO.
-      case Code.LsuAnnouncement | Code.SequencerConnectionSuccessor =>
+      case Code.LsuAnnouncement | Code.LsuSequencerConnectionSuccessor =>
         maxLevel(default, Level.INFO)
       case _ => default
     }
@@ -2337,58 +2337,58 @@ final case class GrpcConnection(
 ) {
   def toProtoV30: v30.LsuSequencerConnectionSuccessor.SequencerConnection =
     v30.LsuSequencerConnectionSuccessor.SequencerConnection(
-      v30.LsuSequencerConnectionSuccessor.SequencerConnection.ConnectionType.Grpc(
-        v30.LsuSequencerConnectionSuccessor.SequencerConnection.Grpc(
-          endpoints = endpoints.map(_.toURI(transportSecurity).toString),
-          customTrustCertificates = customTrustCertificates,
-        )
-      )
+      endpoints = endpoints.map(_.toURI(transportSecurity).toString),
+      customTrustCertificates = customTrustCertificates,
     )
 }
 
 object GrpcConnection {
-  def fromProtoV30(
-      value: v30.LsuSequencerConnectionSuccessor.SequencerConnection
+  def fromProtoPrimitives(
+      endpointsP: Seq[String],
+      customTrustCertificates: Option[ByteString],
   ): ParsingResult[GrpcConnection] = for {
-    grpc <- value.connectionType.grpc.toRight(FieldNotSet("grpc"))
     uris <- ProtoConverter.parseRequiredNonEmpty(
       (s: String) =>
         UrlValidator
           .validate(s)
           .leftMap(err => ValueDeserializationError("endpoints", err.message)),
       "endpoints",
-      grpc.endpoints,
+      endpointsP,
     )
     endpointsAndTls <- Endpoint
       .fromUris(uris)
       .leftMap(err => ValueConversionError("endpoints", err))
     (endpoints, useTls) = endpointsAndTls
 
-  } yield GrpcConnection(endpoints, useTls, grpc.customTrustCertificates)
+  } yield GrpcConnection(endpoints, useTls, customTrustCertificates)
 
+  def fromProtoV30(
+      value: v30.LsuSequencerConnectionSuccessor.SequencerConnection
+  ): ParsingResult[GrpcConnection] =
+    fromProtoPrimitives(value.endpoints, value.customTrustCertificates)
 }
 
 final case class LsuSequencerConnectionSuccessor(
     sequencerId: SequencerId,
-    synchronizerId: SynchronizerId,
+    successorPsid: PhysicalSynchronizerId,
     connection: GrpcConnection,
 ) extends TopologyMapping {
   override def companion: TopologyMappingCompanion = LsuSequencerConnectionSuccessor
   override protected def pretty: Pretty[LsuSequencerConnectionSuccessor] = prettyOfClass(
     param("sequencerId", _.sequencerId),
-    param("synchronizerId", _.synchronizerId),
+    param("successorPsid", _.successorPsid),
     param("connection", _.connection.endpoints.forgetNE.map(_.toString.unquoted)),
     paramIfDefined("tls", x => Option.when(x.connection.transportSecurity)("enabled".unquoted)),
   )
   override def namespace: Namespace = sequencerId.namespace
 
   override def maybeUid: Option[UniqueIdentifier] = Some(sequencerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(sequencerId.uid, synchronizerId.uid)
+  override def referencedUids: Set[UniqueIdentifier] = Set(sequencerId.uid, successorPsid.uid)
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
   ): RequiredAuth = RequiredNamespaces(Set(namespace))
 
-  override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
+  override def restrictedToSynchronizer: Option[SynchronizerId] = Some(successorPsid.logical)
 
   def toGrpcSequencerConnection(alias: SequencerAlias): GrpcSequencerConnection =
     GrpcSequencerConnection(
@@ -2401,7 +2401,7 @@ final case class LsuSequencerConnectionSuccessor(
 
   def toProto: v30.LsuSequencerConnectionSuccessor = v30.LsuSequencerConnectionSuccessor(
     sequencerId = sequencerId.toProtoPrimitive,
-    synchronizerId = synchronizerId.toProtoPrimitive,
+    successorPhysicalSynchronizerId = successorPsid.toProtoPrimitive,
     connection = Some(connection.toProtoV30),
   )
 
@@ -2412,12 +2412,12 @@ final case class LsuSequencerConnectionSuccessor(
   )
 
   override def uniqueKey: MappingHash =
-    LsuSequencerConnectionSuccessor.uniqueKey(sequencerId, synchronizerId)
+    LsuSequencerConnectionSuccessor.uniqueKey(sequencerId, successorPsid.logical)
 }
 
 object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
 
-  override def code: Code = Code.SequencerConnectionSuccessor
+  override def code: Code = Code.LsuSequencerConnectionSuccessor
   def uniqueKey(sequencerId: SequencerId, synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(
       _.addString(sequencerId.uid.toProtoPrimitive).addString(synchronizerId.toProtoPrimitive)
@@ -2428,9 +2428,9 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
   ): ParsingResult[LsuSequencerConnectionSuccessor] =
     for {
       sequencerId <- SequencerId.fromProtoPrimitive(value.sequencerId, "sequencer_id")
-      currentSynchronizer <- SynchronizerId.fromProtoPrimitive(
-        value.synchronizerId,
-        "synchronizer_id",
+      successorPsid <- PhysicalSynchronizerId.fromProtoPrimitive(
+        value.successorPhysicalSynchronizerId,
+        "successor_physical_synchronizer_id",
       )
       connection <- ProtoConverter.parseRequired(
         GrpcConnection.fromProtoV30,
@@ -2439,7 +2439,7 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
       )
     } yield LsuSequencerConnectionSuccessor(
       sequencerId,
-      currentSynchronizer,
+      successorPsid,
       connection,
     )
 }

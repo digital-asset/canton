@@ -18,6 +18,7 @@ import com.github.benmanes.caffeine.cache.RemovalCause
 import com.github.blemale.scaffeine.{AsyncCache, AsyncLoadingCache, Scaffeine}
 
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.BiFunction
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -194,16 +195,15 @@ object ScaffeineCache {
       with NamedLogging {
 
     private val auxCache: TrieMap[K2, K] = TrieMap.empty[K2, K]
+    private val approxSize: AtomicInteger = new AtomicInteger(0)
 
-    private def putAuxCache(key: K2, value: K): Unit = {
-      auxCache.put(key, value).discard
-      updateMetrics()
-    }
+    private def putAuxCache(key: K2, value: K): Unit =
+      if (auxCache.put(key, value).isEmpty)
+        updateMetrics(1)
 
-    private def removeAuxCache(key: K2): Unit = {
-      auxCache.remove(key).discard
-      updateMetrics()
-    }
+    private def removeAuxCache(key: K2): Unit =
+      if (auxCache.remove(key).nonEmpty)
+        updateMetrics(-1)
 
     private val mainCache = ScaffeineCache.buildMappedAsync[K, V](
       cache = cache,
@@ -212,9 +212,8 @@ object ScaffeineCache {
       },
     )(tracedLogger, context)
 
-    @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
-    private def updateMetrics(): Unit =
-      sizeMetric.updateValue(auxCache.size)
+    private def updateMetrics(cnt: Int): Unit =
+      sizeMetric.updateValue(approxSize.updateAndGet(s => Math.max(0, s + cnt)))
 
     def getFuture(
         key: K,
@@ -290,7 +289,7 @@ object ScaffeineCache {
 
     def invalidateAll(): Unit = {
       auxCache.clear()
-      updateMetrics()
+      approxSize.set(0)
       mainCache.invalidateAll()
     }
 

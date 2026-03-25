@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.data
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import org.scalatest.EitherValues
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -14,7 +14,7 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
   "Name.fromString" - {
     "reject" - {
       "digit at the start" in {
-        Name.fromString("9test") shouldBe a[Left[_, _]]
+        Name.fromString("9test") shouldBe a[Left[?, ?]]
       }
 
       "bad symbols" in {
@@ -28,22 +28,22 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
             "test.", // used for DottedName string encoding
             "test#", // used for QualifiedChoiceId string encoding
           )
-        forEvery(testCases)(Name.fromString(_) shouldBe a[Left[_, _]])
+        forEvery(testCases)(Name.fromString(_) shouldBe a[Left[?, ?]])
       }
 
       "unicode" in {
-        Name.fromString("à") shouldBe a[Left[_, _]]
-        Name.fromString("ਊ") shouldBe a[Left[_, _]]
+        Name.fromString("à") shouldBe a[Left[?, ?]]
+        Name.fromString("ਊ") shouldBe a[Left[?, ?]]
       }
 
       "too long" in {
-        Name.fromString("a" * 1000) shouldBe a[Right[_, _]]
-        Name.fromString("a" * 1001) shouldBe a[Left[_, _]]
-        Name.fromString("a" * 10000) shouldBe a[Left[_, _]]
+        Name.fromString("a" * 1000) shouldBe a[Right[?, ?]]
+        Name.fromString("a" * 1001) shouldBe a[Left[?, ?]]
+        Name.fromString("a" * 10000) shouldBe a[Left[?, ?]]
       }
 
       "empty" in {
-        Name.fromString("") shouldBe a[Left[_, _]]
+        Name.fromString("") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -66,39 +66,39 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
 
   "DottedName.fromString" - {
     "reject empty" in {
-      DottedName.fromString("") shouldBe a[Left[_, _]]
+      DottedName.fromString("") shouldBe a[Left[?, ?]]
     }
 
     "rejects empty segment" in {
-      DottedName.fromString(".") shouldBe a[Left[_, _]]
-      DottedName.fromString("a..a") shouldBe a[Left[_, _]]
-      DottedName.fromString("a.") shouldBe a[Left[_, _]]
-      DottedName.fromString(".a") shouldBe a[Left[_, _]]
+      DottedName.fromString(".") shouldBe a[Left[?, ?]]
+      DottedName.fromString("a..a") shouldBe a[Left[?, ?]]
+      DottedName.fromString("a.") shouldBe a[Left[?, ?]]
+      DottedName.fromString(".a") shouldBe a[Left[?, ?]]
     }
 
     "rejects colon" in {
-      DottedName.fromString("foo:bar") shouldBe a[Left[_, _]]
+      DottedName.fromString("foo:bar") shouldBe a[Left[?, ?]]
     }
 
     "reject too long string" in {
-      DottedName.fromString("a" * 1000) shouldBe a[Right[_, _]]
-      DottedName.fromString("a" * 1001) shouldBe a[Left[_, _]]
-      DottedName.fromString("a" * 10000) shouldBe a[Left[_, _]]
-      DottedName.fromString("a" * 500 + "." + "a" * 499) shouldBe a[Right[_, _]]
-      DottedName.fromString("a" * 500 + "." + "a" * 500) shouldBe a[Left[_, _]]
-      DottedName.fromString("a" * 5000 + "." + "a" * 5000) shouldBe a[Left[_, _]]
-      DottedName.fromString("a" * 10000) shouldBe a[Left[_, _]]
-      DottedName.fromString("a." * 499 + "aa") shouldBe a[Right[_, _]]
-      DottedName.fromString("a." * 500 + "a") shouldBe a[Left[_, _]]
-      DottedName.fromString("a." * 5000 + "a") shouldBe a[Left[_, _]]
+      DottedName.fromString("a" * 1000) shouldBe a[Right[?, ?]]
+      DottedName.fromString("a" * 1001) shouldBe a[Left[?, ?]]
+      DottedName.fromString("a" * 10000) shouldBe a[Left[?, ?]]
+      DottedName.fromString("a" * 500 + "." + "a" * 499) shouldBe a[Right[?, ?]]
+      DottedName.fromString("a" * 500 + "." + "a" * 500) shouldBe a[Left[?, ?]]
+      DottedName.fromString("a" * 5000 + "." + "a" * 5000) shouldBe a[Left[?, ?]]
+      DottedName.fromString("a" * 10000) shouldBe a[Left[?, ?]]
+      DottedName.fromString("a." * 499 + "aa") shouldBe a[Right[?, ?]]
+      DottedName.fromString("a." * 500 + "a") shouldBe a[Left[?, ?]]
+      DottedName.fromString("a." * 5000 + "a") shouldBe a[Left[?, ?]]
     }
 
     "rejects empty segments" in {
-      DottedName.fromString(".") shouldBe a[Left[_, _]]
-      DottedName.fromString(".foo.") shouldBe a[Left[_, _]]
-      DottedName.fromString(".foo") shouldBe a[Left[_, _]]
-      DottedName.fromString("foo.") shouldBe a[Left[_, _]]
-      DottedName.fromString("foo..bar") shouldBe a[Left[_, _]]
+      DottedName.fromString(".") shouldBe a[Left[?, ?]]
+      DottedName.fromString(".foo.") shouldBe a[Left[?, ?]]
+      DottedName.fromString(".foo") shouldBe a[Left[?, ?]]
+      DottedName.fromString("foo.") shouldBe a[Left[?, ?]]
+      DottedName.fromString("foo..bar") shouldBe a[Left[?, ?]]
     }
 
     "accepts good segments" - {
@@ -119,22 +119,22 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
   "DottedName.fromSegments" - {
     "rejects" - {
       "empty" in {
-        DottedName.fromSegments(List.empty) shouldBe a[Left[_, _]]
+        DottedName.fromSegments(List.empty) shouldBe a[Left[?, ?]]
       }
       "too long" in {
         val s1 = Name.assertFromString("a")
         val s499 = Name.assertFromString("a" * 499)
         val s500 = Name.assertFromString("a" * 500)
         val s1000 = Name.assertFromString("a" * 1000)
-        DottedName.fromSegments(List.fill(500)(s1)) shouldBe a[Right[_, _]] // length = 999
-        DottedName.fromSegments(List.fill(501)(s1)) shouldBe a[Left[_, _]] // length = 1001
-        DottedName.fromSegments(List.fill(5000)(s1)) shouldBe a[Left[_, _]] // length = 5002
-        DottedName.fromSegments(List(s499, s500)) shouldBe a[Right[_, _]] // length = 1000
-        DottedName.fromSegments(List(s500, s500)) shouldBe a[Left[_, _]] // length = 1001
-        DottedName.fromSegments(List(s1000)) shouldBe a[Right[_, _]] // length = 1000
-        DottedName.fromSegments(List(s1000, s1)) shouldBe a[Left[_, _]] // length = 1002
-        DottedName.fromSegments(List(s1, s1000)) shouldBe a[Left[_, _]] // length = 1002
-        DottedName.fromSegments(List(s1000, s1000)) shouldBe a[Left[_, _]] // length = 2001
+        DottedName.fromSegments(List.fill(500)(s1)) shouldBe a[Right[?, ?]] // length = 999
+        DottedName.fromSegments(List.fill(501)(s1)) shouldBe a[Left[?, ?]] // length = 1001
+        DottedName.fromSegments(List.fill(5000)(s1)) shouldBe a[Left[?, ?]] // length = 5002
+        DottedName.fromSegments(List(s499, s500)) shouldBe a[Right[?, ?]] // length = 1000
+        DottedName.fromSegments(List(s500, s500)) shouldBe a[Left[?, ?]] // length = 1001
+        DottedName.fromSegments(List(s1000)) shouldBe a[Right[?, ?]] // length = 1000
+        DottedName.fromSegments(List(s1000, s1)) shouldBe a[Left[?, ?]] // length = 1002
+        DottedName.fromSegments(List(s1, s1000)) shouldBe a[Left[?, ?]] // length = 1002
+        DottedName.fromSegments(List(s1000, s1000)) shouldBe a[Left[?, ?]] // length = 2001
       }
     }
   }
@@ -151,16 +151,16 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
 
   "QualifiedName.fromString" - {
     "rejects no colon" in {
-      QualifiedName.fromString("foo") shouldBe a[Left[_, _]]
+      QualifiedName.fromString("foo") shouldBe a[Left[?, ?]]
     }
 
     "rejects multiple colons" in {
-      QualifiedName.fromString("foo:bar:baz") shouldBe a[Left[_, _]]
+      QualifiedName.fromString("foo:bar:baz") shouldBe a[Left[?, ?]]
     }
 
     "rejects empty dotted names" in {
-      QualifiedName.fromString(":bar") shouldBe a[Left[_, _]]
-      QualifiedName.fromString("bar:") shouldBe a[Left[_, _]]
+      QualifiedName.fromString(":bar") shouldBe a[Left[?, ?]]
+      QualifiedName.fromString("bar:") shouldBe a[Left[?, ?]]
     }
 
     "accepts valid qualified names" in {
@@ -314,20 +314,20 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
     def makeString(c: Char): String = s"the character $c is not US-ASCII"
 
     "rejects the empty string" in {
-      PackageId.fromString("") shouldBe a[Left[_, _]]
-      Party.fromString("") shouldBe a[Left[_, _]]
-      LedgerString.fromString("") shouldBe a[Left[_, _]]
+      PackageId.fromString("") shouldBe a[Left[?, ?]]
+      Party.fromString("") shouldBe a[Left[?, ?]]
+      LedgerString.fromString("") shouldBe a[Left[?, ?]]
     }
 
     "treats US-ASCII characters as expected" in {
       for (c <- '\u0001' to '\u007f') {
         val s = makeString(c)
-        PackageId.fromString(s) shouldBe (if (packageIdChars.contains(c)) a[Right[_, _]]
-                                          else a[Left[_, _]])
-        Party.fromString(s) shouldBe (if (partyIdChars.contains(c)) a[Right[_, _]]
-                                      else a[Left[_, _]])
-        LedgerString.fromString(s) shouldBe (if (ledgerStringChars.contains(c)) a[Right[_, _]]
-                                             else a[Left[_, _]])
+        PackageId.fromString(s) shouldBe (if (packageIdChars.contains(c)) a[Right[?, ?]]
+                                          else a[Left[?, ?]])
+        Party.fromString(s) shouldBe (if (partyIdChars.contains(c)) a[Right[?, ?]]
+                                      else a[Left[?, ?]])
+        LedgerString.fromString(s) shouldBe (if (ledgerStringChars.contains(c)) a[Right[?, ?]]
+                                             else a[Left[?, ?]])
       }
     }
 
@@ -335,15 +335,15 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
 
       val negativeTestCase = makeString('a')
 
-      PackageId.fromString(negativeTestCase) shouldBe a[Right[_, _]]
-      Party.fromString(negativeTestCase) shouldBe a[Right[_, _]]
-      LedgerString.fromString(negativeTestCase) shouldBe a[Right[_, _]]
+      PackageId.fromString(negativeTestCase) shouldBe a[Right[?, ?]]
+      Party.fromString(negativeTestCase) shouldBe a[Right[?, ?]]
+      LedgerString.fromString(negativeTestCase) shouldBe a[Right[?, ?]]
 
       for (c <- '\u0080' to '\u00ff') {
         val positiveTestCase = makeString(c)
-        PackageId.fromString(positiveTestCase) shouldBe a[Left[_, _]]
-        Party.fromString(positiveTestCase) shouldBe a[Left[_, _]]
-        LedgerString.fromString(positiveTestCase) shouldBe a[Left[_, _]]
+        PackageId.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
+        Party.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
+        LedgerString.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
       }
       for (
         positiveTestCase <- List(
@@ -352,19 +352,19 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
           "Λ (τ : ⋆) (σ: ⋆ → ⋆). λ (e : ∀ (α : ⋆). σ α) → (( e @τ ))",
         )
       ) {
-        Party.fromString(positiveTestCase) shouldBe a[Left[_, _]]
-        PackageId.fromString(positiveTestCase) shouldBe a[Left[_, _]]
-        LedgerString.fromString(positiveTestCase) shouldBe a[Left[_, _]]
+        Party.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
+        PackageId.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
+        LedgerString.fromString(positiveTestCase) shouldBe a[Left[?, ?]]
       }
     }
 
     "reject too long string" in {
-      Party.fromString("p" * 255) shouldBe a[Right[_, _]]
-      Party.fromString("p" * 256) shouldBe a[Left[_, _]]
-      PackageId.fromString("p" * 64) shouldBe a[Right[_, _]]
-      PackageId.fromString("p" * 65) shouldBe a[Left[_, _]]
-      LedgerString.fromString("p" * 255) shouldBe a[Right[_, _]]
-      LedgerString.fromString("p" * 256) shouldBe a[Left[_, _]]
+      Party.fromString("p" * 255) shouldBe a[Right[?, ?]]
+      Party.fromString("p" * 256) shouldBe a[Left[?, ?]]
+      PackageId.fromString("p" * 64) shouldBe a[Right[?, ?]]
+      PackageId.fromString("p" * 65) shouldBe a[Left[?, ?]]
+      LedgerString.fromString("p" * 255) shouldBe a[Right[?, ?]]
+      LedgerString.fromString("p" * 256) shouldBe a[Left[?, ?]]
     }
   }
 
@@ -395,7 +395,7 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
         if (QualifiedChoiceId.fromString(s).isRight)
           QualifiedChoiceId.fromString(s) shouldBe Left(s)
         else
-          QualifiedChoiceId.fromString(s) shouldBe a[Left[_, _]]
+          QualifiedChoiceId.fromString(s) shouldBe a[Left[?, ?]]
       )
     }
 
@@ -432,26 +432,25 @@ class RefTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks w
           "adfs|john@fabrikam.com",
           "mailto:john@fabrikam.com",
           "(usr!67324682736476)",
-
         )
 
     "accept valid user ids" in {
-      validUserIds.foreach(userId => UserId.fromString(userId) shouldBe a[Right[_, _]])
+      validUserIds.foreach(userId => UserId.fromString(userId) shouldBe a[Right[?, ?]])
     }
 
     "reject user ids containing invalid characters" in {
       val invalidCharacters = "àá \\%&*=[]{};<>,?\""
       val invalidUserIds = invalidCharacters.map(_.toString) :+ "john/doe"
-      invalidUserIds.foreach(userId => UserId.fromString(userId) shouldBe a[Left[_, _]])
+      invalidUserIds.foreach(userId => UserId.fromString(userId) shouldBe a[Left[?, ?]])
     }
 
     "reject the empty string" in {
-      UserId.fromString("") shouldBe a[Left[_, _]]
+      UserId.fromString("") shouldBe a[Left[?, ?]]
     }
 
     "reject too long strings" in {
-      UserId.fromString("a" * 128) shouldBe a[Right[_, _]]
-      UserId.fromString("a" * 129) shouldBe a[Left[_, _]]
+      UserId.fromString("a" * 128) shouldBe a[Right[?, ?]]
+      UserId.fromString("a" * 129) shouldBe a[Left[?, ?]]
     }
   }
 

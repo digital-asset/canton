@@ -140,7 +140,16 @@ abstract class BaseSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
 
-  protected def sendAsyncSignedInternal(signedSubmission: SignedContent[SubmissionRequest])(implicit
+  /** @param signedSubmission
+    *   Submission to be sent
+    * @param skipLsuChecks
+    *   If true, skips some of the checks around LSU. Should be used only to sequence a
+    *   `LsuSequencingTest` message.
+    */
+  protected def sendAsyncSignedInternal(
+      signedSubmission: SignedContent[SubmissionRequest],
+      skipLsuChecks: Boolean = false,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
 

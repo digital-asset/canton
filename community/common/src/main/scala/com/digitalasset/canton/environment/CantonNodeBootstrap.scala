@@ -81,7 +81,7 @@ import com.digitalasset.canton.topology.admin.grpc.{
   GrpcTopologyAggregationService,
   GrpcTopologyManagerReadService,
   GrpcTopologyManagerWriteService,
-  PSIdLookup,
+  PsidLookup,
 }
 import com.digitalasset.canton.topology.admin.v30 as adminV30
 import com.digitalasset.canton.topology.client.{
@@ -136,7 +136,7 @@ import org.apache.pekko.actor.ActorSystem
 
 import java.io.IOException
 import java.util.concurrent.{Executors, ScheduledExecutorService}
-import scala.annotation.unused
+import scala.annotation.{tailrec, unused}
 import scala.concurrent.{ExecutionContext, Future}
 
 /** When a canton node is created it first has to obtain an identity before most of its services can
@@ -258,7 +258,7 @@ abstract class CantonNodeBootstrapImpl[
   protected val tracerProvider: TracerProvider = arguments.tracerProvider
   protected val executorServiceMetrics: ExecutorServiceMetrics = arguments.executorServiceMetrics
   protected implicit val tracer: Tracer = tracerProvider.tracer
-  protected val initQueue: SimpleExecutionQueue = new SimpleExecutionQueue(
+  private val initQueue: SimpleExecutionQueue = new SimpleExecutionQueue(
     s"init-queue-${arguments.name}",
     arguments.futureSupervisor,
     timeouts,
@@ -289,6 +289,7 @@ abstract class CantonNodeBootstrapImpl[
       .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor))
 
   private def waitingFor: Option[WaitingForExternalInput] = {
+    @tailrec
     def nextStage(stage: BootstrapStage[?, ?]): Option[BootstrapStage[?, ?]] =
       stage.next match {
         case Some(s: BootstrapStage[?, ?]) => nextStage(s)
@@ -315,7 +316,7 @@ abstract class CantonNodeBootstrapImpl[
   // Node specific status service need to be bound early
   protected def bindNodeStatusService(): ServerServiceDefinition
 
-  protected def mkHealthComponents(
+  private def mkHealthComponents(
       nodeHealthService: DependenciesHealthService,
       livenessService: LivenessHealthService,
   ): (GrpcHealthReporter, Option[GrpcHealthServer], Option[HttpHealthServer]) = {
@@ -389,7 +390,7 @@ abstract class CantonNodeBootstrapImpl[
 
   protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager]
 
-  protected val bootstrapStageCallback = new BootstrapStage.Callback {
+  protected val bootstrapStageCallback: BootstrapStage.Callback = new BootstrapStage.Callback {
     override def loggerFactory: NamedLoggerFactory = CantonNodeBootstrapImpl.this.loggerFactory
     override def timeouts: ProcessingTimeout = CantonNodeBootstrapImpl.this.timeouts
     override def abortThisNodeOnStartupFailure(): Unit =
@@ -409,7 +410,7 @@ abstract class CantonNodeBootstrapImpl[
   protected def lookupSynchronizerTimeTracker(
       psid: PhysicalSynchronizerId
   ): Option[SynchronizerTimeTracker]
-  protected def lookupActivePSId: PSIdLookup
+  protected def lookupActivePsid: PsidLookup
 
   private val startupStage =
     new BootstrapStage[T, SetupCrypto](
@@ -727,7 +728,7 @@ abstract class CantonNodeBootstrapImpl[
     override protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[
       SetupNodeIdResult
     ]] =
-      (config.init.identity match {
+      config.init.identity match {
         case IdentityConfig.External(identifier, namespace, certificates) =>
           initWithExternal(identifier, namespace, certificates).map(Some(_))
         case IdentityConfig.Auto(identifier) =>
@@ -737,7 +738,7 @@ abstract class CantonNodeBootstrapImpl[
         case IdentityConfig.Manual =>
           // This should never be called, as the stage is not auto-completable
           EitherT.leftT("Manual initialization should never run auto-complete")
-      })
+      }
 
     /** validate the certificates and the uid provided externally
       *
@@ -1019,7 +1020,7 @@ abstract class CantonNodeBootstrapImpl[
                     crypto,
                     topologyClientLookup = lookupTopologyClient,
                     lookupSynchronizerTimeTracker,
-                    lookupActivePSId,
+                    lookupActivePsid,
                     processingTimeout = parameters.processingTimeouts,
                     bootstrapStageCallback.loggerFactory,
                   ),
@@ -1033,7 +1034,7 @@ abstract class CantonNodeBootstrapImpl[
                   new GrpcTopologyManagerWriteService(
                     temporaryStoreRegistry
                       .managers() ++ sequencedTopologyManagers :+ topologyManager,
-                    lookupActivePSId,
+                    lookupActivePsid,
                     temporaryStoreRegistry,
                     parameters,
                     bootstrapStageCallback.loggerFactory,

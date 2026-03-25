@@ -3,20 +3,12 @@
 
 package com.digitalasset.canton.topology
 
-import com.digitalasset.canton.crypto.{EncryptionPublicKey, KeyPurpose, PublicKey, SigningPublicKey}
+import com.digitalasset.canton.crypto.{EncryptionPublicKey, PublicKey, SigningPublicKey}
 
 final case class KeyCollection(
     signingKeys: Seq[SigningPublicKey],
     encryptionKeys: Seq[EncryptionPublicKey],
 ) {
-
-  def forPurpose(purpose: KeyPurpose): Seq[PublicKey] = purpose match {
-    case KeyPurpose.Signing => signingKeys
-    case KeyPurpose.Encryption => encryptionKeys
-  }
-
-  def hasBothKeys(): Boolean = signingKeys.nonEmpty && encryptionKeys.nonEmpty
-
   def add(key: PublicKey): KeyCollection = (key: @unchecked) match {
     case sigKey: SigningPublicKey => copy(signingKeys = signingKeys :+ sigKey)
     case encKey: EncryptionPublicKey => copy(encryptionKeys = encryptionKeys :+ encKey)
@@ -24,11 +16,7 @@ final case class KeyCollection(
 
   def addAll(keys: Seq[PublicKey]): KeyCollection = keys.foldLeft(this)(_.add(_))
 
-  def removeFrom(key: PublicKey): KeyCollection =
-    (key: @unchecked) match {
-      case _: SigningPublicKey => copy(signingKeys = signingKeys.filter(_.id != key.id))
-      case _: EncryptionPublicKey => copy(encryptionKeys = encryptionKeys.filter(_.id != key.id))
-    }
+  def isEmpty: Boolean = signingKeys.isEmpty && encryptionKeys.isEmpty
 }
 
 object KeyCollection {

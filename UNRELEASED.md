@@ -30,6 +30,12 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 - See the [hashing algorithm documentation](https://docs.digitalasset-staging.com/build/3.5/explanations/external-signing/external_signing_hashing_algorithm) for the updated version.
 - The `TTL` is now enforced at confirmation time by all confirming participants.
 
+##### SynchronizerId field update in Externally signed transactions
+- In Protocol version 35, the `synchronizer_id` field in externally signed prepared transaction metadata
+  will be populated with the physical synchronizer ID of the synchronizer on which the transaction will be processed,
+  instead of the logical synchronizer ID, as is the case in PV 34.
+  Applications must ensure they do not rely on the format of the `synchronizer_id` value.
+
 #### Dev Protocol
 
 
@@ -129,6 +135,13 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - `PrepareSubmissionRequest.hashing_scheme_version` can now be populated with the desired hashing version to be
    used for the transaction. The default hashing scheme is `HASHING_SCHEME_VERSION_V2` but integrators are encouraged to move to `HASHING_SCHEME_VERSION_V3` for
   synchronizers using protocol version 35.
+- Topology-Aware Package Selection (TAPS) refinement for handling inconsistent vetting states:
+  - The algorithm now considers a party's package vetting state only for packages required by that party in the interpreted transaction.
+    It starts with a minimal set of restrictions derived from the command's root nodes and progressively accumulates more restrictions over a configurable number of passes.
+    This iterative process increases the likelihood of finding a valid package selection set for the routing of the transaction.
+  - The maximum number of TAPS passes can be set at the request-level via the optional `taps_max_passes` field in `Commands` or `PrepareSubmissionRequest` messages.
+    If not specified, the default value is taken from the participant configuration via `participants.participant.ledger-api.topology-aware-package-selection.max-passes-default` (defaults to `3`).
+    A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
 - Deprecated: removed the feature flag `canton.sequencers.<node>.parameters.async-writer.enabled`, as async writing is now
   the only supported mode.
 
@@ -140,9 +153,12 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   control flow, so that the sequencer doesn't crash with an `OutOfMemoryError` when responding to slow clients.
 
 - Fixed a bug preventing automatic synchronization of protocol feature flags.
-Automatic synchronization can be disabled by setting `parameters.auto-sync-protocol-feature-flags = false` in the participant's configuration object.
+  Automatic synchronization can be disabled by setting `parameters.auto-sync-protocol-feature-flags = false` in the participant's configuration object.
+
 - Fixed a bug where the Ledger API `PackageService.ListVettedPackages` used to return a potentially not yet
   effective state of the vetted packages. Now it returns the state of vetted packages effective at the time of the request.
+
+- Sequencer health status used to incorrectly return the synchronizer uid instead of the sequencer uid.
 
 ### (YY-nnn, Severity): Title
 
@@ -195,6 +211,18 @@ channels.
 `unsafe-sequencer-channel-support` from `unsafe-enable-online-party-replication` for consistency and to
 refer specifically to sequencer channels.
 
+### Offline party replication
+
+Concluding an offline party replication by clearing the onboarding flag now includes two major updates:
+- Added crash resilience for ongoing clearances.
+- Automatic scheduling for clearances when a participant (re)connects to the synchronizer.
+
+These changes apply only to the `participant.parties.import_party_acsV2` and
+`participant.parties.clear_party_onboarding_flag` endpoints.
+
+Note: The replicated party ID must be included in the party ACS import call to enable automatic
+scheduling.
+
 ### Alpha Multi-Synchronizer Support
 
 Adds a new participant node parameter, `alpha-multi-synchronizer-support` (Boolean).
@@ -243,11 +271,17 @@ Starting with PV=35, the newly introduced `ParticipantAuthorizationOnboarding` L
 the beginning of party replication and transitions to `ParticipantAuthorizationAdded` once the party's ACS is fully
 visible on the Ledger API.
 
-### Party replication repair console macro removal
+### ACS stream continuation
 
-The original party replication, which relied on a silent synchronizer, has been superseded by the offline party
-replication process. As a result, the obsolete repair console macros associated with the old approach have
-been removed.
+The `GetActiveContracts` stream request has been extended with an optional `stream_continuation_token` field that allows
+clients to continue an interrupted ACS stream from the last element which made through. The field can be populated with
+the `stream_continuation_token` field of the last response element received before the interruption, and the stream will
+continue from the next element after that.
+
+### GetUpdates stream in descending order of events
+
+The `GetUpdatesRequest` object has new optional parameter `descending_order`. When this parameter is `true` the events
+are streamed from the newest to the oldest ones.
 
 ### update to GRPC 1.77.0
 

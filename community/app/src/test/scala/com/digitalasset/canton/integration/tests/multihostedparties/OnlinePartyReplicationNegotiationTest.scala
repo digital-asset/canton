@@ -37,6 +37,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -75,7 +76,9 @@ import scala.jdk.CollectionConverters.*
 @nowarn("msg=match may not be exhaustive")
 sealed trait OnlinePartyReplicationNegotiationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with AwaitsBftSequencerAuthenticationDisseminationQuorum {
+
   private def connectivityMap(implicit env: TestConsoleEnvironment) = {
     // Connect participants 1 and 2 to different sequencers to test negotiating sequencer
     import env.*
@@ -176,6 +179,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
   "Obtain agreement to establish to replicate a party" onlyRunWith ProtocolVersion.dev in {
     implicit env =>
+      waitUntilAllBftSequencersAuthenticateDisseminationQuorum()
+
       import env.*
       val (sourceParticipant, targetParticipant) = (participant1, participant2)
 

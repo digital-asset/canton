@@ -82,7 +82,7 @@ sealed abstract class LsuSuccessorAcceptedIntegrationTest(
         transferTraffic()
         eventually() {
           environment.simClock.value.advance(Duration.ofSeconds(1))
-          participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+          participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
         }
 
         waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
@@ -107,7 +107,7 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest(
         loggerFactory.assertLogs(
           assertThrows[CommandFailure] {
             fixture.oldSynchronizerOwners.foreach(
-              _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
+              _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
             )
           },
           _.message should include("successor id is not greater than current synchronizer id"),

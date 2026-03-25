@@ -199,15 +199,6 @@ private[lf] object PartialTransaction {
     authorizationChecker = authorizationChecker,
   )
 
-  @throws[SError.SErrorDamlException]
-  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
-    either match {
-      case Right(value) =>
-        value
-      case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(context, err))
-    }
-
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
 }
 
@@ -234,6 +225,15 @@ private[speedy] case class PartialTransaction(
 ) {
 
   import PartialTransaction._
+
+  @throws[SError.SErrorDamlException]
+  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
+    either match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        throw SError.SErrorDamlException(convTxError(nodes, context, err))
+    }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
     contractState.consumedByOrInactive(cid)
@@ -382,12 +382,13 @@ private[speedy] case class PartialTransaction(
         ptx.contractState.visitCreate(
           cid,
           createNode.gkeyOpt,
+          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
             Right((cid, nextPtx))
           case Left(duplicate) =>
-            Left((ptx, convTxError("Create", duplicate)))
+            Left((ptx, convTxError(nodes, "Create", duplicate)))
         }
     }
   }
@@ -641,18 +642,24 @@ private[speedy] case class PartialTransaction(
   /** Close a try context, by catching an exception,
     * i.e. a exception was thrown inside the context, and the catch associated to the try context did handle it.
     */
-  def rollbackTry(): PartialTransaction = {
+  def rollbackTry(): Either[IErr.EffectfulRollback, PartialTransaction] = {
     context.info match {
       case info: TryContextInfo =>
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
-        copy(
-          context = info.parent
-            .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
-          nodes = nodes.updated(info.nodeId, rollbackNode),
-          contractState = contractState.endRollback(),
-        )
+        contractState.endRollback() match {
+          case Right(rolledBackState) =>
+            Right(
+              copy(
+                context = info.parent
+                  .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
+                nodes = nodes.updated(info.nodeId, rollbackNode),
+                contractState = rolledBackState,
+              )
+            )
+          case Left(nodeIds) => Left(convEffectfulRollbackError(nodes, TxErr.EffectfulRollback(nodeIds)))
+        }
       case _ =>
         InternalError.runtimeException(
           NameOf.qualifiedNameOfCurrentFunc,

@@ -8,6 +8,7 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   PrepareSubmissionResponse,
+  PreparedTransaction,
 }
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
@@ -20,7 +21,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
   WildcardFilter,
 }
-import com.digitalasset.canton.BaseTest
+import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -30,6 +31,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
 }
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.{
   ParticipantSelector,
@@ -37,14 +39,29 @@ import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseIntera
   defaultExecutingParticipant,
   defaultPreparingParticipant,
 }
-import com.digitalasset.canton.logging.{LogEntry, NamedLogging}
+import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LogEntry,
+  LoggingContextWithTrace,
+  NamedLogging,
+}
+import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.{
+  ExecuteTransactionData,
+  PreparedTransactionDecoder,
+}
 import com.digitalasset.canton.topology.ForceFlag.DisablePartyWithActiveContracts
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ExternalParty, ForceFlags, PartyId, SynchronizerId}
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.{BaseTest, LfTimestamp}
+import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
 import com.google.protobuf.ByteString
 import org.scalatest.Suite
 
 import java.util.UUID
+import scala.collection.immutable.Seq
+import scala.concurrent.ExecutionContext
 
 object BaseInteractiveSubmissionTest {
   type ParticipantSelector = TestConsoleEnvironment => LocalParticipantReference
@@ -57,6 +74,8 @@ object BaseInteractiveSubmissionTest {
 trait BaseInteractiveSubmissionTest extends BaseTest {
 
   this: Suite & NamedLogging =>
+
+  protected val decoder = new PreparedTransactionDecoder(loggerFactory)
 
   protected def ppn(implicit env: TestConsoleEnvironment): LocalParticipantReference =
     defaultPreparingParticipant(env)
@@ -256,5 +275,80 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
         .map(_.transaction)
         .value
     }
+  }
+
+  protected def decodeProtoPreparedTransaction(
+      preparedTransaction: PreparedTransaction
+  )(implicit executionContext: ExecutionContext): ExecuteTransactionData =
+    decoder
+      .decode(
+        ExecuteRequest(
+          UserId.assertFromString("app"),
+          SubmissionId.assertFromString(UUID.randomUUID().toString),
+          DeduplicationOffset(None),
+          Map.empty,
+          preparedTransaction,
+          HashingSchemeVersion.V2,
+          tentativeLedgerEffectiveTime = LfTimestamp.now(),
+        )
+      )(executionContext, LoggingContextWithTrace.ForTesting, implicitly[ErrorLoggingContext])
+      .futureValue
+
+  /** Takes a preparedTransaction in the protobuf format, computes its hash and sign it. Useful in
+    * tests that need to modify the transaction returned by the prepare endpoint and obtain a valid
+    * signature for it.
+    */
+  protected def signProtoPreparedTransaction(
+      preparedTransaction: PreparedTransaction,
+      fingerprint: Fingerprint,
+  )(implicit executionContext: ExecutionContext, env: TestConsoleEnvironment): Signature = {
+    val hash = decodeProtoPreparedTransaction(preparedTransaction)
+      .computeHash(testedHashingSchemeVersion, testedProtocolVersion)
+      .value
+
+    // Sign it
+    env.global_secret.sign(
+      hash.unwrap,
+      fingerprint,
+      SigningKeyUsage.ProtocolOnly,
+    )
+  }
+
+  /** Test util method that creates a prepared transaction with a valid signature but the wrong
+    * synchronizer ID format for the tested PV
+    */
+  protected def prepareTransactionsWithIncorrectSynchronizerIdFormat(
+      command: Command,
+      party: ExternalParty,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): (Signature, PreparedTransaction) = {
+    import env.*
+
+    val preparedTransaction = cpn.ledger_api.javaapi.interactive_submission.prepare(
+      Seq(party.partyId),
+      Seq(command),
+    )
+
+    // This is the WRONG SyncId format, so physical for <= 34 and logical otherwise
+    val wrongSyncId =
+      if (testedProtocolVersion <= ProtocolVersion.v34)
+        synchronizer1Id
+      else
+        synchronizer1Id.logical
+
+    val preparedTransactionWithWrongSyncIdFormat =
+      preparedTransaction
+        .update(
+          _.preparedTransaction.metadata.synchronizerId := wrongSyncId.toProtoPrimitive
+        )
+        .getPreparedTransaction
+
+    val signature = signProtoPreparedTransaction(
+      preparedTransactionWithWrongSyncIdFormat,
+      party.fingerprint,
+    )(executionContext, env)
+
+    (signature, preparedTransactionWithWrongSyncIdFormat)
   }
 }

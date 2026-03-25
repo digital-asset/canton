@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.protocol.v30;
+
+import "google/protobuf/timestamp.proto";
+import "scalapb/scalapb.proto";
+
+message OnboardingClearanceOperation {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  // If unset, the operation is "incomplete." This indicates that the party-to-participant topology
+  // transaction required to activate the party must first be determined to establish the
+  // `onboarding_effective_at` time.
+  // If set, the operation is ready for scheduling.
+  // Optional
+  optional google.protobuf.Timestamp onboarding_effective_at = 1;
+}

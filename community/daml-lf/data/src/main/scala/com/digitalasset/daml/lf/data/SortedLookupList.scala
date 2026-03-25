@@ -3,16 +3,18 @@
 
 package com.digitalasset.daml.lf.data
 
-import ScalazEqual.{equalBy, orderBy}
-
+import scalaz.std.string.*
+import scalaz.std.tuple.*
+import scalaz.syntax.traverse.*
 import scalaz.{Applicative, Equal, Order, Traverse}
-import scalaz.std.tuple._
-import scalaz.std.string._
-import scalaz.syntax.traverse._
 
 import scala.collection.immutable.HashMap
 
-/** We use this container to pass around Daml-LF text maps as flat lists in various parts of the codebase. */
+import ScalazEqual.{equalBy, orderBy}
+
+/** We use this container to pass around Daml-LF text maps as flat lists in various parts of the
+  * codebase.
+  */
 // Note that keys are ordered using Utf8 ordering
 final class SortedLookupList[+X] private (entries: ImmArray[(String, X)]) extends Equals {
 
@@ -30,18 +32,17 @@ final class SortedLookupList[+X] private (entries: ImmArray[(String, X)]) extend
 
   def iterator: Iterator[(String, X)] = entries.iterator
 
-  def toHashMap: HashMap[String, X] = HashMap(entries.toSeq: _*)
+  def toHashMap: HashMap[String, X] = HashMap(entries.toSeq*)
 
   def foreach(f: ((String, X)) => Unit): Unit = entries.foreach(f)
 
-  override def canEqual(that: Any): Boolean = that.isInstanceOf[SortedLookupList[_]]
+  override def canEqual(that: Any): Boolean = that.isInstanceOf[SortedLookupList[?]]
 
-  override def equals(obj: Any): Boolean = {
+  override def equals(obj: Any): Boolean =
     obj match {
-      case other: SortedLookupList[_] if other canEqual this => other.toImmArray == entries
+      case other: SortedLookupList[?] if other canEqual this => other.toImmArray == entries
       case _ => false
     }
-  }
 
   override def hashCode(): Int = entries.hashCode()
 
@@ -51,7 +52,7 @@ final class SortedLookupList[+X] private (entries: ImmArray[(String, X)]) extend
 
 object SortedLookupList extends SortedLookupListInstances {
 
-  private[this] val EntryOrdering: Ordering[(String, _)] = { case ((key1, _), (key2, _)) =>
+  private[this] val EntryOrdering: Ordering[(String, ?)] = { case ((key1, _), (key2, _)) =>
     Utf8.Ordering.compare(key1, key2)
   }
 
@@ -74,9 +75,8 @@ object SortedLookupList extends SortedLookupListInstances {
       case Some(_) => Left(s"the entries $entries are not sorted by key")
     }
 
-  def apply[X](entries: Map[String, X]): SortedLookupList[X] = {
+  def apply[X](entries: Map[String, X]): SortedLookupList[X] =
     new SortedLookupList[X](entries.to(ImmArray.ImmArraySeq).sorted(EntryOrdering).toImmArray)
-  }
 
   def Empty: SortedLookupList[Nothing] = new SortedLookupList(ImmArray.Empty)
 

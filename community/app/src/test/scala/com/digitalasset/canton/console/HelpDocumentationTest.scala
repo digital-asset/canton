@@ -9,7 +9,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /** Tests that the console command documentation adheres to defined restrictions, fails otherwise.
   */
-class HelpDocumentationTest extends AnyWordSpec with CommunityEnvironmentFixture {
+final class HelpDocumentationTest extends AnyWordSpec with CommunityEnvironmentFixture {
 
   "Help Documentation" should {
     "not trigger any formatting warnings (length, newlines, etc.)" in new TestEnvironment {

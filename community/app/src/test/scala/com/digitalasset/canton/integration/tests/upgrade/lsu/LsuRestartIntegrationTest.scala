@@ -62,9 +62,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
         participants.all.foreach(
           _.synchronizers.modify(
             daName,
-            _.focus(_.timeTracker.observationLatency)
-              .replace(config.NonNegativeFiniteDuration.ofMillis(0))
-              .focus(_.timeTracker.patienceDuration)
+            _.focus(_.timeTracker.patienceDuration)
               .replace(config.NonNegativeFiniteDuration.ofMillis(0)),
           )
         )
@@ -111,7 +109,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
 
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
       }
       waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 

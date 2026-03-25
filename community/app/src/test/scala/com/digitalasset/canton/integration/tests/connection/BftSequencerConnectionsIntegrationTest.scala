@@ -77,11 +77,10 @@ sealed trait BftSequencerConnectionsIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S4M1_Config
       .addConfigTransforms(
-        ConfigTransforms.setConnectionPool(true),
         // Increase the acknowledgement interval to avoid flakes with failing acknowledgements log messages
         ConfigTransforms.updateSequencerClientAcknowledgementInterval(
           NonNegativeFiniteDuration.tryOfMinutes(60)
-        ),
+        )
       )
       .withManualStart
       .withSetup { implicit env =>

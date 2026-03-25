@@ -40,9 +40,9 @@ trait RoutingSynchronizerState {
   ): Either[UnableToQueryTopologySnapshot.Failed, TopologySnapshotLoader]
 
   def getTopologySnapshotFor(
-      targetPSId: Target[PhysicalSynchronizerId]
+      targetPsid: Target[PhysicalSynchronizerId]
   ): Either[UnableToQueryTopologySnapshot.Failed, Target[TopologySnapshotLoader]] =
-    getTopologySnapshotFor(targetPSId.unwrap).map(Target(_))
+    getTopologySnapshotFor(targetPsid.unwrap).map(Target(_))
 
   def getSynchronizersOfContracts(
       coids: Seq[LfContractId]

@@ -66,9 +66,11 @@ sealed trait RunTypeConfig {
 
 object RunTypeConfig {
   final case class DvpRun(masterName: String) extends RunTypeConfig
+  final case class TransferRun(masterName: String) extends RunTypeConfig
 
   def fromMasterRole(tp: Master): RunTypeConfig = (tp.runConfig.runType: @unchecked) match {
     case _: runtype.DvpRun => DvpRun(tp.name)
+    case _: runtype.TransferRun => TransferRun(tp.name)
   }
 }
 
@@ -94,12 +96,20 @@ class MissionControl(
   private val user = System.getProperty("user.name").replace(" ", "_")
   private val runEvents = new AtomicBoolean(false)
 
+  private def genRole[T](num: Int, nodeIdx: Int, prefix: String)(gen: String => T): Seq[T] =
+    (0 until num).map { jj =>
+      val name = s"$prefix-n$nodeIdx-p$jj-$user"
+      gen(name)
+    }
+
   private def generateRoleSet(config: RunTypeConfig, ii: Int): Set[PartyRole] = config match {
     case RunTypeConfig.DvpRun(_) =>
-      ((0 until issuersPerNode).map(jj => DvpIssuer(s"Issuer$ii-$jj-$user", settings = settings)) ++
-        (0 until tradersPerNode).map(jj =>
-          DvpTrader(s"Trader$ii-$jj-$user", settings = settings)
-        )).toSet
+      (genRole(issuersPerNode, ii, "Issuer")(DvpIssuer(_, settings)) ++
+        genRole(tradersPerNode, ii, "Trader")(DvpTrader(_, settings))).toSet
+
+    case RunTypeConfig.TransferRun(_) =>
+      (genRole(issuersPerNode, ii, "Issuer")(DvpIssuer(_, settings)) ++
+        genRole(tradersPerNode, ii, "Transfer")(Transfer(_, settings))).toSet
   }
 
   private val (masterConfig, configs): (RunTypeConfig, Seq[(Set[PartyRole], Connectivity)]) =

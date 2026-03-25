@@ -36,6 +36,7 @@ class BufferedCommandCompletionsReader(
         persistenceFetchArgs = userId -> parties,
         bufferFilter = filterCompletions(_, parties, userId),
         toApiResponse = (response: CompletionStreamResponse) => Future.successful(response),
+        descendingOrder = false,
       )
 
   private def filterCompletions(
@@ -85,10 +86,12 @@ object BufferedCommandCompletionsReader {
       override def apply(
           startInclusive: Offset,
           endInclusive: Offset,
+          descendingOrder: Boolean,
           filter: (UserId, Parties),
       )(implicit
           loggingContext: LoggingContextWithTrace
       ): Source[(Offset, CompletionStreamResponse), NotUsed] = {
+        require(!descendingOrder, s"This flow cannot use descending order")
         val (userId, parties) = filter
         delegate
           .getCommandCompletions(

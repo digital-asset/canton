@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
 import com.digitalasset.daml.lf.transaction.{ContractStateMachine, Node, SerializationVersion}
@@ -27,7 +28,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
   private[this] val party = data.Ref.Party.assertFromString("Alice")
   private[this] val committers: Set[data.Ref.Party] = Set(party)
 
-  private[this] val initialState = PartialTransaction.initial(
+  private[this] val initialStateRollbacksAllowed = PartialTransaction.initial(
     ContractStateMachine.Mode.NoContractKey,
     InitialSeeding.TransactionSeed(transactionSeed),
     committers,
@@ -39,7 +40,6 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
         case (acc, (_, create: Node.Create)) => acc :+ create.coid
         case (acc, _) => acc
       }
-      .reverse
   }
 
   private[this] implicit class PartialTransactionExtra(val ptx: PartialTransaction) {
@@ -54,19 +54,36 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
       keyOpt = None,
     )
 
-    def insertCreate_ : PartialTransaction =
+    def insertFetch_(cid: Value.ContractId) : PartialTransaction =
+      ptx
+        .insertFetch(
+          coid = cid,
+          contract = contract,
+          optLocation = None,
+          byKey = false,
+          version = txVersion,
+          interfaceId = None,
+        ) match {
+        case Left(e) => throw new RuntimeException(s"$e")
+        case Right(r) => r
+      }
+
+    def insertCreateWithContractId_ : (Value.ContractId, PartialTransaction) =
       ptx
         .insertCreate(
           preparationTime = data.Time.Timestamp.Epoch,
           contract = contract,
           optLocation = None,
           contractIdVersion = contractIdVersion,
-        )
-        .toOption
-        .get
-        ._2
+        ) match {
+        case Left(e) => throw new RuntimeException(s"$e")
+        case Right(r) => r
+      }
 
-    def beginExercises_ : PartialTransaction =
+    def insertCreate_ : PartialTransaction =
+      insertCreateWithContractId_._2
+
+    def beginExercises_(consuming: Boolean): PartialTransaction =
       ptx
         .beginExercises(
           packageName = pkgName,
@@ -76,7 +93,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           interfaceId = None,
           choiceId = choiceId,
           optLocation = None,
-          consuming = false,
+          consuming = consuming,
           actingParties = Set(party),
           choiceObservers = Set.empty,
           choiceAuthorizers = None,
@@ -87,18 +104,27 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
         .toOption
         .get
 
+    def beginConsumingExercises_ : PartialTransaction = beginExercises_(consuming = true)
+
+    def beginNonConsumingExercises_ : PartialTransaction = beginExercises_(consuming = false)
+
     def endExercises_ : PartialTransaction =
       ptx.endExercises(Value.ValueNone)
 
     def rollbackTry_ : PartialTransaction =
-      ptx.rollbackTry()
+      ptx.rollbackTry() match {
+        case Left(err) => throw new IErrorThrowable(err)
+        case Right(ptx) => ptx
+      }
   }
 
-  private[this] val outputCids =
+  case class IErrorThrowable(err: IError) extends Throwable
+
+  private[this] val outputCidsEffectful =
     contractIdsInOrder(
-      initialState //
+      initialStateRollbacksAllowed //
         .insertCreate_ // create the contract cid_0
-        .beginExercises_ // open an exercise context
+        .beginConsumingExercises_ // open an exercise context
         .insertCreate_ // create the contract cid_1_0
         .insertCreate_ // create the contract cid_1_2
         .insertCreate_ // create the contract cid_1_3
@@ -106,14 +132,14 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
         .insertCreate_ // create the contract cid_2
     )
 
-  val Seq(cid_0, cid_1_0, cid_1_1, cid_1_2, cid_2) = outputCids
+  val Seq(cid_0, cid_1_0, cid_1_1, cid_1_2, cid_2) = outputCidsEffectful
 
-  "try context" should {
+  "try context (effectful rollbacks allowed)" should {
     "be without effect when closed without exception" in {
       def run1 = contractIdsInOrder(
-        initialState //
+        initialStateRollbacksAllowed //
           .insertCreate_ // create the contract cid_0
-          .beginExercises_ // open an exercise context
+          .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .beginTry // open a try context
           .insertCreate_ // create the contract cid_1_1
@@ -125,10 +151,10 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
 
       def run2 = contractIdsInOrder(
         // the double slashes below tricks scalafmt
-        initialState //
+        initialStateRollbacksAllowed //
           .insertCreate_ // create the contract cid_0
           .beginTry // open a try context
-          .beginExercises_ // open an exercise context
+          .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_2
           .insertCreate_ // create the contract cid_1_3
@@ -137,18 +163,18 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_2
       )
 
-      run1 shouldBe outputCids
-      run2 shouldBe outputCids
+      run1 shouldBe outputCidsEffectful
+      run2 shouldBe outputCidsEffectful
 
     }
 
     "rollback the current transaction without resetting seed counter for contract IDs" in {
       def run1 = contractIdsInOrder(
         // the double slashes below tricks scalafmt
-        initialState //
+        initialStateRollbacksAllowed //
           .insertCreate_ // create the contract cid_0
           .beginTry // open a first try context
-          .beginExercises_ // open an exercise context
+          .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_1
           .insertCreate_ // create the contract cid_1_2
@@ -159,10 +185,10 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
       )
 
       def run2 = contractIdsInOrder(
-        initialState //
+        initialStateRollbacksAllowed //
           .insertCreate_ // create the contract cid_0
           .beginTry // open a first try context
-          .beginExercises_ // open an exercise context
+          .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_1
           .beginTry // open a second try context
@@ -176,9 +202,9 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
 
       def run3 = contractIdsInOrder(
         // the double slashes below tricks scalafmt
-        initialState //
+        initialStateRollbacksAllowed //
           .insertCreate_ // create the contract cid_0
-          .beginExercises_ // open an exercise context
+          .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .beginTry // open a try context
           .insertCreate_ // create the contract cid_1_2
@@ -188,9 +214,146 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_2
       )
 
-      run1 shouldBe Seq(cid_0, cid_1_0, cid_1_1, cid_1_2, cid_2)
-      run2 shouldBe Seq(cid_0, cid_1_0, cid_1_1, cid_1_2, cid_2)
-      run3 shouldBe Seq(cid_0, cid_1_0, cid_1_1, cid_1_2, cid_2)
+      run1 shouldBe outputCidsEffectful
+      run2 shouldBe outputCidsEffectful
+      run3 shouldBe outputCidsEffectful
+    }
+  }
+
+  private[this] val initialStateEffectfulRollbacksDisallowed = PartialTransaction.initial(
+    ContractStateMachine.Mode.UCKWithoutRollback,
+    InitialSeeding.TransactionSeed(transactionSeed),
+    committers,
+  )
+
+  private[this] val outputCidsWithPure = {
+    contractIdsInOrder {
+      val (cid, txIntermediate) =
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginConsumingExercises_ // open an exercise context
+          .insertCreateWithContractId_ // create the contract cid_1_0
+      txIntermediate
+        .insertCreate_ // create the contract cid_1_2
+        .insertFetch_(cid) // fetch
+        .insertCreate_ // create the contract cid_1_3
+        .endExercises_ // close the exercise context normally
+        .insertCreate_ // create the contract cid_2
+    }
+  }
+
+  val Seq(_, with_pure_cid_1_0, _, _, _) = outputCidsWithPure
+
+  "try context (effectful rollbacks disallowed)" should {
+    "be without effect when closed without exception" in {
+      // No issues from one create in a try that didn't roll back
+      def run1 = contractIdsInOrder(
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginConsumingExercises_ // open an exercise context
+          .insertCreate_ // create the contract cid_1_0
+          .beginTry // open a try context
+          .insertCreate_ // create the contract cid_1_1
+          .endTry // close the try context
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertCreate_ // create the contract cid_1_2
+          .endExercises_ // close the exercise context normally
+          .insertCreate_ // create the contract cid_2
+      )
+
+      // No issues from consuming exercises, a fetch, and a create in a try that didn't roll back
+      def run2 = contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginTry // open a try context
+          .beginConsumingExercises_ // open an exercise context
+          .insertCreate_ // create the contract cid_1_0
+          .insertCreate_ // create the contract cid_1_2
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertCreate_ // create the contract cid_1_3
+          .endExercises_ // close the exercise context normally
+          .endTry // close the try context
+          .insertCreate_ // create the contract cid_2
+      )
+
+      run1 shouldBe outputCidsWithPure
+      run2 shouldBe outputCidsWithPure
+    }
+
+    "rollback the current transaction without resetting seed counter for contract IDs" in {
+      // No issues from rolling back a fetch
+      def run1 = contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginConsumingExercises_ // open an exercise context
+          .insertCreate_ // create the contract cid_1_0
+          .insertCreate_ // create the contract cid_1_2
+          .beginTry //
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .rollbackTry_ //
+          .insertCreate_ // create the contract cid_1_3
+          .endExercises_ // close the exercise context normally
+          .insertCreate_ // create the contract cid_2
+      )
+
+      run1 shouldBe outputCidsWithPure
+
+      // No issues from rolling back a nonconsuming exercise
+      def run2 = contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginTry //
+          .beginNonConsumingExercises_ // open an exercise context
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .endExercises_ // close the exercise context normally
+          .rollbackTry_ //
+          .insertCreate_ // create the contract cid_2
+      )
+
+      run2 shouldBe contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginNonConsumingExercises_ // open an exercise context
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .endExercises_ // close the exercise context normally
+          .insertCreate_ // create the contract cid_2
+      )
+
+      // Error thrown when rolling back a fetch and a create
+      def run3 = contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginConsumingExercises_ // open an exercise context
+          .insertCreate_ // create the contract cid_1_0
+          .insertCreate_ // create the contract cid_1_2
+          .beginTry //
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertCreate_ // create the contract cid_1_3
+          .rollbackTry_ //
+          .endExercises_ // close the exercise context normally
+          .insertCreate_ // create the contract cid_2
+      )
+
+      // Error thrown when rolling back a consuming exercise and a fetch
+      def run4 = contractIdsInOrder(
+        // the double slashes below tricks scalafmt
+        initialStateEffectfulRollbacksDisallowed //
+          .insertCreate_ // create the contract cid_0
+          .beginTry //
+          .beginConsumingExercises_ // open an exercise context
+          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .endExercises_ // close the exercise context normally
+          .rollbackTry_ //
+          .insertCreate_ // create the contract cid_2
+      )
+
+      assert(intercept[IErrorThrowable](run3).err.isInstanceOf[IError.EffectfulRollback])
+      assert(intercept[IErrorThrowable](run4).err.isInstanceOf[IError.EffectfulRollback])
     }
   }
 

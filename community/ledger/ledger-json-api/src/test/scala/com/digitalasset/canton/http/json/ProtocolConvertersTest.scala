@@ -319,6 +319,10 @@ object Arbitraries {
       ArbitraryDerivation[lapi.reassignment.UnassignedEvent].arbitrary.map(Some(_))
     }
 
+  implicit val arbGetActiveContractsResponse
+      : Arbitrary[lapi.state_service.GetActiveContractsResponse] =
+    ArbitraryDerivation[lapi.state_service.GetActiveContractsResponse]
+
   implicit class OptM[T](val v: Option[T]) {
     def getValue()(implicit ct: ClassTag[T]): T =
       v.getOrElse(

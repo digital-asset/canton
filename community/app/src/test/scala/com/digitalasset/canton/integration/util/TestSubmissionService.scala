@@ -421,6 +421,7 @@ object TestSubmissionService {
     import env.*
 
     val participantNode = participant.underlying.value
+    val loggerFactory = participantNode.loggerFactory
 
     val engine = new Engine(
       EngineConfig(
@@ -430,7 +431,8 @@ object TestSubmissionService {
           else
             LanguageVersion.stableLfVersionsRange,
         checkAuthorization = checkAuthorization,
-      )
+      ),
+      loggerFactory,
     )
 
     def resolveContract(
@@ -444,8 +446,6 @@ object TestSubmissionService {
     val keyResolver = customKeyResolver.getOrElse(ActiveKeyResolver(participant))
 
     val packageResolver: PackageResolver = participantNode.sync.packageService.packageResolver
-
-    val loggerFactory = participantNode.loggerFactory
 
     new TestSubmissionService(
       participant.id,

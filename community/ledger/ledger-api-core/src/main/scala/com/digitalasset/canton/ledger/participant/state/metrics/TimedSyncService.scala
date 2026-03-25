@@ -42,7 +42,6 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -325,9 +324,10 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       costHints,
     )
 
-  override def protocolVersionForSynchronizerId(
+  override def physicalSynchronizerIdForSynchronizerId(
       synchronizerId: SynchronizerId
-  ): Option[ProtocolVersion] = delegate.protocolVersionForSynchronizerId(synchronizerId)
+  ): Option[PhysicalSynchronizerId] =
+    delegate.physicalSynchronizerIdForSynchronizerId(synchronizerId)
 
   override def hashOps: HashOps = delegate.hashOps
 

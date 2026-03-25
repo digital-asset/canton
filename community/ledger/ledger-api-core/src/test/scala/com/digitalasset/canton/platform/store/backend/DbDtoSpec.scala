@@ -3,14 +3,30 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.DbDto.IdFilter
+import com.digitalasset.canton.platform.store.interning.StringInterningBuilder
 import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.{
+  ChoiceName,
+  Identifier,
+  NameTypeConRef,
+  PackageId,
+  ParticipantId,
+  UserId,
+}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.collection.mutable
+
 class DbDtoSpec extends AnyWordSpec with Matchers {
+
   import StorageBackendTestValues.*
+
   implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = ScalatestEqualityHelpers.DbDtoEq
 
   val updateId = TestUpdateId("mock_hash")
@@ -557,6 +573,236 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           )
         ),
       )
+    }
+  }
+
+  "DbDto.provideInternedStrings" should {
+    import StorageBackendTestValues.*
+
+    class TestBuilder extends StringInterningBuilder {
+      val templates: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addTemplateId(templateId: NameTypeConRef): Unit =
+        templates.addOne(templateId.toString)
+
+      val packages: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addPackageId(packageId: PackageId): Unit = packages.addOne(packageId)
+
+      val parties: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addParty(party: Party): Unit = parties.addOne(party)
+
+      val syncs: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addSynchronizerId(synchronizerId: SynchronizerId): Unit =
+        syncs.addOne(synchronizerId.toProtoPrimitive)
+
+      val users: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addUserId(userId: UserId): Unit = users.addOne(userId)
+
+      val ps: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addParticipantId(participantId: ParticipantId): Unit = ps.addOne(participantId)
+
+      val choices: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addChoiceName(choiceName: ChoiceName): Unit = choices.addOne(choiceName)
+
+      val interfaces: mutable.Builder[String, List[String]] = List.newBuilder[String]
+      override def addInterfaceId(interfaceId: Identifier): Unit =
+        interfaces.addOne(interfaceId.toString)
+    }
+
+    "provide correct strings for interning for create" in {
+      val testBuilder = new TestBuilder
+      dtosCreate()().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set(
+        "submitter1",
+        "submitter2",
+        "witness1",
+        "witness2",
+      )
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set("representativepackage")
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for assign" in {
+      val testBuilder = new TestBuilder
+      dtosAssign()().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("submitter1")
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set("representativepackage")
+      testBuilder.syncs.result().toSet shouldBe Set(
+        "x::sourcesynchronizer",
+        "x::targetsynchronizer",
+      )
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for consuming exercise" in {
+      val testBuilder = new TestBuilder
+      dtosConsumingExercise().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set(
+        "submitter1",
+        "submitter2",
+        "witness1",
+        "witness2",
+        "actor1",
+        "actor2",
+        "stakeholder1",
+        "stakeholder2",
+      )
+      testBuilder.templates.result().toSet shouldBe Set("#tem:pl:ate")
+      testBuilder.packages.result().toSet shouldBe Set("package")
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set("choice")
+      testBuilder.interfaces.result().toSet shouldBe Set("in:ter:face")
+    }
+
+    "provide correct strings for interning for unassign" in {
+      val testBuilder = new TestBuilder
+      dtosUnassign().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("submitter1", "stakeholder1", "stakeholder2")
+      testBuilder.templates.result().toSet shouldBe Set("#tem:pl:ate")
+      testBuilder.packages.result().toSet shouldBe Set("package")
+      testBuilder.syncs.result().toSet shouldBe Set(
+        "x::sourcesynchronizer",
+        "x::targetsynchronizer",
+      )
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for witnessed create" in {
+      val testBuilder = new TestBuilder
+      dtosWitnessedCreate()().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set(
+        "submitter1",
+        "submitter2",
+        "witness1",
+        "witness2",
+      )
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set("representativepackage")
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for witnessed exercised" in {
+      val testBuilder = new TestBuilder
+      dtosWitnessedExercised().headOption.value.provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set(
+        "submitter1",
+        "submitter2",
+        "witness1",
+        "witness2",
+        "actor1",
+        "actor2",
+      )
+      testBuilder.templates.result().toSet shouldBe Set("#tem:pl:ate")
+      testBuilder.packages.result().toSet shouldBe Set("package")
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set("choice")
+      testBuilder.interfaces.result().toSet shouldBe Set("in:ter:face")
+    }
+
+    "provide correct strings for interning for PTP" in {
+      val testBuilder = new TestBuilder
+      dtoPartyToParticipant(Offset.tryFromLong(1L), 10).provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("party")
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set("participant")
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for completion" in {
+      val testBuilder = new TestBuilder
+      dtoCompletion(Offset.tryFromLong(1L)).provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("signatory")
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set("user_id")
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for transaction meta" in {
+      val testBuilder = new TestBuilder
+      dtoTransactionMeta(Offset.tryFromLong(1L), 1, 1).provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set()
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for party entry" in {
+      val testBuilder = new TestBuilder
+      dtoPartyEntry(Offset.tryFromLong(1L)).provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("party")
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set()
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for sequencer index moved" in {
+      val testBuilder = new TestBuilder
+      DbDto.SequencerIndexMoved(someSynchronizerId).provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set()
+      testBuilder.templates.result().toSet shouldBe Set()
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set("x::sourcesynchronizer")
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
+    }
+
+    "provide correct strings for interning for sequencer IdFilter" in {
+      val testBuilder = new TestBuilder
+      DbDto
+        .IdFilterVariousWitness(
+          IdFilter(
+            1L,
+            someTemplateId,
+            someParty,
+            first_per_sequential_id = false,
+          )
+        )
+        .provideInternedStrings(testBuilder)
+      testBuilder.parties.result().toSet shouldBe Set("party")
+      testBuilder.templates.result().toSet shouldBe Set("#pkg-name:Mod:Template")
+      testBuilder.packages.result().toSet shouldBe Set()
+      testBuilder.syncs.result().toSet shouldBe Set()
+      testBuilder.users.result().toSet shouldBe Set()
+      testBuilder.ps.result().toSet shouldBe Set()
+      testBuilder.choices.result().toSet shouldBe Set()
+      testBuilder.interfaces.result().toSet shouldBe Set()
     }
   }
 }

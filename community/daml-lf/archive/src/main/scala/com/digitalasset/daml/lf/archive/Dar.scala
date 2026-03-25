@@ -4,9 +4,9 @@
 package com.digitalasset.daml.lf
 package archive
 
+import scalaz.std.list.*
+import scalaz.syntax.equal.*
 import scalaz.{Applicative, Equal, Traverse}
-import scalaz.syntax.equal._
-import scalaz.std.list._
 
 final case class Dar[A](main: A, dependencies: List[A]) {
   lazy val all: List[A] = main :: dependencies
@@ -18,9 +18,9 @@ object Dar {
       Dar[B](main = f(fa.main), dependencies = fa.dependencies.map(f))
 
     override def traverseImpl[G[_]: Applicative, A, B](fa: Dar[A])(f: A => G[B]): G[Dar[B]] = {
-      import scalaz.syntax.apply._
-      import scalaz.syntax.traverse._
-      import scalaz.std.list._
+      import scalaz.syntax.apply.*
+      import scalaz.syntax.traverse.*
+      import scalaz.std.list.*
       val gb: G[B] = f(fa.main)
       val gbs: G[List[B]] = fa.dependencies.traverse(f)
       ^(gb, gbs)((b, bs) => Dar(b, bs))

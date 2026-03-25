@@ -1888,12 +1888,10 @@ trait TopologyStoreTest
 
       "copy the topology state from a predecessor store" in {
         val sourceStore = mk(synchronizer1_p1p2_physicalSynchronizerId, "case12")
-        val successor = synchronizer1_p1p2_physicalSynchronizerId.copy(serial =
-          synchronizer1_p1p2_physicalSynchronizerId.serial.increment.toNonNegative
-        )
+        val successor = synchronizer1_p1p2_physicalSynchronizerId.incrementSerial
         val targetStore = mk(successor, "case12")
 
-        val storeWithUnrelatedLSId = mk(da_vp123_physicalSynchronizerId, "case12")
+        val storeWithUnrelatedLsid = mk(da_vp123_physicalSynchronizerId, "case12")
 
         for {
           // flip source and target to trigger the not predecessor error
@@ -1903,10 +1901,10 @@ trait TopologyStoreTest
               "is not a predecessor of the target synchronizer"
             ),
           )
-          // attempt to copy from a non-matching LSId
-          unexpectedLSId <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          // attempt to copy from a non-matching lsid
+          unexpectedLsid <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
             targetStore
-              .copyFromPredecessorSynchronizerStore(storeWithUnrelatedLSId)
+              .copyFromPredecessorSynchronizerStore(storeWithUnrelatedLsid)
               .failed,
             _.loneElement.throwable.value.getMessage should include(
               "unexpected logical synchronizer id"
@@ -1936,7 +1934,7 @@ trait TopologyStoreTest
           notPredecessor.getMessage should include(
             "is not a predecessor of the target synchronizer"
           )
-          unexpectedLSId.getMessage should include("unexpected logical synchronizer id")
+          unexpectedLsid.getMessage should include("unexpected logical synchronizer id")
 
           val actual = targetData.result
           val expected = sourceData.result.view

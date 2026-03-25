@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.infrastructure.participant
 
+import cats.syntax.traverse.*
 import com.daml.grpc.test.StreamConsumer
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -590,12 +591,15 @@ final class SingleParticipantTestContext private[participant] (
 
   override def activeContracts(
       request: GetActiveContractsRequest
-  ): Future[Vector[CreatedEvent]] =
-    for {
-      contracts <- new StreamConsumer[GetActiveContractsResponse](
-        services.state.getActiveContracts(request, _)
-      ).all()
-    } yield contracts.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
+  ): Future[Vector[CreatedEvent]] = activeContractResponses(request).map(
+    _.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
+  )
+
+  override def activeContractResponses(
+      request: GetActiveContractsRequest
+  ): Future[Vector[GetActiveContractsResponse]] = new StreamConsumer[GetActiveContractsResponse](
+    services.state.getActiveContracts(request, _)
+  ).all()
 
   override def activeContractsRequest(
       parties: Option[Seq[Party]],
@@ -745,10 +749,12 @@ final class SingleParticipantTestContext private[participant] (
       transactionFormat: TransactionFormat,
       begin: Long = referenceOffset,
       end: Option[Long],
+      descendingOrder: Boolean = false,
   ): GetUpdatesRequest = getUpdatesRequestWithEnd(
     transactionFormatO = Some(transactionFormat),
     begin = begin,
     end = end,
+    descendingOrder = descendingOrder,
   )
 
   override def getUpdatesRequestWithEnd(
@@ -757,6 +763,7 @@ final class SingleParticipantTestContext private[participant] (
       topologyFilterO: Option[Seq[Party]] = None,
       begin: Long = referenceOffset,
       end: Option[Long] = None,
+      descendingOrder: Boolean = false,
   ): GetUpdatesRequest = {
 
     val includeTopologyTransactions: Option[TopologyFormat] =
@@ -780,6 +787,7 @@ final class SingleParticipantTestContext private[participant] (
           includeTopologyEvents = includeTopologyTransactions,
         )
       ),
+      descendingOrder = descendingOrder,
     )
   }
 
@@ -805,12 +813,64 @@ final class SingleParticipantTestContext private[participant] (
   ): Future[Vector[Res]] =
     new StreamConsumer[Res](service(request, _)).all()
 
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.FutureTraverse")
+  ) // We started all those futures in variants declaration.
+  private def transactionsWithVariants[Res](
+      request: GetUpdatesRequest,
+      service: (GetUpdatesRequest, StreamObserver[Res]) => Unit,
+  ): Future[Vector[Res]] = {
+    require(request.endInclusive.isDefined)
+    require(!request.descendingOrder)
+    val variants: Seq[(String, Future[Vector[Res]])] = Seq(
+      "ascending" -> new StreamConsumer[Res](service(request.update(_.descendingOrder := false), _))
+        .all(),
+      "descending" -> new StreamConsumer[Res](service(request.update(_.descendingOrder := true), _))
+        .all()
+        .map(_.reverse),
+    )
+
+    for {
+      results <- variants
+        .map { case (name, variant) =>
+          (
+            name,
+            variant.recoverWith(ex =>
+              Future.failed(new SingleParticipantTestContext.VariantFailedException(name, ex))
+            ),
+          )
+        }
+        .traverse { case (name, taggedResult) => taggedResult.map((name, _)) }
+
+      matchingResult <- checkIfResultsMatch(results)
+    } yield matchingResult
+  }
+
+  private def checkIfResultsMatch[T](results: Seq[(String, T)]): Future[T] = results match {
+    case Seq() => Future.failed(new IllegalArgumentException("Empty result seq"))
+    case (_, v) +: tail if tail.forall(_._2 == v) => Future.successful(v)
+    case _ => Future.failed(new SingleParticipantTestContext.ResultMismatchException(results))
+  }
+
+  override def transactionsWithVariants(
+      request: GetUpdatesRequest
+  ): Future[Vector[Transaction]] =
+    transactionsWithVariants(request, services.update.getUpdates)
+      .map(_.flatMap(_.update.transaction))
+
   override def transactionsByTemplateId(
       templateId: Identifier,
       parties: Option[Seq[Party]],
   ): Future[Vector[Transaction]] =
     getTransactionsRequest(transactionFormat(parties, Seq(templateId)))
       .flatMap(transactions)
+
+  override def transactionsByTemplateIdWithVariants(
+      templateId: Identifier,
+      parties: Option[Seq[Party]],
+  ): Future[Vector[Transaction]] =
+    getTransactionsRequest(transactionFormat(parties, Seq(templateId)))
+      .flatMap(transactionsWithVariants)
 
   override def transactions(
       request: GetUpdatesRequest
@@ -826,6 +886,15 @@ final class SingleParticipantTestContext private[participant] (
       transactionFormat =
         transactionFormat(Some(parties), transactionShape = transactionShape, verbose = true)
     ).flatMap(transactions)
+
+  override def transactionsWithVariants(
+      transactionShape: TransactionShape,
+      parties: Party*
+  ): Future[Vector[Transaction]] =
+    getTransactionsRequest(
+      transactionFormat =
+        transactionFormat(Some(parties), transactionShape = transactionShape, verbose = true)
+    ).flatMap(transactionsWithVariants)
 
   override def transactions(
       take: Int,
@@ -1242,6 +1311,7 @@ final class SingleParticipantTestContext private[participant] (
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
       estimateTrafficCost = estimateTrafficCost,
+      tapsMaxPasses = None,
       hashingSchemeVersion = Some(HashingSchemeVersion.HASHING_SCHEME_VERSION_V2),
     )
 
@@ -1523,4 +1593,21 @@ final class SingleParticipantTestContext private[participant] (
     NonNegativeFiniteDuration.tryCreate(
       features.offsetCheckpoint.getMaxOffsetCheckpointEmissionDelay.asJava
     )
+}
+
+object SingleParticipantTestContext {
+  final class ResultMismatchException[T](results: Seq[(String, T)]) extends RuntimeException {
+    override def getMessage: String =
+      s"Results do not match expected results: ${results
+          .groupBy(_._2)
+          .map { case (key, value) =>
+            (value, key)
+          }
+          .toVector}"
+  }
+
+  final class VariantFailedException(variantName: String, cause: Throwable)
+      extends RuntimeException(cause) {
+    override def getMessage: String = s"Variant: $variantName failed: $cause"
+  }
 }

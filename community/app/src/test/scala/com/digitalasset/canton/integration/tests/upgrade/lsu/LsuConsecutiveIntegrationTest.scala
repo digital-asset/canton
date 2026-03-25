@@ -22,7 +22,7 @@ import scala.annotation.nowarn
 
 /*
  * This test is used to test the consecutive LSUs.
- * The consecutive PSIds are:
+ * The consecutive psids are:
  *
  * - (lsid, 0, tested protocol version)
  * - (lsid, 1, pv=dev)
@@ -95,7 +95,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
       import env.*
 
       val fixture1 = Fixture(
-        currentPSId = daId,
+        currentPsid = daId,
         upgradeTime = upgradeTime1,
         oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1)),
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2)),
@@ -106,7 +106,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
       )
 
       val fixture2 = Fixture(
-        currentPSId = fixture1.newPSId,
+        currentPsid = fixture1.newPsid,
         upgradeTime = upgradeTime2,
         oldSynchronizerNodes = fixture1.newSynchronizerNodes,
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer3), Seq(mediator3)),
@@ -121,7 +121,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
 
       // Perform the two LSUs
       Seq(fixture1, fixture2).foreach { fixture =>
-        logger.info(s"Preparing to do LSU from ${fixture.currentPSId} to ${fixture.newPSId}")
+        logger.info(s"Preparing to do LSU from ${fixture.currentPsid} to ${fixture.newPsid}")
 
         IouSyntax.createIou(participant2)(bank, alice).discard
 
@@ -133,7 +133,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
         transferTraffic(Some(fixture))
         eventually() {
           environment.simClock.value.advance(Duration.ofSeconds(1))
-          participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+          participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
         }
 
         fixture.oldSynchronizerNodes.all.stop()

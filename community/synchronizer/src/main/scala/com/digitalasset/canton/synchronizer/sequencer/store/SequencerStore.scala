@@ -147,7 +147,7 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
   val sender: SequencerMemberId
 
   /** Who gets notified of the event once it is successfully sequenced */
-  val notifies: WriteNotification
+  def notifies: NonEmpty[Set[SequencerMemberId]]
 
   /** Description of the event to be used in logs */
   val description: String
@@ -181,7 +181,7 @@ final case class ReceiptStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
+  override def notifies: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
 
   override val description: String = show"receipt[message-id:$messageId]"
 
@@ -209,7 +209,7 @@ final case class DeliverStoreEvent[P](
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[P] {
-  override lazy val notifies: WriteNotification = WriteNotification.Members(members)
+  override def notifies: NonEmpty[Set[SequencerMemberId]] = members
 
   override val description: String = show"deliver[message-id:$messageId]"
 
@@ -256,7 +256,7 @@ final case class DeliverErrorStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
+  override def notifies: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override val description: String = show"deliver-error[message-id:$messageId]"
   override val members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override def map[P](f: Nothing => P): StoreEvent[P] = this
@@ -429,7 +429,7 @@ private[canton] final case class SequencerStoreRecordCounts(
   )
 }
 
-trait ReadEvents {
+sealed trait ReadEvents {
   def nextTimestamp: Option[CantonTimestamp]
   def events: Seq[Sequenced[IdOrPayload]]
 }
@@ -803,7 +803,7 @@ trait SequencerStore
               // Note that if fromExclusive > cache.lastOption.timestamp, we keep the watermark unchanged
               // not to move it backwards and potentially read events twice
               FutureUnlessShutdown.pure(
-                SafeWatermark(cache.lastOption.map(_.timestamp) max Some(fromExclusive))
+                SafeWatermark(cache.lastOption.map(_.timestamp).max(Some(fromExclusive)))
               )
             }
           case _ =>

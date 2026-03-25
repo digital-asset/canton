@@ -115,7 +115,7 @@ class TopologyTransactionDiffTest
         newState,
         p1,
       )
-        .map { case TopologyTransactionDiff(events, _, _) =>
+        .map { case TopologyTransactionDiff(events, _, _, _) =>
           events
         }
       // Same transactions
@@ -208,6 +208,8 @@ class TopologyTransactionDiffTest
       val Subm = (ParticipantPermission.Submission, false)
       val SubmOB = (ParticipantPermission.Submission, true)
 
+      val isAtLeastV35 = testedProtocolVersion > ProtocolVersion.v34
+
       def diff(
           beforeState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]],
           afterState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]],
@@ -217,46 +219,57 @@ class TopologyTransactionDiffTest
         beforeState,
         afterState,
         localParticipant,
-      ).map(_.topologyEvents)
+      )
 
       def authOnboarding(participantId: ParticipantId) = Set(
         PartyToParticipantAuthorization(
           alice.toLf,
           participantId.toLf,
-          if (testedProtocolVersion == ProtocolVersion.v34) Added(Submission)
-          else Onboarding(Submission),
+          if (isAtLeastV35) Onboarding(Submission)
+          else Added(Submission),
         )
       )
 
       def authClearOnboarding(
           participantId: ParticipantId
       ): Option[Set[PartyToParticipantAuthorization]] =
-        Option.when(testedProtocolVersion > ProtocolVersion.v34)(
+        Option.when(isAtLeastV35)(
           Set(PartyToParticipantAuthorization(alice.toLf, participantId.toLf, Added(Submission)))
         )
 
       // Non-local onboarding
-      diff(
+      val res1 = diff(
         List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         p1,
-      ).value.forgetNE should contain theSameElementsAs authOnboarding(p2)
+      )
+      res1.value.topologyEvents.forgetNE should contain theSameElementsAs authOnboarding(p2)
+      res1.value.onboardingLocalParty shouldBe false
+      res1.value.clearingOnboardingLocalParty shouldBe false
 
       // Non-local clearing of onboarding
-      diff(
+      val res2 = diff(
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
         p1,
-      ) shouldBe authClearOnboarding(p2)
+      )
+      res2.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
+      res2.foreach { d =>
+        d.onboardingLocalParty shouldBe false
+        d.clearingOnboardingLocalParty shouldBe false
+      }
 
       // Non-local onboarding removal considered removed
-      diff(
+      val res3 = diff(
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
         p1,
-      ).value.forgetNE should contain theSameElementsAs Set(
+      )
+      res3.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
         PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
       )
+      res3.value.onboardingLocalParty shouldBe false
+      res3.value.clearingOnboardingLocalParty shouldBe false
 
       // Non-local transition from not onboarding to onboarding considered no-op
       // This is not an expected transition but tested for completeness.
@@ -267,27 +280,38 @@ class TopologyTransactionDiffTest
       ) shouldBe None
 
       // Local participant onboarding
-      diff(
+      val res4 = diff(
         List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         p2,
-      ).value.forgetNE should contain theSameElementsAs authOnboarding(p2)
+      )
+      res4.value.topologyEvents.forgetNE should contain theSameElementsAs authOnboarding(p2)
+      res4.value.onboardingLocalParty shouldBe isAtLeastV35
+      res4.value.clearingOnboardingLocalParty shouldBe false
 
       // Local participant clearing of onboarding
-      diff(
+      val res5 = diff(
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
         p2,
-      ) shouldBe authClearOnboarding(p2)
+      )
+      res5.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
+      res5.foreach { d =>
+        d.onboardingLocalParty shouldBe false
+        d.clearingOnboardingLocalParty shouldBe true
+      }
 
       // Local participant onboarding removal considered removed
-      diff(
+      val res6 = diff(
         List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
         List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
         p2,
-      ).value.forgetNE should contain theSameElementsAs Set(
+      )
+      res6.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
         PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
       )
+      res6.value.onboardingLocalParty shouldBe false
+      res6.value.clearingOnboardingLocalParty shouldBe false
 
       // Local participant transition from not onboarding to onboarding considered no-op
       // This is not an expected transition but tested for completeness.

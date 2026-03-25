@@ -5,10 +5,10 @@ package com.digitalasset.daml.lf.testing.parser
 
 import com.digitalasset.daml.lf.data
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.testing.parser.Parsers._
-import com.digitalasset.daml.lf.testing.parser.Token._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.testing.parser.Parsers.*
+import com.digitalasset.daml.lf.testing.parser.Token.*
 
 private[parser] class TypeParser[P](parameters: ParserParameters[P]) {
 
@@ -54,7 +54,9 @@ private[parser] class TypeParser[P](parameters: ParserParameters[P]) {
     )
 
   private lazy val tForall: Parser[Type] =
-    `forall` ~>! rep1(typeBinder) ~ `.` ~ typ ^^ { case bs ~ _ ~ t => (bs foldRight t)(TForall.apply) }
+    `forall` ~>! rep1(typeBinder) ~ `.` ~ typ ^^ { case bs ~ _ ~ t =>
+      (bs foldRight t)(TForall.apply)
+    }
 
   private lazy val fieldType: Parser[(FieldName, Type)] =
     id ~ `:` ~ typ ^^ { case name ~ _ ~ t => name -> t }

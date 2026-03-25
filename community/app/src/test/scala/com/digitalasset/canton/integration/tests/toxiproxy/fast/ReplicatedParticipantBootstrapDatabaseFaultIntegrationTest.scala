@@ -50,7 +50,11 @@ trait ReplicatedParticipantBootstrapDatabaseFaultIntegrationTest
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    baseEnvironmentDefinition.withManualStart
+    /** Intentionally not using the baseEnvironmentDefinition from ReplicatedParticipantTestSetup
+      * here, because we want to use the less aggressive health check periods to trigger a race
+      * between bootstrap and on active transitions.
+      */
+    EnvironmentDefinition.P4S1M1_Manual
       .addConfigTransforms(
         // Set auto init to false to force the bootstrap to stop before the node is initialized
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -58,8 +62,7 @@ trait ReplicatedParticipantBootstrapDatabaseFaultIntegrationTest
             .replace(IdentityConfig.Manual)
             .focus(_.init.generateTopologyTransactionsAndKeys)
             .replace(false)
-        ),
-        ConfigTransforms.enableReplicatedParticipants(),
+        )
       )
       .withTeardown { _ =>
         ToxiproxyHelpers.removeAllProxies(
@@ -95,16 +98,10 @@ class ParticipantBootstrapDatabaseFaultIntegrationTestPostgres
           Seq(
             (
               _.infoMessage should include(
-                "Participant replica is becoming passive (participant services not initialized yet: nothing to do)"
+                "Replica not yet initialized, ignoring replica state change"
               ),
               "skipped passive function",
-            ),
-            (
-              _.infoMessage should include(
-                "Successfully performed replica state change to Passive"
-              ),
-              "transition to passive message",
-            ),
+            )
           ),
           Seq(_ => succeed),
         ),

@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.testing.modelbased
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
+import com.digitalasset.canton.testing.modelbased.checker.{
+  PropertyChecker,
+  PropertyCheckerResultAssertions,
+}
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
@@ -13,9 +16,10 @@ import com.digitalasset.canton.testing.modelbased.syntax.{Parser, Pretty}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+class ReferenceInterpreterTest
+    extends AnyWordSpec
+    with BaseTest
+    with PropertyCheckerResultAssertions {
 
   "The reference interpreter" should {
     "run a scenario with two toplevel create commands" in {
@@ -30,7 +34,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |      Create 1 sigs={1} obs={}
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -54,7 +58,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -77,7 +81,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |        LookupByKey Failure key=(0, {1})
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -86,41 +90,47 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
     }
 
     "run a generated scenario and produce projections" should {
-      List((LanguageVersion.v2_dev, true), (LanguageVersion.v2_2, false)).foreach {
-        case (languageVersion, readOnlyRollbacks) =>
-          s"with LF version $languageVersion and readOnlyRollbacks=$readOnlyRollbacks" in {
-            val interpreter = ReferenceInterpreter()
-            val generators = new ConcreteGenerators(
-              languageVersion = languageVersion,
-              readOnlyRollbacks = readOnlyRollbacks,
-              // TODO(#30398): change to NUCK once NUCK state machine is implemented and plugged
-              keyMode = KeyMode.UniqueContractKeys,
-              // TODO(#30398): change to true once QueryNByKey is fully supported in the engine
-              generateQueryByKey = false,
-            )
-            val scenario = generators
-              .validScenarioGenerator(numParties = 3, numPackages = 1, numParticipants = 3)
-              .generate(size = 50)
-            logger.info(s"Running scenario:\n${Pretty.prettyScenario(scenario)}")
+      List(
+        "pv34" ->
+          new ConcreteGenerators(
+            languageVersion = LanguageVersion.v2_2,
+            readOnlyRollbacks = false,
+            keyMode = KeyMode.UniqueContractKeys,
+            generateQueryByKey = false,
+          ),
+        "pvdev" ->
+          new ConcreteGenerators(
+            languageVersion = LanguageVersion.v2_dev,
+            readOnlyRollbacks = true,
+            // TODO(#30398): change to NUCK once NUCK state machine is implemented and plugged
+            keyMode = KeyMode.UniqueContractKeys,
+            // TODO(#30398): change to true once QueryNByKey is fully supported in the engine
+            generateQueryByKey = false,
+          ),
+      ).foreach { case (pv, generators) =>
+        s"for $pv transactions" in {
+          val interpreter = ReferenceInterpreter(loggerFactory)
 
-            interpreter.runAndProject(scenario) match {
-              case Left(error) =>
-                logger.error(s"Interpreter error: $error")
-                logger.error("Shrinking scenario...")
-                val shrinkResult =
-                  Shrinker.shrinkToFailure[Concrete.Scenario](
-                    scenario,
-                    error,
-                    s => interpreter.runAndProject(s).map(_ => ()),
-                  )(Shrinker.shrinkScenario)
-                logger.error(shrinkResult.summary)
-                logger.error(s"Shrunk scenario:\n${Pretty.prettyScenario(shrinkResult.value)}")
-                logger.error(s"Original scenario:\n${Pretty.prettyScenario(scenario)}")
-                fail(shrinkResult.error)
-              case Right(projections) =>
-                projections should not be empty
-            }
-          }
+          val generator =
+            generators.validScenarioGenerator(
+              numParties = 3,
+              numPackages = 1,
+              numParticipants = 3,
+            )
+
+          PropertyChecker
+            .checkProperty(
+              generate = () => generator.generate(size = 30),
+              shrink = Shrinker.shrinkScenario,
+              property = (s: Concrete.Scenario) =>
+                interpreter.runAndProject(s).flatMap { projections =>
+                  if (projections.nonEmpty) Right(())
+                  else Left("Expected non-empty projections")
+                },
+              maxSamples = 20,
+            )
+            .assertPassed(Pretty.prettyScenario)
+        }
       }
     }
   }

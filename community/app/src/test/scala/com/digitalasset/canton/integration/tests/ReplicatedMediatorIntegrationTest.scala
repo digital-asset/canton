@@ -93,7 +93,6 @@ trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
       .withManualStart
       .addConfigTransforms(
         addTwoReplicatedMediators,
-        ConfigTransforms.enableReplicatedMediators(),
         ConfigTransforms.setPassiveCheckPeriodMediators(config.PositiveFiniteDuration.ofSeconds(3)),
         // The default of 20 seconds is too low after switching to the AZ runners
         ConfigTransforms.setDelayLoggingThreshold(config.NonNegativeFiniteDuration.ofSeconds(30)),

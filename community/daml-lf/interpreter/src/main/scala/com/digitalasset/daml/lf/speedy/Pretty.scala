@@ -49,6 +49,18 @@ private[lf] object Pretty {
     error match {
       case FailedAuthorization(nid, fa) =>
         text(prettyFailedAuthorization(nid, fa))
+      case EffectfulRollback(nodes) =>
+        def prettyEffectfulRollbackNode(node: EffectfulRollback.Node) =
+          node match {
+            case n: EffectfulRollback.Create =>
+              text(s"Create of") & prettyTypeConId(n.templateId) & text("(") &
+                prettyContractId(n.coid) & text(")")
+            case n: EffectfulRollback.Exercise =>
+              val exerciseMsg = if (n.byKey) "exercise by key" else "exercise"
+              text(s"Consuming $exerciseMsg of ${n.choiceId} on") &
+                prettyTypeConId(n.templateId) & text("(") & prettyContractId(n.coid) & text(")")
+          }
+        text(s"Tried to rollback side-effectful node(s):") & intercalate(text(", ") + Doc.line, nodes.map(prettyEffectfulRollbackNode(_)))
       case UnhandledException(_, value) =>
         text(s"Unhandled Daml exception:") & prettyValue(true)(value)
       case UserError(message) =>
@@ -161,15 +173,15 @@ private[lf] object Pretty {
               text("original package name is") & text(srcPackageName) /
               text("original signatories are") & prettyParties(originalSignatories) /
               text("original observers are") & prettyParties(originalObservers) /
+              text("target package name is") & text(dstPackageName) /
+              text("recomputed signatories are") & prettyParties(recomputedSignatories) /
+              text("recomputed observers are") & prettyParties(recomputedObservers) /
               (originalKeyOpt match {
                 case None => Doc.empty
                 case Some(key) =>
                   text("original maintainers are") & prettyParties(key.maintainers) /
                     text("original key is") & prettyValue(verbose = false)(key.value)
               }) /
-              text("target package name is") & text(dstPackageName) /
-              text("recomputed signatories are") & prettyParties(recomputedSignatories) /
-              text("recomputed observers are") & prettyParties(recomputedObservers) /
               (recomputedKeyOpt match {
                 case None => Doc.empty
                 case Some(key) =>
@@ -188,8 +200,6 @@ private[lf] object Pretty {
                 case Some(coid) => text("contract") & prettyContractId(coid)
                 case None => text("a contract")
               }) & text("to a value of type") & prettyTypeConId(dstTemplateId) & text("fails.") /
-              text("The contract is purportedly an instance of") & prettyTypeConId(srcTemplateId) /
-              text("Its contract argument is: ") & prettyValue(verbose = false)(createArg) /
               text("Reason:") & (translationError match {
                 case TranslationFailed.LookupError(lookupError) => text(lookupError.pretty)
                 case TranslationFailed.TypeMismatch(expectedType, value, message) =>
@@ -208,7 +218,9 @@ private[lf] object Pretty {
                   text("Invalid value") & prettyValue(verbose = false)(value) & text(message)
                 case TranslationFailed.InvalidExtendedValue(message) =>
                   text(s"Invalid ExtendedValue: $message")
-              })
+              }) /
+              text("The contract is purportedly an instance of") & prettyTypeConId(srcTemplateId) /
+              text("Its contract argument is: ") & prettyValue(verbose = false)(createArg)
           case Upgrade.AuthenticationFailed(coid, srcTemplateId, dstTemplateId, value, message) =>
             text("Error when authenticating contract") & prettyContractId(coid) &
               text("against template") & prettyTypeConId(dstTemplateId) & text(":") &

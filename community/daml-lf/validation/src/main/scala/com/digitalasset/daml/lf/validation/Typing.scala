@@ -4,16 +4,15 @@
 package com.digitalasset.daml.lf
 package validation
 
-import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct}
-import com.digitalasset.daml.lf.data.TemplateOrInterface
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface, Reference}
-import com.digitalasset.daml.lf.language.iterable.TypeIterable
-import com.digitalasset.daml.lf.validation.Util._
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, TemplateOrInterface}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.language.iterable.TypeIterable
+import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface, Reference}
 import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
+import com.digitalasset.daml.lf.validation.Util.*
 
 import scala.annotation.tailrec
 
@@ -31,13 +30,12 @@ private[validation] object Typing {
   import Work.{Ret, Delay, Bind}
 
   private def sequenceWork[A, T](works: List[Work[T]])(k: List[T] => Work[A]): Work[A] = {
-    def loop(acc: List[T], works: List[Work[T]]): Work[A] = {
+    def loop(acc: List[T], works: List[Work[T]]): Work[A] =
       works match {
         case Nil => k(acc.reverse)
         case work :: works =>
-          Bind(work, { (x: T) => loop(x :: acc, works) })
+          Bind(work, (x: T) => loop(x :: acc, works))
       }
-    }
     loop(Nil, works)
   }
 
@@ -61,9 +59,8 @@ private[validation] object Typing {
 
   /* Typing */
 
-  private def checkUniq[A](xs: Iterator[A], mkError: A => ValidationError): Unit = {
+  private def checkUniq[A](xs: Iterator[A], mkError: A => ValidationError): Unit =
     discard((xs foldLeft Set.empty[A])((acc, x) => if (acc(x)) throw mkError(x) else acc + x))
-  }
 
   private def kindOfBuiltin(bType: BuiltinType): Kind = bType match {
     case BTInt64 | BTText | BTTimestamp | BTParty | BTBool | BTDate | BTUnit | BTAny | BTTypeRep |
@@ -422,21 +419,18 @@ private[validation] object Typing {
     private[lf] def TTuple2(t1: Type, t2: Type) =
       TApp(TApp(TTyCon(StablePackagesV2.Tuple2), t1), t2)
 
-    private[lf] def kindOf(typ: Type): Kind = { // testing entry point
+    private[lf] def kindOf(typ: Type): Kind = // testing entry point
       // must *NOT* be used for sub-types
       runWork(kindOfType(typ))
-    }
 
-    private[Typing] def checkType(typ: Type, kind: Kind): Unit = {
+    private[Typing] def checkType(typ: Type, kind: Kind): Unit =
       // must *NOT* be used for sub-types
-      runWork(nestedCheckType(typ, kind) { Ret(()) })
-    }
+      runWork(nestedCheckType(typ, kind)(Ret(())))
 
     // continuation style is for convenience of caller
-    private def typeOf[T](e: Expr)(k: Type => Work[T]): Work[T] = {
+    private def typeOf[T](e: Expr)(k: Type => Work[T]): Work[T] =
       // stack-safe type-computation for sub-expressions
       Bind(Delay(() => typeOfExpr(e)), k)
-    }
 
     private def checkTopExpr(expr: Expr, typ: Type): Unit = {
       // must *NOT* be used for sub-expressions
@@ -445,17 +439,15 @@ private[validation] object Typing {
         throw ETypeMismatch(ctx, foundType = exprType, expectedType = typ, expr = Some(expr))
     }
 
-    private[lf] def typeOfTopExpr(exp: Expr): Type = { // testing entry point
+    private[lf] def typeOfTopExpr(exp: Expr): Type = // testing entry point
       // stack-safe type-computation for TOP-LEVEL expressions
       // must *NOT* be used for sub-expressions
       runWork(typeOfExpr(exp))
-    }
 
     /* Env Ops */
 
-    private def introTypeVar(v: TypeVarName, k: Kind): Env = {
+    private def introTypeVar(v: TypeVarName, k: Kind): Env =
       copy(tVars = tVars + (v -> k))
-    }
 
     private def introExprVar(x: ExprVarName, t: Type): Env = copy(eVars = eVars + (x -> t))
 
@@ -520,10 +512,9 @@ private[validation] object Typing {
         checkTopExpr(body, typ)
     }
 
-    private[Typing] def checkRecordTypeTop(fields: ImmArray[(FieldName, Type)]): Unit = {
+    private[Typing] def checkRecordTypeTop(fields: ImmArray[(FieldName, Type)]): Unit =
       // must *NOT* be used when nested with a type
-      runWork(checkRecordType(fields) { Ret(()) })
-    }
+      runWork(checkRecordType(fields)(Ret(())))
 
     private def checkChoice(tplId: TypeConId, choice: TemplateChoice): Unit =
       choice match {
@@ -617,9 +608,8 @@ private[validation] object Typing {
           }
       }
 
-    private def checkIfaceMethod(method: InterfaceMethod): Unit = {
+    private def checkIfaceMethod(method: InterfaceMethod): Unit =
       checkType(method.returnType, KStar)
-    }
 
     private def alphaEquiv(t1: Type, t2: Type) =
       AlphaEquiv.alphaEquiv(t1, t2) ||
@@ -716,18 +706,16 @@ private[validation] object Typing {
         TypeSubst.substitute((tparams.keys zip tArgs.iterator).toMap, dataCons)
     }
 
-    private def nestedCheckType[T](typ: Type, kind: Kind)(work: => Work[T]): Work[T] = {
+    private def nestedCheckType[T](typ: Type, kind: Kind)(work: => Work[T]): Work[T] =
       nestedKindOf(typ) { typKind =>
         if (kind != typKind) {
           throw EKindMismatch(ctx, foundKind = typKind, expectedKind = kind)
         }
         work
       }
-    }
 
-    private def nestedKindOf[T](typ: Type)(k: Kind => Work[T]): Work[T] = {
+    private def nestedKindOf[T](typ: Type)(k: Kind => Work[T]): Work[T] =
       Bind(Delay(() => kindOfType(typ)), k)
-    }
 
     private def kindOfDataType(defDataType: DDataType): Kind =
       defDataType.params.reverse.foldLeft[Kind](KStar) { case (acc, (_, k)) => KArrow(k, acc) }
@@ -884,7 +872,7 @@ private[validation] object Typing {
           throw EExpectedRecordType(ctx, typ0)
       }
 
-    private def typeOfStructCon(fields: ImmArray[(FieldName, Expr)]): Work[Type] = {
+    private def typeOfStructCon(fields: ImmArray[(FieldName, Expr)]): Work[Type] =
       sequenceWork(fields.map { case (f, x) =>
         typeOf(x) { ty =>
           Ret(f -> ty)
@@ -892,7 +880,6 @@ private[validation] object Typing {
       }.toList) { xs =>
         Ret(Struct.fromSeq(xs).fold(name => throw EDuplicateField(ctx, name), TStruct.apply))
       }
-    }
 
     private def typeOfStructProj(proj: EStructProj): Work[Type] =
       typeOf(proj.struct) { ty =>
@@ -1086,7 +1073,7 @@ private[validation] object Typing {
         }
 
         sequenceWork(alts.map { case CaseAlt(patn, rhs) =>
-          introPattern(patn).typeOf(rhs) { ty => Ret(ty) }
+          introPattern(patn).typeOf(rhs)(ty => Ret(ty))
         }.toList) {
           case t :: ts =>
             ts.foreach(otherType =>
@@ -1205,10 +1192,10 @@ private[validation] object Typing {
 
     private def typeOfUpdateBlock(bindings: ImmArray[Binding], body: Expr): Work[Type] = {
       def loop(env: Env, bindings0: List[Binding]): Work[Type] = bindings0 match {
-        case Binding(vName, typ, bound) :: bindings =>
+        case Binding(vName, typ, bound) :: bindings1 =>
           env.checkType(typ, KStar)
           env.checkExpr(bound, TUpdate(typ)) {
-            loop(env.introExprVar(vName, typ), bindings)
+            loop(env.introExprVar(vName, typ), bindings1)
           }
         case Nil =>
           env.typeOf(body) { ty =>
@@ -1252,7 +1239,7 @@ private[validation] object Typing {
         cid: Expr,
         arg: Expr,
         guard: Option[Expr],
-    ): Work[Type] = {
+    ): Work[Type] =
       checkExpr(cid, TContractId(TTyCon(interfaceId))) {
         val choice = handleLookup(ctx, pkgInterface.lookupInterfaceChoice(interfaceId, chName))
         checkExpr(arg, choice.argBinder._2) {
@@ -1266,21 +1253,19 @@ private[validation] object Typing {
           }
         }
       }
-    }
 
     private def typeOfExerciseByKey(
         tmplId: TypeConId,
         chName: ChoiceName,
         key: Expr,
         arg: Expr,
-    ): Work[Type] = {
+    ): Work[Type] =
       checkByKey(tmplId, key) {
         val choice = handleLookup(ctx, pkgInterface.lookupTemplateChoice(tmplId, chName))
         checkExpr(arg, choice.argBinder._2) {
           Ret(TUpdate(choice.returnType))
         }
       }
-    }
 
     private def typeOfFetchTemplate(tpl: TypeConId, cid: Expr): Work[Type] = {
       discard(handleLookup(ctx, pkgInterface.lookupTemplate(tpl)))
@@ -1348,7 +1333,9 @@ private[validation] object Typing {
       case UpdateQueryNByKey(templateId) =>
         val keyType = handleLookup(ctx, pkgInterface.lookupTemplateKey(templateId)).typ
         Ret(
-          TInt64 ->: keyType ->: TUpdate(TApp(TBuiltin(BTList), TTuple2(TContractId(TTyCon(templateId)), TTyCon(templateId))))
+          TInt64 ->: keyType ->: TUpdate(
+            TApp(TBuiltin(BTList), TTuple2(TContractId(TTyCon(templateId)), TTyCon(templateId)))
+          )
         )
       case UpdateTryCatchV1(typ, body, binder, handler) =>
         checkType(typ, KStar)
@@ -1361,7 +1348,7 @@ private[validation] object Typing {
     }
 
     // checks that typ contains neither variables, nor quantifiers, nor synonyms
-    private def checkAnyType_(typ: Type): Unit = {
+    private def checkAnyType_(typ: Type): Unit =
       // No expansion here because we forbid TSynApp
       typ match {
         case TVar(_) | TForall(_, _) | TSynApp(_, _) =>
@@ -1369,7 +1356,6 @@ private[validation] object Typing {
         case _ =>
           TypeIterable(typ).foreach(checkAnyType_)
       }
-    }
 
     private def checkAnyType(typ: Type): Unit = {
       if (LanguageVersion.featureComplexAnyType.enabledIn(languageVersion))
@@ -1519,7 +1505,7 @@ private[validation] object Typing {
         Ret(typ)
     }
 
-    private def resolveExprType[T](expr: Expr, typ: Type)(k: Type => Work[T]): Work[T] = {
+    private def resolveExprType[T](expr: Expr, typ: Type)(k: Type => Work[T]): Work[T] =
       typeOf(expr) { exprType =>
         if (!alphaEquiv(exprType, typ))
           expr match {
@@ -1537,15 +1523,13 @@ private[validation] object Typing {
           }
         k(exprType)
       }
-    }
 
-    private def checkExpr[T](expr: Expr, typ0: Type)(work: => Work[T]): Work[T] = {
+    private def checkExpr[T](expr: Expr, typ0: Type)(work: => Work[T]): Work[T] =
       resolveExprType(expr, typ0) { _ =>
         work
       }
-    }
 
-    private def checkExprList[T](xs: List[(Expr, Type)])(work: => Work[T]): Work[T] = {
+    private def checkExprList[T](xs: List[(Expr, Type)])(work: => Work[T]): Work[T] =
       sequenceWork(xs.map { case (e, f) =>
         checkExpr(e, f) {
           Ret(())
@@ -1553,7 +1537,6 @@ private[validation] object Typing {
       }) { _ =>
         work
       }
-    }
 
     private def toStruct(t: Type): TStruct =
       t match {
@@ -1618,7 +1601,7 @@ private[validation] object Typing {
   private[this] val wildcard: ExprVarName = Name.assertFromString("_")
   private[this] def variantExpectedPatterns(
       scrutTCon: TypeConId,
-      cons: ImmArray[(VariantConName, _)],
+      cons: ImmArray[(VariantConName, ?)],
   ) = new ExpectedPatterns(
     cons.length,
     cons.iterator.map { case (variants, _) => CPVariant(scrutTCon, variants, wildcard) },

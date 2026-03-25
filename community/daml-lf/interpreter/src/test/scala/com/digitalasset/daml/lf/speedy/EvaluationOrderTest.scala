@@ -4,9 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.data.Ref.{Location, PackageId, PackageName, Party}
+import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast._
@@ -33,8 +32,8 @@ import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
-import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
+import com.digitalasset.canton.logging.SuppressingLogging
 
 class EvaluationOrderWithoutKeyTest_V2
     extends EvaluationOrderTest(LanguageVersion.v2_dev, withKey = false)
@@ -44,29 +43,10 @@ class EvaluationOrderWithKeyTest_V2
 abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Boolean)
     extends AnyFreeSpec
     with Matchers
-    with Inside {
-
-  class TestTraceLog extends TraceLog {
-    private val messages: ArrayBuffer[(String, Option[Location])] = new ArrayBuffer()
-
-    override def add(message: String, optLocation: Option[Location])(implicit
-        loggingContext: LoggingContext
-    ) = {
-      messages += ((message, optLocation))
-    }
-
-    def tracePF[X, Y](text: String, pf: PartialFunction[X, Y]): PartialFunction[X, Y] = {
-      case x if { add(text, None)(LoggingContext.ForTesting); pf.isDefinedAt(x) } => pf(x)
-    }
-
-    override def iterator = messages.iterator
-
-    def getMessages: Seq[String] = messages.view.map(_._1).toSeq
-  }
+    with Inside
+    with SuppressingLogging {
 
   val serializationVersion = SerializationVersion.assign(languageVersion)
-
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   private val packageId = Ref.PackageId.assertFromString("-pkg-")
   private[this] implicit val parserParameters: ParserParameters[this.type] =
@@ -537,28 +517,28 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
         PartialFunction.empty,
   ) = {
     val se = pkgs.compiler.unsafeCompile(e)
-    val traceLog = new TestTraceLog()
+    val recordingLogger = new RecordingMachineLogger(MachineLogger())
     val machine = Speedy.Machine
       .fromUpdateSExpr(
         pkgs,
         seed,
         if (args.isEmpty) se else SEApp(se, args),
         parties,
+        recordingLogger,
         readAs,
         mode =
           if (withKey) ContractStateMachine.Mode.UCKWithRollback
           else ContractStateMachine.Mode.NoContractKey,
         packageResolution = packageResolution,
-        traceLog = traceLog,
       )
     val res = Try(
       SpeedyTestLib.run(
         machine,
-        getContract = traceLog.tracePF("queries contract", getContract),
-        getKeys = traceLog.tracePF("queries key", getKeys),
+        getContract = recordingLogger.tracePartialFunction("queries contract", getContract),
+        getKeys = recordingLogger.tracePartialFunction("queries key", getKeys),
       )
     )
-    val msgs = traceLog.getMessages.dropWhile(_ != "starts test")
+    val msgs = recordingLogger.recordedMessages.dropWhile(_ != "starts test")
     (res, msgs)
   }
 

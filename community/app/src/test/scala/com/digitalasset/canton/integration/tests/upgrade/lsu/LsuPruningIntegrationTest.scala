@@ -103,7 +103,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
       transferTraffic()
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
       }
 
       // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments)

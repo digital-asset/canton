@@ -88,7 +88,7 @@ sealed trait StatusIntegrationTest
         assertSequencerUnconnectedStatus(
           health.status().sequencerStatus(sequencer1.name),
           connectedMediators = List(mediator1.id),
-          daName,
+          sequencer1.id,
           testedProtocolVersion,
         )
       }
@@ -99,7 +99,7 @@ sealed trait StatusIntegrationTest
       assertSequencerUnconnectedStatus(
         sequencer1.health.status.trySuccess,
         connectedMediators = Nil,
-        daName,
+        sequencer1.id,
         testedProtocolVersion,
       )
 
@@ -108,7 +108,7 @@ sealed trait StatusIntegrationTest
         assertSequencerUnconnectedStatus(
           sequencer1.health.status.trySuccess,
           connectedMediators = List(mediator1.id),
-          daName,
+          sequencer1.id,
           testedProtocolVersion,
         )
       }
@@ -158,12 +158,14 @@ sealed trait StatusIntegrationTest
       assertSequencerUnconnectedStatus(
         sequencer1.health.status.trySuccess,
         connectedMediators = List(mediator1.id),
-        daName,
+        sequencer1.id,
         testedProtocolVersion,
       )
     }
 
     participant1.synchronizers.connect_local(sequencer1, alias = daName)
+
+    sequencer1.health.status.trySuccess.uid shouldBe sequencer1.id.uid
 
     eventually() {
       assertNodesAreConnected(

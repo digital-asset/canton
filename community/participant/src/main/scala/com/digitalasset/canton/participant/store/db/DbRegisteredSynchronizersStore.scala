@@ -101,13 +101,13 @@ class DbRegisteredSynchronizersStore(
     )
   }
 
-  // Ensure this PSId is not already registered with another alias
+  // Ensure this psid is not already registered with another alias
   private def checkAliasConsistent(
       alias: SynchronizerAlias,
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
   ): EitherT[dbio.DBIO, Error, Unit] = for {
     existingAliases <- dbEitherT[Error](
-      sql"select synchronizer_alias from par_registered_synchronizers where physical_synchronizer_id=$synchronizerId"
+      sql"select synchronizer_alias from par_registered_synchronizers where physical_synchronizer_id=$psid"
         .as[SynchronizerAlias]
     )
 
@@ -115,7 +115,7 @@ class DbRegisteredSynchronizersStore(
       case None => EitherT.pure[DBIO, Error](())
       case Some(`alias`) => EitherT.pure[DBIO, Error](())
       case Some(otherAlias) =>
-        EitherT.leftT[DBIO, Unit](SynchronizerIdAlreadyAdded(synchronizerId, otherAlias): Error)
+        EitherT.leftT[DBIO, Unit](SynchronizerIdAlreadyAdded(psid, otherAlias): Error)
     }
   } yield ()
 
@@ -135,8 +135,8 @@ class DbRegisteredSynchronizersStore(
         .map(existing =>
           InconsistentLogicalSynchronizerIds(
             alias = alias,
-            newPSId = synchronizerId,
-            existingPSId = existing,
+            newPsid = synchronizerId,
+            existingPsid = existing,
           )
         )
         .toLeft(())

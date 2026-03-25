@@ -70,9 +70,6 @@ trait AcsCommitmentRepairIntegrationTest
           _.focus(_.parameters.engine.enableAdditionalConsistencyChecks)
             .replace(true)
         ),
-        ConfigTransforms.updateAllSequencerConfigs_(
-          _.focus(_.timeTracker.observationLatency).replace(config.NonNegativeFiniteDuration.Zero)
-        ),
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)

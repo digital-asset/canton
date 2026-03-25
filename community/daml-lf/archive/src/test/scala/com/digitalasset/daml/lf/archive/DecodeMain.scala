@@ -3,11 +3,11 @@
 
 package com.digitalasset.daml.lf.archive
 
-import java.io.File
-import java.util.concurrent.TimeUnit
-
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
+
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 /** Test application for decoding DARs. Useful for testing decoder performance and memory usage.
   */

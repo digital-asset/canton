@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
 import com.daml.ledger.javaapi.data.*
 import com.daml.ledger.javaapi.data.codegen.HasCommands
-import com.digitalasset.canton.admin.api.client.data.FlagNotSet
 import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.ContractNotFound
@@ -70,9 +69,9 @@ final class ExplicitDisclosureIntegrationTest extends OfflinePartyReplicationInt
     // Ensure active contract is present (not filtered out accidentally by export party ACS)
     repair.acs.read_from_file(acsSnapshotPath) should have size 1
 
-    target.parties.import_party_acsV2(acsSnapshotPath, daId)
+    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
 
-    reconnectAndRemoveOnboardingFlag(clock, alice, daName) shouldBe FlagNotSet
+    reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 
     // Verify that `alice` can see the contract with explicit disclosure
     target.ledger_api.javaapi.commands.submit(

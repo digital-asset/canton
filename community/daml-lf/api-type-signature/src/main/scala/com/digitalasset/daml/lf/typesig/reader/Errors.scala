@@ -5,14 +5,14 @@ package com.digitalasset.daml.lf.typesig
 package reader
 
 import com.digitalasset.daml.lf.data.Ref.{DottedName, Name}
-
-import scala.language.implicitConversions
-import scala.collection.immutable.Map
+import scalaz.std.map.*
+import scalaz.std.string.*
+import scalaz.syntax.monoid.*
+import scalaz.syntax.traverse.*
 import scalaz.{-\/, ==>>, @@, Applicative, Cord, Monoid, Order, Semigroup, Tag, Traverse, \/, \/-}
-import scalaz.std.map._
-import scalaz.std.string._
-import scalaz.syntax.monoid._
-import scalaz.syntax.traverse._
+
+import scala.collection.immutable.Map
+import scala.language.implicitConversions
 
 // Free[K ==>> ?, A] with an incompatible semigroup and strict representation
 final case class Errors[K, A](run: A \/ (K ==>> Errors[K, A])) {
@@ -97,30 +97,28 @@ object Errors {
     def apply[E, A](fa: E \/ A): Errors[Loc, E] \/ A = rootErr(fa)
   }
 
-  /** Meant for "discard and continue" style errors; errors end up in the _1,
-    * successes in the _2.
+  /** Meant for "discard and continue" style errors; errors end up in the _1, successes in the _2.
     */
   private[reader] def partitionIndexedErrs[K, A, Loc: Order, E: Semigroup, B](
       map: Iterable[(K, A)]
   )(f: A => (Errors[Loc, E] \/ B))(implicit kloc: K => Loc): (Errors[Loc, E], Map[K, B]) = {
-    import scalaz.std.iterable._
+    import scalaz.std.iterable.*
     val (errs, successes) = map.partitionMap { case (k, a) =>
       locate(kloc(k), f(a)).map((k, _)).toEither
     }
     (errs.suml, successes.toMap)
   }
 
-  /** Meant for "fail if any fail" style errors; failures end up indexed by `kloc`
-    * in the left if any (`kloc` is not required to be injective, but that's
-    * probably what you want).
+  /** Meant for "fail if any fail" style errors; failures end up indexed by `kloc` in the left if
+    * any (`kloc` is not required to be injective, but that's probably what you want).
     */
   private[reader] def traverseIndexedErrs[F[_]: Traverse, K, A, Loc: Order, E: Semigroup, B](
       map: F[(K, A)]
   )(f: A => (Errors[Loc, E] \/ B))(implicit kloc: K => Loc): Errors[Loc, E] \/ F[B] =
     map.traverse { case (k, a) => locate(kloc(k), f(a)).validation }.disjunction
 
-  /** Like `traverseIndexedErrs` for maps specifically. If result is
-    * right, the keyset is guaranteed to be the same.
+  /** Like `traverseIndexedErrs` for maps specifically. If result is right, the keyset is guaranteed
+    * to be the same.
     */
   private[reader] def traverseIndexedErrsMap[K, A, Loc: Order, E: Semigroup, B](map: Map[K, A])(
       f: A => (Errors[Loc, E] \/ B)
@@ -130,7 +128,7 @@ object Errors {
   private[reader] def stringReport[Loc, E](
       errors: Errors[Loc, E]
   )(loc: Loc => Cord, msg: E => Cord): Cord = {
-    import scalaz.std.vector._
+    import scalaz.std.vector.*
     errors
       .fold[Vector[Cord]](
         e => Vector(msg(e)),

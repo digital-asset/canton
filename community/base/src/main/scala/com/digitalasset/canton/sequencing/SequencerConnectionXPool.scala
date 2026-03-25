@@ -169,7 +169,7 @@ object SequencerConnectionXPool {
     *   The maximum duration after which a failed connection is restarted.
     * @param warnConnectionValidationDelay
     *   The duration after which a warning is issued if a started connection still fails validation.
-    * @param expectedPSIdO
+    * @param expectedPsidO
     *   If provided, defines the synchronizer to which the connections are expected to connect. If
     *   empty, the synchronizer will be determined as soon as [[trustThreshold]]-many connections
     *   are validated and agree on bootstrap information.
@@ -180,7 +180,7 @@ object SequencerConnectionXPool {
       minRestartConnectionDelay: NonNegativeFiniteDuration,
       maxRestartConnectionDelay: NonNegativeFiniteDuration,
       warnConnectionValidationDelay: NonNegativeFiniteDuration,
-      expectedPSIdO: Option[PhysicalSynchronizerId] = None,
+      expectedPsidO: Option[PhysicalSynchronizerId] = None,
   ) extends PrettyPrinting {
     // TODO(i24780): when persisting, use com.digitalasset.canton.version.Invariant machinery for validation
     import SequencerConnectionXPoolConfig.*
@@ -191,7 +191,7 @@ object SequencerConnectionXPool {
       param("minRestartConnectionDelay", _.minRestartConnectionDelay),
       param("maxRestartConnectionDelay", _.maxRestartConnectionDelay),
       param("warnConnectionValidationDelay", _.warnConnectionValidationDelay),
-      paramIfDefined("expectedPSIdO", _.expectedPSIdO),
+      paramIfDefined("expectedPsidO", _.expectedPsidO),
     )
 
     def validate: Either[SequencerConnectionXPoolError, Unit] = {
@@ -258,7 +258,7 @@ object SequencerConnectionXPool {
     def fromSequencerConnections(
         sequencerConnections: SequencerConnections,
         tracingConfig: TracingConfig,
-        expectedPSIdO: Option[PhysicalSynchronizerId],
+        expectedPsidO: Option[PhysicalSynchronizerId],
     ): SequencerConnectionXPoolConfig = {
       val connectionsConfig = sequencerConnections.aliasToConnection.flatMap {
         case (
@@ -292,7 +292,7 @@ object SequencerConnectionXPool {
       new SequencerConnectionXPoolConfig(
         connectionsConfig,
         trustThreshold = sequencerConnections.sequencerTrustThreshold,
-        expectedPSIdO = expectedPSIdO,
+        expectedPsidO = expectedPsidO,
         minRestartConnectionDelay =
           sequencerConnections.sequencerConnectionPoolDelays.minRestartDelay,
         maxRestartConnectionDelay =
@@ -351,7 +351,7 @@ trait SequencerConnectionXPoolFactory {
   // TODO(i27260): remove when no longer needed
   def createFromOldConfig(
       sequencerConnections: SequencerConnections,
-      expectedPSIdO: Option[PhysicalSynchronizerId],
+      expectedPsidO: Option[PhysicalSynchronizerId],
       tracingConfig: TracingConfig,
       name: String,
   )(implicit

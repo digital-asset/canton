@@ -4,6 +4,8 @@
 package com.digitalasset.canton.testing.modelbased.runner
 
 import cats.syntax.either.*
+import cats.syntax.flatMap.*
+import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.commands.DisclosedContract as ProtoDisclosedContract
 import com.daml.ledger.api.v2.transaction.Transaction as ProtoTransaction
@@ -16,6 +18,10 @@ import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.ast.Implicits.*
 import com.digitalasset.canton.testing.modelbased.conversions.ConcreteToCommands
 import com.digitalasset.canton.testing.modelbased.conversions.ConcreteToCommands.*
+import com.digitalasset.canton.testing.modelbased.projections.ToProjection.{
+  ContractIdReverseMapping,
+  PartyIdReverseMapping,
+}
 import com.digitalasset.canton.testing.modelbased.projections.{Projections, ToProjection}
 import com.digitalasset.canton.testing.modelbased.runner.InterpretationErrors.{
   InterpreterError,
@@ -26,8 +32,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.daml.lf.data.Ref
 
-import java.util.concurrent.atomic.AtomicInteger
-import scala.annotation.tailrec
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.jdk.OptionConverters.*
 
 /** An interpreter that executes scenarios against a real Canton instance.
@@ -45,6 +50,10 @@ final class CantonInterpreter private (
 ) {
 
   import CantonInterpreter.*
+
+  /** Checks the cancellation flag and returns `Left` if cancellation has been requested. */
+  private def checkCancelled(cancelled: AtomicBoolean): Either[InterpreterError, Unit] =
+    Either.cond(!cancelled.get(), (), SubmitFailure("Cancelled"))
 
   // -- Command execution --
 
@@ -119,32 +128,61 @@ final class CantonInterpreter private (
     * @return
     *   the accumulated contract ID mapping after all submissions
     */
-  @tailrec
   private def runCommandsList(
       partyIdMapping: PartyIdMapping,
       contractIdMapping: ContractIdMapping,
-      disclosureStore: DisclosureStore,
       commandsList: List[Concrete.Commands],
+      cancelled: AtomicBoolean,
   ): Either[InterpreterError, ContractIdMapping] =
-    commandsList match {
-      case Nil => Right(contractIdMapping)
-      case cmds :: rest =>
-        runCommands(
-          partyIdMapping,
-          contractIdMapping,
-          disclosureStore,
-          cmds,
-        ) match {
-          case Left(err) => Left(err)
-          case Right((newMapping, updatedDisclosureStore)) =>
-            runCommandsList(
-              partyIdMapping,
-              newMapping,
-              updatedDisclosureStore,
-              rest,
-            )
-        }
-    }
+    commandsList
+      .foldLeftM((contractIdMapping, DisclosureStore())) {
+        case ((previousContractIdMapping, previousDisclosureStore), commands) =>
+          // We check the cancellation flag between each runCommands to enable cooperative shutdown.
+          checkCancelled(cancelled) >> runCommands(
+            partyIdMapping,
+            previousContractIdMapping,
+            previousDisclosureStore,
+            commands,
+          )
+      }
+      .map(_._1)
+
+  /** For each party, for each participant that hosts it, fetch the projection. We check the
+    * cancellation flag between each fetch to enable cooperative shutdown.
+    */
+  private def fetchProjections(
+      partyToParticipants: Map[Concrete.PartyId, Set[Concrete.Participant]],
+      partyIdMapping: PartyIdMapping,
+      contractIdMapping: ContractIdMapping,
+      numLedgerSteps: Int,
+      cancelled: AtomicBoolean,
+  ): Either[InterpreterError, Map[
+    Projections.PartyId,
+    Map[Concrete.ParticipantId, Projections.Projection],
+  ]] = {
+    val reversePartyIds = partyIdMapping.map(_.swap)
+    val reverseContractIds = contractIdMapping.map { case (k, v) => v.contractId -> k }
+    partyToParticipants.toList
+      .traverse { case (partyId, partyParticipants) =>
+        val party = com.digitalasset.canton.topology.PartyId.tryFromProtoPrimitive(
+          partyIdMapping(partyId)
+        )
+        partyParticipants.toList
+          .traverse { p =>
+            checkCancelled(cancelled).map { _ =>
+              p.participantId -> fetchProjection(
+                participants(p.participantId),
+                party,
+                reversePartyIds,
+                reverseContractIds,
+                numLedgerSteps,
+              )
+            }
+          }
+          .map(entries => partyId -> entries.toMap)
+      }
+      .map(_.toMap)
+  }
 
   /** Run a full scenario against Canton participants and compute per-party, per-participant
     * projections.
@@ -160,11 +198,15 @@ final class CantonInterpreter private (
     *
     * @param scenario
     *   the scenario to execute
+    * @param cancelled
+    *   a flag that, when set to `true`, causes the interpreter to stop between RPC calls and return
+    *   a `Left("Cancelled")` error.
     * @return
     *   either an error message, or a map from party ID to (participant ID to projection)
     */
   def runAndProject(
-      scenario: Concrete.Scenario
+      scenario: Concrete.Scenario,
+      cancelled: AtomicBoolean = new AtomicBoolean(false),
   ): Either[
     String,
     Map[Projections.PartyId, Map[Concrete.ParticipantId, Projections.Projection]],
@@ -213,39 +255,23 @@ final class CantonInterpreter private (
       .toMap
 
     // Run all commands
-    val disclosureStore = DisclosureStore()
-    val numLedgerSteps = scenario.ledger.size
-    runCommandsList(
-      partyIdMapping = partyIdMapping,
-      contractIdMapping = Map.empty,
-      disclosureStore = disclosureStore,
-      commandsList = scenario.ledger,
-    ) match {
-      case Left(err) => Left(err.pretty)
-      case Right(contractIdMapping) =>
-        val reversePartyIds: ToProjection.PartyIdReverseMapping = partyIdMapping.map(_.swap)
-        val reverseContractIds: ToProjection.ContractIdReverseMapping = contractIdMapping.map {
-          case (k, v) => v.contractId -> k
-        }
+    val result = for {
+      contractIdMapping <- runCommandsList(
+        partyIdMapping = partyIdMapping,
+        contractIdMapping = Map.empty,
+        commandsList = scenario.ledger,
+        cancelled = cancelled,
+      )
+      projections <- fetchProjections(
+        partyToParticipants = partyToParticipants,
+        partyIdMapping = partyIdMapping,
+        contractIdMapping = contractIdMapping,
+        numLedgerSteps = scenario.ledger.size,
+        cancelled = cancelled,
+      )
+    } yield projections
 
-        // For each party, for each participant that hosts it, fetch the projection
-        Right(partyToParticipants.map { case (partyId, partyParticipants) =>
-          val party = com.digitalasset.canton.topology.PartyId.tryFromProtoPrimitive(
-            partyIdMapping(partyId)
-          )
-          val participantProjections: Map[Concrete.ParticipantId, Projections.Projection] =
-            partyParticipants.map { p =>
-              p.participantId -> fetchProjection(
-                participants(p.participantId),
-                party,
-                reversePartyIds,
-                reverseContractIds,
-                numLedgerSteps,
-              )
-            }.toMap
-          partyId -> participantProjections
-        })
-    }
+    result.left.map(_.pretty)
   }
 }
 
@@ -329,8 +355,8 @@ object CantonInterpreter {
   private def fetchProjection(
       participant: ParticipantReference,
       party: com.digitalasset.canton.topology.Party,
-      reversePartyIds: ToProjection.PartyIdReverseMapping,
-      reverseContractIds: ToProjection.ContractIdReverseMapping,
+      reversePartyIds: PartyIdReverseMapping,
+      reverseContractIds: ContractIdReverseMapping,
       numTransactions: Int,
   ): Projections.Projection =
     if (numTransactions == 0) Nil

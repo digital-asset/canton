@@ -106,17 +106,15 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
   protected def operations: NonEmpty[Seq[TopologyOperations]]
 
-  protected def trafficControlParameters: Option[TrafficControlParameters] =
-    Some(
-      TrafficControlParameters(
-        maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000_000L),
-        maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
-        setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
-        readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
-        enforceRateLimiting = true,
-        baseEventCost = NonNegativeLong.tryCreate(50L),
-        freeConfirmationResponses = true,
-      )
+  protected def trafficControlParameters: TrafficControlParameters =
+    TrafficControlParameters(
+      maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000_000L),
+      maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
+      setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
+      readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
+      enforceRateLimiting = true,
+      baseEventCost = NonNegativeLong.tryCreate(50L),
+      freeConfirmationResponses = true,
     )
 
   /*
@@ -199,7 +197,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
                 mediatorReactionTimeout = config.NonNegativeFiniteDuration
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
-                trafficControl = trafficControlParameters,
+                trafficControl = Some(trafficControlParameters),
               ),
               // when there are multiple synchronizer owners, waiting for the update to become effective would only work
               // after the nth synchronizer owner submitted the proposal that would fulfill the synchronizer owner quorum
@@ -363,7 +361,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
         runners.foreach(_.close())
 
         val activeSequencer = getActiveSequencer()
-        val activePSId =
+        val activePsid =
           env.participant1.synchronizers.list_connected().loneElement.physicalSynchronizerId
 
         // Before leaving the suppressing logger scope, let the workload finish or time out, so that we
@@ -372,7 +370,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
         // Synchronize the participants so that they are all caught up by making them ping each others
         clue("[chaos testing] waiting until a final set of pings goes through") {
           val allOnboardedParticipants = activeSequencer.topology.synchronizer_trust_certificates
-            .list(activePSId)
+            .list(activePsid)
             .map(_.item.participantId.identifier.unwrap)
             .distinct
             .map(p)
@@ -394,13 +392,13 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
           // Run one last topology transaction through the synchronizer and wait until all synchronizer members have observed
           // that transaction to help ensure that no synchronizer member is behind consuming topology changes.
           val sequencedTimeOfDummyTransaction =
-            waitUntilDummySynchronizerTopologyTransactionsProcessed(activeSequencer, activePSId)
+            waitUntilDummySynchronizerTopologyTransactionsProcessed(activeSequencer, activePsid)
 
           // Wait for the duration of a client sequencer acknowledgment interval (+margin) to ensure
           // that all acknowledgements have been processed by the sequencers.
           Threading.sleep((sequencerClientAcknowledgementIntervalMs + computationMarginMs).toLong)
 
-          validateTopologyState(activeSequencer, activePSId, sequencedTimeOfDummyTransaction)
+          validateTopologyState(activeSequencer, activePsid, sequencedTimeOfDummyTransaction)
         }
       },
       forEvery(_)(acceptableLogMessageIncludingTopologyChangeWarnings),
@@ -433,20 +431,20 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
   private def waitUntilDummySynchronizerTopologyTransactionsProcessed(
       activeSequencer: LocalSequencerReference,
-      activePSId: PhysicalSynchronizerId,
+      activePsid: PhysicalSynchronizerId,
   )(implicit
       env: TestConsoleEnvironment
   ): CantonTimestamp = clue("[chaos testing] dummy topology transaction") {
     import env.*
     val signingKey =
-      clue(s"[chaos testing] propose dummy NSD transaction for $activeSequencer on $activePSId") {
+      clue(s"[chaos testing] propose dummy NSD transaction for $activeSequencer on $activePsid") {
         val identifierKey = activeSequencer.keys.secret
           .generate_signing_key(usage = SigningKeyUsage.NamespaceOnly)
         activeSequencer.topology.namespace_delegations.propose_delegation(
           activeSequencer.namespace,
           identifierKey,
           CanSignAllButNamespaceDelegations,
-          store = activePSId,
+          store = activePsid,
         )
         identifierKey
       }
@@ -457,7 +455,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
     ) {
       val synchronizerMembers = activeSequencer.topology.transactions
         .list(
-          store = activePSId,
+          store = activePsid,
           operation = Some(TopologyChangeOp.Replace),
           filterMappings = Seq(
             Code.SynchronizerTrustCertificate,
@@ -486,7 +484,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
           logger.info(s"Checking dummy transaction for $member")
           def fetchNSD = member.topology.namespace_delegations
             .list(
-              store = activePSId,
+              store = activePsid,
               filterNamespace = activeSequencer.namespace.filterString,
               filterTargetKey = Some(signingKey.fingerprint),
             )
@@ -505,14 +503,14 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
   private def validateTopologyState(
       activeSequencer: LocalSequencerReference,
-      activePSId: PhysicalSynchronizerId,
+      activePsid: PhysicalSynchronizerId,
       timestampForTopologyChecks: CantonTimestamp,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
     logger.info(s"Starting topology validations at timestamp $timestampForTopologyChecks")
 
     val allOnboardedMediators = activeSequencer.topology.mediators
-      .list(activePSId, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
+      .list(activePsid, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
       .flatMap(group => group.item.allMediatorsInGroup)
       .map(_.identifier.unwrap)
       .distinct
@@ -520,7 +518,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
     val allOnboardedSequencers =
       activeSequencer.topology.sequencers
-        .list(activePSId, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
+        .list(activePsid, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
         .loneElement
         .item
         .allSequencers
@@ -531,7 +529,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
     val allOnboardedParticipants =
       activeSequencer.topology.synchronizer_trust_certificates
-        .list(activePSId, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
+        .list(activePsid, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
         .map(_.item.participantId.identifier.unwrap)
         .distinct
         .map(p)
@@ -550,7 +548,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
     )
 
     clue(s"validating topology state of ${runningNodes.map(_.name)}")(
-      verification.ensureConsistentTopologyState(runningNodes, activePSId)
+      verification.ensureConsistentTopologyState(runningNodes, activePsid)
     )
 
     clue(s"validating sequencer snapshots of ${allOnboardedSequencers.map(_.name)}")(
@@ -561,7 +559,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       verification.ensureTopologyHistoryCanBeReplayed(
         activeSequencer,
         unusedNode = lp("replay-config"),
-        activePSId,
+        activePsid,
         staticSynchronizerParameters1,
       )
     )
@@ -803,14 +801,9 @@ class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest
 
   // To test LSU traffic transfer with non-trivial (zeros) extra traffic,
   // we reduce the default base traffic amount to be insufficient
-  override protected val trafficControlParameters: Option[TrafficControlParameters] =
-    super.trafficControlParameters.map(
-      _.copy(maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L))
-    )
-  require(
-    trafficControlParameters.nonEmpty,
-    "LSU chaos requires traffic control parameters to be set",
-  )
+  override protected val trafficControlParameters: TrafficControlParameters =
+    super.trafficControlParameters
+      .copy(maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L))
 
   /*
   For LSU we don't want to use the target latency settings.

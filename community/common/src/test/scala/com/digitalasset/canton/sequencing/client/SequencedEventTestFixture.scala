@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -38,6 +37,7 @@ import org.scalatest.Assertions.fail
 import org.scalatest.concurrent.{PatienceConfiguration, ScalaFutures}
 import org.scalatest.time.{Seconds, Span}
 
+import java.util.concurrent.BlockingQueue
 import scala.concurrent.{ExecutionContext, Future}
 
 class SequencedEventTestFixture(
@@ -117,16 +117,18 @@ class SequencedEventTestFixture(
     ).onShutdown(throw new RuntimeException("failed to create carlos event")).futureValue
   )
 
-  // TODO(i27260): cleanup when the new connection pool is stable
-  private val useNewConnectionPool = true
-
   def mkAggregator(
-      config: MessageAggregationConfig = MessageAggregationConfig(
-        Option.when(!useNewConnectionPool)(NonEmptyUtil.fromUnsafe(Set(sequencerAlice))),
-        PositiveInt.tryCreate(1),
-      )
+      config: MessageAggregationConfig = MessageAggregationConfig(PositiveInt.tryCreate(1))
   ) = {
-    val aggregator = new SequencerAggregator(
+    val postAggregationHandler = new PostAggregationHandler {
+      override def handlerIsIdleF: Future[Unit] = Future.unit
+      override def signalHandler(eventQueue: BlockingQueue[SequencedSerializedEvent])(implicit
+          traceContext: TraceContext
+      ): Unit = ()
+    }
+
+    new SequencerAggregator(
+      postAggregationHandler = postAggregationHandler,
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),
       loggerFactory = loggerFactory,
@@ -134,27 +136,11 @@ class SequencedEventTestFixture(
       updateSendTracker = _ => (),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
-      useNewConnectionPool = useNewConnectionPool,
     )
-
-    if (useNewConnectionPool) {
-      aggregator.setPostAggregationHandler(new PostAggregationHandler {
-        override def handlerIsIdleF: Future[Unit] = Future.unit
-        override def signalHandler()(implicit traceContext: TraceContext): Unit = ()
-      })
-    }
-
-    aggregator
   }
 
-  def config(
-      expectedSequencers: Set[SequencerId] = Set(sequencerAlice),
-      sequencerTrustThreshold: Int = 1,
-  ): MessageAggregationConfig =
-    MessageAggregationConfig(
-      Option.when(!useNewConnectionPool)(NonEmptyUtil.fromUnsafe(expectedSequencers)),
-      PositiveInt.tryCreate(sequencerTrustThreshold),
-    )
+  def config(sequencerTrustThreshold: Int = 1): MessageAggregationConfig =
+    MessageAggregationConfig(PositiveInt.tryCreate(sequencerTrustThreshold))
 
   def mkValidator(
       syncCryptoApi: SynchronizerCryptoClient = subscriberCryptoApi

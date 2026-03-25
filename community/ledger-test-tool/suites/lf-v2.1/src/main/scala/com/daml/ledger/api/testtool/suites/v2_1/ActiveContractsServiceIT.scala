@@ -1057,6 +1057,94 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
     } yield ()
   })
 
+  test(
+    "AcsContinuation",
+    "The ActiveContractService should resume streaming with continuation token",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      end <- ledger.currentEnd()
+      activeContracts <- ledger
+        .activeContractResponses(
+          ledger.activeContractsRequest(
+            parties = Some(Seq(party)),
+            activeAtOffset = end,
+          )
+        )
+      continuations <- Future.sequence(for {
+        activeContract <- activeContracts
+        continuation = ledger
+          .activeContractResponses(
+            ledger
+              .activeContractsRequest(
+                parties = Some(Seq(party)),
+                activeAtOffset = end,
+              )
+              .copy(streamContinuationToken = Some(activeContract.streamContinuationToken))
+          )
+      } yield {
+        continuation
+      })
+
+      // archive the contracts to not be active on the next tests
+      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
+    } yield {
+      val activeContractEvents =
+        activeContracts.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
+      assert(
+        activeContractEvents.sizeIs == 3,
+        s"Expected 3 contracts, but received ${activeContractEvents.size}.",
+      )
+
+      assert(
+        continuations.sizeIs == 3,
+        s"Expected 3 continuations, but received ${continuations.size}.",
+      )
+
+      continuations.zipWithIndex.foreach { case (continuationStream, index) =>
+        assert(
+          continuationStream == activeContracts.drop(index + 1),
+          s"Continuation did not match the original stream at index $index",
+        )
+      }
+    }
+  })
+
+  test(
+    "AcsInvalidContinuationToken",
+    "Fail if incorrect continuation token is used",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      end <- ledger.currentEnd()
+      activeContractsWithoutContinuation <- ledger
+        .activeContractResponses(
+          ledger.activeContractsRequest(
+            parties = Some(Seq(party)),
+            activeAtOffset = end,
+          )
+        )
+      invalidToken = activeContractsWithoutContinuation.headOption
+        .map(_.streamContinuationToken.substring(1))
+      _ <- ledger
+        .activeContracts(
+          ledger
+            .activeContractsRequest(
+              parties = Some(Seq(party)),
+              activeAtOffset = end,
+            )
+            .copy(streamContinuationToken = invalidToken)
+        )
+        .mustFailWith(
+          "invalid continuation token",
+          RequestValidationErrors.InvalidField,
+        )
+      // archive the contracts to not be active on the next tests
+      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
+    } yield ()
+  })
   private def createDummyContracts(party: Party, ledger: ParticipantTestContext)(implicit
       ec: ExecutionContext
   ): Future[

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.authentication
 
 import cats.data.EitherT
-import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
@@ -25,7 +24,7 @@ import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 
 import java.time.Duration
 import scala.concurrent.ExecutionContext
@@ -119,13 +118,23 @@ class MemberAuthenticationService(
     for {
       _ <- EitherT.right(waitForInitialized)
       _ <- isActive(member)
-      value <- EitherT
-        .fromEither(
-          ignoreExpired(store.fetchAndRemoveNonce(member, providedNonce))
+
+      storedNonce <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          store
+            .fetchAndRemoveNonce(member, providedNonce)
             .toRight(MissingNonce(member): AuthenticationError)
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
-      StoredNonce(_, nonce, generatedAt, _expireAt) = value
+      StoredNonce(_, nonce, generatedAt, expireAt) = storedNonce
+
+      _ <- {
+        val now = clock.now
+        EitherTUtil.condUnitET[FutureUnlessShutdown](
+          expireAt > now,
+          ExpiredNonce(member, expireAt, now, generatedAt),
+        )
+      }
+
       authentication <- EitherT.fromEither[FutureUnlessShutdown](MemberAuthentication(member))
       hash = authentication.hashSynchronizerNonce(nonce, synchronizerId, cryptoApi.pureCrypto)
       snapshot <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
@@ -216,9 +225,6 @@ class MemberAuthenticationService(
       }
     } yield res
 
-  private def ignoreExpired[A <: HasExpiry](itemO: Option[A]): Option[A] =
-    itemO.filter(_.expireAt > clock.now)
-
   private def scheduleExpirations(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Unit = {
@@ -300,7 +306,7 @@ class MemberAuthenticationService(
   )(memberId: T)(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     isActiveCheck(memberId).map { isActive =>
       if (!isActive) {
-        logger.debug(s"Expiring all auth-tokens of $memberId")
+        logger.info(s"Expiring all auth-tokens of $memberId")
         // first, remove all auth tokens
         store.invalidateMember(memberId)
         // second, ensure the sequencer client gets disconnected

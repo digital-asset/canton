@@ -3,8 +3,9 @@
 
 package com.digitalasset.daml.lf.language
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+
 import scala.collection.immutable.VectorMap
 
 object Ast {
@@ -173,8 +174,8 @@ object Ast {
   final case class EFromInterface(interfaceId: TypeConId, templateId: TypeConId, value: Expr)
       extends ExprInterface
 
-  /** Convert interface back to template payload,
-    * or raise a WronglyTypedContract error if not possible
+  /** Convert interface back to template payload, or raise a WronglyTypedContract error if not
+    * possible
     */
   final case class EUnsafeFromInterface(
       interfaceId: TypeConId,
@@ -197,8 +198,8 @@ object Ast {
       body: Expr,
   ) extends ExprInterface
 
-  /** Downcast from an interface payload to an interface that requires it,
-    * or raise a WronglyTypedContract error if not possible.
+  /** Downcast from an interface payload to an interface that requires it, or raise a
+    * WronglyTypedContract error if not possible.
     */
   final case class EUnsafeFromRequiredInterface(
       requiredIfaceId: TypeConId,
@@ -1113,7 +1114,7 @@ object Ast {
 
     private[daml] def serializableDefinitions: Map[DottedName, DDataType] =
       definitions.collect {
-        case (name, dataType: DDataType) if dataType.serializable => name -> dataType
+        case (dottedName, dataType: DDataType) if dataType.serializable => dottedName -> dataType
       }
 
     /** A utility module is a module that does not contain any serializable type */
@@ -1239,7 +1240,8 @@ object Ast {
   // the replacement for directDeps
   final case class GeneratedImports(reason: String, pkgIds: Set[PackageId]) extends Imports
 
-  /** @param directDeps will contain all packages that are referenced in [[modules]]
+  /** @param directDeps
+    *   will contain all packages that are referenced in [[modules]]
     */
   final case class GenPackage[E](
       modules: Map[ModuleName, GenModule[E]],
@@ -1287,12 +1289,11 @@ object Ast {
     private[lf] def pkgName: Ref.PackageName = metadata.name
     private[lf] def pkgVersion: Ref.PackageVersion = metadata.version
 
-    def importsWithStablePkgs: Set[PackageId] = {
+    def importsWithStablePkgs: Set[PackageId] =
       // TODO[RB]: when we have our bazel-maintained stable packages list, we
       // use it here to filter the stablepackages by lf version (right now it is
       // ok since all stable packages are 2.1)
       imports.pkgIds.union(stableIds)
-    }
 
     private val stableIds: Set[PackageId] =
       Seq(
@@ -1356,7 +1357,7 @@ object Ast {
         languageVersion: LanguageVersion,
         metadata: PackageMetadata,
         imports: Imports,
-    ): GenPackage[E] = {
+    ): GenPackage[E] =
       GenPackage(
         modules = modules,
         directDeps = directDeps,
@@ -1365,7 +1366,6 @@ object Ast {
         imports = imports,
         isUtilityPackage = modules.values.forall(_.isUtilityModule),
       )
-    }
 
     def unapply(arg: GenPackage[E]): Some[
       (
@@ -1374,7 +1374,7 @@ object Ast {
           LanguageVersion,
           PackageMetadata,
       )
-    ] = {
+    ] =
       Some(
         (
           arg.modules,
@@ -1383,7 +1383,6 @@ object Ast {
           arg.metadata,
         )
       )
-    }
 
   }
 

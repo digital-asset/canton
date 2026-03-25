@@ -256,6 +256,7 @@ message ListLsuAnnouncementResponse {
 message ListLsuSequencerConnectionSuccessorRequest {
   BaseQuery base_query = 1;
   string filter_sequencer_id = 2;
+  string filter_successor_physical_synchronizer_id = 3;
 }
 
 message ListLsuSequencerConnectionSuccessorResponse {

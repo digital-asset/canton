@@ -345,6 +345,8 @@ final class BftBlockOrderer(
       BlockNumber(sequencerSubscriptionInitialHeight),
       timeouts,
       loggerFactory,
+      config.outputEnqueueMaxRetries,
+      config.outputEnqueueMaxRetryDelay,
     )(
       abort = sys.error
     )

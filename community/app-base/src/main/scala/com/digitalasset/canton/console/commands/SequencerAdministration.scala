@@ -33,9 +33,11 @@ import com.digitalasset.canton.sequencer.admin.v30.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.SequencerId
 import com.google.protobuf.ByteString
 
+import java.io.BufferedInputStream
 import scala.concurrent.ExecutionContext
 
 class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGroup.Impl(node) {
@@ -172,10 +174,10 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   }
 
   @Help.Summary(
-    "Initialize a sequencer for the logical upgrade from the state of its predecessor"
+    "Initialize a sequencer for the logical upgrade from the state of its predecessor, streaming the state from a file"
   )
   def initialize_from_lsu_predecessor(
-      predecessorState: ByteString,
+      inputFile: String,
       synchronizerParameters: StaticSynchronizerParameters,
       waitForReady: Boolean = true,
   ): Unit = {
@@ -184,7 +186,9 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromLsuPredecessor(
-          predecessorState,
+          new BufferedInputStream(
+            new java.io.FileInputStream(inputFile)
+          ),
           synchronizerParameters.toInternal,
         )
       )
@@ -225,6 +229,18 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     }
   }
 
+  @Help.Summary("Test sequencing around LSU upgrade")
+  @Help.Description(
+    """Allows to test sequencing on the successor synchronizer by sequencing a message.
+      |
+      |Parameters:
+      |- recipientMediatorGroup: Recipient group that will receive the message.
+      |"""
+  )
+  def test_lsu_sequencing(recipientMediatorGroup: MediatorGroupIndex): Unit =
+    consoleEnvironment.run(
+      runner.adminCommand(SequencerAdminCommands.PerformLsuSequencingTest(recipientMediatorGroup))
+    )
 }
 
 class SequencerHealthAdministration(

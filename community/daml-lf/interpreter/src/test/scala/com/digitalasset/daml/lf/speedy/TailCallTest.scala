@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
+
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SResult.SResultFinal
@@ -14,9 +16,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
 
 // TEST_EVIDENCE: Availability: Tail call optimization: Tail recursion does not blow the scala JVM stack.
-class TailCallTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class TailCallTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -68,6 +68,7 @@ class TailCallTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       initialSeeding = InitialSeeding.NoSeed,
       committers = Set.empty,
       readAs = Set.empty,
+      logger = MachineLogger(),
       iterationsBetweenInterruptions = Long.MaxValue,
       packageResolution = Map.empty,
       costModel = costModel,

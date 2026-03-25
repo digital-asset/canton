@@ -3,18 +3,18 @@
 
 package com.digitalasset.daml.lf.archive
 
-import java.nio.file.Paths
-import com.digitalasset.daml.lf.data.{Numeric, Ref}
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion => LV}
-import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.archive.DamlLf1
-import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import org.scalatest.{Inside, OptionValues}
+import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
+import com.digitalasset.daml.lf.data.{Numeric, Ref}
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion as LV}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Inside, OptionValues}
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-import scala.jdk.CollectionConverters._
+import java.nio.file.Paths
+import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
 class DecodeV1Spec
@@ -70,12 +70,11 @@ class DecodeV1Spec
 
   private[this] val lfVersions = LV.allLegacyLfVersions
 
-  private[this] def forEveryVersionSuchThat[U](cond: LV => Boolean)(f: LV => U): Unit = {
+  private[this] def forEveryVersionSuchThat[U](cond: LV => Boolean)(f: LV => U): Unit =
     lfVersions.foreach { version =>
       if (cond(version)) f(version)
       ()
     }
-  }
 
   private[this] def forEveryVersion[U]: (LV => U) => Unit =
     forEveryVersionSuchThat(_ => true)
@@ -85,7 +84,7 @@ class DecodeV1Spec
       stringTable: ImmArraySeq[String] = ImmArraySeq.empty,
       dottedNameTable: ImmArraySeq[Ref.DottedName] = ImmArraySeq.empty,
       typeTable: ImmArraySeq[Ast.Type] = ImmArraySeq.empty,
-  ) = {
+  ) =
     new DecodeV1(version.minor).Env(
       Ref.PackageId.assertFromString("noPkgId"),
       stringTable,
@@ -95,7 +94,6 @@ class DecodeV1Spec
       Some(dummyModuleName),
       schemaMode = false,
     )
-  }
 
   "decodeKind" should {
 
@@ -118,7 +116,7 @@ class DecodeV1Spec
 
   "uncheckedDecodeType" should {
 
-    import DamlLf1.PrimType._
+    import DamlLf1.PrimType.*
 
     def buildNat(i: Long) = DamlLf1.Type.newBuilder().setNat(i).build()
 
@@ -128,7 +126,7 @@ class DecodeV1Spec
     "reject nat type if lf version < 1.7" in {
 
       val testCases =
-        Table("proto nat type", (validNatTypes.map(_.toLong) ++ invalidNatTypes).map(buildNat): _*)
+        Table("proto nat type", (validNatTypes.map(_.toLong) ++ invalidNatTypes).map(buildNat)*)
 
       forEveryVersionSuchThat(_ < Features.numeric) { version =>
         val decoder = moduleDecoder(version)
@@ -140,8 +138,8 @@ class DecodeV1Spec
 
     "accept only valid nat types if lf version >= 1.7" in {
       val positiveTestCases =
-        Table("proto nat type" -> "nat", validNatTypes.map(v => buildNat(v.toLong) -> v): _*)
-      val negativeTestCases = Table("proto nat type", invalidNatTypes.map(buildNat): _*)
+        Table("proto nat type" -> "nat", validNatTypes.map(v => buildNat(v.toLong) -> v)*)
+      val negativeTestCases = Table("proto nat type", invalidNatTypes.map(buildNat)*)
 
       forEveryVersionSuchThat(_ >= Features.numeric) { version =>
         val decoder = moduleDecoder(version)
@@ -477,14 +475,13 @@ class DecodeV1Spec
           coImplements = Map.empty,
         )
 
-      val testCases = {
+      val testCases =
         Table(
           "input" -> "expected output",
           emptyDefInterface -> emptyDefInterfaceScala,
           methodsDefInterface -> methodsDefInterfaceScala,
           coImplementsDefInterface -> coImplementsDefInterfaceScala,
         )
-      }
 
       val interfaceName = Ref.DottedName.assertFromString("I")
       val modName = Ref.DottedName.assertFromString("Mod")

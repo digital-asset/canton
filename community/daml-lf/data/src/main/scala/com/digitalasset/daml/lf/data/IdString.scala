@@ -4,11 +4,10 @@
 package com.digitalasset.daml.lf.data
 
 import com.daml.scalautil.Statement.discard
-
-import java.io.{StringReader, StringWriter}
-
 import com.google.common.io.{BaseEncoding, ByteStreams}
 import scalaz.{Equal, Order}
+
+import java.io.{StringReader, StringWriter}
 import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 
@@ -43,15 +42,13 @@ sealed trait HexStringModule[T <: String] extends StringModule[T] {
 
 }
 
-/** ConcatenableMatchingString are non empty US-ASCII strings built with letters, digits,
-  * and some other (parameterizable) extra characters.
-  * We use them to represent identifiers. In this way, we avoid
-  * empty identifiers, escaping problems, and other similar pitfalls.
+/** ConcatenableMatchingString are non empty US-ASCII strings built with letters, digits, and some
+  * other (parameterizable) extra characters. We use them to represent identifiers. In this way, we
+  * avoid empty identifiers, escaping problems, and other similar pitfalls.
   *
-  * ConcatenableMatchingString has the advantage over MatchingStringModule of being
-  * concatenable and can be generated from numbers without extra checks.
-  * Those properties are heavily use to generate some ids by combining other existing
-  * ids.
+  * ConcatenableMatchingString has the advantage over MatchingStringModule of being concatenable and
+  * can be generated from numbers without extra checks. Those properties are heavily use to generate
+  * some ids by combining other existing ids.
   */
 sealed trait ConcatenableStringModule[T <: String, HS <: String] extends StringModule[T] {
 
@@ -80,22 +77,21 @@ sealed abstract class IdString {
   // Human-readable package names and versions.
   type PackageName <: String
 
-  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon, minus and,
-    *      underscore. We use them to represent [Party] literals. In this way, we avoid
-    *      empty identifiers, escaping problems, and other similar pitfalls.
+  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon,
+    * minus and, underscore. We use them to represent [Party] literals. In this way, we avoid empty
+    * identifiers, escaping problems, and other similar pitfalls.
     */
   type Party <: String
 
-  /** Reference to a package via a package identifier. The identifier is the ascii7
-    * lowercase hex-encoded hash of the package contents found in the Daml-LF Archive.
+  /** Reference to a package via a package identifier. The identifier is the ascii7 lowercase
+    * hex-encoded hash of the package contents found in the Daml-LF Archive.
     */
   type PackageId <: String
 
   type ParticipantId <: String
 
-  /** Used to reference to ledger objects like legacy contractIds, ledgerIds,
-    * transactionId, ... We use the same type for those ids, because we
-    * construct some by concatenating the others.
+  /** Used to reference to ledger objects like legacy contractIds, ledgerIds, transactionId, ... We
+    * use the same type for those ids, because we construct some by concatenating the others.
     */
   type LedgerString <: String
 
@@ -197,15 +193,13 @@ private final class MatchingStringModule(description: String, string_regex: Stri
 
 }
 
-/** ConcatenableMatchingString are non empty US-ASCII strings built with letters, digits,
-  * and some other (parameterizable) extra characters.
-  * We use them to represent identifiers. In this way, we avoid
-  * empty identifiers, escaping problems, and other similar pitfalls.
+/** ConcatenableMatchingString are non empty US-ASCII strings built with letters, digits, and some
+  * other (parameterizable) extra characters. We use them to represent identifiers. In this way, we
+  * avoid empty identifiers, escaping problems, and other similar pitfalls.
   *
-  * ConcatenableMatchingString has the advantage over MatchingStringModule of being
-  * concatenable and can be generated from numbers without extra checks.
-  * Those properties are heavily use to generate some ids by combining other existing
-  * ids.
+  * ConcatenableMatchingString has the advantage over MatchingStringModule of being concatenable and
+  * can be generated from numbers without extra checks. Those properties are heavily use to generate
+  * some ids by combining other existing ids.
   */
 private final class ConcatenableMatchingStringModule(
     description: String,
@@ -247,7 +241,7 @@ private final class ConcatenableMatchingStringModule(
   }
 
   override def assertConcat(s: T, ss: T*): T =
-    assertRight(concat(s, ss: _*))
+    assertRight(concat(s, ss*))
 
   override def fromHexString(s: String): String = s
 }
@@ -303,24 +297,23 @@ private[data] final class IdStringImpl extends IdString {
   override val PackageName: ConcatenableStringModule[PackageName, HexString] =
     new ConcatenableMatchingStringModule("Daml-LF Package Name", "-_", 255)
 
-  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon, minus and,
-    * underscore limited to 255 chars. We use them to represent [Party] literals. In this way, we avoid
-    * empty identifiers, escaping problems, and other similar pitfalls.
+  /** Party identifiers are non-empty US-ASCII strings built from letters, digits, space, colon,
+    * minus and, underscore limited to 255 chars. We use them to represent [Party] literals. In this
+    * way, we avoid empty identifiers, escaping problems, and other similar pitfalls.
     */
   override type Party = String
   override val Party: ConcatenableStringModule[Party, HexString] =
     new ConcatenableMatchingStringModule("Daml-LF Party", ":-_ ", 255)
 
-  /** Reference to a package via a package identifier. The identifier is the ascii7
-    * lowercase hex-encoded hash of the package contents found in the Daml-LF Archive.
+  /** Reference to a package via a package identifier. The identifier is the ascii7 lowercase
+    * hex-encoded hash of the package contents found in the Daml-LF Archive.
     */
   override type PackageId = String
   override val PackageId: ConcatenableStringModule[PackageId, HexString] =
     new ConcatenableMatchingStringModule("Daml-LF Package ID", "-_ ", 64)
 
-  /** Used to reference to leger objects like contractIds, ledgerIds,
-    * transactionId, ... We use the same type for those ids, because we
-    * construct some by concatenating the others.
+  /** Used to reference to leger objects like contractIds, ledgerIds, transactionId, ... We use the
+    * same type for those ids, because we construct some by concatenating the others.
     */
   override type LedgerString = String
   override val LedgerString: ConcatenableStringModule[LedgerString, HexString] =
@@ -335,12 +328,12 @@ private[data] final class IdStringImpl extends IdString {
   override val ContractIdString: StringModule[ContractIdString] =
     new MatchingStringModule("Daml-LF Contract ID", """#[\w._:\-#/ ]{0,254}""")
 
-  /** Identifiers for participant node users are non-empty strings with a length <= 128 that consist of
-    * ASCII alphanumeric characters and the symbols "@^$.!`-#+'~_|:()".
-    * This character set is chosen such that it maximizes the ease of integration with IAM systems.
-    * Since the Ledger API needs to be compatible with JWT and uses the "sub" registered claim to
-    * represent participant node users, the definition and use of these identifiers must keep in
-    * consideration the definition of the aforementioned claim: https://www.rfc-editor.org/rfc/rfc7519#section-4.1.2
+  /** Identifiers for participant node users are non-empty strings with a length <= 128 that consist
+    * of ASCII alphanumeric characters and the symbols "@^$.!`-#+'~_|:()". This character set is
+    * chosen such that it maximizes the ease of integration with IAM systems. Since the Ledger API
+    * needs to be compatible with JWT and uses the "sub" registered claim to represent participant
+    * node users, the definition and use of these identifiers must keep in consideration the
+    * definition of the aforementioned claim: https://www.rfc-editor.org/rfc/rfc7519#section-4.1.2
     */
   override type UserId = String
   override val UserId: StringModule[UserId] =

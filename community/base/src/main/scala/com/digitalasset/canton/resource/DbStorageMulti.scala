@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DbStorage.DbAction.{All, ReadTransactional}
 import com.digitalasset.canton.resource.DbStorageMulti.passiveInstanceHealthState
@@ -46,8 +46,8 @@ final class DbStorageMulti private (
     generalDb: Database,
     private[resource] val writeConnectionPool: DbLockedConnectionPool,
     val dbConfig: DbConfig,
-    onActive: () => FutureUnlessShutdown[Unit],
-    onPassive: () => FutureUnlessShutdown[Unit],
+    onActive: TracedLogger => FutureUnlessShutdown[Unit],
+    onPassive: TracedLogger => FutureUnlessShutdown[Unit],
     checkPeriod: PositiveFiniteDuration,
     clock: Clock,
     closeClock: Boolean,
@@ -85,10 +85,10 @@ final class DbStorageMulti private (
           // We have a transition of the activeness
           val transitionReplicaState =
             if (connectionPoolActive)
-              onActive()
+              onActive(logger)
                 .thereafter(_ => reportHealthState(ComponentHealthState.Ok()))
             else
-              onPassive()
+              onPassive(logger)
                 .thereafter(_ => reportHealthState(passiveInstanceHealthState))
 
           FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
@@ -224,8 +224,9 @@ object DbStorageMulti {
       writePoolSize: PositiveInt,
       mainLockCounter: DbLockCounter,
       poolLockCounter: DbLockCounter,
-      onActive: () => FutureUnlessShutdown[Unit],
-      onPassive: () => FutureUnlessShutdown[Unit],
+      onActive: TracedLogger => FutureUnlessShutdown[Unit],
+      onPassive: TracedLogger => FutureUnlessShutdown[Unit],
+      mustStayActive: Boolean,
       metrics: DbStorageMetrics,
       logQueryCost: Option[QueryCostMonitoringConfig],
       customClock: Option[Clock],
@@ -295,6 +296,7 @@ object DbStorageMulti {
           futureSupervisor,
           loggerFactory,
           writeExecutor,
+          mustStayActive,
         )
         .leftMap(err => s"Failed to create write connection pool: $err")
         .toEitherT[UnlessShutdown]

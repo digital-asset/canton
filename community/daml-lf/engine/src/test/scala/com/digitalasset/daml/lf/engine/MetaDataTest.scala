@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
   CreateKey,
@@ -29,9 +31,10 @@ class MetaDataTest
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with TestIdFactory {
+    with TestIdFactory
+    with SuppressingLogging {
 
-  val helpers = new MetaDataTestHelper
+  val helpers = new MetaDataTestHelper(loggerFactory)
   import helpers._
   import TreeTransactionBuilder._
 
@@ -166,7 +169,7 @@ class MetaDataTest
 
 }
 
-class MetaDataTestHelper {
+class MetaDataTestHelper(loggerFactory: NamedLoggerFactory) {
 
   val langVersion = LanguageVersion.latestStableLfVersion
 
@@ -175,7 +178,7 @@ class MetaDataTestHelper {
       Some(SerializationVersion.assign(langVersion))
   }
 
-  val engine = Engine.DevEngine
+  val engine = Engine.DevEngine(loggerFactory)
 
   def emptyPkg(pkgName: String): language.Ast.Package =
     language.Ast.Package(

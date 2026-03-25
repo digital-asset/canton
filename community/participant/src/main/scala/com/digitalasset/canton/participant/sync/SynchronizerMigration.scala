@@ -126,7 +126,7 @@ class SynchronizerMigration(
                 case other =>
                   InvalidSynchronizerConfigStatuses(
                     source,
-                    other.map(c => (c.configuredPSId, c.status)),
+                    other.map(c => (c.configuredPsid, c.status)),
                   ).asLeft
               }
             }
@@ -156,7 +156,7 @@ class SynchronizerMigration(
           sourceSynchronizerId
         ): SynchronizerMigrationError,
       )
-    } yield sourceConnection.map(_.configuredPSId)
+    } yield sourceConnection.map(_.configuredPsid)
   }
 
   private def registerNewSynchronizer(
@@ -276,7 +276,7 @@ class SynchronizerMigration(
   def migrateSynchronizer(
       source: Source[SynchronizerAlias],
       target: Target[SynchronizerConnectionConfig],
-      targetPSId: Target[PhysicalSynchronizerId],
+      targetPsid: Target[PhysicalSynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerMigrationError, Unit] = {
@@ -288,18 +288,18 @@ class SynchronizerMigration(
       )
       for {
         // check that the request makes sense
-        sourcePSId <- checkMigrationRequest(source, target, targetPSId.map(_.logical))
+        sourcePsid <- checkMigrationRequest(source, target, targetPsid.map(_.logical))
         // check if the target alias already exists.
         targetStatusO = target.traverse(config =>
           synchronizerConnectionConfigStore
-            .get(config.synchronizerAlias, KnownPhysicalSynchronizerId(targetPSId.unwrap))
+            .get(config.synchronizerAlias, KnownPhysicalSynchronizerId(targetPsid.unwrap))
             .toOption
             .map(_.status)
         )
         // check if we are already active on the target synchronizer
         _ <- targetStatusO.fold {
           // synchronizer not yet configured, add the configuration
-          registerNewSynchronizer(target, targetPSId.value)
+          registerNewSynchronizer(target, targetPsid.value)
         } { targetStatus =>
           logger.debug(s"Checking status of target synchronizer ${target.unwrap.synchronizerAlias}")
           EitherT.fromEither[FutureUnlessShutdown](
@@ -317,12 +317,12 @@ class SynchronizerMigration(
               _ <- aliasManager.synchronizerIdForAlias(target.unwrap.synchronizerAlias).traverse_ {
                 storedSynchronizerId =>
                   Either.cond(
-                    targetPSId.unwrap.logical == storedSynchronizerId,
+                    targetPsid.unwrap.logical == storedSynchronizerId,
                     (),
                     InvalidArgument.ExpectedSynchronizerIdsDiffer(
                       target.map(_.synchronizerAlias),
                       storedSynchronizerId,
-                      targetPSId.map(_.logical),
+                      targetPsid.map(_.logical),
                     ),
                   )
               }
@@ -331,29 +331,29 @@ class SynchronizerMigration(
         }
         _ <- updateSynchronizerStatus(
           target.map(_.synchronizerAlias),
-          targetPSId.map(KnownPhysicalSynchronizerId(_): ConfiguredPhysicalSynchronizerId),
+          targetPsid.map(KnownPhysicalSynchronizerId(_): ConfiguredPhysicalSynchronizerId),
           SynchronizerConnectionConfigStore.HardMigratingTarget,
         )
         _ <- updateSynchronizerStatus(
           source,
-          sourcePSId,
+          sourcePsid,
           SynchronizerConnectionConfigStore.HardMigratingSource,
         )
-      } yield sourcePSId
+      } yield sourcePsid
     }
 
     for {
-      sourcePSId <- synchronizeWithClosing(functionFullName)(prepare())
-      sourceLSId <- source.traverse(getSynchronizerId(_))
+      sourcePsid <- synchronizeWithClosing(functionFullName)(prepare())
+      sourceLsid <- source.traverse(getSynchronizerId(_))
       _ <- prepareSynchronizerConnection(Traced(target.unwrap.synchronizerAlias))
-      _ <- migrateContracts(source, sourceLSId, targetPSId.map(_.logical))
+      _ <- migrateContracts(source, sourceLsid, targetPsid.map(_.logical))
       _ <- updateSynchronizerStatus(
         target.map(_.synchronizerAlias),
-        targetPSId.map(KnownPhysicalSynchronizerId(_): ConfiguredPhysicalSynchronizerId),
+        targetPsid.map(KnownPhysicalSynchronizerId(_): ConfiguredPhysicalSynchronizerId),
         SynchronizerConnectionConfigStore.Active,
       )
 
-      _ <- updateSynchronizerStatus(source, sourcePSId, SynchronizerConnectionConfigStore.Inactive)
+      _ <- updateSynchronizerStatus(source, sourcePsid, SynchronizerConnectionConfigStore.Inactive)
 
     } yield ()
   }

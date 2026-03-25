@@ -41,6 +41,7 @@ class SetupDriver(
     val loggerFactory: NamedLoggerFactory,
     val darPath: Option[String],
     synchronizers: Seq[SynchronizerId],
+    maxRetries: Int,
 )(implicit
     ec: ExecutionContext,
     executionSequencerFactory: ExecutionSequencerFactory,
@@ -135,10 +136,12 @@ class SetupDriver(
     }
   }
 
-  private def findParty(client: LedgerClient)(prefix: String): Future[Option[LfPartyId]] =
+  private def findParty(
+      client: LedgerClient
+  )(prefix: String): Future[Option[LfPartyId]] =
     client.partyManagementClient
       .listKnownParties(filterParty = prefix)
-      .map(_._1.headOption.map(_.party))
+      .map(_._1.find(_.isLocal).map(_.party))
 
   private def observeParty(
       client: LedgerClient,
@@ -183,7 +186,7 @@ class SetupDriver(
     retry.Pause(
       logger,
       this,
-      maxRetries = 40,
+      maxRetries = maxRetries,
       delay = 500.millis,
       operationName = operationName,
     )(task, retryable)

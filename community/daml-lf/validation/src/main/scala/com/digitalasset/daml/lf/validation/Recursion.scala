@@ -3,10 +3,10 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.{Graphs, Util => AstUtil}
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.iterable.TypeIterable
+import com.digitalasset.daml.lf.language.{Graphs, Util as AstUtil}
 
 private[validation] object Recursion {
 

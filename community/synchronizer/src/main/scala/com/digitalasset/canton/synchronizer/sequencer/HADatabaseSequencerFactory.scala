@@ -7,7 +7,6 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
@@ -17,6 +16,7 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageBuilder.ExclusiveStorage
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageNotifier.FailoverNotification
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
@@ -64,7 +64,7 @@ class HADatabaseSequencerFactory(
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
       authenticationServices: Option[AuthenticationServices],
@@ -124,7 +124,7 @@ class HADatabaseSequencerFactory(
       metrics,
       loggerFactory,
       blockSequencerMode = false,
-      sequencingTimeLowerBoundExclusive = sequencingTimeLowerBoundExclusive,
+      lsuSequencingBounds,
       rateLimitManagerO = None,
     ) {
       override def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = {

@@ -5,23 +5,16 @@ package com.digitalasset.canton.performance.control
 
 import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.performance.control.Balancer.Item
 import com.digitalasset.canton.util.Mutex
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.mutable
 
 class Balancer {
 
-  class Item(val party: Party) extends Ordered[Item] {
-    val outstanding = new AtomicInteger(0)
-    val counter = new AtomicInteger(0)
-    override def compare(that: Item): Int = this.outstanding.get().compare(that.outstanding.get())
-    def update(change: Int): Int = {
-      counter.incrementAndGet()
-      outstanding.updateAndGet(x => Math.max(0, x + change))
-    }
-  }
   private val ordered = mutable.ArrayBuffer[Item]()
   private val lock = new Mutex()
 
@@ -38,6 +31,11 @@ class Balancer {
     )
   })
 
+  /** Perform bubble sort
+    *
+    * We bubble sort here simply because we know that the order doesn't change everytime
+    * substantially
+    */
   @tailrec
   private def swapIfNecessary(direction: Int, ii: Int): Unit = {
     val (mm, nn) = if (direction == 1) (ii, ii + 1) else (ii - 1, ii)
@@ -88,5 +86,33 @@ class Balancer {
     update(0, head, 1)
     head
   })
+
+}
+
+object Balancer {
+  private class Item(val party: Party) extends Ordered[Item] {
+    val outstanding = new AtomicInteger(0)
+    val counter = new AtomicInteger(0)
+    override def compare(that: Item): Int = this.outstanding.get().compare(that.outstanding.get())
+    def update(change: Int): Int = {
+      counter.incrementAndGet()
+      outstanding.updateAndGet(x => Math.max(0, x + change))
+    }
+  }
+}
+
+class RandomBalancer {
+
+  private val pool = new AtomicReference[IndexedSeq[Party]](IndexedSeq.empty)
+
+  def updateMembers(current: Seq[Party]): Unit =
+    pool.updateAndGet(_ => IndexedSeq.from(current)).discard
+
+  def next(): Party = {
+    val pp = pool.get()
+    require(pp.nonEmpty, "Balancer is empty")
+    val idx = ThreadLocalRandom.current().nextInt(pp.length)
+    pp(idx)
+  }
 
 }

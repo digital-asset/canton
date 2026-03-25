@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package testing.snapshot
 
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto
@@ -20,7 +21,10 @@ import java.nio.file.Files
 
 class ReplayBenchmarkTestV1 extends ReplayBenchmarkTest(ContractIdVersion.V1)
 
-class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion) extends AnyWordSpec with Matchers {
+class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
+    extends AnyWordSpec
+    with Matchers
+    with SuppressingLogging {
 
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
 
@@ -52,7 +56,11 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion) extends AnyWordS
           ValueRecord(None, ImmArray(None -> ValueInt64(3))),
         )
       val pkgs = TransactionSnapshot.loadDar(darFile.toPath)
-      val engine = TransactionSnapshot.compile(pkgs, snapshotDir = Some(snapshotDir))
+      val engine = TransactionSnapshot.compile(
+        pkgs,
+        snapshotDir = Some(snapshotDir),
+        loggerFactory = loggerFactory,
+      )
       engine.submit(
         submitters = Set(alice),
         readAs = Set.empty,

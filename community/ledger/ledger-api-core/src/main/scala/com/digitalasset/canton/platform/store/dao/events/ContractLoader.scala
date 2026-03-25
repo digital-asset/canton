@@ -39,25 +39,25 @@ import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResu
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
-trait Loader[KEY, VALUE] {
+trait Loader[Key, Value] {
 
-  def load(key: KEY)(implicit loggingContext: LoggingContextWithTrace): Future[Option[VALUE]]
+  def load(key: Key)(implicit loggingContext: LoggingContextWithTrace): Future[Option[Value]]
 
 }
 
-class PekkoStreamParallelBatchedLoader[KEY, VALUE](
-    batchLoad: Seq[(KEY, LoggingContextWithTrace)] => Future[Map[KEY, VALUE]],
+class PekkoStreamParallelBatchedLoader[Key, Value](
+    batchLoad: Seq[(Key, LoggingContextWithTrace)] => Future[Map[Key, Value]],
     createQueue: () => Source[
-      (KEY, LoggingContextWithTrace, Promise[Option[VALUE]]),
+      (Key, LoggingContextWithTrace, Promise[Option[Value]]),
       BoundedSourceQueue[
-        (KEY, LoggingContextWithTrace, Promise[Option[VALUE]])
+        (Key, LoggingContextWithTrace, Promise[Option[Value]])
       ],
     ],
     maxBatchSize: Int,
     parallelism: Int,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, materializer: Materializer)
-    extends Loader[KEY, VALUE]
+    extends Loader[Key, Value]
     with NamedLogging {
 
   private val (queue, done) = createQueue()
@@ -101,9 +101,9 @@ class PekkoStreamParallelBatchedLoader[KEY, VALUE](
     .run()
 
   override def load(
-      key: KEY
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[VALUE]] = {
-    val promise = Promise[Option[VALUE]]()
+      key: Key
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Value]] = {
+    val promise = Promise[Option[Value]]()
     queue.offer((key, loggingContext, promise)) match {
       case QueueOfferResult.Enqueued => promise.future
 

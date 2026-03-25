@@ -38,7 +38,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.grpc.ByteStringStreamObserver
+import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
@@ -772,7 +772,7 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary(
-      "Download the topology upgrade state for a sequencer (intended for logical synchronizer upgrade)"
+      "Stream the topology upgrade state for a sequencer (intended for logical synchronizer upgrade) to a file"
     )
     @Help.Description(
       """Download the topology snapshot which includes the entire history of topology transactions
@@ -787,22 +787,26 @@ class TopologyAdministrationGroup(
         """
     )
     def sequencer_lsu_state(
+        outputFile: String,
         topologyStore: Option[TopologyStoreId.Synchronizer] = None,
         timeout: NonNegativeDuration = timeouts.unbounded,
-    ): ByteString =
+    ): Unit =
       consoleEnvironment.run {
-        val responseObserver = new ByteStringStreamObserver[SequencerLsuStateResponse](_.chunk)
+        val fileStreamObserver = new OutputFileStreamObserver[SequencerLsuStateResponse](
+          better.files.File(outputFile),
+          _.chunk,
+        )
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           adminCommand(
-            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, responseObserver)
+            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, fileStreamObserver)
           )
 
         processResult(
           call,
-          responseObserver.resultBytes,
+          fileStreamObserver.result,
           timeout,
-          "Downloading the genesis state for logical upgrade",
+          "Downloading the genesis state for logical upgrade to a file",
         )
       }
 
@@ -3672,7 +3676,7 @@ class TopologyAdministrationGroup(
           |- sequencerId: The ID of the sequencer that will be reachable by the provided endpoints.
           |- endpoints: A list of URIs of the endpoints with which the sequencer is reachable on the
           |  successor synchronizer.
-          |- synchronizerId: The logical synchronizer ID.
+          |- successorSynchronizerId: The physical synchronizer id the sequencer will belong to.
           |- customTrustCertificates: A trust certificate in case the sequencer's TLS certificate is
           |  not signed via certificates trusted by the OS's default trusted certificates.
           |- store:
@@ -3701,7 +3705,7 @@ class TopologyAdministrationGroup(
       def propose_successor(
           sequencerId: SequencerId,
           endpoints: NonEmpty[Seq[URI]],
-          synchronizerId: SynchronizerId,
+          successorSynchronizerId: PhysicalSynchronizerId,
           customTrustCertificates: Option[ByteString] = None,
           store: Option[TopologyStoreId] = None,
           mustFullyAuthorize: Boolean = false,
@@ -3721,7 +3725,7 @@ class TopologyAdministrationGroup(
                   .map { case (validatedEndpoints, useTls) =>
                     LsuSequencerConnectionSuccessor(
                       sequencerId,
-                      synchronizerId,
+                      successorSynchronizerId,
                       GrpcConnection(
                         validatedEndpoints,
                         useTls,
@@ -3734,7 +3738,7 @@ class TopologyAdministrationGroup(
                 change = operation,
                 mustFullyAuthorize = mustFullyAuthorize,
                 forceChanges = ForceFlags.none,
-                store = store.getOrElse(synchronizerId),
+                store = store.getOrElse(successorSynchronizerId.logical),
                 waitToBecomeEffective = synchronize,
               )
             )
@@ -3748,6 +3752,7 @@ class TopologyAdministrationGroup(
           operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
           filterSequencerId: String = "",
           filterSigningKey: String = "",
+          filterSuccessorPhysicalSynchronizerId: String = "",
       ): Seq[ListLsuSequencerConnectionSuccessorResult] = consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Read.ListLsuSequencerConnectionSuccessor(
@@ -3759,7 +3764,8 @@ class TopologyAdministrationGroup(
               filterSigningKey,
               None,
             ),
-            filterSequencerId,
+            filterSequencerId = filterSequencerId,
+            filterSuccessorPhysicalSynchronizerId = filterSuccessorPhysicalSynchronizerId,
           )
         )
       }

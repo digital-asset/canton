@@ -43,6 +43,7 @@ class UpdateServiceClient(
               includeTopologyEvents = None,
             )
           ),
+          descendingOrder = false,
         ),
         LedgerClient.stubWithTracing(service, token.orElse(getDefaultToken())).getUpdates,
       )

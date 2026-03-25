@@ -135,7 +135,7 @@ class SequencerTest
         DefaultProcessingTimeouts.testing,
         storage,
         sequencerStore,
-        sequencingTimeLowerBoundExclusive = None,
+        lsuSequencingBounds = None,
         clock,
         topologyClientMember,
         crypto,
@@ -247,7 +247,7 @@ class SequencerTest
         )(
           "member registration"
         )
-        signedSubmission <- RequestSigner(aliceCrypto, testedProtocolVersion, loggerFactory)
+        signedSubmission <- RequestSigner(aliceCrypto, loggerFactory)
           .signRequest(
             submission,
             HashPurpose.SubmissionRequestSignature,

@@ -121,7 +121,9 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
         .getActiveContracts(
           eventFormat = eventFormat(dsoParty),
           activeAt = ledgerEndOffset,
+          continuationToken = None,
         )
+        .map(_.withEmptyChecksum)
         .zipWithIndex
         .runWith(Sink.last)
         .map { case (last, lastIndex) =>

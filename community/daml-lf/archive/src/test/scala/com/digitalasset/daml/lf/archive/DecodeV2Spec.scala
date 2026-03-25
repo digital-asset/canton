@@ -3,25 +3,23 @@
 
 package com.digitalasset.daml.lf.archive
 
+import com.daml.crypto.MessageDigestPrototype
 import com.digitalasset.daml.SafeProto
+import com.digitalasset.daml.lf.archive.DamlLf2
+import com.digitalasset.daml.lf.archive.{DamlLf, DamlLf2 as PLF}
+import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
+import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.data.{Numeric, Ref}
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion as LV}
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Inside, OptionValues}
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import java.math.BigDecimal
 import java.nio.file.Paths
-import com.daml.crypto.MessageDigestPrototype
-import com.digitalasset.daml.lf.archive.{DamlLf2 => PLF}
-import com.digitalasset.daml.lf.data.{Numeric, Ref}
-import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion => LV}
-import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
-import com.digitalasset.daml.lf.archive.DamlLf2
-import com.digitalasset.daml.lf.archive.DamlLf
-import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import org.scalatest.{Inside, OptionValues}
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpec
-
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
 class DecodeV2Spec
@@ -98,7 +96,7 @@ class DecodeV2Spec
       kindTable: ImmArraySeq[Ast.Kind] = ImmArraySeq.empty,
       typeTable: ImmArraySeq[Ast.Type] = ImmArraySeq.empty,
       exprTable: ImmArraySeq[PLF.Expr] = ImmArraySeq.empty,
-  ) = {
+  ) =
     new DecodeV2(version.minor).Env(
       Ref.PackageId.assertFromString("noPkgId"),
       stringTable,
@@ -112,7 +110,6 @@ class DecodeV2Spec
       None,
       Left("package made in com.digitalasset.daml.lf.archive.DecodeV2Spec"),
     )
-  }
 
   "decodeKind" should {
 
@@ -210,7 +207,7 @@ class DecodeV2Spec
 
   "uncheckedDecodeType" should {
 
-    import DamlLf2.BuiltinType._
+    import DamlLf2.BuiltinType.*
 
     def buildNat(i: Long) = DamlLf2.Type.newBuilder().setNat(i).build()
 
@@ -219,8 +216,8 @@ class DecodeV2Spec
 
     "accept only valid nat types" in {
       val positiveTestCases =
-        Table("proto nat type" -> "nat", validNatTypes.map(v => buildNat(v.toLong) -> v): _*)
-      val negativeTestCases = Table("proto nat type", invalidNatTypes.map(buildNat): _*)
+        Table("proto nat type" -> "nat", validNatTypes.map(v => buildNat(v.toLong) -> v)*)
+      val negativeTestCases = Table("proto nat type", invalidNatTypes.map(buildNat)*)
 
       forEveryVersion { version =>
         val decoder = moduleDecoder(version)
@@ -588,7 +585,7 @@ class DecodeV2Spec
         )
 
       forEveryVersion { version =>
-        val decoder = moduleDecoder(version, ImmArraySeq(testCases.map(_._2): _*))
+        val decoder = moduleDecoder(version, ImmArraySeq(testCases.map(_._2)*))
         forEvery(testCases) { (id, string) =>
           inside(decoder.decodeExprForTest(toNumericProto(id), "test")) {
             case Ast.EBuiltinLit(Ast.BLNumeric(num)) =>
@@ -1329,9 +1326,9 @@ class DecodeV2Spec
     }
 
     "accept well-formed QueryNByKey for lf features that support it)" in {
-     val protoPkgId = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
-     val protoModId =
-       DamlLf2.ModuleId.newBuilder().setPackageId(protoPkgId).setModuleNameInternedDname(0).build()
+      val protoPkgId = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
+      val protoModId =
+        DamlLf2.ModuleId.newBuilder().setPackageId(protoPkgId).setModuleNameInternedDname(0).build()
       val protoTemplateTyConId =
         DamlLf2.TypeConId.newBuilder().setModule(protoModId).setNameInternedDname(1)
 
@@ -1349,20 +1346,19 @@ class DecodeV2Spec
       forEveryVersionSuchThat(LV.featureNUCK.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
-         packageId = Ref.PackageId.assertFromString("noPkgId"),
+          packageId = Ref.PackageId.assertFromString("noPkgId"),
           internedDottedNames = ImmArraySeq("Mod", "T").map(Ref.DottedName.assertFromString),
         )
-        inside(env.decodeExprForTest(expr, "test")) {
-          case Ast.EUpdate(u) =>
-            u shouldBe Ast.UpdateQueryNByKey(Ref.TypeConId.assertFromString("noPkgId:Mod:T"))
+        inside(env.decodeExprForTest(expr, "test")) { case Ast.EUpdate(u) =>
+          u shouldBe Ast.UpdateQueryNByKey(Ref.TypeConId.assertFromString("noPkgId:Mod:T"))
         }
       }
     }
 
     "reject well-formed QueryNByKey for lf features that do not support it" in {
-     val protoPkgId = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
-     val protoModId =
-       DamlLf2.ModuleId.newBuilder().setPackageId(protoPkgId).setModuleNameInternedDname(0).build()
+      val protoPkgId = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
+      val protoModId =
+        DamlLf2.ModuleId.newBuilder().setPackageId(protoPkgId).setModuleNameInternedDname(0).build()
       val protoTemplateTyConId =
         DamlLf2.TypeConId.newBuilder().setModule(protoModId).setNameInternedDname(1)
 
@@ -1380,12 +1376,11 @@ class DecodeV2Spec
       forEveryVersionSuchThat(!LV.featureNUCK.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
-         packageId = Ref.PackageId.assertFromString("noPkgId"),
+          packageId = Ref.PackageId.assertFromString("noPkgId"),
           internedDottedNames = ImmArraySeq("Mod", "T").map(Ref.DottedName.assertFromString),
         )
-        inside(Try(env.decodeExprForTest(expr, "test"))) {
-          case Failure(Error.Parsing(message)) =>
-            message should include("Non-unique contract keys is not supported by Daml-LF")
+        inside(Try(env.decodeExprForTest(expr, "test"))) { case Failure(Error.Parsing(message)) =>
+          message should include("Non-unique contract keys is not supported by Daml-LF")
         }
       }
     }
@@ -1482,14 +1477,13 @@ class DecodeV2Spec
           view = TUnit,
         )
 
-      val testCases = {
+      val testCases =
         Table(
           "input" -> "expected output",
           emptyDefInterface -> emptyDefInterfaceScala,
           methodsDefInterface -> methodsDefInterfaceScala,
           coImplementsDefInterface -> coImplementsDefInterfaceScala,
         )
-      }
 
       val interfaceName = Ref.DottedName.assertFromString("I")
       val modName = Ref.DottedName.assertFromString("Mod")
@@ -1568,7 +1562,9 @@ class DecodeV2Spec
   "decodeModuleRef" should {
 
     lazy val Right(ArchivePayload.Lf2(pkgId, pkgProto, minorVersion, _)) =
-      ArchiveReader.fromFile(Paths.get(getClass.getClassLoader.getResource("DarReaderTest.dalf").toURI))
+      ArchiveReader.fromFile(
+        Paths.get(getClass.getClassLoader.getResource("DarReaderTest.dalf").toURI)
+      )
 
     lazy val extId = {
       val dalf1 = pkgProto
@@ -1835,7 +1831,7 @@ class DecodeV2Spec
         .build()
     }
 
-    def buildLet(n: Int): DamlLf2.Expr = {
+    def buildLet(n: Int): DamlLf2.Expr =
       if (n == 0)
         unitExpr
       else
@@ -1849,7 +1845,6 @@ class DecodeV2Spec
               .build()
           )
           .build()
-    }
 
     "gracefully fail when expression too deep when version supports expression interning" in {
       forEveryVersionSuchThat(LV.featureFlatArchive.enabledIn) { _ =>
@@ -1868,14 +1863,14 @@ class DecodeV2Spec
         //
         // Subject to change when proto message structure changes (safe to
         // adjust, if with explanation and still reasonably deep)
-        Decode.decodeArchive(exprToArch(buildLet(48), "dev")) shouldBe a[Right[_, _]]
+        Decode.decodeArchive(exprToArch(buildLet(48), "dev")) shouldBe a[Right[?, ?]]
       }
     }
 
     "still accept reasonably deep expressions when version does not support" in {
       forEveryVersionSuchThat(!LV.featureFlatArchive.enabledIn(_)) { _ =>
         // explanation for "magic" number: see above
-        Decode.decodeArchive(exprToArch(buildLet(498), "1")) shouldBe a[Right[_, _]]
+        Decode.decodeArchive(exprToArch(buildLet(498), "1")) shouldBe a[Right[?, ?]]
       }
     }
 
@@ -1904,7 +1899,7 @@ class DecodeV2Spec
             minor = version.minor,
             patch = 0,
           )
-        ) shouldBe a[Right[_, _]]
+        ) shouldBe a[Right[?, ?]]
 
         inside(
           Decode.decodeArchivePayload(
@@ -1930,7 +1925,7 @@ class DecodeV2Spec
             minor = version.minor,
             patch = 1,
           )
-        ) shouldBe a[Right[_, _]]
+        ) shouldBe a[Right[?, ?]]
       }
     }
   }

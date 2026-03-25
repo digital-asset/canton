@@ -6,7 +6,7 @@ package data
 
 import com.daml.scalautil.Statement.discard
 
-import scala.collection.{immutable, mutable, IndexedSeq}
+import scala.collection.{IndexedSeq, immutable, mutable}
 
 // This object implement linear time builder for immutable TreeMap and TreeSet.
 // Requires the entries to be ordered, crashes if not.

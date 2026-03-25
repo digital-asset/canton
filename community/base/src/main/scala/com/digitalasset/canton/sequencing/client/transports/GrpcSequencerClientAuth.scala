@@ -33,8 +33,7 @@ import io.grpc.{ManagedChannel, Status}
 
 import scala.concurrent.ExecutionContext
 
-/** Auth helpers for the [[GrpcSequencerClientTransport]] when dealing with our custom
-  * authentication tokens.
+/** Auth helpers when dealing with our custom authentication tokens.
   */
 class GrpcSequencerClientAuth(
     synchronizerId: PhysicalSynchronizerId,

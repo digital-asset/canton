@@ -5,29 +5,29 @@ package com.digitalasset.daml.lf
 package speedy
 package testing
 
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.speedy.Pretty._
-import com.digitalasset.daml.lf.speedy.SResult._
-import com.digitalasset.daml.lf.speedy.SExpr.LfDefRef
-import com.digitalasset.daml.lf.validation.Validation
-import com.digitalasset.daml.lf.testing.parser
-import com.digitalasset.daml.lf.language.{PackageInterface, LanguageVersion => LV}
 import com.daml.logging.LoggingContext
-
-import java.io.{File, PrintWriter, StringWriter}
-import java.nio.file.{Path, Paths}
-import java.io.PrintStream
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LanguageVersion as LV, PackageInterface}
+import com.digitalasset.daml.lf.speedy.Pretty.*
+import com.digitalasset.daml.lf.speedy.SExpr.LfDefRef
+import com.digitalasset.daml.lf.speedy.SResult.*
+import com.digitalasset.daml.lf.testing.parser
+import com.digitalasset.daml.lf.validation.Validation
 import org.jline.builtins.Completers
-import org.jline.reader.{History, LineReader, LineReaderBuilder}
 import org.jline.reader.impl.completer.{AggregateCompleter, ArgumentCompleter, StringsCompleter}
 import org.jline.reader.impl.history.DefaultHistory
+import org.jline.reader.{History, LineReader, LineReaderBuilder}
 
+import java.io.{File, PrintStream, PrintWriter, StringWriter}
+import java.nio.file.{Path, Paths}
 import scala.collection.immutable.ListMap
-import scala.concurrent.duration._
-import scala.jdk.CollectionConverters._
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 object Main extends App {
   // idempotent; force stdout to output in UTF-8 -- in theory it should pick it up from
@@ -68,9 +68,10 @@ object Main extends App {
 }
 
 // The Daml-LF Read-Eval-Print-Loop
-class Repl {
+class Repl extends NamedLogging {
+  override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
-  import Repl._
+  import Repl.*
 
   def repl(compilerConfig: Compiler.Config, darFile: String): Unit =
     repl(load(compilerConfig, darFile) getOrElse initialState(compilerConfig))
@@ -137,12 +138,11 @@ class Repl {
   final val commandCompleter = new ArgumentCompleter(new StringsCompleter(commands.keys.asJava))
 
   final class DalfFileCompleter extends Completers.FileNameCompleter {
-    override def accept(path: Path): Boolean = {
+    override def accept(path: Path): Boolean =
       if (path.toFile.isDirectory)
         true
       else
         path.toString.endsWith(".dalf")
-    }
   }
 
   final val loadCompleter = {
@@ -189,7 +189,7 @@ class Repl {
         .build
     )
 
-  def dispatch(state: State, line: String): State = {
+  def dispatch(state: State, line: String): State =
     line.trim.split(" ").toList match {
       case Nil => state
       case "" :: _ => state
@@ -199,9 +199,8 @@ class Repl {
           case None => invokePure(state, cmdS, args); state
         }
     }
-  }
 
-  def list(state: State): Unit = {
+  def list(state: State): Unit =
     state.packages.foreach { case (pkgId, pkg) =>
       println(pkgId)
       pkg.modules.foreach { case (mname, mod) =>
@@ -215,7 +214,6 @@ class Repl {
         }
       }
     }
-  }
 
   def prettyDefinitionType(defn: Definition, pkgId: PackageId, modId: ModuleName): String =
     defn match {
@@ -224,7 +222,7 @@ class Repl {
       case DValue(typ, _) => prettyType(typ, pkgId, modId)
     }
 
-  def prettyQualified(pkgId: PackageId, modId: ModuleName, m: Identifier): String = {
+  def prettyQualified(pkgId: PackageId, modId: ModuleName, m: Identifier): String =
     if (pkgId == m.packageId)
       if (modId == m.qualifiedName.module)
         m.qualifiedName.name.toString
@@ -232,7 +230,6 @@ class Repl {
         m.qualifiedName.toString
     else
       m.qualifiedName.toString + "@" + m.packageId
-  }
 
   def prettyType(typ: Type, pkgId: PackageId, modId: ModuleName): String = {
     val precTApp = 2
@@ -340,8 +337,7 @@ class Repl {
   // The identifier can be fully-qualified (Foo.Bar@<package id>). If package is not
   // specified, the last used package is used.
   // If the resulting type is a script it is automatically executed.
-  def invokePure(state: State, id: String, args: Seq[String]): Unit = {
-
+  def invokePure(state: State, id: String, args: Seq[String]): Unit =
     parser.parseExprs[this.type](args.mkString(" ")) match {
 
       case Left(error @ _) =>
@@ -359,6 +355,7 @@ class Repl {
               state.packages,
               Compiler.Config.Default,
             )
+            import TraceContext.Implicits.Empty.emptyTraceContext
             val machine = Speedy.Machine.fromPureExpr(compiledPackages, expr)
             val startTime = System.nanoTime()
             val valueOpt = machine.run() match {
@@ -384,7 +381,6 @@ class Repl {
             println("Error: " + id + " not a value.")
         }
     }
-  }
 
   private val unknownPackageId = PackageId.assertFromString("-unknownPackage-")
 

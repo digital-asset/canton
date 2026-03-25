@@ -215,6 +215,9 @@ class Environment(
       maxPoolSize = config.parameters.threading.maxPoolSize,
       minRunnable = config.parameters.threading.minRunnable,
     )
+  config.parameters.threading.mutexMaxSpins.foreach { maxSpins =>
+    Mutex.MaxSpins.set(maxSpins.value)
+  }
 
   private val deadlockConfig = config.monitoring.deadlockDetection
   protected def timeouts: ProcessingTimeout = config.parameters.timeouts.processing

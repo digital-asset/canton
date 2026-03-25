@@ -375,26 +375,20 @@ message LsuAnnouncement {
 
 // a sequencer can announce its connections on the successor synchronizer
 // authorization: whoever controls the sequencer
-// UNIQUE(sequencer_id, synchronizer_id)
+// UNIQUE(sequencer_id, successor_physical_synchronizer_id.logical)
 message LsuSequencerConnectionSuccessor {
   // the sequencer id
   string sequencer_id = 1;
-  // to synchronizer id
-  string synchronizer_id = 2;
+  // the physical synchronizer id of the successor synchronizer
+  string successor_physical_synchronizer_id = 2;
   // the connection details with which members can connect to the sequencer on the successor synchronizer
   SequencerConnection connection = 3;
 
   message SequencerConnection {
-    oneof connection_type {
-      Grpc grpc = 1;
-    }
-
-    message Grpc {
-      // connection information to sequencer (http[s]://<host>:<port>")
-      // all endpoints must agree on using HTTPS or HTTP
-      repeated string endpoints = 1;
-      optional bytes custom_trust_certificates = 2;
-    }
+    // connection information to sequencer (http[s]://<host>:<port>")
+    // all endpoints must agree on using HTTPS or HTTP
+    repeated string endpoints = 1;
+    optional bytes custom_trust_certificates = 2;
   }
 }
 

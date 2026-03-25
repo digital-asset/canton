@@ -40,8 +40,10 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
         recordTime: CantonTimestamp,
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
-          cause =
-            s"Timestamp mismatch: requested=$timestamp != recordTime=$recordTime. (Context: offset=${offset.unwrap} -> synchronizer offset=${synchronizerOffset.unwrap})"
+          cause = s"Timestamp mismatch: requested=$timestamp != recordTime=$recordTime. " +
+            s"If an event with a record time is known to exist for the requested timestamp (e.g., a topology transaction), please retry the request. " +
+            s"If no event exists with a record time matching exactly the requested timestamp and you intentionally want the highest prior offset, set the 'force' flag to true. " +
+            s"(Context: offset=${offset.unwrap} -> synchronizer offset=${synchronizerOffset.unwrap})"
         )
         with PartyManagementServiceError
 

@@ -685,18 +685,17 @@ trait MembersTopologySnapshotClient {
 
 trait SynchronizerUpgradeClient {
 
-  /** In case the synchronizer owners have announced a synchronizer upgrade, returns the physical
-    * synchronizer id of the successor of this synchronizer and the upgrade time. Otherwise, returns
-    * None.
+  /** In case the synchronizer owners have announced an LSU, returns the physical synchronizer id of
+    * the successor of this synchronizer and the upgrade time. Otherwise, returns None.
     */
-  def synchronizerUpgradeOngoing()(implicit
+  def announcedLsu()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]]
 
   /** Returns the known sequencer connection details for the successor synchronizer as published by
     * the sequencers.
     */
-  def sequencerConnectionSuccessors()(implicit
+  def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]]
 }

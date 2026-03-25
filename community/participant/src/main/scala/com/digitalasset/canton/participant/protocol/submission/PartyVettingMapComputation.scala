@@ -80,7 +80,7 @@ final class PartyVettingMapComputation(
         )
 
     def getPartyHostingOnAdmissibleSynchronizers(
-        prescribedPSIdO: Option[PhysicalSynchronizerId]
+        prescribedPsidO: Option[PhysicalSynchronizerId]
     ): FutureUnlessShutdown[
       Map[PhysicalSynchronizerId, Map[LfPartyId, Set[ParticipantId]]]
     ] =
@@ -91,7 +91,7 @@ final class PartyVettingMapComputation(
           .forParties(submitters, informees, synchronizerState)
           .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
           .merge
-        withPrescribedPsidConsidered <- prescribedPSIdO match {
+        withPrescribedPsidConsidered <- prescribedPsidO match {
           case Some(psid) =>
             val admissibleSyncshronizers = partyHostingOnAllAdmissibleSyncs.keySet
             partyHostingOnAllAdmissibleSyncs
@@ -113,10 +113,10 @@ final class PartyVettingMapComputation(
 
     for {
       _ <- validateAnySynchronizerReady
-      prescribedPSIdO <- prescribedSynchronizerIdO.traverse(toPhysicalSyncId)
+      prescribedPsidO <- prescribedSynchronizerIdO.traverse(toPhysicalSyncId)
 
       // Get the hosting participants for parties on the admissible synchronizers
-      partyHostingOnAdmissibleSyncs <- getPartyHostingOnAdmissibleSynchronizers(prescribedPSIdO)
+      partyHostingOnAdmissibleSyncs <- getPartyHostingOnAdmissibleSynchronizers(prescribedPsidO)
 
       // Compute the vetting state per participant with the validity computed at the provided `vettingValidityTimestamp`
       //   Note: a package is vetting-valid if there exists a VettedPackage reference in the VettedPackages topology transaction

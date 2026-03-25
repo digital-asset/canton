@@ -9,6 +9,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
   AcsCounterParticipantConfigStore,
   AcsInspection,
@@ -17,7 +19,11 @@ import com.digitalasset.canton.participant.store.{
   PhysicalSyncPersistentState,
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
+import com.digitalasset.canton.store.memory.{
+  InMemoryPendingOperationStore,
+  InMemorySendTrackerStore,
+  InMemorySequencedEventStore,
+}
 import com.digitalasset.canton.store.{
   IndexedPhysicalSynchronizer,
   IndexedStringStore,
@@ -63,6 +69,9 @@ class InMemoryLogicalSyncPersistentState(
 
   override val reassignmentStore =
     new InMemoryReassignmentStore(Target(synchronizerIdx.item), loggerFactory)
+
+  override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
+    new InMemoryPendingOperationStore(OnboardingClearanceOperation)
 
   override def close(): Unit = ()
 }

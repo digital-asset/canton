@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf.language
 
 import com.digitalasset.daml.lf.data.{InsertOrdSet, Relation}
+
 import scala.annotation.tailrec
 
 object Graphs {
@@ -55,7 +56,7 @@ object Graphs {
   def transitiveClosure[A](graph: Graph[A], startNode: A): Set[A] = {
 
     @tailrec
-    def go(toVisit: Set[A], visited: Set[A]): Set[A] = {
+    def go(toVisit: Set[A], visited: Set[A]): Set[A] =
       if (toVisit.isEmpty) {
         visited
       } else {
@@ -71,7 +72,6 @@ object Graphs {
           go(newToVisit, newVisited)
         }
       }
-    }
     go(Set(startNode), Set.empty[A])
   }
 

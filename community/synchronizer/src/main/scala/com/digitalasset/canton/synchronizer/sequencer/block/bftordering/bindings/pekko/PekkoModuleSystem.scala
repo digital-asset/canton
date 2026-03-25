@@ -9,7 +9,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelApplicativeFutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
@@ -27,12 +27,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
-import org.apache.commons.io.IOUtils
 import org.apache.pekko.actor.typed.*
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.{BootstrapSetup, Cancellable}
 
-import java.nio.charset.Charset
 import java.time.Instant
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable
@@ -607,7 +605,6 @@ object PekkoModuleSystem {
             }
           }
           .onFailure(SupervisorStrategy.stop)
-      debugLogApplicationConfResources(logger)
       ActorSystem(
         systemBehavior,
         name,
@@ -622,42 +619,5 @@ object PekkoModuleSystem {
       actorSystem,
       result,
     )
-  }
-
-  // TODO(#31402) remove once the classloading flakes are resolved
-  @SuppressWarnings(Array("org.wartremover.warts.While", "org.wartremover.warts.Var"))
-  private def debugLogApplicationConfResources(
-      logger: TracedLogger
-  )(implicit traceContext: TraceContext): Unit =
-    if (logger.underlying.isDebugEnabled) {
-      val loader = Thread.currentThread().getContextClassLoader
-      debugLogClassloadingChain(loader, logger)
-      val resources = loader.getResources("application.conf")
-      var found = false
-      while (resources.hasMoreElements) {
-        found = true
-        val resource = resources.nextElement()
-        val text = IOUtils.toString(resource, Charset.defaultCharset())
-        val len = text.length
-        logger.debug(
-          s"Found $len chars 'application.conf' resource at: $resource; content: $text"
-        )
-      }
-      if (!found)
-        logger.debug("No 'application.conf' resource found on the classpath")
-    }
-
-  // TODO(#31402) remove once the classloading flakes are resolved
-  @SuppressWarnings(Array("org.wartremover.warts.While", "org.wartremover.warts.Var"))
-  private def debugLogClassloadingChain(loader: ClassLoader, logger: TracedLogger)(implicit
-      traceContext: TraceContext
-  ): Unit = {
-    var currentLoader: ClassLoader = loader
-    var chain = List(currentLoader.toString)
-    while (currentLoader.getParent != null) {
-      currentLoader = currentLoader.getParent
-      chain = currentLoader.toString :: chain
-    }
-    logger.debug(s"Classloader chain: ${chain.mkString(" -> ")}")
   }
 }

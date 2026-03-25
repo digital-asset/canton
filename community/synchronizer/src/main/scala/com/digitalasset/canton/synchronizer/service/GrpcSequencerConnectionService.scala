@@ -5,12 +5,8 @@ package com.digitalasset.canton.synchronizer.service
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
   NamedLoggerFactory,
@@ -23,12 +19,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.Aborted
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConnectionXPoolError
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
-import com.digitalasset.canton.sequencing.client.{
-  RequestSigner,
-  RichSequencerClient,
-  SequencerClient,
-  SequencerClientTransportFactory,
-}
+import com.digitalasset.canton.sequencing.client.{RichSequencerClient, SequencerClient}
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   SequencerConnectionValidation,
@@ -37,10 +28,9 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnections,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, TracingConfig}
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, retry}
+import com.digitalasset.canton.util.{EitherTUtil, retry}
 import io.grpc.{Status, StatusException}
 import monocle.Lens
 import org.apache.pekko.actor.ActorSystem
@@ -51,7 +41,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 class GrpcSequencerConnectionService(
     fetchConnection: () => FutureUnlessShutdown[Option[SequencerConnections]],
-    setConnection: (SequencerConnectionValidation, SequencerConnections) => EitherT[
+    setConnection: SequencerConnections => EitherT[
       FutureUnlessShutdown,
       String,
       Unit,
@@ -83,12 +73,12 @@ class GrpcSequencerConnectionService(
             requestedReplacement,
           )
         )
-        validation <- EitherT.fromEither[FutureUnlessShutdown](
+        _validation <- EitherT.fromEither[FutureUnlessShutdown](
           SequencerConnectionValidation
             .fromProtoV30(request.sequencerConnectionValidation)
             .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.message).asException())
         )
-        _ <- setConnection(validation, requestedReplacement)
+        _ <- setConnection(requestedReplacement)
           .leftMap(error => Status.FAILED_PRECONDITION.withDescription(error).asException())
       } yield v30.SetConnectionResponse()))
     }
@@ -161,17 +151,12 @@ object GrpcSequencerConnectionService extends HasLoggerName {
     def set(client: RichSequencerClient): Unit
   }
 
-  def setup[C](member: Member, useNewConnectionPool: Boolean)(
+  def setup[C](
       registry: CantonMutableHandlerRegistry,
       fetchConfig: () => FutureUnlessShutdown[Option[C]],
       saveConfig: C => FutureUnlessShutdown[Unit],
       sequencerConnectionLens: Lens[C, SequencerConnections],
-      requestSigner: RequestSigner,
-      transportFactory: SequencerClientTransportFactory,
-      sequencerInfoLoader: SequencerInfoLoader,
       connectionPoolFactory: SequencerConnectionXPoolFactory,
-      synchronizerAlias: SynchronizerAlias,
-      synchronizerId: PhysicalSynchronizerId,
       sequencerClient: SequencerClient,
       tracingConfig: TracingConfig,
       loggerFactory: NamedLoggerFactory,
@@ -180,7 +165,6 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       executionServiceFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
-      closeContext: CloseContext,
   ): UpdateSequencerClient = {
     val clientO = new AtomicReference[Option[RichSequencerClient]](None)
     implicit val namedLoggingContext: NamedLoggingContext =
@@ -189,12 +173,12 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       SequencerConnectionService.bindService(
         new GrpcSequencerConnectionService(
           fetchConnection = () => fetchConfig().map(_.map(sequencerConnectionLens.get)),
-          setConnection = (sequencerConnectionValidation, newSequencerConnection) =>
+          setConnection = newSequencerConnections =>
             for {
               currentConfig <- OptionT(fetchConfig()).toRight(
                 "Can't update config when none has yet been set. Please initialize node."
               )
-              newConfig = sequencerConnectionLens.replace(newSequencerConnection)(currentConfig)
+              newConfig = sequencerConnectionLens.replace(newSequencerConnections)(currentConfig)
 
               // load and potentially validate the new connection
               //
@@ -205,74 +189,44 @@ object GrpcSequencerConnectionService extends HasLoggerName {
               // In principle, mediator node start-up could also fail without retrying and rely on the container
               // framework to restart the pod. But that's a much more expensive operation, so it kinda makes sense to
               // retry there (see `waitUntilSequencerConnectionIsValidWithPool`).
-              newEndpointsInfoAndPoolConfigO <-
-                if (useNewConnectionPool) for {
-                  // The following implementation strives to keep the same behavior as with the transport mechanisms,
-                  // which is ensure the new config is valid before replacing the old config.
-                  // The transport mechanism supports a variety of validation modes, whereas here we support only the
-                  // equivalent to `THRESHOLD_ACTIVE`, i.e. the config is considered valid if at least trust-threshold-many
-                  // connections are successful.
-                  //
-                  // Performing this validation here protects the node operator from typos in the connection config that
-                  // would render their node dysfunctional because it cannot connect to the sequencer.
-                  // On the other hand, the operator should be able to set a new configuration in case of a substantial
-                  // change to sequencer endpoints and that should be doable concurrently to those sequencer endpoint
-                  // changes taking place, so one could argue that we should not validate the config here and rely on the
-                  // pool to report through health status.
-                  //
-                  // As we cannot satisfy both needs here, this will likely be discussed and revisited.
-                  connectionPoolAndInfo <- validateConfig(
-                    connectionPoolFactory = connectionPoolFactory,
-                    sequencerConnections = newSequencerConnection,
-                    poolName = "temp",
-                    tracingConfig = tracingConfig,
-                  )
-                } yield {
-                  val (pool, info) = connectionPoolAndInfo
-                  pool.close()
-                  (info, Some(pool.config))
-                }
-                else
-                  sequencerInfoLoader
-                    .loadAndAggregateSequencerEndpoints(
-                      synchronizerAlias,
-                      Some(synchronizerId),
-                      newSequencerConnection,
-                      sequencerConnectionValidation,
-                    )
-                    .leftMap(_.cause)
-                    .map((_, None))
-              (newEndpointsInfo, newPoolConfigO) = newEndpointsInfoAndPoolConfigO
 
-              sequencerTransportsMapF = Option.when(!useNewConnectionPool)(
-                transportFactory
-                  .makeTransport(
-                    newEndpointsInfo.sequencerConnections,
-                    member,
-                    requestSigner,
-                    // We are not interested in replay for the connection service.
-                    allowReplay = false,
-                  )
+              // The following implementation strives to keep the same behavior as with the transport mechanisms,
+              // which is ensure the new config is valid before replacing the old config.
+              // The transport mechanism supports a variety of validation modes, whereas here we support only the
+              // equivalent to `THRESHOLD_ACTIVE`, i.e. the config is considered valid if at least trust-threshold-many
+              // connections are successful.
+              //
+              // Performing this validation here protects the node operator from typos in the connection config that
+              // would render their node dysfunctional because it cannot connect to the sequencer.
+              // On the other hand, the operator should be able to set a new configuration in case of a substantial
+              // change to sequencer endpoints and that should be doable concurrently to those sequencer endpoint
+              // changes taking place, so one could argue that we should not validate the config here and rely on the
+              // pool to report through health status.
+              //
+              // As we cannot satisfy both needs here, this will likely be discussed and revisited.
+              connectionPool <- validateConfig(
+                connectionPoolFactory = connectionPoolFactory,
+                sequencerConnections = newSequencerConnections,
+                poolName = "temp",
+                tracingConfig = tracingConfig,
               )
-              sequencerTransportsMapO <- EitherT.liftF(sequencerTransportsMapF.traverse(identity))
+              _ = connectionPool.close()
+              newPoolConfig = connectionPool.config
+
               sequencerTransports <- EitherT.fromEither[FutureUnlessShutdown](
                 SequencerTransports.from(
-                  sequencerTransportsMapO,
-                  newEndpointsInfo.expectedSequencersO,
-                  newEndpointsInfo.sequencerConnections.sequencerTrustThreshold,
-                  newEndpointsInfo.sequencerConnections.sequencerLivenessMargin,
-                  newEndpointsInfo.sequencerConnections.submissionRequestAmplification,
-                  newEndpointsInfo.sequencerConnections.sequencerConnectionPoolDelays,
+                  newSequencerConnections.sequencerTrustThreshold,
+                  newSequencerConnections.sequencerLivenessMargin,
+                  newSequencerConnections.submissionRequestAmplification,
+                  newSequencerConnections.sequencerConnectionPoolDelays,
                 )
               )
 
               // important to only save the config and change the transport after the `makeTransport` has run and done the handshake
-              _ <- clientO.get.fold {
-                // need to close here
-                sequencerTransportsMapO.foreach(_.values.foreach(_.close()))
-                EitherT.pure[FutureUnlessShutdown, String](())
-              }(
-                _.changeTransport(sequencerTransports, newPoolConfigO)
+              _ <- EitherT.fromEither[FutureUnlessShutdown](
+                clientO.get.fold(Either.unit[String])(
+                  _.changeTransport(sequencerTransports, newPoolConfig)
+                )
               )
               _ <- EitherT.right(saveConfig(newConfig))
             } yield (),
@@ -287,52 +241,6 @@ object GrpcSequencerConnectionService extends HasLoggerName {
     }
   }
 
-  def waitUntilSequencerConnectionIsValid(
-      sequencerInfoLoader: SequencerInfoLoader,
-      flagCloseable: FlagCloseable,
-      loadConfig: => FutureUnlessShutdown[Option[SequencerConnections]],
-  )(implicit
-      namedLoggingContext: NamedLoggingContext,
-      executionContext: ExecutionContextExecutor,
-  ): EitherT[FutureUnlessShutdown, String, SequencerAggregatedInfo] = {
-    implicit val traceContext: TraceContext = namedLoggingContext.traceContext
-
-    implicit val closeContext = CloseContext(flagCloseable)
-    val alias = SynchronizerAlias.tryCreate("synchronizer")
-
-    def tryNewConfig: EitherT[FutureUnlessShutdown, String, SequencerAggregatedInfo] =
-      OptionT(loadConfig)
-        .toRight("No sequencer connection config")
-        .flatMap { settings =>
-          sequencerInfoLoader
-            .loadAndAggregateSequencerEndpoints(
-              synchronizerAlias = alias,
-              expectedSynchronizerId = None,
-              sequencerConnections = settings,
-              sequencerConnectionValidation = SequencerConnectionValidation.Active,
-            )
-            .leftMap { e =>
-              namedLoggingContext.warn(s"Waiting for valid sequencer connection $e")
-              e.toString
-            }
-        }
-    import scala.concurrent.duration.*
-    EitherT(
-      retry
-        .Pause(
-          namedLoggingContext.tracedLogger,
-          flagCloseable,
-          maxRetries = Int.MaxValue,
-          delay = 50.millis,
-          operationName = "wait-for-valid-sequencer-connection",
-        )
-        .unlessShutdown(
-          tryNewConfig.value,
-          NoExceptionRetryPolicy,
-        )
-    )
-  }
-
   def waitUntilSequencerConnectionIsValidWithPool(
       connectionPoolFactory: SequencerConnectionXPoolFactory,
       tracingConfig: TracingConfig,
@@ -343,17 +251,17 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       actorSystem: ActorSystem,
-  ): EitherT[FutureUnlessShutdown, String, (SequencerConnectionXPool, SequencerAggregatedInfo)] = {
+  ): EitherT[FutureUnlessShutdown, String, (SequencerConnectionXPool, SequencerConnections)] = {
     implicit val traceContext: TraceContext = namedLoggingContext.traceContext
 
     def tryNewConfig: EitherT[
       FutureUnlessShutdown,
       String,
-      (SequencerConnectionXPool, SequencerAggregatedInfo),
+      (SequencerConnectionXPool, SequencerConnections),
     ] =
       for {
         sequencerConnections <- OptionT(loadConfig).toRight("No sequencer connection config")
-        connectionPoolAndInfo <- validateConfig(
+        connectionPool <- validateConfig(
           connectionPoolFactory = connectionPoolFactory,
           sequencerConnections = sequencerConnections,
           poolName = "main",
@@ -361,7 +269,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
           logErrorFn =
             error => namedLoggingContext.warn(s"Waiting for valid sequencer connection: $error"),
         )
-      } yield connectionPoolAndInfo
+      } yield (connectionPool, sequencerConnections)
 
     import scala.concurrent.duration.*
     EitherT(
@@ -391,7 +299,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
-  ): EitherT[FutureUnlessShutdown, String, (SequencerConnectionXPool, SequencerAggregatedInfo)] = {
+  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionXPool] = {
     implicit val traceContext: TraceContext = namedLoggingContext.traceContext
 
     for {
@@ -399,7 +307,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
         connectionPoolFactory
           .createFromOldConfig(
             sequencerConnections,
-            expectedPSIdO = None,
+            expectedPsidO = None,
             tracingConfig = tracingConfig,
             name = poolName,
           )
@@ -412,33 +320,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
         logErrorFn(error)
         error.toString
       }
-    } yield {
-      val psid = connectionPool.physicalSynchronizerIdO.getOrElse(
-        ErrorUtil.invalidState(
-          "a successfully started connection pool must have the synchronizer ID defined"
-        )
-      )
-      val staticParameters = connectionPool.staticSynchronizerParametersO.getOrElse(
-        ErrorUtil.invalidState(
-          "a successfully started connection pool must have the static parameters defined"
-        )
-      )
-
-      // The `sequencerConnections.aliasToConnections` field that we place into `SequencerAggregatedInfo` is different
-      // with the connection pool compared to what is produced with the transport mechanism with the `SequencerInfoLoader`:
-      // with the connection pool, we provide the original configuration, whereas `SequencerInfoLoader.loadAndAggregateSequencerEndpoints`
-      // produces a map that depends on the validation mode (all, active only, etc.).
-      // It seems this parameter is however only used later on for building the transports, so it does not matter
-      // when using the connection pool (since they are not used).
-      val info = SequencerAggregatedInfo(
-        psid = psid,
-        staticSynchronizerParameters = staticParameters,
-        expectedSequencersO = None,
-        sequencerConnections = sequencerConnections,
-      )
-
-      (connectionPool, info)
-    }
+    } yield connectionPool
   }
 
 }

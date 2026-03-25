@@ -1047,6 +1047,7 @@ message Update {
   }
 
   // Retrieve by key Update
+  // used as both FetchByKey and LookupByKey (both queries have same parameters, but different type/auth rules)
   message RetrieveByKey {
     TypeConId template = 1;
     // Note: The following field could be reused as it was dropped when RetrieveByKey was still in 2.dev
@@ -1073,12 +1074,12 @@ message Update {
     Block block = 2;
     Create create = 3;
     Exercise exercise = 4;
-    ExerciseByKey exercise_by_key = 10;
+    ExerciseByKey exercise_by_key = 10; // from 2.3
     Fetch fetch = 5;
     Unit get_time = 6;
-    RetrieveByKey lookup_by_key = 8;
+    RetrieveByKey lookup_by_key = 8; // from 2.dev
     QueryNByKey query_n_by_key = 16; // from 2.3
-    RetrieveByKey fetch_by_key = 9;
+    RetrieveByKey fetch_by_key = 9; // from 2.3
     EmbedExpr embed_expr = 7;
     TryCatch try_catch = 11;
     CreateInterface create_interface = 12;

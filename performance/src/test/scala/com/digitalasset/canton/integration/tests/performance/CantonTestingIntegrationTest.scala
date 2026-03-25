@@ -26,9 +26,7 @@ class CantonTestingIntegrationTest extends CommunityIntegrationTest with SharedE
         withRemote = true,
       )
       .addConfigTransforms(
-        ConfigTransforms.enableReplicatedMediators(),
-        ConfigTransforms.enableReplicatedParticipants(),
-        ConfigTransforms.disableAdditionalConsistencyChecks,
+        ConfigTransforms.disableAdditionalConsistencyChecks
       )
       .updateTestingConfig(
         _.focus(_.participantsWithoutLapiVerification).replace(

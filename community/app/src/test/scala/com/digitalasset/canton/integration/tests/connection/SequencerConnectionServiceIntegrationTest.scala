@@ -19,7 +19,6 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -41,9 +40,8 @@ sealed trait SequencerConnectionServiceIntegrationTest
     // in order to be able to crash one and things still work with the BFT orderer
     EnvironmentDefinition.P2S4M1_Config
       .addConfigTransforms(
-        ConfigTransforms.setConnectionPool(true),
         _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(config.NonNegativeDuration.tryFromDuration(2.seconds)),
+          .replace(config.NonNegativeDuration.tryFromDuration(2.seconds))
       )
       .withNetworkBootstrap { implicit env =>
         import env.*

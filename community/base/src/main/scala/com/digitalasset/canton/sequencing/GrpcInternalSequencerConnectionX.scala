@@ -35,10 +35,7 @@ import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
 }
 import com.digitalasset.canton.sequencing.SequencerConnectionXStub.SequencerConnectionXStubError
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
-import com.digitalasset.canton.sequencing.client.transports.{
-  GrpcClientTransportHelpers,
-  GrpcSequencerClientAuth,
-}
+import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.protocol.HandshakeResponse
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.Member
@@ -67,8 +64,7 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor, esf: ExecutionSequencerFactory, materializer: Materializer)
     extends InternalSequencerConnectionX
-    with PrettyPrinting
-    with GrpcClientTransportHelpers {
+    with PrettyPrinting {
   import GrpcInternalSequencerConnectionX.*
 
   private val lock = Mutex()

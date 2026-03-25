@@ -768,40 +768,6 @@ object ConfigTransforms {
         .replace(config.NonNegativeFiniteDuration(targetTimestampForwardTolerance))
     )
 
-  /** Flag the provided participants as being replicated. Keep in mind to actually work they need to
-    * be configured to share the same database (see
-    * [[com.digitalasset.canton.integration.plugins.UseSharedStorage]]).
-    *
-    * Enables replication for all participants if no participants are given
-    */
-  def enableReplicatedParticipants(
-      replicatedParticipantNames: String*
-  ): ConfigTransform =
-    ConfigTransforms.updateAllParticipantConfigs { (name, config) =>
-      if (replicatedParticipantNames.isEmpty || replicatedParticipantNames.contains(name))
-        config
-          .focus(_.replication)
-          .modify(
-            _.map(_.focus(_.enabled).replace(Some(true)))
-              .orElse(Some(ReplicationConfig(enabled = Some(true))))
-          )
-      else config
-    }
-
-  def enableReplicatedMediators(
-      replicatedMediatorNames: String*
-  ): ConfigTransform =
-    ConfigTransforms.updateAllMediatorConfigs { (name, config) =>
-      if (replicatedMediatorNames.isEmpty || replicatedMediatorNames.contains(name))
-        config
-          .focus(_.replication)
-          .modify(
-            _.map(_.focus(_.enabled).replace(Some(true)))
-              .orElse(Some(ReplicationConfig(enabled = Some(true))))
-          )
-      else config
-    }
-
   def setPassiveCheckPeriodMediators(
       passiveCheckPeriod: config.PositiveFiniteDuration,
       mediatorNames: String*
@@ -855,12 +821,6 @@ object ConfigTransforms {
       },
     )
   }
-
-  def enableReplicatedAllNodes: Seq[ConfigTransform] =
-    Seq(
-      enableReplicatedParticipants(),
-      enableReplicatedMediators(),
-    )
 
   def enableSlowQueryLogging(
       slowQuery: PositiveFiniteDuration = PositiveFiniteDuration.tryOfSeconds(30)

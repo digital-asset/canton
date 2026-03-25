@@ -164,8 +164,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
     for {
       // submit one transaction
       _ <- ledger.create(party, new Dummy(party))
+      maxOffsetCheckpointEmissionDelay = ledger.maxOffsetCheckpointEmissionDelay.duration.toMillis
       // wait for the checkpoint cache to be updated
-      _ = Threading.sleep(ledger.maxOffsetCheckpointEmissionDelay.duration.toMillis)
+      _ = Threading.sleep(maxOffsetCheckpointEmissionDelay * 2)
       endOffsetAfterSubmission <- ledger.currentEnd()
       startTime = System.nanoTime()
       updates <- ledger.updates(
@@ -191,9 +192,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
         s"One checkpoint should have been received but none were instead",
       )
       assert(
-        // idleStreamOffsetCheckpointTimeout is 1s, but we give some extra time to account for scheduling delays
-        millisForCheckpoint < 1500,
-        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the idleStreamOffsetCheckpointTimeout.",
+        // idleStreamOffsetCheckpointTimeout is < maxOffsetCheckpointEmissionDelay, but we give some extra time to account for flakes
+        millisForCheckpoint < maxOffsetCheckpointEmissionDelay * 2,
+        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the maxOffsetCheckpointEmissionDelay ($maxOffsetCheckpointEmissionDelay ms).",
       )
       assert(
         checkpoints.map(_.offset).forall(_ >= endOffsetAfterSubmission),
@@ -375,8 +376,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
     for {
       // submit one transaction
       _ <- ledger.create(party, new Dummy(party))
+      maxOffsetCheckpointEmissionDelay = ledger.maxOffsetCheckpointEmissionDelay.duration.toMillis
       // wait for the checkpoint cache to be updated
-      _ = Threading.sleep(ledger.maxOffsetCheckpointEmissionDelay.duration.toMillis)
+      _ = Threading.sleep(maxOffsetCheckpointEmissionDelay * 2)
       // and check that the checkpoint received will be there almost immediately
       endOffsetAfterSubmissions <- ledger.currentEnd()
       startTime = System.nanoTime()
@@ -399,9 +401,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
         s"At least one checkpoint should have been received but none were instead",
       )
       assert(
-        // idleStreamOffsetCheckpointTimeout is 1s, but we give some extra time to account for scheduling delays
-        millisForCheckpoint < 1500,
-        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the idleStreamOffsetCheckpointTimeout.",
+        // idleStreamOffsetCheckpointTimeout is < maxOffsetCheckpointEmissionDelay, but we give some extra time to account for flakes
+        millisForCheckpoint < maxOffsetCheckpointEmissionDelay * 2,
+        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the maxOffsetCheckpointEmissionDelay ($maxOffsetCheckpointEmissionDelay ms).",
       )
       assert(
         checkpoints.map(_.offset).forall(_ >= endOffsetAfterSubmissions),

@@ -314,6 +314,12 @@ fileComments:
               Modifiable
 
               Optional: can be empty
+      annotations_entry:
+        message:
+          comments: null
+          fieldComments:
+            key: ''
+            value: ''
     oneOfs:
       ObjectMeta: {}
     services: {}
@@ -357,6 +363,17 @@ fileComments:
             known_since: |-
               Indicates since when the package is known to the backing participant.
               Required
+      Unvet:
+        message:
+          comments: Remove packages from the set of vetted packages
+          fieldComments:
+            packages: |-
+              Packages to be unvetted.
+
+              If a reference in this list matches multiple packages, they are all
+              unvetted.
+
+              Required: must be non-empty
       UpdateVettedPackagesRequest:
         message:
           comments: null
@@ -477,6 +494,28 @@ fileComments:
         message:
           comments: null
           fieldComments: {}
+      Vet:
+        message:
+          comments: |-
+            Set vetting bounds of a list of packages. Packages that were not previously
+            vetted have their bounds added, previous vetting bounds are overwritten.
+          fieldComments:
+            packages: |-
+              Packages to be vetted.
+
+              If a reference in this list matches more than one package, the change is
+              considered ambiguous and the entire update request is rejected. In other
+              words, every reference must match exactly one package.
+
+              Required: must be non-empty
+            new_valid_from_inclusive: |-
+              The time from which these packages should be vetted, prior lower bounds
+              are overwritten.
+              Optional
+            new_valid_until_exclusive: |-
+              The time until which these packages should be vetted, prior upper bounds
+              are overwritten.
+              Optional
       VettedPackagesChange:
         message:
           comments: A change to the set of vetted packages.
@@ -851,6 +890,20 @@ fileComments:
               3. party is hosted by the participant, but is outside of the user's identity provider.
 
               Optional
+      SignedTransaction:
+        message:
+          comments: null
+          fieldComments:
+            transaction: |-
+              The serialized TopologyTransaction
+
+              Required: must be non-empty
+            signatures: |-
+              Additional signatures for this transaction specifically
+              Use for transactions that require additional signatures beyond the namespace key signatures
+              e.g: PartyToKeyMapping must be signed by all registered keys
+
+              Optional: can be empty
       UpdatePartyDetailsRequest:
         message:
           comments: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(party_details.identity_provider_id)``'
@@ -1000,6 +1053,47 @@ fileComments:
           or decentralized parties require you to construct the topology transactions yourself.
   admin/user_management_service.proto:
     messages:
+      CanActAs:
+        message:
+          comments: null
+          fieldComments:
+            party: |-
+              The right to authorize commands for this party.
+
+              Required
+      CanExecuteAs:
+        message:
+          comments: null
+          fieldComments:
+            party: |-
+              The right to prepare and execute submissions as this party.
+              This right does not entitle the user to perform any reads.
+              If reading is required, a separate ReadAs right must be added.
+              Right to execute as a party is also implicitly contained in the CanActAs right.
+
+              Required
+      CanExecuteAsAnyParty:
+        message:
+          comments: |-
+            The rights of a user to prepare and execute transactions as any party.
+            Its utility is predominantly for users that perform interactive submissions
+            on behalf of many parties.
+          fieldComments: {}
+      CanReadAs:
+        message:
+          comments: null
+          fieldComments:
+            party: |-
+              The right to read ledger data visible to this party.
+
+              Required
+      CanReadAsAnyParty:
+        message:
+          comments: |-
+            The rights of a participant's super reader. Its utility is predominantly for
+            feeding external tools, such as PQS, continually without the need to change subscriptions
+            as new parties pop in and out of existence.
+          fieldComments: {}
       CreateUserRequest:
         message:
           comments: |2-
@@ -1092,6 +1186,13 @@ fileComments:
               The rights that were newly granted by the request.
 
               Optional: can be empty
+      IdentityProviderAdmin:
+        message:
+          comments: |-
+            The right to administer the identity provider that the user is assigned to.
+            It means, being able to manage users and parties that are also assigned
+            to the same identity provider.
+          fieldComments: {}
       ListUserRightsRequest:
         message:
           comments: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)
@@ -1148,6 +1249,10 @@ fileComments:
               Empty, if there are no further results.
 
               Optional
+      ParticipantAdmin:
+        message:
+          comments: The right to administer the participant node.
+          fieldComments: {}
       RevokeUserRightsRequest:
         message:
           comments: |-
@@ -1560,6 +1665,13 @@ fileComments:
               Must be a valid UserIdString (as described in ``value.proto``).
               Required unless authentication is used with a user token.
               In that case, the token's user-id will be used for the request's user_id.
+
+              Optional
+            taps_max_passes: |-
+              The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+              Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+              If unset, this defaults to the value defined in the participant configuration.
+              The provided value must not exceed the limit specified in the participant configuration.
 
               Optional
             prefetch_contract_keys: |-
@@ -2728,6 +2840,21 @@ fileComments:
               If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
 
               Required
+      GlobalKeyMappingEntry:
+        message:
+          comments: null
+          fieldComments:
+            key: Required
+            value: Optional
+      InputContract:
+        message:
+          comments: null
+          fieldComments:
+            v1: When new versions will be added, they will show here
+            created_at: Required
+            event_blob: |-
+              Used to contain driver_metadata, now contained in event_blob
+              Required: must be non-empty
       Metadata:
         message:
           comments: |-
@@ -2778,6 +2905,25 @@ fileComments:
               Same as min_ledger_time_abs, but specified as a duration, starting from the time this request is received by the server.
               Must not be set at the same time as min_ledger_time_abs.
               Optional
+      Node:
+        message:
+          comments: |-
+            A transaction may contain nodes with different versions.
+            Each node must be hashed using the hashing algorithm corresponding to its specific version.
+            [docs-entry-start: DamlTransaction.Node]
+          fieldComments:
+            node_id: Required
+            v1: |-
+              Start at 1000 so we can add more fields before if necessary
+              When new versions will be added, they will show here
+
+              Required
+      NodeSeed:
+        message:
+          comments: null
+          fieldComments:
+            node_id: Required
+            seed: 'Required: must be non-empty'
       PackagePreference:
         message:
           comments: null
@@ -2844,6 +2990,13 @@ fileComments:
               When true, the response will contain additional details on how the transaction was encoded and hashed
               This can be useful for troubleshooting of hash mismatches. Should only be used for debugging.
               Defaults to false
+
+              Optional
+            taps_max_passes: |-
+              The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+              Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+              If unset, this defaults to the value defined in the participant configuration.
+              The provided value must not exceed the limit specified in the participant configuration.
 
               Optional
             prefetch_contract_keys: |-
@@ -2962,6 +3115,12 @@ fileComments:
               Signatures
 
               Required: must be non-empty
+      SubmitterInfo:
+        message:
+          comments: null
+          fieldComments:
+            act_as: 'Required: must be non-empty'
+            command_id: Required
     oneOfs:
       CostEstimation: {}
       CostEstimationHints: {}
@@ -3800,6 +3959,23 @@ fileComments:
               before the active_at_offset.
 
               Required
+      ConnectedSynchronizer:
+        message:
+          comments: null
+          fieldComments:
+            synchronizer_alias: |-
+              The alias of the synchronizer
+
+              Required
+            synchronizer_id: |-
+              The ID of the synchronizer
+
+              Required
+            permission: |-
+              The permission on the synchronizer
+              Set if a party was used in the request, otherwise unspecified.
+
+              Optional
       GetActiveContractsRequest:
         message:
           comments: |-
@@ -3855,6 +4031,12 @@ fileComments:
             incomplete_unassigned: |-
               Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
               assigned event before or at the active_at_offset.
+            stream_continuation_token: |-
+              Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+              of the active contracts snapshot.
+              Only populated for the streaming ``GetActiveContracts`` rpc call.
+
+              Optional: can be empty
             incomplete_assigned: |-
               Important: this message is not indicating that the contract is active on the target synchronizer!
               Included iff the assigned event was before or at the active_at_offset, but there was no corresponding
@@ -4383,6 +4565,12 @@ fileComments:
               for submitting it as a disclosed contract with future commands.
 
               Optional
+      filters_by_party_entry:
+        message:
+          comments: null
+          fieldComments:
+            key: ''
+            value: ''
     oneOfs:
       CumulativeFilter:
         identifier_filter:
@@ -4455,24 +4643,28 @@ fileComments:
           comments: null
           fieldComments:
             begin_exclusive: |-
-              Beginning of the requested ledger section (non-negative integer).
+              Exclusive lower bound offset of the requested ledger section (non-negative integer).
               The response will only contain transactions whose offset is strictly greater than this.
-              If not populated or set to zero, the stream will start from the beginning of the ledger.
-              If positive, the streaming will start after this absolute offset.
-              If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
-
-              Optional
+              If set to zero, the lower bound is set to the the beginning of the ledger.
+              If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
+              Required
             end_inclusive: |-
-              End of the requested ledger section.
-              The response will only contain transactions whose offset is less than or equal to this.
-              If empty, the stream will not terminate.
-              If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+              Inclusive higher bound offset of the requested ledger section.
+              If specified the response will only contain transactions whose offset is less than or equal to this.
+              If not specified,
+
+              - the descending_order must not be selected,
+              - the stream will not terminate.
 
               Optional
             update_format: |-
               The update format for this request
 
               Required
+            descending_order: |-
+              If set, the stream will populate the elements in descending order.
+
+              Optional
       GetUpdatesResponse:
         message:
           comments: null

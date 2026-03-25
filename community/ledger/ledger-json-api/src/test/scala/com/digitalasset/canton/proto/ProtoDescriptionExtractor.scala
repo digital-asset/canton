@@ -11,7 +11,7 @@ import com.digitalasset.canton.http.json.v2.{
   MessageInfo,
   ServiceMethod,
 }
-import io.protostuff.compiler.model.{FieldContainer, Proto}
+import io.protostuff.compiler.model.{FieldContainer, Message, Proto}
 
 import scala.collection.immutable.SortedMap
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -30,9 +30,14 @@ object ProtoDescriptionExtractor {
             fileName.stripPrefix(s"${ProtoParser.ledgerApiProtoLocation}/")
           } else fileName
 
-        val messages = proto.getMessages.asScala.map { msg =>
-          msg.getName -> MessageInfo(toFieldData(msg))
-        }.toMap
+        def unnest(m: Message): Seq[Message] = m +: m.getMessages.asScala.toSeq.flatMap(unnest)
+
+        val messages = proto.getMessages.asScala
+          .flatMap(unnest)
+          .map { msg =>
+            msg.getName -> MessageInfo(toFieldData(msg))
+          }
+          .toMap
 
         val oneOfs = proto.getMessages.asScala.map { msg =>
           msg.getName -> SortedMap.from {

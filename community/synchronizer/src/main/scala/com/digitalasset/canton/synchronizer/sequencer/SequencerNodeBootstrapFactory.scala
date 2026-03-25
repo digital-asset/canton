@@ -9,7 +9,7 @@ import com.digitalasset.canton.environment.{
   CantonNodeBootstrapCommonArguments,
   NodeFactoryArguments,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbLockCounters, StorageFactory, StorageMultiFactory}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -17,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameters,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.ScheduledExecutorService
@@ -54,8 +55,19 @@ object SequencerNodeBootstrapFactoryImpl extends SequencerNodeBootstrapFactory {
       arguments.config.storage,
       exitOnFatalFailures = arguments.parameters.exitOnFatalFailures,
       arguments.config.replication,
-      () => FutureUnlessShutdown.unit,
-      () => FutureUnlessShutdown.unit,
+      onActive = logger => {
+        FatalError.exitOnFatalError(
+          "Sequencer storage went active from passive. This should never happen, considering this Sequencer's storage should never go passive",
+          logger,
+        )(TraceContext.empty)
+      },
+      onPassive = logger => {
+        FatalError.exitOnFatalError(
+          "Sequencer storage went passive. This indicates another process is accessing this Sequencer's database simultaneously, which is not permitted.",
+          logger,
+        )(TraceContext.empty)
+      },
+      mustStayActive = true,
       DbLockCounters.SEQUENCER_INIT,
       DbLockCounters.SEQUENCER_INIT_WORKER,
       arguments.futureSupervisor,

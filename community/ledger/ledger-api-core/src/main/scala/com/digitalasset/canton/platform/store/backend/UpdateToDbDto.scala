@@ -53,6 +53,7 @@ object UpdateToDbDto {
           offset = offset,
           serializedTraceContext = serializedTraceContext,
           commandRejected = u,
+          isTransaction = u.isTransaction,
         )
 
       case u: TopologyTransactionEffective =>
@@ -99,6 +100,7 @@ object UpdateToDbDto {
       offset: Offset,
       serializedTraceContext: Array[Byte],
       commandRejected: CommandRejected,
+      isTransaction: Boolean,
   )(implicit mc: MetricsContext): Iterator[DbDto] = {
     withExtraMetricLabels(
       IndexerMetrics.Labels.grpcCode -> Status
@@ -126,8 +128,7 @@ object UpdateToDbDto {
         synchronizerId = commandRejected.synchronizerId,
         messageUuid = messageUuid,
         serializedTraceContext = serializedTraceContext,
-        isTransaction =
-          true, // please note from usage point of view (deduplication) rejections are always used both for transactions and reassignments at the moment.
+        isTransaction = isTransaction,
       ).copy(
         rejection_status_code = Some(commandRejected.reasonTemplate.code),
         rejection_status_message = Some(commandRejected.reasonTemplate.message),

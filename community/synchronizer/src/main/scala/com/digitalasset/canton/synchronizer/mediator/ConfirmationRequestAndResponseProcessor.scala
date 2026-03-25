@@ -774,6 +774,11 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               OptionT.none[FutureUnlessShutdown, Unit]
             }
           }
+          _ = responseAggregation.recordResponseMetric(
+            mediatorState.metrics.responseLatencies,
+            ts,
+            responses.sender,
+          )
           nextResponseAggregation <- OptionT(
             responseAggregation
               .validateAndProgress(ts, responses, snapshot.ipsSnapshot, batchingConfig)

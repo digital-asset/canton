@@ -9,14 +9,12 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   InteractiveSubmissionServiceGrpc,
   PackageVettingRequirement,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal.ping.Ping
 
 import scala.concurrent.Future
 
-@UnstableTest // TODO(#30185)
 final class GetPreferredPackagesAuthIT extends PublicServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

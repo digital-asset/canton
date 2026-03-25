@@ -4,15 +4,15 @@
 package com.digitalasset.daml.lf
 package language
 
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.TemplateOrInterface
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 
 private[digitalasset] class PackageInterface(
     val signatures: PartialFunction[PackageId, PackageSignature]
 ) {
 
-  import PackageInterface._
+  import PackageInterface.*
 
   private[this] def lookupPackage(
       pkgId: PackageId,
@@ -200,9 +200,8 @@ private[digitalasset] class PackageInterface(
   def lookupInterface(tycon: TypeConId): Either[LookupError, DefInterfaceSignature] =
     lookupInterface(tycon, Reference.Interface(tycon))
 
-  /** Look up a template's choice by name.
-    * This purposefully does not return choices inherited via interfaces.
-    * Use lookupChoice for a more flexible lookup.
+  /** Look up a template's choice by name. This purposefully does not return choices inherited via
+    * interfaces. Use lookupChoice for a more flexible lookup.
     */
   private[this] def lookupTemplateChoice(
       tmplId: TypeConId,

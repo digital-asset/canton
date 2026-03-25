@@ -39,8 +39,8 @@ import com.digitalasset.canton.platform.{
   TemplatePartiesFilter,
   Value,
 }
+import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref.{IdentifierConverter, NameTypeConRef, Party}
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -139,7 +139,6 @@ private[events] object TransactionLogUpdatesConversions {
         transactionAccepted,
         internalTransactionFormat,
         lfValueTranslation,
-        transactionAccepted.traceContext,
       )
         .map(transaction =>
           GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(transaction))
@@ -158,7 +157,6 @@ private[events] object TransactionLogUpdatesConversions {
         reassignmentInternalEventFormat.templatePartiesFilter.allFilterParties,
         reassignmentInternalEventFormat.eventProjectionProperties,
         lfValueTranslation,
-        reassignmentAccepted.traceContext,
       )
         .map(reassignment =>
           GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(reassignment))
@@ -195,7 +193,6 @@ private[events] object TransactionLogUpdatesConversions {
             transactionAccepted,
             internalTransactionFormat,
             lfValueTranslation,
-            transactionAccepted.traceContext,
           )
             .map(transaction =>
               GetUpdateResponse(GetUpdateResponse.Update.Transaction(transaction))
@@ -214,7 +211,6 @@ private[events] object TransactionLogUpdatesConversions {
             reassignmentInternalEventFormat.templatePartiesFilter.allFilterParties,
             reassignmentInternalEventFormat.eventProjectionProperties,
             lfValueTranslation,
-            reassignmentAccepted.traceContext,
           )
             .map(reassignment =>
               GetUpdateResponse(GetUpdateResponse.Update.Reassignment(reassignment))
@@ -234,7 +230,6 @@ private[events] object TransactionLogUpdatesConversions {
       transactionAccepted: TransactionLogUpdate.TransactionAccepted,
       internalTransactionFormat: InternalTransactionFormat,
       lfValueTranslation: LfValueTranslation,
-      traceContext: TraceContext,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -257,7 +252,7 @@ private[events] object TransactionLogUpdatesConversions {
             events = events,
             offset = transactionAccepted.offset.unwrap,
             synchronizerId = transactionAccepted.synchronizerId,
-            traceContext = SerializableTraceContext(traceContext).toDamlProto,
+            traceContext = SerializableTraceContext(transactionAccepted.traceContext).toDamlProto,
             recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
             externalTransactionHash = transactionAccepted.externalTransactionHash.map(_.unwrap),
           )
@@ -570,7 +565,6 @@ private[events] object TransactionLogUpdatesConversions {
       requestingParties: Option[Set[Party]],
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
-      traceContext: TraceContext,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -644,7 +638,7 @@ private[events] object TransactionLogUpdatesConversions {
           workflowId = reassignmentAccepted.workflowId,
           offset = reassignmentAccepted.offset.unwrap,
           events = events,
-          traceContext = SerializableTraceContext(traceContext).toDamlProto,
+          traceContext = SerializableTraceContext(reassignmentAccepted.traceContext).toDamlProto,
           recordTime = Some(TimestampConversion.fromLf(reassignmentAccepted.recordTime)),
           synchronizerId = reassignmentAccepted.synchronizerId,
         )

@@ -4,9 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -66,14 +64,14 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
       participant1.health.ping(participant1)
 
       fixture.oldSynchronizerOwners.foreach(
-        _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
+        _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
       )
 
       eventually() {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
-            .list(store = Some(fixture.currentPSId))
-            .filter(_.item.successorSynchronizerId == fixture.newPSId)
+            .list(store = Some(fixture.currentPsid))
+            .filter(_.item.successorSynchronizerId == fixture.newPsid)
             .loneElement
         )
       }
@@ -86,22 +84,22 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
             sequencerId = sequencer1.id,
             // sequencer4 has id of sequencer2 instead of sequencer1
             endpoints = sequencer4.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
           sequencer2.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = sequencer2.id,
             // sequencer3 has id of sequencer1 instead of sequencer2
             endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
 
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
           transferTraffic(suppressLogs = false)
           eventually() {
             environment.simClock.value.advance(Duration.ofSeconds(1))
-            participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe false
+            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe false
             participants.all.forall(
-              _.synchronizers.is_connected(fixture.currentPSId)
+              _.synchronizers.is_connected(fixture.currentPsid)
             ) shouldBe false
           }
 
@@ -123,13 +121,13 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
         (
           LogEntryOptionality.Required,
           _.errorMessage should (include(
-            s"Unable to perform handshake with ${fixture.newPSId}"
+            s"Unable to perform handshake with ${fixture.newPsid}"
           ) and include("Trust threshold of 2 is no longer reachable")),
         ),
         // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
         (
           LogEntryOptionality.Required,
-          _.errorMessage should include(s"Upgrade to ${fixture.newPSId} failed"),
+          _.errorMessage should include(s"Upgrade to ${fixture.newPsid} failed"),
         ),
         (
           LogEntryOptionality.OptionalMany,
@@ -175,24 +173,18 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           SynchronizerConnectionConfig(
             synchronizerAlias = daName,
             sequencerConnections = sequencer1,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
           )
         )
         participant2.synchronizers.connect_by_config(
           SynchronizerConnectionConfig(
             synchronizerAlias = daName,
             sequencerConnections = sequencer2,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
           )
         )
       }
 
   "Logical synchronizer upgrade" should {
-    "detect incorrect PSId" in { implicit env =>
+    "detect incorrect psid" in { implicit env =>
       import env.*
 
       val fixture = fixtureWithDefaults()
@@ -200,14 +192,14 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
       participant1.health.ping(participant2)
 
       fixture.oldSynchronizerOwners.foreach(
-        _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
+        _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
       )
 
       eventually() {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
-            .list(store = Some(fixture.currentPSId))
-            .filter(_.item.successorSynchronizerId == fixture.newPSId)
+            .list(store = Some(fixture.currentPsid))
+            .filter(_.item.successorSynchronizerId == fixture.newPsid)
             .loneElement
         )
       }
@@ -217,14 +209,14 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
       // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
       def failedHandshakeLogLine(entry: LogEntry, p: ParticipantReference): Assertion = {
         entry.errorMessage should (include(
-          s"Unable to perform handshake with ${fixture.newPSId}"
+          s"Unable to perform handshake with ${fixture.newPsid}"
         ) and include("Trust threshold of 1 is no longer reachable"))
         entry.loggerName should include(s"participant=${p.name}")
       }
 
-      def incorrectSequencerPSId(entry: LogEntry, p: ParticipantReference): Assertion = {
+      def incorrectSequencerPsid(entry: LogEntry, p: ParticipantReference): Assertion = {
         entry.warningMessage should (include("connection") and include(
-          s"is not on expected synchronizer: expected Some(${fixture.newPSId}), got ${fixture.currentPSId}"
+          s"is not on expected synchronizer: expected Some(${fixture.newPsid}), got ${fixture.currentPsid}"
         ))
 
         entry.loggerName should include(s"participant=${p.name}")
@@ -236,20 +228,20 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
             sequencerId = sequencer1.id,
             // It should be sequencer3 here
             endpoints = sequencer1.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
           sequencer2.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = sequencer2.id,
             // It should be sequencer4 here
             endpoints = sequencer2.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
 
           // fix the successor announcement
           sequencer2.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = sequencer2.id,
             endpoints = sequencer4.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
+            successorSynchronizerId = fixture.newPsid,
           )
 
           // Ensure P2 sees the correct announcement before progressing the time
@@ -265,11 +257,11 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           transferTraffic(suppressLogs = false)
           eventually() {
             environment.simClock.value.advance(Duration.ofSeconds(1))
-            participant1.synchronizers.is_connected(fixture.newPSId) shouldBe false
-            participant2.synchronizers.is_connected(fixture.newPSId) shouldBe true
+            participant1.synchronizers.is_connected(fixture.newPsid) shouldBe false
+            participant2.synchronizers.is_connected(fixture.newPsid) shouldBe true
 
             participants.all.forall(
-              _.synchronizers.is_connected(fixture.currentPSId)
+              _.synchronizers.is_connected(fixture.currentPsid)
             ) shouldBe false
           }
 
@@ -279,15 +271,15 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           participant2.health.ping(participant2)
         },
         // initial handshake and connect
-        (LogEntryOptionality.OptionalMany, incorrectSequencerPSId(_, participant1)),
+        (LogEntryOptionality.OptionalMany, incorrectSequencerPsid(_, participant1)),
         // initial handshake
-        (LogEntryOptionality.Required, incorrectSequencerPSId(_, participant2)),
+        (LogEntryOptionality.Required, incorrectSequencerPsid(_, participant2)),
         (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant1)),
         (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant2)),
         // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
         (
           LogEntryOptionality.Required,
-          _.errorMessage should include(s"Upgrade to ${fixture.newPSId} failed"),
+          _.errorMessage should include(s"Upgrade to ${fixture.newPsid} failed"),
         ),
         (
           LogEntryOptionality.OptionalMany,

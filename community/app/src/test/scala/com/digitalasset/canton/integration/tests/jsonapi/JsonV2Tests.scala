@@ -667,6 +667,7 @@ class JsonV2Tests
             minLedgerTimeRel = None,
             disclosedContracts = Seq.empty,
             packageIdSelectionPreference = Seq.empty,
+            tapsMaxPasses = None,
           )
         }
 
@@ -1005,6 +1006,7 @@ class JsonV2Tests
                 activeAtOffset = endOffset,
                 verbose = true,
                 eventFormat = None,
+                streamContinuationToken = None,
               )
 
             val message = TextMessage(
@@ -1045,6 +1047,7 @@ class JsonV2Tests
                 filter = None,
                 activeAtOffset = endOffset,
                 eventFormat = None,
+                streamContinuationToken = None,
               )
 
             val message = TextMessage(
@@ -1123,6 +1126,7 @@ class JsonV2Tests
                     activeAtOffset = endOffset,
                     verbose = true,
                     eventFormat = Some(allTransactionsFormat),
+                    streamContinuationToken = None,
                   )
                   .asJson,
                 headers,
@@ -1155,6 +1159,7 @@ class JsonV2Tests
                     filter = Some(allTransactionsFilter),
                     activeAtOffset = endOffset,
                     eventFormat = Some(allTransactionsFormat),
+                    streamContinuationToken = None,
                   )
                   .asJson,
                 headers,
@@ -2006,6 +2011,7 @@ class JsonV2Tests
         includeTopologyEvents = None,
       )
     ),
+    descendingOrder = false,
   )
 
   private def transactionFormat(party: String): Option[TransactionFormat] = Some(

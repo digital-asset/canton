@@ -3,15 +3,15 @@
 
 package com.digitalasset.daml.lf.data
 
+import scalaz.syntax.order.*
 import scalaz.{@@, Equal, Order, Tag}
-import scalaz.syntax.order._
 
 object ScalazEqual {
   def withNatural[A](isNatural: Boolean)(c: (A, A) => Boolean): Equal[A] =
     if (isNatural) Equal.equalA else Equal.equal(c)
 
-  /** Curry the typical pattern of matching equals by pairs, preserving exhaustiveness
-    * checking while reducing the boilerplate in each case.
+  /** Curry the typical pattern of matching equals by pairs, preserving exhaustiveness checking
+    * while reducing the boilerplate in each case.
     *
     * For example, this is unsafe:
     *
@@ -23,10 +23,9 @@ object ScalazEqual {
     *  }
     * }}}
     *
-    * because the third case disables exhaustiveness checking. And the easier
-    * it is to make this mistake, the stronger impulse to create the situation
-    * where it can occur, because the cost of writing out the false cases is
-    * quadratic.
+    * because the third case disables exhaustiveness checking. And the easier it is to make this
+    * mistake, the stronger impulse to create the situation where it can occur, because the cost of
+    * writing out the false cases is quadratic.
     *
     * With this function, the above would be written
     *
@@ -37,16 +36,15 @@ object ScalazEqual {
     *  }
     * }}}
     *
-    * which preserves exhaustiveness checking for the left argument, which is
-    * perfectly sufficient for writing equals functions.
+    * which preserves exhaustiveness checking for the left argument, which is perfectly sufficient
+    * for writing equals functions.
     */
   def match2[A, B, C](fallback: => C)(f: A => (B PartialFunction C))(a: A, b: B): C =
     f(a).applyOrElse(b, (_: B) => fallback)
 
-  /** The Equal and Order instances only use `iterator` directly, so
-    * this is perfectly sufficient.  If you want a public version, you
-    * need something more along the lines of [[ImmArray.ImmArraySeq]],
-    * customized for the specific type.
+  /** The Equal and Order instances only use `iterator` directly, so this is perfectly sufficient.
+    * If you want a public version, you need something more along the lines of
+    * [[ImmArray.ImmArraySeq]], customized for the specific type.
     */
   private[data] def toIterableForScalazInstances[A](iter: => Iterator[A]): Iterable[A] =
     new Iterable[A] {

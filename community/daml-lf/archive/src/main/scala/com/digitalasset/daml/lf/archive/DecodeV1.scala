@@ -4,19 +4,19 @@
 package com.digitalasset.daml.lf
 package archive
 
-import java.util
-import com.digitalasset.daml.lf.archive.{DamlLf1 => PLF}
-import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.archive.DamlLf1 as PLF
+import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.LanguageVersion as LV
+import com.digitalasset.daml.lf.language.Util.*
 
+import java.util
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 // taken from main-2.x as of April 4th.
 // https://github.com/digital-asset/daml/commit/5f6bd1d0fe2696453c537a0a6db7054b5d274f23
@@ -24,7 +24,7 @@ import scala.jdk.CollectionConverters._
 
 private[archive] class DecodeV1(minor: LV.Minor) {
 
-  import DecodeV1._
+  import DecodeV1.*
   import Work.Ret
 
   private val languageVersion = LV(LV.Major.V1, minor)
@@ -170,9 +170,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
   private[archive] def decodeInternedTypesForTest( // test entry point
       env: Env,
       lfPackage: PLF.Package,
-  ): IndexedSeq[Type] = {
+  ): IndexedSeq[Type] =
     Work.run(decodeInternedTypes(env, lfPackage))
-  }
 
   private def decodeInternedTypes(
       env: Env,
@@ -210,32 +209,26 @@ private[archive] class DecodeV1(minor: LV.Minor) {
     private[archive] def decodeChoiceForTest(
         tpl: DottedName,
         lfChoice: PLF.TemplateChoice,
-    ): TemplateChoice = {
+    ): TemplateChoice =
       Work.run(decodeChoice(tpl, lfChoice))
-    }
 
     private[archive] def decodeDefInterfaceForTest(
         id: DottedName,
         lfInterface: PLF.DefInterface,
-    ): DefInterface = {
+    ): DefInterface =
       Work.run(decodeDefInterface(id, lfInterface))
-    }
 
-    private[archive] def decodeKindForTest(lfKind: PLF.Kind): Kind = {
+    private[archive] def decodeKindForTest(lfKind: PLF.Kind): Kind =
       Work.run(decodeKind(lfKind))
-    }
 
-    private[archive] def decodeTypeForTest(lfType: PLF.Type): Type = {
+    private[archive] def decodeTypeForTest(lfType: PLF.Type): Type =
       Work.run(decodeType(lfType)(Ret(_)))
-    }
 
-    private[archive] def uncheckedDecodeTypeForTest(lfType: PLF.Type): Type = {
+    private[archive] def uncheckedDecodeTypeForTest(lfType: PLF.Type): Type =
       Work.run(uncheckedDecodeType(lfType))
-    }
 
-    private[archive] def decodeExprForTest(lfExpr: PLF.Expr, definition: String): Expr = {
+    private[archive] def decodeExprForTest(lfExpr: PLF.Expr, definition: String): Expr =
       Work.run(decodeExpr(lfExpr, definition)(Ret(_)))
-    }
 
     @scala.annotation.nowarn("cat=unused")
     private var currentDefinitionRef: Option[DefinitionRef] = None
@@ -496,7 +489,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
 
     private[this] def decodeFields(
         lfFields: collection.Seq[PLF.FieldWithType]
-    ): Work[ImmArray[(Name, Type)]] = {
+    ): Work[ImmArray[(Name, Type)]] =
       Work.sequence(lfFields.view.map { lfFieldWithType =>
         decodeType(lfFieldWithType.getType) { typ =>
           Ret(decodeFieldName(lfFieldWithType) -> typ)
@@ -504,7 +497,6 @@ private[archive] class DecodeV1(minor: LV.Minor) {
       }) { xs =>
         Ret(xs.to(ImmArray))
       }
-    }
 
     private[this] def decodeEnumCon(
         enumCon: PLF.DefDataType.EnumConstructors
@@ -515,9 +507,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         "EnumConstructors.constructors",
       )
 
-    private[archive] def decodeDefValueForTest(lfValue: PLF.DefValue): DValue = {
+    private[archive] def decodeDefValueForTest(lfValue: PLF.DefValue): DValue =
       Work.run(decodeDefValue(lfValue))
-    }
 
     private def decodeDefValue(lfValue: PLF.DefValue): Work[DValue] = {
       if (!lfValue.getNoPartyLiterals) {
@@ -545,9 +536,9 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         tpl: DottedName,
         key: PLF.DefTemplate.DefKey,
         tplVar: ExprVarName,
-    ): Work[TemplateKey] = {
+    ): Work[TemplateKey] =
       decodeType(key.getType) { typ =>
-        decodeExpr(key.getMaintainers, s"${tpl}:maintainer") { maintainers =>
+        decodeExpr(key.getMaintainers, s"$tpl:maintainer") { maintainers =>
           Ret(
             TemplateKey(
               typ,
@@ -557,7 +548,6 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           )
         }
       }
-    }
 
     private[this] def decodeTemplate(tpl: DottedName, lfTempl: PLF.DefTemplate): Work[Template] = {
       val lfImplements = lfTempl.getImplementsList.asScala
@@ -607,7 +597,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
 
     private[this] def decodeTemplateImplements(
         lfImpl: PLF.DefTemplate.Implements
-    ): Work[TemplateImplements] = {
+    ): Work[TemplateImplements] =
       Work.bind(decodeInterfaceInstanceBody(lfImpl.getBody)) { body =>
         Ret(
           TemplateImplements.build(
@@ -616,22 +606,20 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           )
         )
       }
-    }
 
     private[this] def decodeInterfaceInstanceBody(
         lfBody: PLF.InterfaceInstanceBody
-    ): Work[InterfaceInstanceBody] = {
+    ): Work[InterfaceInstanceBody] =
       decodeExpr(lfBody.getView, "InterfaceInstanceBody.view") { view =>
         Work.sequence(lfBody.getMethodsList.asScala.view.map(decodeInterfaceInstanceMethod(_))) {
           methods =>
             Ret(InterfaceInstanceBody.build(methods, view))
         }
       }
-    }
 
     private[this] def decodeInterfaceInstanceMethod(
         lfMethod: PLF.InterfaceInstanceBody.InterfaceInstanceMethod
-    ): Work[InterfaceInstanceMethod] = {
+    ): Work[InterfaceInstanceMethod] =
       decodeExpr(lfMethod.getValue, "InterfaceInstanceMethod.value") { value =>
         Ret(
           InterfaceInstanceMethod(
@@ -641,12 +629,11 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           )
         )
       }
-    }
 
     private def decodeChoice(
         tpl: DottedName,
         lfChoice: PLF.TemplateChoice,
-    ): Work[TemplateChoice] = {
+    ): Work[TemplateChoice] =
       Work.bind(decodeBinder(lfChoice.getArgBinder)) { case (v, t) =>
         val chName = handleInternedName(
           lfChoice.getNameCase,
@@ -708,7 +695,6 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           }
         }
       }
-    }
 
     private def decodeException(
         exceptionName: DottedName,
@@ -721,7 +707,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
     private def decodeDefInterface(
         id: DottedName,
         lfInterface: PLF.DefInterface,
-    ): Work[DefInterface] = {
+    ): Work[DefInterface] =
       Work.sequence(lfInterface.getMethodsList.asScala.view.map(decodeInterfaceMethod(_))) {
         methods =>
           Work.sequence(lfInterface.getChoicesList.asScala.view.map(decodeChoice(id, _))) {
@@ -750,11 +736,10 @@ private[archive] class DecodeV1(minor: LV.Minor) {
               }
           }
       }
-    }
 
     private[this] def decodeInterfaceMethod(
         lfMethod: PLF.InterfaceMethod
-    ): Work[InterfaceMethod] = {
+    ): Work[InterfaceMethod] =
       decodeType(lfMethod.getType) { returnType =>
         Ret(
           InterfaceMethod(
@@ -763,11 +748,10 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           )
         )
       }
-    }
 
     private[this] def decodeInterfaceCoImplements(
         lfCoImpl: PLF.DefInterface.CoImplements
-    ): Work[InterfaceCoImplements] = {
+    ): Work[InterfaceCoImplements] =
       Work.bind(decodeInterfaceInstanceBody(lfCoImpl.getBody)) { body =>
         Ret(
           InterfaceCoImplements.build(
@@ -776,9 +760,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           )
         )
       }
-    }
 
-    private def decodeKind(lfKind: PLF.Kind): Work[Kind] = {
+    private def decodeKind(lfKind: PLF.Kind): Work[Kind] =
       Work.Delay { () =>
         lfKind.getSumCase match {
           case PLF.Kind.SumCase.STAR => Ret(KStar)
@@ -798,9 +781,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
             throw Error.Parsing("Kind.SUM_NOT_SET")
         }
       }
-    }
 
-    private def decodeType[T](lfType: PLF.Type)(k: Type => Work[T]): Work[T] = {
+    private def decodeType[T](lfType: PLF.Type)(k: Type => Work[T]): Work[T] =
       Work.Bind(
         Work.Delay { () =>
           if (versionIsOlderThan(Features.internedTypes)) {
@@ -821,9 +803,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         },
         k,
       )
-    }
 
-    private def uncheckedDecodeType(lfType: PLF.Type): Work[Type] = {
+    private def uncheckedDecodeType(lfType: PLF.Type): Work[Type] =
       lfType.getSumCase match {
         case PLF.Type.SumCase.VAR =>
           val tvar = lfType.getVar
@@ -911,7 +892,6 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         case PLF.Type.SumCase.SUM_NOT_SET =>
           throw Error.Parsing("Type.SUM_NOT_SET")
       }
-    }
 
     private[this] def decodeModuleRef(lfRef: PLF.ModuleRef): (PackageId, ModuleName) = {
       val modName = handleDottedName(
@@ -922,7 +902,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         lfRef.getModuleNameInternedDname,
         "ModuleRef.module_name.module_name",
       )
-      import PLF.PackageRef.{SumCase => SC}
+      import PLF.PackageRef.SumCase as SC
 
       val pkgId = lfRef.getPackageRef.getSumCase match {
         case SC.SELF =>
@@ -965,9 +945,8 @@ private[archive] class DecodeV1(minor: LV.Minor) {
     }
 
     @scala.annotation.nowarn("cat=unused")
-    private def decodeExpr[T](lfExpr: PLF.Expr, definition: String)(k: Expr => Work[T]): Work[T] = {
+    private def decodeExpr[T](lfExpr: PLF.Expr, definition: String)(k: Expr => Work[T]): Work[T] =
       Work.Delay(() => k(EUnit))
-    }
 
     private[this] def decodeTypeVarWithKind(
         lfTypeVarWithKind: PLF.TypeVarWithKind
@@ -982,11 +961,11 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           "TypeVarWithKind.var.var",
         )
       Work.bind(decodeKind(lfTypeVarWithKind.getKind)) { kind =>
-        Ret { name -> kind }
+        Ret(name -> kind)
       }
     }
 
-    private[this] def decodeBinder(lfBinder: PLF.VarWithType): Work[(ExprVarName, Type)] = {
+    private[this] def decodeBinder(lfBinder: PLF.VarWithType): Work[(ExprVarName, Type)] =
       decodeType(lfBinder.getType) { typ =>
         Ret(
           handleInternedName(
@@ -999,7 +978,6 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           ) -> typ
         )
       }
-    }
 
   }
 
@@ -1038,17 +1016,17 @@ private[archive] class DecodeV1(minor: LV.Minor) {
     if (i != 0)
       throw Error.Parsing(s"$description is not supported by $prettyVersion")
 
-  private def assertUndefined(s: collection.Seq[_], description: => String): Unit =
+  private def assertUndefined(s: collection.Seq[?], description: => String): Unit =
     if (s.nonEmpty)
       throw Error.Parsing(s"$description is not supported by $prettyVersion")
 
-  private def assertNonEmpty(s: collection.Seq[_], description: => String): Unit =
+  private def assertNonEmpty(s: collection.Seq[?], description: => String): Unit =
     if (s.isEmpty) throw Error.Parsing(s"Unexpected empty $description")
 
-  private[this] def assertEmpty(s: collection.Seq[_], description: => String): Unit =
+  private[this] def assertEmpty(s: collection.Seq[?], description: => String): Unit =
     if (s.nonEmpty) throw Error.Parsing(s"Unexpected non-empty $description")
 
-  private[this] def assertEmpty(s: util.List[_], description: => String): Unit =
+  private[this] def assertEmpty(s: util.List[?], description: => String): Unit =
     if (!s.isEmpty) throw Error.Parsing(s"Unexpected non-empty $description")
 
 }
@@ -1069,7 +1047,7 @@ private[lf] object DecodeV1 {
   }
 
   val builtinTypeInfos: List[BuiltinTypeInfo] = {
-    import PLF.PrimType._
+    import PLF.PrimType.*
     // DECIMAL is not there and should be handled in an ad-hoc way.
     List(
       BuiltinTypeInfo(UNIT, BTUnit),

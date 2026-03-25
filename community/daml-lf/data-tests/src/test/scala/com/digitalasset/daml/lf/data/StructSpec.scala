@@ -3,9 +3,9 @@
 
 package com.digitalasset.daml.lf.data
 
-import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 class StructSpec extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks {
 
@@ -46,7 +46,7 @@ class StructSpec extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks
         )
 
       forEvery(testCases) { list =>
-        Struct.fromSeq(list) shouldBe a[Left[_, _]]
+        Struct.fromSeq(list) shouldBe a[Left[?, ?]]
       }
 
     }
@@ -92,7 +92,7 @@ class StructSpec extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks
     "order as expected (first consider all names, then consider values)" in {
 
       import Struct.structOrderInstance
-      import scalaz.Scalaz._
+      import scalaz.Scalaz.*
 
       val testCases =
         Table(
@@ -109,7 +109,7 @@ class StructSpec extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks
             List(f2 -> 2),
             List(f2 -> 2, f3 -> 3),
             List(f3 -> 3),
-          ).map(Struct.assertFromSeq).zipWithIndex: _*
+          ).map(Struct.assertFromSeq).zipWithIndex*
         )
 
       forEvery(testCases) { (x, i) =>

@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   SequencerChannelAgreement,
 }
 import com.digitalasset.canton.participant.protocol.party.{
+  OnboardingClearanceOperation,
   PartyReplicationSourceParticipantMessage,
   PartyReplicationTargetParticipantMessage,
 }
@@ -300,6 +301,17 @@ final class GeneratorsParticipant(
         .map(
           PendingHandshakeWithLsuSuccessor(_)(
             PendingHandshakeWithLsuSuccessor.protocolVersionRepresentativeFor(version)
+          )
+        )
+    )
+
+  implicit val onboardingClearanceOperationArb: Arbitrary[OnboardingClearanceOperation] =
+    Arbitrary(
+      Gen
+        .option(Arbitrary.arbitrary[EffectiveTime])
+        .map(
+          OnboardingClearanceOperation(_)(
+            OnboardingClearanceOperation.protocolVersionRepresentativeFor(version)
           )
         )
     )

@@ -99,10 +99,6 @@ class RestartHAParticipantReliabilityIntegrationTest
 
   override lazy val baseEnvironmentConfig: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1
-      .addConfigTransform(
-        ConfigTransforms
-          .enableReplicatedParticipants(loadBalancedParticipant1, loadBalancedParticipant2)
-      )
       .addConfigTransforms(ConfigTransforms.addMonitoringEndpointAllNodes*)
       .addConfigTransform(addRemoteLoadBalancedParticipant)
 

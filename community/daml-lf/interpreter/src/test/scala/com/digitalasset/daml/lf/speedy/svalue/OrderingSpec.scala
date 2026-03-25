@@ -79,14 +79,14 @@ class OrderingSpec
     Table(
       ("comparable value subset", "generator"),
       Seq(
-        r("Int64", VA.int64)(SInt64),
-        r("Text", VA.text)(SText),
+        r("Int64", VA.int64)(SInt64.apply),
+        r("Text", VA.text)(SText.apply),
         r("Int64 Option List", VA.list(VA.optional(VA.int64))) { loi =>
-          SList(loi.map(oi => SOptional(oi map SInt64)).to(FrontStack))
+          SList(loi.map(oi => SOptional(oi map SInt64.apply)).to(FrontStack))
         },
       ) ++
         comparableCoidsGen.zipWithIndex.map { case (g, ix) =>
-          (s"ContractId $ix", g map SContractId)
+          (s"ContractId $ix", g map SContractId.apply)
         }: _*
     )
   }
@@ -107,7 +107,7 @@ class OrderingSpec
   "txn Value Ordering" should {
     import Value.{ContractId => Cid}
     implicit val svalueOrd: Order[SValue] = Order fromScalaOrdering Ordering
-    implicit val cidOrd: Order[Cid] = svalueOrd contramap SContractId
+    implicit val cidOrd: Order[Cid] = svalueOrd contramap SContractId.apply
 
     "match global ContractId ordering" in forEvery(Table("gen", comparableCoidsGen: _*)) {
       coidGen =>
@@ -138,7 +138,7 @@ class OrderingSpec
       val cid43 = Value.ContractId.V2(local2, suffix3)
 
       val List(vCid10, vCid11, vCid12, vCid21, vCid30, vCid31, vCid32, vCid41, vCid43) =
-        List(cid10, cid11, cid12, cid21, cid30, cid31, cid32, cid41, cid43).map(SContractId)
+        List(cid10, cid11, cid12, cid21, cid30, cid31, cid32, cid41, cid43).map(SContractId.apply)
 
       val negativeTestCases =
         Table(

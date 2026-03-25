@@ -6,11 +6,10 @@ package language
 
 import scala.math.Ordered.orderingToOrdered
 
-
 final case class LanguageVersion private[lf] (
-                                          major: LanguageVersion.Major,
-                                          minor: LanguageVersion.Minor,
-                                        ) extends Ordered[LanguageVersion] {
+    major: LanguageVersion.Major,
+    minor: LanguageVersion.Minor,
+) extends Ordered[LanguageVersion] {
 
   def pretty = toString
 
@@ -18,21 +17,20 @@ final case class LanguageVersion private[lf] (
 
   def isDevVersion: Boolean = minor.isDevVersion
 
-  override def compare(that: LanguageVersion): Int = {
+  override def compare(that: LanguageVersion): Int =
     (this.major, this.minor).compare((that.major, that.minor))
-  }
 }
 
 object LanguageVersion extends LanguageFeaturesGenerated {
   private[this] lazy val V2NumericRegex = """2\.(\d+)(?:-rc(\d+))?""".r
 
-  def assertFromStringUnchecked(str: String): LanguageVersion = data.assertRight(fromStringUnchecked(str))
+  def assertFromStringUnchecked(str: String): LanguageVersion =
+    data.assertRight(fromStringUnchecked(str))
 
-  /**
-   * Unchecked because it does not check if the parsed version "exists" (if you pass it 2.n it will succeed, even if
-   * 2.n is not released yet
-   */
-  def fromStringUnchecked(str: String): Either[String, LanguageVersion] = {
+  /** Unchecked because it does not check if the parsed version "exists" (if you pass it 2.n it will
+    * succeed, even if 2.n is not released yet
+    */
+  def fromStringUnchecked(str: String): Either[String, LanguageVersion] =
     str match {
       case "2.dev" =>
         Right(LanguageVersion(Major.V2, Minor.Dev))
@@ -53,14 +51,15 @@ object LanguageVersion extends LanguageFeaturesGenerated {
       case _ =>
         Left(s"Unsupported LF version: '$str'. Expected '2.dev', '2.n', or '2.n-rcm'")
     }
-  }
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 
   def fromString(str: String): Either[String, LanguageVersion] =
     (allLegacyLfVersions ++ allLfVersions)
       .find(_.toString == str)
-      .toRight(s"Failed to parse ${str}, it is not supported (supported non-legacy versions are ${allLfVersions})")
+      .toRight(
+        s"Failed to parse $str, it is not supported (supported non-legacy versions are $allLfVersions)"
+      )
 
   // TODO: remove after https://github.com/digital-asset/daml/issues/22403
   def supportsPackageUpgrades(lv: LanguageVersion): Boolean =
@@ -70,15 +69,14 @@ object LanguageVersion extends LanguageFeaturesGenerated {
     }
 
   // TODO: remove after feature https://github.com/digital-asset/daml/issues/22403
-  def allUpToVersion(version: LanguageVersion): VersionRange.Inclusive[LanguageVersion] = {
+  def allUpToVersion(version: LanguageVersion): VersionRange.Inclusive[LanguageVersion] =
     version.major match {
       case Major.V2 => VersionRange(v2_1, version)
       case _ => throw new IllegalArgumentException(s"${version.major.pretty} not supported")
     }
-  }
 
   sealed abstract class Major(val major: Int)
-    extends Product
+      extends Product
       with Serializable
       with Ordered[Major] {
     val pretty = major.toString
@@ -108,9 +106,9 @@ object LanguageVersion extends LanguageFeaturesGenerated {
   }
 
   final case class Feature(
-                            name: String,
-                            versionRange: VersionRange[LanguageVersion],
-                          ) {
+      name: String,
+      versionRange: VersionRange[LanguageVersion],
+  ) {
     def enabledIn(lv: LanguageVersion): Boolean = versionRange.contains(lv)
   }
 
@@ -120,7 +118,7 @@ object LanguageVersion extends LanguageFeaturesGenerated {
     def fromString(str: String): Either[String, Major] =
       allMajors
         .find(_.pretty == str)
-        .toRight(s"${str} is not supported, supported majors: ${allMajors}")
+        .toRight(s"$str is not supported, supported majors: $allMajors")
 
     case object V1 extends Major(1)
 
@@ -136,7 +134,7 @@ object LanguageVersion extends LanguageFeaturesGenerated {
         .map(_.minor)
         .find(_.pretty == str)
         .toRight(
-          s"${str} is not supported, supported minors: ${(allLfVersions ++ allLegacyLfVersions).map(_.minor)}"
+          s"$str is not supported, supported minors: ${(allLfVersions ++ allLegacyLfVersions).map(_.minor)}"
         )
 
     final case class Stable(version: Int) extends Minor {
@@ -144,7 +142,7 @@ object LanguageVersion extends LanguageFeaturesGenerated {
     }
 
     final case class Staging(version: Int, revision: Int) extends Minor {
-      override def pretty: String = s"${version}-rc${revision}"
+      override def pretty: String = s"$version-rc$revision"
     }
 
     case object Dev extends Minor {

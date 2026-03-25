@@ -102,6 +102,7 @@ class MediatorReplicaManager(
     adminServiceRegistry.addServiceU(scanService.serviceDescriptor)
     if (isActive) {
       // we intentionally transition to active here to have it bring up the mediator runtime for the active instance
+      setInitialState(ReplicaState.Init)
       setActive()
     } else {
       // for passive instances we don't want the transition to occur so just set its initialization state

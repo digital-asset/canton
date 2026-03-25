@@ -159,9 +159,6 @@ class LoadBalancedHAParticipantIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4S1M1_Manual
       .addConfigTransforms(ConfigTransforms.addMonitoringEndpointAllNodes*)
-      .addConfigTransform(
-        ConfigTransforms.enableReplicatedParticipants(participant1Name, participant2Name)
-      )
       .addConfigTransform(addRemoteLoadBalancedParticipant)
       // Increase the timeout because the individual tests start even before the external processes are fully spined up
       // which can add enough delay to fail the test under the default timeout

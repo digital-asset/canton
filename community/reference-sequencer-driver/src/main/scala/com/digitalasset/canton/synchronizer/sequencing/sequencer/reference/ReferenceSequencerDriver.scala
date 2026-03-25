@@ -91,7 +91,6 @@ class ReferenceSequencerDriver(
         .map { requests =>
           implicit val traceContext: TraceContext =
             TraceContext.ofBatch("reference-driver-requests-batch")(requests)(logger)
-          logger.debug("Storing batch of requests")
           traceContext -> batchRequests(
             sequencerId,
             timeProvider.nowInMicrosecondsSinceEpoch,
@@ -100,7 +99,7 @@ class ReferenceSequencerDriver(
             traceContext,
           )
         }
-        .map { case (tc, req) =>
+        .mapAsync(parallelism = config.writeParallelism) { case (tc, req) =>
           implicit val traceContext: TraceContext = tc
           store
             .insertRequest(
@@ -111,6 +110,7 @@ class ReferenceSequencerDriver(
                 s"Stored batch of requests"
               )
             )
+            .unwrap
         }
         .toMat(Sink.ignore)(Keep.both),
       errorLogMessagePrefix = "Fatally failed to handle state changes",
@@ -223,6 +223,7 @@ object ReferenceSequencerDriver {
       maxBlockSize: Int = 500,
       maxBlockCutMillis: Int = 1,
       maxQueryBlockCount: Int = 100,
+      writeParallelism: Int = 1,
       emptyBlockIntervalMillis: Option[Int] = Some(500),
   )
 

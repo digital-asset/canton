@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.backend.postgresql
 import com.digitalasset.canton.platform.store.backend.common.Field
 import com.digitalasset.canton.platform.store.interning.StringInterning
 
-private[postgresql] trait PGStringArrayBase[FROM, TO] extends Field[FROM, TO, String] {
+private[postgresql] trait PGStringArrayBase[From, To] extends Field[From, To, String] {
   override def selectFieldExpression(inputFieldName: String): String =
     s"string_to_array($inputFieldName, '|')"
 
@@ -19,24 +19,24 @@ private[postgresql] trait PGStringArrayBase[FROM, TO] extends Field[FROM, TO, St
   }
 }
 
-private[postgresql] final case class PGStringArray[FROM](
-    extract: StringInterning => FROM => Iterable[String]
-) extends PGStringArrayBase[FROM, Iterable[String]] {
+private[postgresql] final case class PGStringArray[From](
+    extract: StringInterning => From => Iterable[String]
+) extends PGStringArrayBase[From, Iterable[String]] {
   override def convert: Iterable[String] => String = convertBase
 }
 
-private[postgresql] final case class PGSmallint[FROM](
-    extract: StringInterning => FROM => Int
-) extends Field[FROM, Int, java.lang.Integer] {
+private[postgresql] final case class PGSmallint[From](
+    extract: StringInterning => From => Int
+) extends Field[From, Int, java.lang.Integer] {
   override def selectFieldExpression(inputFieldName: String): String =
     s"$inputFieldName::smallint"
 
   override def convert: Int => Integer = Int.box
 }
 
-private[postgresql] final case class PGSmallintOptional[FROM](
-    extract: StringInterning => FROM => Option[Int]
-) extends Field[FROM, Option[Int], java.lang.Integer] {
+private[postgresql] final case class PGSmallintOptional[From](
+    extract: StringInterning => From => Option[Int]
+) extends Field[From, Option[Int], java.lang.Integer] {
   override def selectFieldExpression(inputFieldName: String): String =
     s"$inputFieldName::smallint"
 

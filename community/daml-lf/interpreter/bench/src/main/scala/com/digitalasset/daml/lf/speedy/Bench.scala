@@ -4,7 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.testing.parser.*
@@ -16,20 +17,23 @@ import scala.collection.immutable.ArraySeq
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MICROSECONDS) // Changed to microseconds here
-class Bench {
+class Bench extends NamedLogging {
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
+  override def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
   implicit def parserParameters: ParserParameters[this.type] =
     ParserParameters.default
 
   private[this] val metricPlugins = {
-    val config = Engine.DevEngine.config
+    val config = Engine.DevConfig
 
     Seq(new StepCount(config.iterationsBetweenInterruptions), new TxNodeCount)
   }
+
+  import TraceContext.Implicits.Empty.emptyTraceContext
+  private[this] val machineLogger = MachineLogger()
 
   private[this] def defaultPackageId = parserParameters.defaultPackageId
 
@@ -160,7 +164,12 @@ class Bench {
   @Benchmark
   def bench(counters: Bench.EventCounter): SValue = {
     counters.reset()
-    machine = Speedy.Machine.fromPureSExpr(compiledPackages, sexpr, metricPlugins = metricPlugins)
+    machine = Speedy.Machine.fromPureSExpr(
+      compiledPackages,
+      sexpr,
+      metricPlugins = metricPlugins,
+      logger = machineLogger,
+    )
     machine.setExpressionToEvaluate(sexpr)
     machine.run() match {
       case SResult.SResultFinal(v) =>

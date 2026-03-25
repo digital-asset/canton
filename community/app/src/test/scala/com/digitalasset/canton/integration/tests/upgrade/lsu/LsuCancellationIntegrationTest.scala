@@ -117,7 +117,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
     connectedSynchronizer.ephemeral.recordOrderPublisher.getSynchronizerSuccessor shouldBe successor
 
     connectedSynchronizer.synchronizerCrypto.currentSnapshotApproximation.futureValueUS.ipsSnapshot
-      .synchronizerUpgradeOngoing()
+      .announcedLsu()
       .futureValueUS
       .map { case (successor, _) => successor } shouldBe successor
   }
@@ -127,7 +127,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       import env.*
 
       fixture1 = Fixture(
-        currentPSId = daId,
+        currentPsid = daId,
         upgradeTime = upgradeTime1,
         oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1)),
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2)),
@@ -138,7 +138,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       )
 
       fixture2 = Fixture(
-        currentPSId = daId,
+        currentPsid = daId,
         upgradeTime = upgradeTime2,
         oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1)),
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer3), Seq(mediator3)),
@@ -153,8 +153,8 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       // Some assertions below don't make sense if the value is too low
       dynamicSynchronizerParameters.decisionTimeout.asJava.getSeconds should be > 10L
 
-      daId should not be fixture1.newPSId
-      fixture1.newPSId should not be fixture2.newPSId
+      daId should not be fixture1.newPsid
+      fixture1.newPsid should not be fixture2.newPsid
 
       val alice = participant1.parties.enable("Alice")
       val bank = participant1.parties.enable("Bank")
@@ -182,7 +182,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       clock.advanceTo(upgradeTime1.minusSeconds(5))
 
       fixture1.oldSynchronizerOwners.foreach(
-        _.topology.lsu.announcement.revoke(fixture1.newPSId, fixture1.upgradeTime)
+        _.topology.lsu.announcement.revoke(fixture1.newPsid, fixture1.upgradeTime)
       )
 
       eventually()(checkLsuOngoing(None))
@@ -190,7 +190,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       // LSU traffic state returns an error
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         sequencer1.traffic_control.get_lsu_state(),
-        _.shouldBeCantonErrorCode(SequencerError.NoOngoingLsu),
+        _.shouldBeCantonErrorCode(SequencerError.NoLsuAnnounced),
       )
 
       sequencer2.stop()
@@ -208,7 +208,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       // LSU traffic state returns an error
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         sequencer1.traffic_control.get_lsu_state(),
-        _.shouldBeCantonErrorCode(SequencerError.NoOngoingLsu),
+        _.shouldBeCantonErrorCode(SequencerError.NoLsuAnnounced),
       )
 
       // With a cancelled LSU there's no LSU tick, so we need to create some traffic
@@ -242,7 +242,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       transferTraffic(Some(fixture2))
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture2.newPSId)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture2.newPsid)) shouldBe true
       }
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
@@ -256,7 +256,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
 
       // Bob is known
       participant1.topology.party_to_participant_mappings
-        .list(fixture2.newPSId, filterParty = bob.filterString)
+        .list(fixture2.newPsid, filterParty = bob.filterString)
         .loneElement
     }
   }

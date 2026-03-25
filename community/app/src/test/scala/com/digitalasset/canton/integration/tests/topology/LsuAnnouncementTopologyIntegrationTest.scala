@@ -27,7 +27,11 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
-import com.digitalasset.canton.topology.TopologyManagerError.InvalidSynchronizerSuccessor
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  InvalidSynchronizerSuccessor,
+  LsuSequencerSuccessorInvalidSuccessorPsid,
+  NoLsuAnnounced,
+}
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
@@ -58,18 +62,18 @@ final class LsuAnnouncementTopologyIntegrationTest
         )
       )
       .withSetup { env =>
-        latestSuccessorPSId.set(Some(env.daId))
+        latestSuccessorPsid.set(Some(env.daId))
       }
 
   /*
-  PSId of the successor needs to be strictly increasing with different announcements.
+  Psid of the successor needs to be strictly increasing with different announcements.
   This allows to track the latest used.
    */
-  private val latestSuccessorPSId = new AtomicReference[Option[PhysicalSynchronizerId]](None)
+  private val latestSuccessorPsid = new AtomicReference[Option[PhysicalSynchronizerId]](None)
 
-  private def allocateSuccessorPSId(): PhysicalSynchronizerId =
-    latestSuccessorPSId.updateAndGet { existing =>
-      Some(existing.value.copy(serial = existing.value.serial.increment.toNonNegative))
+  private def allocateSuccessorPsid(): PhysicalSynchronizerId =
+    latestSuccessorPsid.updateAndGet { existing =>
+      Some(existing.value.incrementSerial)
     }.value
 
   private lazy val upgradeTime = CantonTimestamp.now().plusSeconds(3600)
@@ -79,10 +83,10 @@ final class LsuAnnouncementTopologyIntegrationTest
 
     // Note: this test case documents the behavior. Changing upgrade time might be a useful UX feature, but it complicates a few things.
 
-    val successorPSId = allocateSuccessorPSId()
+    val successorPsid = allocateSuccessorPsid()
     synchronizerOwners1.foreach { owner =>
       owner.topology.lsu.announcement.propose(
-        successorPhysicalSynchronizerId = successorPSId,
+        successorPhysicalSynchronizerId = successorPsid,
         upgradeTime = upgradeTime,
       )
     }
@@ -90,7 +94,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       synchronizerOwners1.foreach { owner =>
         owner.topology.lsu.announcement.propose(
-          successorPhysicalSynchronizerId = successorPSId,
+          successorPhysicalSynchronizerId = successorPsid,
           upgradeTime = upgradeTime.plusSeconds(3600),
         )
       },
@@ -104,10 +108,10 @@ final class LsuAnnouncementTopologyIntegrationTest
   "upgrade announcement does not permit further topology transactions" in { implicit env =>
     import env.*
 
-    val successorPSId = allocateSuccessorPSId()
+    val successorPsid = allocateSuccessorPsid()
     synchronizerOwners1.foreach { owner =>
       owner.topology.lsu.announcement.propose(
-        successorPhysicalSynchronizerId = successorPSId,
+        successorPhysicalSynchronizerId = successorPsid,
         upgradeTime = upgradeTime,
       )
     }
@@ -126,7 +130,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     import env.*
     synchronizerOwners1.foreach(
       _.topology.lsu.announcement.revoke(
-        successorPhysicalSynchronizerId = latestSuccessorPSId.get().value,
+        successorPhysicalSynchronizerId = latestSuccessorPsid.get().value,
         upgradeTime = upgradeTime,
       )
     )
@@ -156,10 +160,10 @@ final class LsuAnnouncementTopologyIntegrationTest
     )
 
     // announce the upgrade to prepare for the sequencer connection announcements
-    val successorPSId = allocateSuccessorPSId()
+    val successorPsid = allocateSuccessorPsid()
     synchronizerOwners1.foreach(
       _.topology.lsu.announcement.propose(
-        successorPhysicalSynchronizerId = successorPSId,
+        successorPhysicalSynchronizerId = successorPsid,
         upgradeTime = upgradeTime,
       )
     )
@@ -168,7 +172,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
       endpoints = NonEmpty(Seq, new URI("https://localhost:5000")),
-      daId,
+      successorSynchronizerId = successorPsid,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
     // check that participant1 automatically created a synchronizer config for the successor synchronizer
@@ -180,14 +184,14 @@ final class LsuAnnouncementTopologyIntegrationTest
       .get(daName, UnknownPhysicalSynchronizerId)
       .toOption shouldBe None
     connectionConfigStore(participant2)
-      .get(daName, KnownPhysicalSynchronizerId(successorPSId))
+      .get(daName, KnownPhysicalSynchronizerId(successorPsid))
       .toOption shouldBe None
 
     // sequencer2 announces its connection details for the successor synchronizer
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
       endpoints = NonEmpty(Seq, new URI("http://localhost:6000"), new URI("http://localhost:7000")),
-      daId,
+      successorSynchronizerId = successorPsid,
     )
 
     // check that participant2 automatically created a synchronizer config for the successor synchronizer
@@ -203,7 +207,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
       endpoints = NonEmpty(Seq, new URI("http://localhost:6000")),
-      daId,
+      successorSynchronizerId = successorPsid,
     )
     // check that participant2 updated the synchronizer config for the successor synchronizer
     // for sequencer2
@@ -213,7 +217,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
       endpoints = NonEmpty(Seq, new URI("https://localhost:5005")),
-      daId,
+      successorSynchronizerId = successorPsid,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
 
@@ -256,7 +260,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       // unfrozen successor synchronizer
       synchronizerOwners1.foreach(
         _.topology.lsu.announcement.revoke(
-          latestSuccessorPSId.get().value,
+          latestSuccessorPsid.get().value,
           upgradeTime = upgradeTime,
         )
       )
@@ -293,12 +297,12 @@ final class LsuAnnouncementTopologyIntegrationTest
       }
   }
 
-  "successor PSId should increase between announcements" in { implicit env =>
+  "successor psid should increase between announcements" in { implicit env =>
     import env.*
 
-    val successor1 = allocateSuccessorPSId()
-    val successor2 = allocateSuccessorPSId()
-    val successor3 = allocateSuccessorPSId()
+    val successor1 = allocateSuccessorPsid()
+    val successor2 = allocateSuccessorPsid()
+    val successor3 = allocateSuccessorPsid()
 
     Seq(successor1, successor2).foreach { successor =>
       synchronizerOwners1.foreach { owner =>
@@ -341,6 +345,120 @@ final class LsuAnnouncementTopologyIntegrationTest
     )
   }
 
+  "sequencer successors should be for future synchronizers" in { implicit env =>
+    import env.*
+
+    val successor1 = allocateSuccessorPsid()
+    val successor2 = allocateSuccessorPsid()
+    val successor3 = allocateSuccessorPsid()
+
+    // (sequencer id, successor id, port)
+    def listKnownSuccessors(
+        filterSuccessorPhysicalSynchronizerId: String = ""
+    ): (SequencerId, PhysicalSynchronizerId, Int) = {
+      val m = sequencer1.topology.lsu.sequencer_successors
+        .list(
+          store = daId,
+          filterSuccessorPhysicalSynchronizerId = filterSuccessorPhysicalSynchronizerId,
+        )
+        .filter(_.item.sequencerId == sequencer1.id)
+        .loneElement
+        .item
+      (m.sequencerId, m.successorPsid, m.connection.endpoints.forgetNE.loneElement.port.unwrap)
+    }
+
+    synchronizerOwners1.foreach { owner =>
+      owner.topology.lsu.announcement.propose(
+        successorPhysicalSynchronizerId = successor1,
+        upgradeTime = upgradeTime,
+      )
+    }
+
+    // Wrong successor
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      sequencer1.topology.lsu.sequencer_successors.propose_successor(
+        sequencer1.id,
+        endpoints = NonEmpty(Seq, new URI("https://localhost:5001")),
+        successorSynchronizerId = successor2,
+        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      ),
+      _.errorMessage should include(
+        LsuSequencerSuccessorInvalidSuccessorPsid
+          .Reject(
+            sequencer1.id,
+            successorPsid = successor2,
+            expectedSuccessorPsid = successor1,
+          )
+          .cause
+      ),
+    )
+
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
+      sequencer1.id,
+      endpoints = NonEmpty(Seq, new URI("https://localhost:5001")),
+      successorSynchronizerId = successor1,
+      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+    )
+    listKnownSuccessors() shouldBe (sequencer1.id, successor1, 5001)
+
+    synchronizerOwners1.foreach { owner =>
+      owner.topology.lsu.announcement.revoke(
+        successorPhysicalSynchronizerId = successor1,
+        upgradeTime = upgradeTime,
+      )
+    }
+
+    // No announced LSU
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      sequencer1.topology.lsu.sequencer_successors.propose_successor(
+        sequencer1.id,
+        endpoints = NonEmpty(Seq, new URI("https://localhost:5002")),
+        successorSynchronizerId = successor2,
+        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      ),
+      _.errorMessage should include(NoLsuAnnounced.Failure().cause),
+    )
+
+    synchronizerOwners1.foreach { owner =>
+      owner.topology.lsu.announcement.propose(
+        successorPhysicalSynchronizerId = successor2,
+        upgradeTime = upgradeTime,
+      )
+    }
+
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
+      sequencer1.id,
+      endpoints = NonEmpty(Seq, new URI("https://localhost:5002")),
+      successorSynchronizerId = successor2,
+      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+    )
+    listKnownSuccessors() shouldBe (sequencer1.id, successor2, 5002)
+
+    // Update to a new value
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
+      sequencer1.id,
+      endpoints = NonEmpty(Seq, new URI("https://localhost:5003")),
+      successorSynchronizerId = successor2,
+      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+    )
+    listKnownSuccessors() shouldBe (sequencer1.id, successor2, 5003)
+
+    // Override for the new announcement
+    synchronizerOwners1.foreach { owner =>
+      owner.topology.lsu.announcement.propose(
+        successorPhysicalSynchronizerId = successor3,
+        upgradeTime = upgradeTime,
+      )
+    }
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
+      sequencer1.id,
+      endpoints = NonEmpty(Seq, new URI("https://localhost:5004")),
+      successorSynchronizerId = successor3,
+      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+    )
+    listKnownSuccessors() shouldBe (sequencer1.id, successor3, 5004)
+  }
+
   private def connectionConfigStore(participant: LocalParticipantReference) =
     participant.underlying.value.sync.synchronizerConnectionConfigStore
 
@@ -356,7 +474,7 @@ final class LsuAnnouncementTopologyIntegrationTest
         configStore.get(daName, KnownPhysicalSynchronizerId(daId)).value
       currentConfig.status shouldBe SynchronizerConnectionConfigStore.Active
       val successorConfig =
-        configStore.get(daName, KnownPhysicalSynchronizerId(latestSuccessorPSId.get().value)).value
+        configStore.get(daName, KnownPhysicalSynchronizerId(latestSuccessorPsid.get().value)).value
       successorConfig.status shouldBe SynchronizerConnectionConfigStore.LsuTarget
 
       val currentSequencers = currentConfig.config.sequencerConnections.aliasToConnection.map {

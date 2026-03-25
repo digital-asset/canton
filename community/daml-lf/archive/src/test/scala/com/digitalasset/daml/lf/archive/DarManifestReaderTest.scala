@@ -3,12 +3,12 @@
 
 package com.digitalasset.daml.lf.archive
 
-import java.io.{ByteArrayInputStream, InputStream}
-import java.nio.charset.Charset
-
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.io.{ByteArrayInputStream, InputStream}
+import java.nio.charset.Charset
 
 class DarManifestReaderTest extends AnyWordSpec with Matchers with Inside {
 

@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto.sync
 
 import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithLongTermKeys
-import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
+import com.digitalasset.canton.topology.DefaultTestIdentities.{participant1, participant2}
 import com.digitalasset.canton.topology.TestingTopology
 import com.digitalasset.canton.util.ResourceUtil
 import org.scalatest.wordspec.AnyWordSpec
@@ -62,6 +62,29 @@ class SyncCryptoWithLongTermKeysTest extends AnyWordSpec with SyncCryptoTest {
           )
           .valueOrFail("verification failed")
           .futureValueUS
+
+        syncCryptoVerifierP1
+          .verifyKeyUsage(
+            testSnapshot,
+            participant1.member,
+            signature.signedBy,
+            signature.signatureDelegation,
+            defaultUsage,
+          )
+          .valueOrFail("verification failed")
+          .futureValueUS
+
+        syncCryptoVerifierP1
+          .verifyKeyUsage(
+            testSnapshot,
+            participant2.member,
+            signature.signedBy,
+            signature.signatureDelegation,
+            defaultUsage,
+          )
+          .futureValueUS
+          .isLeft shouldBe true
+
       }
     }
 

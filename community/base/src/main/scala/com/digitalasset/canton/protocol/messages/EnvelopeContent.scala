@@ -73,6 +73,8 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
           RootHashMessage.fromProtoV30(SerializedRootHashMessagePayload.fromByteString)(messageP)
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.LsuSequencingTestMessage(messageP) =>
+          LsuSequencingTestMessage.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
       }): ParsingResult[UnsignedProtocolMessage]
     } yield EnvelopeContent(content)(rpv)
@@ -105,6 +107,8 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentProtocolMessage(messageP) =>
           AcsCommitmentProtocolMessage.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.LsuSequencingTestMessage(messageP) =>
+          LsuSequencingTestMessage.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
       }): ParsingResult[UnsignedProtocolMessage]
     } yield EnvelopeContent(content)(rpv)

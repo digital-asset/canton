@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct}
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SExpr._
@@ -16,9 +17,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 
@@ -407,13 +406,13 @@ class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenP
       val fun2 = e"""(\(x: Int64) -> 42)"""
 
       def tApps(t: Type, args: Type*) =
-        args.foldLeft(t)(TApp)
+        args.foldLeft(t)(TApp.apply)
 
       def eApps(e: Expr, args: Expr*) =
-        args.foldLeft(e)(EApp)
+        args.foldLeft(e)(EApp.apply)
 
       def etApps(e: Expr, types: Type*) =
-        types.foldLeft(e)(ETyApp)
+        types.foldLeft(e)(ETyApp.apply)
 
       def text(s: String) = EBuiltinLit(BLText(s))
 
@@ -685,6 +684,7 @@ class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenP
       Speedy.Machine.fromPureSExpr(
         compiledPackages,
         SEApp(sexpr, (parties ++ contractIds).to(ArraySeq)),
+        logger = MachineLogger()
       )
     machine.runPure()
   }

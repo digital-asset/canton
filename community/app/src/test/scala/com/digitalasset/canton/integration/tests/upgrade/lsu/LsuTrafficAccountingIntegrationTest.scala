@@ -23,6 +23,7 @@ import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlo
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
@@ -202,7 +203,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       // Before upgrade time has been reached on the old sequencer we expect an error
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         sequencer1.traffic_control.get_lsu_state(),
-        _.shouldBeCantonErrorCode(SequencerError.NoOngoingLsu),
+        _.shouldBeCantonErrorCode(SequencerError.NoLsuAnnounced),
       )
 
       performSynchronizerNodesLsu(fixture)
@@ -226,7 +227,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       environment.simClock.value.advance(Duration.ofSeconds(1))
 
       // Participants should not be able to connect to the new sequencers before the traffic state has been set
-      participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe false
+      participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe false
 
       clue("check that traffic state is not available on new sequencers before it's set") {
         loggerFactory.assertThrowsAndLogs[CommandFailure](
@@ -241,8 +242,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
           .valueOrFail("Failed to parse traffic state from sequencer1")
 
         val missingParticipant1 = LsuTrafficState(oldTrafficStateSeq1Parsed.membersTraffic.filter {
-          case (member, _) =>
-            member != participant1.id.member
+          case (member, _) => member != participant1.id.member
         })(LsuTrafficState.protocolVersionRepresentativeFor(testedProtocolVersion)).toByteString
 
         loggerFactory.assertThrowsAndLogs[CommandFailure](
@@ -268,8 +268,10 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
 
       eventually(maxPollInterval = 100.millis) {
         environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
       }
+
+      waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
       logger.debug("Comparing traffic states on old and new sequencers")
       val members = Seq(participant1.id.member, participant2.id.member, mediator1.id.member)

@@ -4,25 +4,25 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.engine.{Error => EE}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.engine.Error as EE
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction._
-import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
-import org.scalatest.Inside.inside
-import org.scalatest.{Assertion, ParallelTestExecution}
-import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.speedy.ValueTranslator
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import org.scalatest.wordspec.AsyncWordSpec
+import com.digitalasset.daml.lf.transaction.{CreationTime, *}
+import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.*
+import org.scalatest.Inside.inside
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, ParallelTestExecution}
 
 import scala.collection.immutable
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ExecutionContext, Future}
 
 // Split the Upgrade unit tests over four suites, which seems to be the sweet
 // spot (~95s instead of ~185s runtime)
@@ -33,15 +33,16 @@ class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2
 
 /** A test suite to run the UpgradesMatrix matrix directly in the engine
   *
-  * This runs a lot more quickly (~35s on a single suite) than UpgradesMatrixIT
-  * (~5000s) because it does not need to spin up Canton, so we can use this for
-  * sanity checking before running UpgradesMatrixIT.
+  * This runs a lot more quickly (~35s on a single suite) than UpgradesMatrixIT (~5000s) because it
+  * does not need to spin up Canton, so we can use this for sanity checking before running
+  * UpgradesMatrixIT.
   */
 class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: Int)
     extends AsyncWordSpec
     with ParallelTestExecution
     with Matchers
-    with UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata), Unit] {
+    with UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata), Unit]
+    with SuppressingLogging {
   override val cases = upgradesMatrixCases
   defineTestCases()
 
@@ -49,9 +50,8 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   override def createTestCase(
       name: String,
       assertion: ExecutionContext => Future[Assertion],
-  ): Unit = {
+  ): Unit =
     name in assertion(executionContext)
-  }
 
   def toContractId(s: String): ContractId =
     ContractId.V1.assertBuild(crypto.Hash.hashPrivateKey(s), Bytes.assertFromString("00"))
@@ -70,7 +70,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
       )
     )
 
-  def normalize(value: Value, typ: Ast.Type): Value = {
+  def normalize(value: Value, typ: Ast.Type): Value =
     new ValueTranslator(
       cases.compiledPackages.pkgInterface,
       forbidLocalContractIds = true,
@@ -80,9 +80,8 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
       case Left(err) => throw new RuntimeException(s"Normalization failed: $err")
       case Right(sValue) => sValue.toNormalizedValue
     }
-  }
 
-  def newEngine() = new Engine(cases.engineConfig)
+  def newEngine() = new Engine(cases.engineConfig, loggerFactory)
 
   override def execute(
       setupData: UpgradesMatrixCases.SetupData[Unit],
@@ -217,10 +216,10 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   override def assertResultMatchesExpectedOutcome(
       result: Either[Error, (SubmittedTransaction, Transaction.Metadata)],
       expectedOutcome: UpgradesMatrixCases.ExpectedOutcome,
-  )(implicit ec: ExecutionContext): Assertion = {
+  )(implicit ec: ExecutionContext): Assertion =
     expectedOutcome match {
       case UpgradesMatrixCases.ExpectSuccess =>
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       case UpgradesMatrixCases.ExpectUpgradeError =>
         inside(result) { case Left(EE.Interpretation(EE.Interpretation.DamlException(error), _)) =>
           error shouldBe a[IE.Upgrade]
@@ -252,5 +251,4 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
           error shouldBe a[EE.Interpretation.Internal]
         }
     }
-  }
 }

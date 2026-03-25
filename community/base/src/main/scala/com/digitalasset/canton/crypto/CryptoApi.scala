@@ -309,6 +309,25 @@ trait SyncCryptoApi {
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit]
 
+  /** Verifies that the signature for the given member has been created using a valid signing key
+    *
+    * Note that this does not verify the signature itself. The method itself allows to prevalidate
+    * signatures such that expensive computations don't have to be performed in sequential steps.
+    *
+    * @param signedBy
+    *   should be set to signature.signedBy
+    * @param signatureDelegation
+    *   should be set to signature.signatureDelegation
+    */
+  def verifyKeyUsage(
+      signer: Member,
+      signedBy: Fingerprint,
+      signatureDelegation: Option[SignatureDelegation],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit]
+
   /** Verifies a list of `signatures` to be produced by active members of a `mediatorGroup`,
     * counting each member's signature only once. Returns `Right` when the `mediatorGroup`'s
     * threshold is met. Can be successful even if some signatures fail the check, logs the errors in

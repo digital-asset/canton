@@ -8,10 +8,8 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.mediator.v30.MediatorStatusServiceGrpc.MediatorStatusService
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.connection.GrpcApiInfoService
@@ -65,7 +63,7 @@ import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.time.{Clock, HasUptime, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.PSIdLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookup
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   InitialTopologySnapshotValidator,
@@ -74,8 +72,8 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -150,13 +148,15 @@ final case class MediatorNodeConfig(
 
   override def withDefaults(
       ports: Option[DefaultPorts]
-  ): MediatorNodeConfig = ports.fold(this)(ports =>
-    this
-      .focus(_.adminApi.internalPort)
-      .modify(ports.mediatorAdminApiPort.setDefaultPort)
+  ): MediatorNodeConfig =
+    ports
+      .fold(this)(ports =>
+        this
+          .focus(_.adminApi.internalPort)
+          .modify(ports.mediatorAdminApiPort.setDefaultPort)
+      )
       .focus(_.replication)
       .modify(ReplicationConfig.withDefaultO(storage, _))
-  )
 }
 
 class MediatorNodeBootstrap(
@@ -205,7 +205,7 @@ class MediatorNodeBootstrap(
     replicaManager.mediatorRuntime
       .flatMap(rt => Option.when(rt.mediator.topologyClient.psid == psid)(rt.mediator.timeTracker))
 
-  override protected lazy val lookupActivePSId: PSIdLookup =
+  override protected lazy val lookupActivePsid: PsidLookup =
     synchronizerId =>
       synchronizerTopologyManager
         .map(_.psid)
@@ -266,6 +266,22 @@ class MediatorNodeBootstrap(
         false, // this stage does not have auto-init
       )
       with GrpcMediatorInitializationService.Callback {
+
+    private val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+      clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
+      minimumProtocolVersion = Some(ProtocolVersion.minimum),
+      authConfig = parameters.sequencerClient.authToken,
+      keepAliveClientConfigO = parameters.sequencerClient.keepAliveClient,
+      member = mediatorId,
+      clock = clock,
+      crypto = crypto,
+      seedForRandomnessO = arguments.testingConfig.sequencerTransportSeed,
+      metrics = arguments.metrics.sequencerClient.connectionPool,
+      metricsContext = MetricsContext.Empty,
+      futureSupervisor = futureSupervisor,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+    )
 
     override def getAdminToken: Option[String] = Some(adminTokenDispenser.getCurrentToken.secret)
 
@@ -361,34 +377,40 @@ class MediatorNodeBootstrap(
         )
         EitherT.pure(InitializeMediatorResponse())
       } else {
-        val synchronizerAlias = SynchronizerAlias.tryCreate("synchronizer")
-        val sequencerInfoLoader = createSequencerInfoLoader()
         completeWithExternalUS {
           logger.info(
             s"Assigning mediator to ${request.synchronizerId} via sequencers ${request.sequencerConnections}"
           )
           for {
-            sequencerAggregatedInfo <- sequencerInfoLoader
-              .loadAndAggregateSequencerEndpoints(
-                synchronizerAlias,
-                Some(request.synchronizerId),
-                request.sequencerConnections,
-                request.sequencerConnectionValidation,
+            connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
+              connectionPoolFactory
+                .createFromOldConfig(
+                  request.sequencerConnections,
+                  expectedPsidO = None,
+                  tracingConfig = parameters.tracing,
+                  name = "temp",
+                )
+                .leftMap(_.toString)
+            )
+            _ <- connectionPool.start().leftMap(_.toString)
+            staticParameters = connectionPool.staticSynchronizerParametersO.getOrElse(
+              ErrorUtil.invalidState(
+                "a successfully started connection pool must have the static parameters defined"
               )
-              .leftMap(error => s"Error loading sequencer endpoint information: $error")
-
+            )
+            _ = connectionPool.close()
             _ <- CryptoHandshakeValidator
-              .validate(sequencerAggregatedInfo.staticSynchronizerParameters, cryptoConfig)
+              .validate(staticParameters, cryptoConfig)
               .toEitherT[FutureUnlessShutdown]
 
             configToStore = MediatorSynchronizerConfiguration(
               request.synchronizerId,
-              sequencerAggregatedInfo.staticSynchronizerParameters,
+              staticParameters,
               request.sequencerConnections,
             )
             _ <- EitherT.right(synchronizerConfigurationStore.saveConfiguration(configToStore))
           } yield (
-            sequencerAggregatedInfo.staticSynchronizerParameters,
+            staticParameters,
             request.synchronizerId,
           )
         }.map(_ => InitializeMediatorResponse())
@@ -475,16 +497,6 @@ class MediatorNodeBootstrap(
       }
   }
 
-  private def createSequencerInfoLoader() =
-    new SequencerInfoLoader(
-      timeouts = timeouts,
-      traceContextPropagation = parameters.tracing.propagation,
-      clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
-      minimumProtocolVersion = Some(ProtocolVersion.minimum),
-      dontWarnOnDeprecatedPV = parameters.dontWarnOnDeprecatedPV,
-      loggerFactory = loggerFactory,
-    )
-
   private def fetchSynchronizerConfigOrFail(
       configStore: MediatorSynchronizerConfigurationStore
   ): EitherT[FutureUnlessShutdown, String, MediatorSynchronizerConfiguration] =
@@ -509,8 +521,6 @@ class MediatorNodeBootstrap(
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
-    val synchronizerAlias = SynchronizerAlias(psid.uid.toLengthLimitedString)
-    val sequencerInfoLoader = createSequencerInfoLoader()
     def getSequencerConnectionFromStore: FutureUnlessShutdown[Option[SequencerConnections]] =
       synchronizerConfigurationStore.fetchConfiguration().map(_.map(_.sequencerConnections))
 
@@ -529,8 +539,6 @@ class MediatorNodeBootstrap(
       timeouts = timeouts,
       loggerFactory = synchronizerLoggerFactory,
     )
-
-    val useNewConnectionPool = parameters.sequencerClient.useNewConnectionPool
 
     val connectionPoolRef = new AtomicReference[Option[SequencerConnectionXPool]](None)
 
@@ -557,7 +565,7 @@ class MediatorNodeBootstrap(
             TopologyTransactionProcessor
               .createProcessorAndClientForSynchronizer(
                 synchronizerTopologyStore,
-                synchronizerUpgradeTime = None,
+                upgradeTimeFromPredecessor = None,
                 crypto.pureCrypto,
                 arguments.parameterConfig,
                 arguments.config.topology,
@@ -588,9 +596,7 @@ class MediatorNodeBootstrap(
       sequencerClientFactory = SequencerClientFactory(
         psid,
         syncCryptoWithOptionalSessionKeys,
-        crypto,
         parameters.sequencerClient,
-        parameters.tracing.propagation,
         arguments.testingConfig,
         staticSynchronizerParameters,
         timeouts,
@@ -611,38 +617,18 @@ class MediatorNodeBootstrap(
         parameters.loggingConfig,
         parameters.exitOnFatalFailures,
         synchronizerLoggerFactory,
-        ProtocolVersionCompatibility.supportedProtocols(parameters),
       )
 
       // we wait here until the sequencer becomes active. this allows to reconfigure the
       // sequencer client address
-      connectionPoolAndInfo <-
-        if (useNewConnectionPool)
-          GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValidWithPool(
-            connectionPoolFactory = connectionPoolFactory,
-            tracingConfig = parameters.tracing,
-            flagCloseable = this,
-            loadConfig = getSequencerConnectionFromStore,
-          )
-        else
-          for {
-            info <- GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValid(
-              sequencerInfoLoader,
-              this,
-              getSequencerConnectionFromStore,
-            )
-            dummyPool <- EitherT.fromEither[FutureUnlessShutdown](
-              connectionPoolFactory
-                .createFromOldConfig(
-                  sequencerConnections = info.sequencerConnections,
-                  expectedPSIdO = None,
-                  tracingConfig = parameters.tracing,
-                  name = "dummy",
-                )
-                .leftMap(error => error.toString)
-            )
-          } yield (dummyPool, info)
-      (connectionPool, info) = connectionPoolAndInfo
+      connectionPoolAndSequencerConnections <-
+        GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValidWithPool(
+          connectionPoolFactory = connectionPoolFactory,
+          tracingConfig = parameters.tracing,
+          flagCloseable = this,
+          loadConfig = getSequencerConnectionFromStore,
+        )
+      (connectionPool, sequencerConnections) = connectionPoolAndSequencerConnections
       _ = connectionPoolRef.set(Some(connectionPool))
 
       sequencerClient <- sequencerClientFactory
@@ -652,35 +638,24 @@ class MediatorNodeBootstrap(
           sendTrackerStore,
           RequestSigner(
             syncCryptoWithOptionalSessionKeys,
-            staticSynchronizerParameters.protocolVersion,
             loggerFactory,
           ),
-          info.sequencerConnections,
+          sequencerConnections,
           synchronizerPredecessor = None,
-          info.expectedSequencersO,
           connectionPool,
         )
         .leftMap(error => s"Failed to create sequencer client: $error")
 
       sequencerClientRef =
         GrpcSequencerConnectionService
-          .setup[MediatorSynchronizerConfiguration](mediatorId, useNewConnectionPool)(
+          .setup[MediatorSynchronizerConfiguration](
             adminServerRegistry,
             () => synchronizerConfigurationStore.fetchConfiguration(),
             config => synchronizerConfigurationStore.saveConfiguration(config),
             Lens[MediatorSynchronizerConfiguration, SequencerConnections](_.sequencerConnections)(
               connection => conf => conf.copy(sequencerConnections = connection)
             ),
-            RequestSigner(
-              syncCryptoWithOptionalSessionKeys,
-              staticSynchronizerParameters.protocolVersion,
-              loggerFactory,
-            ),
-            sequencerClientFactory,
-            sequencerInfoLoader,
             connectionPoolFactory,
-            synchronizerAlias,
-            psid,
             sequencerClient,
             parameters.tracing,
             loggerFactory,
@@ -701,7 +676,7 @@ class MediatorNodeBootstrap(
       )
       _ = topologyClient.setSynchronizerTimeTracker(timeTracker)
 
-      outboxQueue = new SynchronizerOutboxQueue(loggerFactory)
+      outboxQueue = new SynchronizerOutboxQueue(timeouts, loggerFactory)
 
       topologyManager = new SynchronizerTopologyManager(
         nodeId = mediatorId.uid,

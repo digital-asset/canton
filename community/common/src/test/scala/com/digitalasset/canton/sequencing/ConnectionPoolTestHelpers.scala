@@ -193,7 +193,7 @@ trait ConnectionPoolTestHelpers {
       minRestartConnectionDelay = poolDelays.minRestartDelay,
       maxRestartConnectionDelay = poolDelays.maxRestartDelay,
       warnConnectionValidationDelay = poolDelays.warnValidationDelay,
-      expectedPSIdO = expectedSynchronizerIdO,
+      expectedPsidO = expectedSynchronizerIdO,
     )
   }
 
@@ -404,8 +404,8 @@ protected object ConnectionPoolTestHelpers {
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
-    ): SequencerSubscriptionX[SequencerClientSubscriptionError] =
-      new SequencerSubscriptionX(
+    ): SequencerSubscriptionXImpl[SequencerClientSubscriptionError] =
+      new SequencerSubscriptionXImpl(
         connection = connection,
         member = member,
         startingTimestampO = None,
@@ -483,7 +483,7 @@ protected object ConnectionPoolTestHelpers {
 
     override def createFromOldConfig(
         sequencerConnections: SequencerConnections,
-        expectedPSIdO: Option[PhysicalSynchronizerId],
+        expectedPsidO: Option[PhysicalSynchronizerId],
         tracingConfig: TracingConfig,
         name: String,
     )(implicit

@@ -3,16 +3,16 @@
 
 package com.digitalasset.daml.lf.testing.parser
 
-import java.math.BigDecimal
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
+import java.math.BigDecimal
 import scala.collection.immutable.VectorMap
 import scala.language.implicitConversions
 
@@ -435,7 +435,7 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
     }
 
     "parse properly rounding Mode" in {
-      import java.math.RoundingMode._
+      import java.math.RoundingMode.*
 
       val testCases = Table(
         "string" -> "rounding mode",

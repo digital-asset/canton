@@ -5,7 +5,6 @@ package com.digitalasset.canton.util
 
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.crypto.{HashOps, HmacOps}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -33,7 +32,6 @@ trait ContractValidator {
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-      loggingContext: LoggingContext,
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
   /** Authenticate the contract hash by recomputing the contract id suffix and checking it the one
@@ -66,7 +64,6 @@ object ContractValidator {
     def authenticate(contract: FatContractInstance, targetPackageId: LfPackageId)(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
-        loggingContext: LoggingContext,
     ): EitherT[FutureUnlessShutdown, String, Unit] =
       for {
         contractIdVersion <- EitherT.fromEither[FutureUnlessShutdown](
@@ -143,7 +140,6 @@ object ContractValidator {
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
-        loggingContext: LoggingContext,
     ): EitherT[FutureUnlessShutdown, String, Unit] =
       EitherT.pure(())
 

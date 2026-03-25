@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   NoActiveSynchronizer,
   UnknownAlias,
   UnknownId,
-  UnknownPSId,
+  UnknownPsid,
 }
 import com.digitalasset.canton.participant.store.db.DbSynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.store.memory.InMemorySynchronizerConnectionConfigStore
@@ -47,7 +47,7 @@ import scala.concurrent.ExecutionContext
   *   Connection config for the synchronizer
   * @param status
   *   Status of the synchronizer
-  * @param configuredPSId
+  * @param configuredPsid
   *   Configured physical synchronizer id. Is unknown before the first connect/handshake is made.
   * @param predecessor
   *   Is defined iff the predecessor exists and the participant was connected to it.
@@ -55,7 +55,7 @@ import scala.concurrent.ExecutionContext
 final case class StoredSynchronizerConnectionConfig(
     config: SynchronizerConnectionConfig,
     status: SynchronizerConnectionConfigStore.Status,
-    configuredPSId: ConfiguredPhysicalSynchronizerId,
+    configuredPsid: ConfiguredPhysicalSynchronizerId,
     predecessor: Option[SynchronizerPredecessor],
 )
 
@@ -81,7 +81,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   def put(
       config: SynchronizerConnectionConfig,
       status: SynchronizerConnectionConfigStore.Status,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
@@ -92,7 +92,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     * for the (alias, physicalSynchronizerId).
     */
   def replace(
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       config: SynchronizerConnectionConfig,
   )(implicit
       traceContext: TraceContext
@@ -124,15 +124,15 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     */
   def get(
       alias: SynchronizerAlias,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
   ): Either[MissingConfigForSynchronizer, StoredSynchronizerConnectionConfig]
 
   /** Retrieves the config for a given id. Will return an
-    * [[SynchronizerConnectionConfigStore.UnknownPSId]] error if there is no config for id.
+    * [[SynchronizerConnectionConfigStore.UnknownPsid]] error if there is no config for id.
     */
   def get(
       psid: PhysicalSynchronizerId
-  ): Either[UnknownPSId, StoredSynchronizerConnectionConfig]
+  ): Either[UnknownPsid, StoredSynchronizerConnectionConfig]
 
   /** Retrieves the active connection for `alias`. Return an
     * [[SynchronizerConnectionConfigStore.Error]] if the alias is unknown or if no connection is
@@ -148,7 +148,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
         if (configs.sizeIs == 1)
           configs.head1.asRight
         else
-          AtMostOnePhysicalActive(alias, configs.map(_.configuredPSId).toSet).asLeft
+          AtMostOnePhysicalActive(alias, configs.map(_.configuredPsid).toSet).asLeft
     }
 
   /** Retrieves the active connection for `id`. Return an
@@ -168,21 +168,21 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     */
   def getAll(): Seq[StoredSynchronizerConnectionConfig]
 
-  /** Ensures a configured PSId can be the successor of another one.
+  /** Ensures a configured psid can be the successor of another one.
     */
   protected def predecessorCompatibilityCheck(
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   ): Either[Error, Unit] =
-    (configuredPSId.toOption, synchronizerPredecessor)
+    (configuredPsid.toOption, synchronizerPredecessor)
       .mapN((_, _))
-      .map { case (psid, SynchronizerPredecessor(predecessorPSId, _, _)) =>
+      .map { case (psid, SynchronizerPredecessor(predecessorPsid, _, _)) =>
         Either.cond(
-          psid.logical == predecessorPSId.logical,
+          psid.logical == predecessorPsid.logical,
           (),
           InconsistentPredecessorLogicalSynchronizerIds(
-            currentPSId = psid,
-            predecessorPSId = predecessorPSId,
+            currentPsid = psid,
+            predecessorPsid = predecessorPsid,
           ),
         )
       }
@@ -224,7 +224,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   /** Set the synchronizer configuration status */
   def setStatus(
       alias: SynchronizerAlias,
-      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
       status: SynchronizerConnectionConfigStore.Status,
   )(implicit
       traceContext: TraceContext
@@ -336,14 +336,14 @@ object SynchronizerConnectionConfigStore {
     */
   private[store] sealed trait ConfigIdentifier extends Product with Serializable
   private[store] object ConfigIdentifier {
-    final case class WithPSId(psid: PhysicalSynchronizerId) extends ConfigIdentifier {
+    final case class WithPsid(psid: PhysicalSynchronizerId) extends ConfigIdentifier {
       override def toString: String = psid.toString
     }
     final case class WithAlias(
         alias: SynchronizerAlias,
-        configuredPSID: ConfiguredPhysicalSynchronizerId,
+        configuredPsid: ConfiguredPhysicalSynchronizerId,
     ) extends ConfigIdentifier {
-      override def toString: String = s"($alias, $configuredPSID)"
+      override def toString: String = s"($alias, $configuredPsid)"
     }
   }
 
@@ -367,19 +367,19 @@ object SynchronizerConnectionConfigStore {
 
   final case class InconsistentLogicalSynchronizerIds(
       alias: SynchronizerAlias,
-      newPSId: PhysicalSynchronizerId,
-      existingPSId: PhysicalSynchronizerId,
+      newPsid: PhysicalSynchronizerId,
+      existingPsid: PhysicalSynchronizerId,
   ) extends Error {
     val message =
-      s"Synchronizer with id $newPSId and alias $alias cannot be registered because existing id `$existingPSId` is for a different logical synchronizer"
+      s"Synchronizer with id $newPsid and alias $alias cannot be registered because existing id `$existingPsid` is for a different logical synchronizer"
   }
 
   final case class InconsistentPredecessorLogicalSynchronizerIds(
-      currentPSId: PhysicalSynchronizerId,
-      predecessorPSId: PhysicalSynchronizerId,
+      currentPsid: PhysicalSynchronizerId,
+      predecessorPsid: PhysicalSynchronizerId,
   ) extends Error {
     val message =
-      s"Synchronizer with id $predecessorPSId cannot be the predecessor of $predecessorPSId because their logical IDs are incompatible"
+      s"Synchronizer with id $predecessorPsid cannot be the predecessor of $predecessorPsid because their logical IDs are incompatible"
   }
 
   final case class InconsistentSequencerIds(
@@ -434,7 +434,7 @@ object SynchronizerConnectionConfigStore {
     override def message: String =
       s"Synchronizer with id `$id` is unknown. Has the synchronizer been registered?"
   }
-  final case class UnknownPSId(id: PhysicalSynchronizerId) extends Error {
+  final case class UnknownPsid(id: PhysicalSynchronizerId) extends Error {
     override def message: String =
       s"Synchronizer with id `$id` is unknown. Has the synchronizer been registered?"
   }

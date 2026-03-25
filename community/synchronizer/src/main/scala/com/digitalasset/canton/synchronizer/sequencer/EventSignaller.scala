@@ -4,42 +4,61 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.synchronizer.sequencer.WriteNotification.{All, Members}
 import com.digitalasset.canton.synchronizer.sequencer.store.{Sequenced, SequencerMemberId}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.annotation.tailrec
+
 /** Who gets notified that a event has been written */
-sealed trait WriteNotification {
-  def union(notification: WriteNotification): WriteNotification
-  def memberIds: Set[SequencerMemberId]
+sealed trait WriteNotification extends Product with Serializable {
+  final def union(notification: WriteNotification): WriteNotification = (this, notification) match {
+    case (Members(thisMembers), Members(thatMembers)) => Members(thisMembers ++ thatMembers)
+    case (All, _) | (_, All) => All
+    case (WriteNotification.NoTarget, those) => those
+    case (these, WriteNotification.NoTarget) => these
+  }
   def isBroadcast: Boolean
 }
 
 object WriteNotification {
 
-  case object None extends WriteNotification {
-    override def union(notification: WriteNotification): WriteNotification = notification
-    override def memberIds: Set[SequencerMemberId] = Set.empty
+  case object NoTarget extends WriteNotification {
     override def isBroadcast: Boolean = false
   }
-  final case class Members(memberIds: Set[SequencerMemberId]) extends WriteNotification {
-    override def union(notification: WriteNotification): WriteNotification =
-      notification match {
-        case Members(newMemberIds) => Members(memberIds ++ newMemberIds)
-        case None => this
-      }
 
-    override def isBroadcast: Boolean = memberIds.contains(SequencerMemberId.Broadcast)
-
+  final case class Members private[WriteNotification] (memberIds: NonEmpty[Set[SequencerMemberId]])
+      extends WriteNotification {
+    override def isBroadcast: Boolean = false
     override def toString: String = s"Members(${memberIds.map(_.unwrap).mkString(",")})"
   }
 
-  def apply(events: NonEmpty[Seq[Sequenced[?]]]): WriteNotification =
-    events
-      .map(_.event.notifies)
-      .reduceLeft(_ union _)
+  case object All extends WriteNotification {
+    override def isBroadcast: Boolean = true
+  }
+
+  @VisibleForTesting
+  def forMemberIds(members: NonEmpty[Set[SequencerMemberId]]): WriteNotification =
+    if (members.contains(SequencerMemberId.Broadcast)) WriteNotification.All
+    else WriteNotification.Members(members)
+
+  def forEvents(events: NonEmpty[Seq[Sequenced[?]]]): WriteNotification = {
+    val iter = events.iterator
+    @tailrec
+    def go(notification: WriteNotification): WriteNotification =
+      if (iter.hasNext) {
+        val sequenced = iter.next()
+        val newNotification = forMemberIds(sequenced.event.notifies)
+        if (newNotification.isBroadcast) newNotification
+        else go(newNotification.union(notification))
+      } else notification
+
+    go(NoTarget)
+  }
 }
 
 /** Signal that a reader should attempt to read the latest events as some may have been written */

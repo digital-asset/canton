@@ -106,7 +106,7 @@ trait DistributedStatusIntegrationTest
         assertSequencerUnconnectedStatus(
           sts.sequencerStatus(sequencer1.name),
           connectedMediators = List(mediator1.id),
-          daName,
+          sequencer1.id,
           testedProtocolVersion,
         )
       }

@@ -7,7 +7,7 @@ import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState}
+import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.lifecycle.{HasRunOnClosing, HasUnlessClosing}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
@@ -33,7 +33,19 @@ import org.apache.pekko.stream.AbruptStageTerminationException
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
-/** A subscription to a sequencer.
+/** A subscription to a sequencer. */
+trait SequencerSubscriptionX[HandlerError]
+    extends InternallyCompletedSequencerSubscription[HandlerError]
+    with NamedLogging {
+
+  def connection: SequencerConnectionX
+
+  def start()(implicit traceContext: TraceContext): Either[String, Unit]
+
+  private[sequencing] def health: HealthComponent
+}
+
+/** Regular subscription to a sequencer.
   *
   * @param connection
   *   the underlying connection to the sequencer
@@ -47,8 +59,8 @@ import scala.util.{Failure, Success, Try}
   *   component whose closing indicates the subscriptions will be closed soon; used to shortcut
   *   errors and avoid warning logs when shutting down
   */
-class SequencerSubscriptionX[HandlerError] private[sequencing] (
-    val connection: SequencerConnectionX,
+class SequencerSubscriptionXImpl[HandlerError] private[sequencing] (
+    override val connection: SequencerConnectionX,
     member: Member,
     startingTimestampO: Option[CantonTimestamp],
     handler: SequencedEventHandler[HandlerError],
@@ -56,22 +68,22 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends InternallyCompletedSequencerSubscription[HandlerError]
-    with NamedLogging {
+    extends SequencerSubscriptionX[HandlerError] {
   private val retryPolicy = connection.subscriptionRetryPolicy
 
-  private[sequencing] val health: AtomicHealthComponent = new AtomicHealthComponent() {
+  override private[sequencing] val health: AtomicHealthComponent = new AtomicHealthComponent() {
     override def name: String = s"subscription-${connection.name}"
 
     override protected def initialHealthState: ComponentHealthState =
       ComponentHealthState.Failed()
 
-    override protected def associatedHasRunOnClosing: HasRunOnClosing = SequencerSubscriptionX.this
+    override protected def associatedHasRunOnClosing: HasRunOnClosing =
+      SequencerSubscriptionXImpl.this
 
-    override protected def logger: TracedLogger = SequencerSubscriptionX.this.logger
+    override protected def logger: TracedLogger = SequencerSubscriptionXImpl.this.logger
   }
 
-  def start()(implicit traceContext: TraceContext): Either[String, Unit] = {
+  override def start()(implicit traceContext: TraceContext): Either[String, Unit] = {
     val startingTimestampStringO = startingTimestampO
       .map(timestamp => s"the timestamp $timestamp")
       .getOrElse("the beginning")
@@ -252,7 +264,7 @@ class SequencerSubscriptionXFactoryImpl(
       loggerWithConnection,
     )
 
-    new SequencerSubscriptionX(
+    new SequencerSubscriptionXImpl(
       connection = connection,
       member = member,
       startingTimestampO = startingTimestampO,

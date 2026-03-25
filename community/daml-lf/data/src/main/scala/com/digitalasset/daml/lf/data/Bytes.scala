@@ -3,11 +3,11 @@
 
 package com.digitalasset.daml.lf.data
 
-import java.io.InputStream
-import java.nio.ByteBuffer
+import com.google.protobuf.ByteString
 import scalaz.Order
 
-import com.google.protobuf.ByteString
+import java.io.InputStream
+import java.nio.ByteBuffer
 
 final class Bytes private (protected val value: ByteString) extends AnyVal {
 

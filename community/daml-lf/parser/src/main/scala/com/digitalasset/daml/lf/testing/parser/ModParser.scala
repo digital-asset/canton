@@ -4,18 +4,17 @@
 package com.digitalasset.daml.lf
 package testing.parser
 
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV, Util => AstUtil}
-import com.digitalasset.daml.lf.testing.parser.Parsers._
-import com.digitalasset.daml.lf.testing.parser.Token._
 import com.daml.scalautil.Statement.discard
-
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LanguageVersion as LV, Util as AstUtil}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
+import com.digitalasset.daml.lf.testing.parser.Parsers.*
+import com.digitalasset.daml.lf.testing.parser.Token.*
 
 private[parser] class ModParser[P](parameters: ParserParameters[P]) {
 
-  import ModParser._
+  import ModParser.*
 
   private[parser] val exprParser: ExprParser[P] = new ExprParser(parameters)
   import exprParser.typeParser.{argTyp, fullIdentifier, typ, typeBinder}

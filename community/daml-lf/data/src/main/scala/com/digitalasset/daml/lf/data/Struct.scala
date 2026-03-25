@@ -4,17 +4,17 @@
 package com.digitalasset.daml.lf
 package data
 
-import IdString.`Name order instance`
-import Ref.Name
-import ScalazEqual._
-
-import scalaz.std.iterable._
-import scalaz.std.tuple._
-import scalaz.syntax.order._
+import scalaz.std.iterable.*
+import scalaz.std.tuple.*
+import scalaz.syntax.order.*
 import scalaz.{Equal, Order}
 
 import scala.annotation.tailrec
-import scala.collection.immutable._
+import scala.collection.immutable.*
+
+import IdString.`Name order instance`
+import Ref.Name
+import ScalazEqual.*
 
 final class Struct[+X] private (protected val sortedFields: ArraySeq[(Ref.Name, X)])
     extends AnyVal {
@@ -72,9 +72,8 @@ object Struct {
   def unapplySeq[X](v: Struct[X]): Some[Seq[(Ref.Name, X)]] =
     Some(v.sortedFields)
 
-  /** Constructs a Struct.
-    * In case one of the field name is duplicated, return it as Left.
-    * O(n log n)
+  /** Constructs a Struct. In case one of the field name is duplicated, return it as Left. O(n log
+    * n)
     */
   def fromSeq[X](fields: collection.Seq[(Name, X)]): Either[Name, Struct[X]] =
     if (fields.isEmpty) rightEmpty

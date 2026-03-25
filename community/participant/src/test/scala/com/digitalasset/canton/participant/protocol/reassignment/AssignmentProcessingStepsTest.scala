@@ -96,11 +96,11 @@ final class AssignmentProcessingStepsTest
     with HasTestCloseContext
     with HasExecutionContext
     with FailOnShutdown {
-  private lazy val sourcePSId = Source(
+  private lazy val sourcePsid = Source(
     SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("synchronizer::source")).toPhysical
   )
   private lazy val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(0))
-  private lazy val targetPSId = Target(
+  private lazy val targetPsid = Target(
     SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("synchronizer::target")).toPhysical
   )
   private lazy val targetMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(0))
@@ -152,7 +152,7 @@ final class AssignmentProcessingStepsTest
   private lazy val seedGenerator = new SeedGenerator(crypto.pureCrypto)
 
   private lazy val identityFactory = TestingTopology()
-    .withSynchronizers(sourcePSId.unwrap, targetPSId.unwrap)
+    .withSynchronizers(sourcePsid.unwrap, targetPsid.unwrap)
     .withReversedTopology(
       Map(
         participant -> Map(
@@ -165,11 +165,11 @@ final class AssignmentProcessingStepsTest
     .build(crypto, loggerFactory)
 
   private lazy val cryptoClient =
-    identityFactory.forOwnerAndSynchronizer(participant, targetPSId.unwrap)
+    identityFactory.forOwnerAndSynchronizer(participant, targetPsid.unwrap)
 
   private lazy val cryptoSnapshot = cryptoClient.currentSnapshotApproximation.futureValueUS
 
-  private lazy val assignmentProcessingSteps = testInstance(targetPSId, cryptoClient, None)
+  private lazy val assignmentProcessingSteps = testInstance(targetPsid, cryptoClient, None)
 
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
 
@@ -178,7 +178,7 @@ final class AssignmentProcessingStepsTest
     val contractStore = mock[ContractStore]
     val logical =
       new InMemoryLogicalSyncPersistentState(
-        IndexedSynchronizer.tryCreate(targetPSId.unwrap, 1),
+        IndexedSynchronizer.tryCreate(targetPsid.unwrap, 1),
         enableAdditionalConsistencyChecks = true,
         indexedStringStore = indexedStringStore,
         contractStore = contractStore,
@@ -189,7 +189,7 @@ final class AssignmentProcessingStepsTest
 
     val physical = new InMemoryPhysicalSyncPersistentState(
       SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
-      IndexedPhysicalSynchronizer.tryCreate(targetPSId.unwrap, 1),
+      IndexedPhysicalSynchronizer.tryCreate(targetPsid.unwrap, 1),
       defaultStaticSynchronizerParameters,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
@@ -229,8 +229,8 @@ final class AssignmentProcessingStepsTest
 
   private lazy val reassignmentDataHelpers = ReassignmentDataHelpers(
     contract,
-    sourcePSId,
-    targetPSId,
+    sourcePsid,
+    targetPsid,
     identityFactory,
   )
 
@@ -399,8 +399,8 @@ final class AssignmentProcessingStepsTest
       val unassignmentData2 = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
         sourceMediator,
         party3,
-        sourcePSId,
-        targetPSId,
+        sourcePsid,
+        targetPsid,
         contract,
       )
       val submissionParam2 = SubmissionParam(
@@ -427,29 +427,28 @@ final class AssignmentProcessingStepsTest
       }
     }
 
-    "fail when target synchronizer has different LSId" in {
+    "fail when target synchronizer has different lsid" in {
 
-      val originalTargetPSId = unassignmentData.targetPSId
+      val originalTargetPsid = unassignmentData.targetPsid
 
-      lazy val otherTargetPSId = Target(
+      lazy val otherTargetPsid = Target(
         SynchronizerId(
           UniqueIdentifier.tryFromProtoPrimitive("synchronizer::othertarget")
         ).toPhysical
       )
 
-      val upgradedTargetPSId =
-        targetPSId.map(_.copy(serial = targetPSId.unwrap.serial.increment.toNonNegative))
+      val upgradedTargetPsid = targetPsid.map(_.incrementSerial)
 
-      originalTargetPSId shouldBe targetPSId
-      otherTargetPSId.map(_.logical) should not be targetPSId.map(_.logical)
-      upgradedTargetPSId.map(_.logical) shouldBe targetPSId.map(_.logical)
+      originalTargetPsid shouldBe targetPsid
+      otherTargetPsid.map(_.logical) should not be targetPsid.map(_.logical)
+      upgradedTargetPsid.map(_.logical) shouldBe targetPsid.map(_.logical)
 
       for {
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(unassignmentData, persistentState).failOnShutdown
         res <-
-          testInstance(otherTargetPSId, cryptoClient, None)
+          testInstance(otherTargetPsid, cryptoClient, None)
             .createSubmission(
               submissionParam,
               targetMediator,
@@ -461,8 +460,8 @@ final class AssignmentProcessingStepsTest
 
         _ = res.getMessage should include("found on wrong synchronizer")
 
-        // same LSId, different PSId
-        _ <- testInstance(upgradedTargetPSId, cryptoClient, None)
+        // same lsid, different psid
+        _ <- testInstance(upgradedTargetPsid, cryptoClient, None)
           .createSubmission(
             submissionParam,
             targetMediator,
@@ -528,7 +527,7 @@ final class AssignmentProcessingStepsTest
 
       inside(error) { case UnexpectedSynchronizer(_, targetD, currentD) =>
         assert(targetD == anotherSynchronizer)
-        assert(currentD == targetPSId.unwrap)
+        assert(currentD == targetPsid.unwrap)
       }
     }
 
@@ -627,7 +626,7 @@ final class AssignmentProcessingStepsTest
         new TestValidator(Map((testContract.contractId, invalidRpId.unwrap) -> expected))
 
       val assignmentProcessingSteps =
-        testInstance(targetPSId, cryptoClient, None, contractValidator)
+        testInstance(targetPsid, cryptoClient, None, contractValidator)
 
       for {
         deps <- statefulDependencies
@@ -648,7 +647,7 @@ final class AssignmentProcessingStepsTest
             case target: Target[?] => target
             case _ => Target(testContract.templateId.packageId)
           },
-          targetPSId,
+          targetPsid,
           targetMediator,
           reassigningParticipants = Set(participant),
         )
@@ -788,7 +787,7 @@ final class AssignmentProcessingStepsTest
         ),
         submitterInfo(submitter),
         reassignmentId,
-        sourcePSId,
+        sourcePsid,
         isReassigningParticipant = false,
         hostedConfirmingReassigningParties = contract.metadata.stakeholders,
         commonValidationResult = AssignmentValidationResult.CommonValidationResult(
@@ -952,7 +951,7 @@ final class AssignmentProcessingStepsTest
       contract: ContractInstance = contract,
       sourceValidationPackageId: Source[LfPackageId] = Source(contract.templateId.packageId),
       targetValidationPackageId: Target[LfPackageId] = Target(contract.templateId.packageId),
-      targetSynchronizer: Target[PhysicalSynchronizerId] = targetPSId,
+      targetSynchronizer: Target[PhysicalSynchronizerId] = targetPsid,
       targetMediator: MediatorGroupRecipient = targetMediator,
       uuid: UUID = new UUID(4L, 5L),
       reassigningParticipants: Set[ParticipantId] = Set.empty,
@@ -961,7 +960,7 @@ final class AssignmentProcessingStepsTest
     val seed = seedGenerator.generateSaltSeed()
 
     val reassignmentId = ReassignmentId.single(
-      sourcePSId,
+      sourcePsid,
       targetSynchronizer,
       CantonTimestamp.Epoch,
       contract.contractId,
@@ -980,7 +979,7 @@ final class AssignmentProcessingStepsTest
           targetValidationPackageId,
           initialReassignmentCounter,
         ),
-        sourcePSId,
+        sourcePsid,
         targetSynchronizer,
         targetMediator,
         uuid,
@@ -1006,8 +1005,8 @@ final class AssignmentProcessingStepsTest
         unassignmentData.reassignmentId,
         submitterInfo(submitter),
         unassignmentData.contractsBatch,
-        unassignmentData.sourcePSId,
-        unassignmentData.targetPSId,
+        unassignmentData.sourcePsid,
+        unassignmentData.targetPsid,
         targetMediator,
         uuid,
         Target(testedProtocolVersion),

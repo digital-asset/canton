@@ -65,6 +65,7 @@ object MediatorAdministrationCommands {
         request: v30.InitializeMediatorRequest,
     ): Future[v30.InitializeMediatorResponse] =
       service.initializeMediator(request)
+
     override protected def handleResponse(
         response: v30.InitializeMediatorResponse
     ): Either[String, Unit] =
