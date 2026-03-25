@@ -5,6 +5,8 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive.
 
 import cats.data.EitherT
 import cats.syntax.either.*
+
+import scala.annotation.unused
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PreparedTransaction
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -221,7 +223,7 @@ class ExternalTransactionProcessor(
       contractLookupParallelism: PositiveInt,
       hashTracer: HashTracer,
       maxRecordTime: Option[LfTimestamp],
-      hashingSchemeVersion: HashingSchemeVersion,
+      @unused hashingSchemeVersion: HashingSchemeVersion, // Reserved for future use; currently computed from tx version
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       executionContext: ExecutionContext,
