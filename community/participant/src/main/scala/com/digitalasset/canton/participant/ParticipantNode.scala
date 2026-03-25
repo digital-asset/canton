@@ -62,7 +62,7 @@ import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.Submission
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.synchronizer.grpc.GrpcSynchronizerRegistry
 import com.digitalasset.canton.participant.topology.*
-import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.execution.{CommandProgressTracker, ExternalCallHandler}
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.platform.store.LedgerApiContractStoreImpl
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
@@ -674,21 +674,8 @@ class ParticipantNodeBootstrap(
             )
             .mapK(FutureUnlessShutdown.outcomeK)
 
-        /*
-        Returns the topology manager corresponding to an active configuration. Restricting to active is fine since
-        the topology manager is used for party allocation which would fail for inactive configurations.
-         */
-        activeTopologyManagerGetter = (id: PhysicalSynchronizerId) =>
-          synchronizerConnectionConfigStore
-            .get(id)
-            .toOption
-            .filter(_.status == Active)
-            .flatMap(_.configuredPSId.toOption)
-            .flatMap(syncPersistentStateManager.get)
-            .map(_.topologyManager)
-
         // Create extension service manager early so it can be shared with both CantonSyncService and LedgerApiServer
-        extensionServiceManagerOpt = if (parameters.engine.extensions.nonEmpty) {
+        extensionServiceManagerOpt: Option[ExtensionServiceManager] = if (parameters.engine.extensions.nonEmpty) {
           val manager = new ExtensionServiceManager(
             extensionConfigs = parameters.engine.extensions,
             engineExtensionsConfig = parameters.engine.extensionSettings,
@@ -704,12 +691,12 @@ class ParticipantNodeBootstrap(
         }
 
         // Create external call handler from extension service manager for use in transaction reinterpretation
-        externalCallHandler = extensionServiceManagerOpt.map(manager =>
+        externalCallHandler: Option[ExternalCallHandler] = extensionServiceManagerOpt.map(manager =>
           new ExtensionServiceExternalCallHandler(manager)
         )
 
         // Sync Service
-        sync = CantonSyncService.create(
+        sync: CantonSyncService = CantonSyncService.create(
           participantId,
           synchronizerRegistry,
           synchronizerConnectionConfigStore,
@@ -755,7 +742,7 @@ class ParticipantNodeBootstrap(
           connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
         }
 
-        ledgerApiServerContainer = new LifeCycleContainer[LedgerApiServer](
+        ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer] = new LifeCycleContainer[LedgerApiServer](
           stateName = "ledger-api-server",
           create = () =>
             FutureUnlessShutdown.outcomeF(
