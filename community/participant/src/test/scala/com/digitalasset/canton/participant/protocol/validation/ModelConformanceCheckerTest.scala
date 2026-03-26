@@ -202,6 +202,8 @@ class ModelConformanceCheckerTest
             packageResolution: Map[PackageName, PackageId],
             expectFailure: Boolean,
             getEngineAbortStatus: GetEngineAbortStatus,
+            storedExternalCallResults: DAMLe.StoredExternalCallResults,
+            isConfirmer: Boolean,
         )(implicit traceContext: TraceContext): EitherT[
           FutureUnlessShutdown,
           DAMLe.ReinterpretationError,
@@ -219,6 +221,8 @@ class ModelConformanceCheckerTest
             packageResolution,
             expectFailure,
             getEngineAbortStatus,
+            storedExternalCallResults,
+            isConfirmer,
           )
           .map { result =>
             result.copy(

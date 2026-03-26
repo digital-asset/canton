@@ -170,7 +170,7 @@ class ExampleTransactionConformanceTest
           commonData.ledgerTime,
           commonData.preparationTime,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
-          topologySnapshot = mock[TopologySnapshot],
+          topologySnapshot = factory.topologySnapshot,
         )
         .failOnShutdown
 
