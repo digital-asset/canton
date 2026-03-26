@@ -271,6 +271,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       exerciseResult = Some(someChoiceResult),
       keyOpt = key,
       byKey = false,
+      externalCallResults = ImmArray.Empty,
       version = txVersion,
     )
 
@@ -750,6 +751,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
             )
         },
         byKey = false,
+        externalCallResults = ImmArray.Empty,
         version = txVersion,
       )
     )
