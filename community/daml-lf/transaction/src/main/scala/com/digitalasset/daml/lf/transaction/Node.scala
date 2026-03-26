@@ -17,18 +17,16 @@ import com.digitalasset.daml.lf.value._
   *
   * @param extensionId Identifier of the configured extension
   * @param functionId Function identifier within the extension
-  * @param configHash Configuration hash for version validation
-  * @param inputHex Input data (hex-encoded)
-  * @param outputHex Output data (hex-encoded)
-  * @param callIndex Index of this call within the exercise (for ordering)
+  * @param config Extension configuration (binary)
+  * @param input Input data (binary)
+  * @param output Output data (binary)
   */
 final case class ExternalCallResult(
     extensionId: String,
     functionId: String,
-    configHash: String,
-    inputHex: String,
-    outputHex: String,
-    callIndex: Int,
+    config: data.Bytes,
+    input: data.Bytes,
+    output: data.Bytes,
 )
 
 object ExternalCallResult {
