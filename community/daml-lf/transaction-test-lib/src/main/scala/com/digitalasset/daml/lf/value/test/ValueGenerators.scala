@@ -329,17 +329,15 @@ object ValueGenerators {
     for {
       extensionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
       functionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
-      configHash <- Gen.alphaNumStr.map(_.take(64))
-      inputHex <- Gen.hexStr.map(_.take(200))
-      outputHex <- Gen.hexStr.map(_.take(200))
-      callIndex <- Gen.chooseNum(0, 100)
+      config <- Gen.listOf(Gen.chooseNum(0.toByte, 255.toByte)).map(bs => data.Bytes.fromByteArray(bs.toArray))
+      input <- Gen.listOf(Gen.chooseNum(0.toByte, 255.toByte)).map(bs => data.Bytes.fromByteArray(bs.toArray))
+      output <- Gen.listOf(Gen.chooseNum(0.toByte, 255.toByte)).map(bs => data.Bytes.fromByteArray(bs.toArray))
     } yield ExternalCallResult(
       extensionId = extensionId,
       functionId = functionId,
-      configHash = configHash,
-      inputHex = inputHex,
-      outputHex = outputHex,
-      callIndex = callIndex,
+      config = config,
+      input = input,
+      output = output,
     )
 
   /** Generates a list of ExternalCallResults for exercise nodes. */
