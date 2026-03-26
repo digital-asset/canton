@@ -52,12 +52,12 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
 | Test | Description | Priority |
 |------|-------------|----------|
-| `equal keys for identical calls` | Same extensionId, functionId, configHash, inputHex → equal | High |
+| `equal keys for identical calls` | Same extensionId, functionId, config, input → equal | High |
 | `different extensionId creates different key` | Different extensionId → not equal | High |
 | `different functionId creates different key` | Different functionId → not equal | High |
-| `different configHash creates different key` | Different configHash → not equal | High |
-| `different inputHex creates different key` | Different inputHex → not equal | High |
-| `outputHex does not affect equality` | Same key with different outputs → equal keys | High |
+| `different config creates different key` | Different config → not equal | High |
+| `different input creates different key` | Different input → not equal | High |
+| `output does not affect equality` | Same key with different outputs → equal keys | High |
 | `pretty printing formats correctly` | Verify pretty print output | Low |
 
 ##### 2. collectExternalCalls Tests
@@ -70,7 +70,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 | `skip exercise without external calls` | Exercise with empty externalCallResults → no calls | High |
 | `extract signatories from coreInputs` | Contract signatories correctly extracted | Critical |
 | `handle missing contract in coreInputs` | Contract not in coreInputs → empty signatories | Medium |
-| `preserve callIndex from source` | callIndex correctly preserved | Medium |
+| `preserve sequential ordering from source` | sequential index correctly derived from list position | Medium |
 | `preserve viewPosition from source` | viewPosition correctly preserved | Medium |
 
 ##### 3. checkConsistency - Single Party Tests

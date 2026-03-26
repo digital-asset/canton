@@ -201,15 +201,6 @@ private[lf] object PartialTransaction {
     externalCallResults = HashMap.empty,
   )
 
-  @throws[SError.SErrorDamlException]
-  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
-    either match {
-      case Right(value) =>
-        value
-      case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(context, err))
-    }
-
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
 }
 
@@ -237,6 +228,15 @@ private[speedy] case class PartialTransaction(
 ) {
 
   import PartialTransaction._
+
+  @throws[SError.SErrorDamlException]
+  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
+    either match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        throw SError.SErrorDamlException(convTxError(nodes, context, err))
+    }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
     contractState.consumedByOrInactive(cid)
@@ -315,15 +315,7 @@ private[speedy] case class PartialTransaction(
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
         val tx0 = Tx(nodes, roots)
-        val (tx, seeds) = NormalizeRollbacks.normalizeTx(
-          tx0,
-          shouldDropRollbacks = contractState.mode match {
-            case ContractStateMachine.Mode.UCKWithoutRollback => true
-            case ContractStateMachine.Mode.NoContractKey => false
-            case ContractStateMachine.Mode.LegacyNUCK => false
-            case ContractStateMachine.Mode.UCKWithRollback => false
-          }
-        )
+        val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))
 
@@ -394,6 +386,7 @@ private[speedy] case class PartialTransaction(
           nid,
           cid,
           createNode.gkeyOpt,
+          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
@@ -634,14 +627,12 @@ private[speedy] case class PartialTransaction(
       case Some(ec) =>
         val nodeId = ec.nodeId
         val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
-        val callIndex = existing.length
         val result = ExternalCallResult(
           extensionId = extensionId,
           functionId = functionId,
-          configHash = configHash,
-          inputHex = inputHex,
-          outputHex = outputHex,
-          callIndex = callIndex,
+          config = data.Bytes.fromString(configHash).getOrElse(data.Bytes.Empty),
+          input = data.Bytes.fromString(inputHex).getOrElse(data.Bytes.Empty),
+          output = data.Bytes.fromString(outputHex).getOrElse(data.Bytes.Empty),
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))

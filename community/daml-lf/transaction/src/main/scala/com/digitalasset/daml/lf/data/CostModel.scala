@@ -443,9 +443,8 @@ private[lf] object CostModel {
     implicit def costOfExternalCallResult(value: ExternalCallResult): Cost =
       1 + costOfString(value.extensionId) +
         costOfString(value.functionId) +
-        costOfString(value.configHash) +
-        costOfString(value.inputHex) +
-        costOfString(value.outputHex) +
-        costOfInt(value.callIndex)
+        value.config.length +
+        value.input.length +
+        value.output.length
   }
 }

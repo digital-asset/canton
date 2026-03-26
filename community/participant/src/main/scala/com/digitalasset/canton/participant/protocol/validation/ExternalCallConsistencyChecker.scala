@@ -7,11 +7,12 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.daml.lf.data.{Bytes => LfBytes}
 
 /** Checks consistency of external call results across a transaction on a per-party basis.
   *
   * Two external calls are considered "equal" if they have the same (extensionId, functionId,
-  * configHash, inputHex). For each party P that is a signatory of contracts being exercised,
+  * config, input). For each party P that is a signatory of contracts being exercised,
   * this checker verifies that all equal external calls visible to P return the same output.
   *
   * This is required because the same external call can appear multiple times in a transaction
@@ -30,36 +31,33 @@ object ExternalCallConsistencyChecker {
   final case class ExternalCallKey(
       extensionId: String,
       functionId: String,
-      configHash: String,
-      inputHex: String,
+      config: LfBytes,
+      input: LfBytes,
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[ExternalCallKey] = prettyOfClass(
       param("extensionId", _.extensionId.unquoted),
       param("functionId", _.functionId.unquoted),
-      param("configHash", _.configHash.unquoted),
-      param("inputHex", _.inputHex.unquoted),
+      param("config", _.config.toHexString.unquoted),
+      param("input", _.input.toHexString.unquoted),
     )
   }
 
   /** An external call occurrence with its execution context.
     *
     * @param key The equality key identifying this call
-    * @param outputHex The recorded output of this call
-    * @param callIndex The index of this call within the exercise node
+    * @param output The recorded output of this call
     * @param viewPosition The position of the view containing this call
     * @param signatories The signatories of the contract being exercised (the validating parties)
     */
   final case class ExternalCallWithContext(
       key: ExternalCallKey,
-      outputHex: String,
-      callIndex: Int,
+      output: LfBytes,
       viewPosition: ViewPosition,
       signatories: Set[LfPartyId],
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[ExternalCallWithContext] = prettyOfClass(
       param("key", _.key),
-      param("outputHex", _.outputHex.unquoted),
-      param("callIndex", _.callIndex),
+      param("output", _.output.toHexString.unquoted),
       param("viewPosition", _.viewPosition),
       param("signatories", _.signatories),
     )
@@ -81,12 +79,12 @@ object ExternalCallConsistencyChecker {
     */
   final case class Inconsistent(
       key: ExternalCallKey,
-      outputs: Set[String],
+      outputs: Set[LfBytes],
       viewPositions: Set[ViewPosition],
   ) extends PartyConsistencyResult {
     override protected def pretty: Pretty[Inconsistent] = prettyOfClass(
       param("key", _.key),
-      param("outputs", _.outputs.mkString("[", ", ", "]").unquoted),
+      param("outputs", _.outputs.map(_.toHexString).mkString("[", ", ", "]").unquoted),
       param("viewPositions", _.viewPositions),
     )
   }
@@ -145,11 +143,10 @@ class ExternalCallConsistencyChecker {
               key = ExternalCallKey(
                 extensionId = result.extensionId,
                 functionId = result.functionId,
-                configHash = result.configHash,
-                inputHex = result.inputHex,
+                config = result.config,
+                input = result.input,
               ),
-              outputHex = result.outputHex,
-              callIndex = result.callIndex,
+              output = result.output,
               viewPosition = viewPosition,
               signatories = signatories,
             )
@@ -190,10 +187,10 @@ class ExternalCallConsistencyChecker {
 
           // 3. For each group, check all outputs are identical
           val inconsistency: Option[Inconsistent] = groupedByKey.collectFirst {
-            case (key, calls) if calls.map(_.outputHex).toSet.sizeIs > 1 =>
+            case (key, calls) if calls.map(_.output).toSet.sizeIs > 1 =>
               Inconsistent(
                 key = key,
-                outputs = calls.map(_.outputHex).toSet,
+                outputs = calls.map(_.output).toSet,
                 viewPositions = calls.map(_.viewPosition).toSet,
               )
           }

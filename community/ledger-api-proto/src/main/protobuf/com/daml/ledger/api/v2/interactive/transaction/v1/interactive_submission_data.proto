@@ -45,10 +45,9 @@ message Fetch {
 message ExternalCallResult {
   string extension_id = 1;    // Extension service identifier (e.g., "oracle-price-feed")
   string function_id = 2;     // Function identifier within the extension
-  string config_hash = 3;     // Hash of the extension configuration for version validation
-  string input_hex = 4;       // Hex-encoded input data sent to the extension
-  string output_hex = 5;      // Hex-encoded output data returned by the extension
-  int32 call_index = 6;       // Index of this call within the exercise node (for ordering)
+  bytes config = 3;           // Extension configuration bytes for version validation
+  bytes input = 4;            // Input data sent to the extension
+  bytes output = 5;           // Output data returned by the extension
 }
 
 // Exercise node

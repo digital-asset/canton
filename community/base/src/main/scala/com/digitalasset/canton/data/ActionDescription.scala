@@ -33,7 +33,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
-import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.data.{Bytes => LfBytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
 import com.google.common.annotations.VisibleForTesting
@@ -238,10 +238,10 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         ExternalCallResult(
           extensionId = r.extensionId,
           functionId = r.functionId,
-          configHash = r.configHash,
-          inputHex = r.inputHex,
-          outputHex = r.outputHex,
-          callIndex = r.callIndex,
+          config = LfBytes.fromByteString(r.config),
+          input = LfBytes.fromByteString(r.input),
+          output = LfBytes.fromByteString(r.output),
+          
         )
       })
       actionDescription <- ExerciseActionDescription
@@ -389,10 +389,9 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
             v30.ActionDescription.ExternalCallResultProto(
               extensionId = r.extensionId,
               functionId = r.functionId,
-              configHash = r.configHash,
-              inputHex = r.inputHex,
-              outputHex = r.outputHex,
-              callIndex = r.callIndex,
+              config = r.config.toByteString,
+              input = r.input.toByteString,
+              output = r.output.toByteString,
             )
           },
         )

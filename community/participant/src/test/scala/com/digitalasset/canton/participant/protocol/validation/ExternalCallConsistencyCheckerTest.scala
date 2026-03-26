@@ -7,6 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsistencyChecker.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.daml.lf.data.{Bytes => LfBytes}
 import org.scalatest.wordspec.AnyWordSpec
 
 class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
@@ -24,28 +25,28 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
   private val checker = new ExternalCallConsistencyChecker()
 
+  private def toBytes(s: String): LfBytes = LfBytes.fromStringUtf8(s)
+
   // Helper to create ExternalCallKey
-  private def key(functionId: String, inputHex: String = "input1"): ExternalCallKey =
+  private def key(functionId: String, input: LfBytes = toBytes("input1")): ExternalCallKey =
     ExternalCallKey(
       extensionId = "test-ext",
       functionId = functionId,
-      configHash = "config1",
-      inputHex = inputHex,
+      config = toBytes("config1"),
+      input = input,
     )
 
   // Helper to create ExternalCallWithContext
   private def call(
       functionId: String,
-      outputHex: String,
+      output: LfBytes,
       viewPosition: ViewPosition,
       signatories: Set[LfPartyId],
-      inputHex: String = "input1",
-      callIndex: Int = 0,
+      input: LfBytes = toBytes("input1"),
   ): ExternalCallWithContext =
     ExternalCallWithContext(
-      key = key(functionId, inputHex),
-      outputHex = outputHex,
-      callIndex = callIndex,
+      key = key(functionId, input),
+      output = output,
       viewPosition = viewPosition,
       signatories = signatories,
     )
@@ -53,44 +54,44 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
   "ExternalCallKey" should {
 
     "be equal for identical calls" in {
-      val key1 = ExternalCallKey("ext1", "func1", "config1", "input1")
-      val key2 = ExternalCallKey("ext1", "func1", "config1", "input1")
+      val key1 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
+      val key2 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
       key1 shouldBe key2
     }
 
     "be different when extensionId differs" in {
-      val key1 = ExternalCallKey("ext1", "func1", "config1", "input1")
-      val key2 = ExternalCallKey("ext2", "func1", "config1", "input1")
+      val key1 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
+      val key2 = ExternalCallKey("ext2", "func1", toBytes("config1"), toBytes("input1"))
       key1 should not be key2
     }
 
     "be different when functionId differs" in {
-      val key1 = ExternalCallKey("ext1", "func1", "config1", "input1")
-      val key2 = ExternalCallKey("ext1", "func2", "config1", "input1")
+      val key1 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
+      val key2 = ExternalCallKey("ext1", "func2", toBytes("config1"), toBytes("input1"))
       key1 should not be key2
     }
 
-    "be different when configHash differs" in {
-      val key1 = ExternalCallKey("ext1", "func1", "config1", "input1")
-      val key2 = ExternalCallKey("ext1", "func1", "config2", "input1")
+    "be different when config differs" in {
+      val key1 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
+      val key2 = ExternalCallKey("ext1", "func1", toBytes("config2"), toBytes("input1"))
       key1 should not be key2
     }
 
-    "be different when inputHex differs" in {
-      val key1 = ExternalCallKey("ext1", "func1", "config1", "input1")
-      val key2 = ExternalCallKey("ext1", "func1", "config1", "input2")
+    "be different when input differs" in {
+      val key1 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
+      val key2 = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input2"))
       key1 should not be key2
     }
 
-    "not include outputHex in equality (it's in ExternalCallWithContext, not key)" in {
-      // ExternalCallKey doesn't have outputHex - this test verifies the design
-      val key1 = key("func1", "input1")
-      val key2 = key("func1", "input1")
+    "not include output in equality (it's in ExternalCallWithContext, not key)" in {
+      // ExternalCallKey doesn't have output - this test verifies the design
+      val key1 = key("func1", toBytes("input1"))
+      val key2 = key("func1", toBytes("input1"))
       key1 shouldBe key2
     }
 
     "have proper pretty printing" in {
-      val k = ExternalCallKey("ext1", "func1", "config1", "input1")
+      val k = ExternalCallKey("ext1", "func1", toBytes("config1"), toBytes("input1"))
       val prettyStr = k.toString
       prettyStr should include("ext1")
       prettyStr should include("func1")
@@ -108,7 +109,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
     "report not allConsistent when any party is inconsistent" in {
       val results = ExternalCallConsistencyResults(
         Map[LfPartyId, PartyConsistencyResult](
-          alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0, viewPos1)),
+          alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0, viewPos1)),
           bob -> Consistent,
         )
       )
@@ -133,7 +134,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       }
 
       "return empty results for empty parties" in {
-        val calls = Seq(call("func1", "output1", viewPos0, Set(alice)))
+        val calls = Seq(call("func1", toBytes("output1"), viewPos0, Set(alice)))
         val result = checker.checkConsistency(calls, Set.empty)
         result shouldBe ExternalCallConsistencyResults.empty
       }
@@ -142,15 +143,15 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
     "single party" should {
 
       "return Consistent for a single call" in {
-        val calls = Seq(call("func1", "output1", viewPos0, Set(alice)))
+        val calls = Seq(call("func1", toBytes("output1"), viewPos0, Set(alice)))
         val result = checker.checkConsistency(calls, Set(alice))
         result.results shouldBe Map(alice -> Consistent)
       }
 
       "return Consistent for two equal calls with same output" in {
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice)),
-          call("func1", "output1", viewPos1, Set(alice)),
+          call("func1", toBytes("output1"), viewPos0, Set(alice)),
+          call("func1", toBytes("output1"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice))
         result.results shouldBe Map(alice -> Consistent)
@@ -158,8 +159,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "return Inconsistent for two equal calls with different outputs" in {
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice)),
-          call("func1", "output2", viewPos1, Set(alice)),
+          call("func1", toBytes("output1"), viewPos0, Set(alice)),
+          call("func1", toBytes("output2"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice))
 
@@ -167,9 +168,9 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
           case Inconsistent(k, outputs, positions) =>
             k.extensionId shouldBe "test-ext"
             k.functionId shouldBe "func1"
-            k.configHash shouldBe "config1"
-            k.inputHex shouldBe "input1"
-            outputs shouldBe Set("output1", "output2")
+            k.config shouldBe toBytes("config1")
+            k.input shouldBe toBytes("input1")
+            outputs shouldBe Set(toBytes("output1"), toBytes("output2"))
             positions shouldBe Set(viewPos0, viewPos1)
           case Consistent =>
             fail("Expected Inconsistent result")
@@ -178,8 +179,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "return Consistent for different calls (different keys)" in {
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice)),
-          call("func2", "output2", viewPos1, Set(alice)),
+          call("func1", toBytes("output1"), viewPos0, Set(alice)),
+          call("func2", toBytes("output2"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice))
         result.results shouldBe Map(alice -> Consistent)
@@ -187,15 +188,15 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "return Consistent for same function but different inputs" in {
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice), inputHex = "input1"),
-          call("func1", "output2", viewPos1, Set(alice), inputHex = "input2"),
+          call("func1", toBytes("output1"), viewPos0, Set(alice), input = toBytes("input1")),
+          call("func1", toBytes("output2"), viewPos1, Set(alice), input = toBytes("input2")),
         )
         val result = checker.checkConsistency(calls, Set(alice))
         result.results shouldBe Map(alice -> Consistent)
       }
 
       "return Consistent when party is not a signatory of any call" in {
-        val calls = Seq(call("func1", "output1", viewPos0, Set(bob)))
+        val calls = Seq(call("func1", toBytes("output1"), viewPos0, Set(bob)))
         val result = checker.checkConsistency(calls, Set(alice))
         result.results shouldBe Map(alice -> Consistent)
       }
@@ -205,8 +206,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "return same result for all parties" in {
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice, bob)),
-          call("func1", "output2", viewPos1, Set(alice, bob)),
+          call("func1", toBytes("output1"), viewPos0, Set(alice, bob)),
+          call("func1", toBytes("output2"), viewPos1, Set(alice, bob)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob))
 
@@ -226,8 +227,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
         // Bob sees only call 1 → no inconsistency
 
         val calls = Seq(
-          call("func1", "out1", viewPos0, Set(alice, bob)),
-          call("func1", "out2", viewPos1, Set(alice)),
+          call("func1", toBytes("out1"), viewPos0, Set(alice, bob)),
+          call("func1", toBytes("out2"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob))
 
@@ -244,9 +245,9 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
         // Charlie sees only call 1 → consistent
 
         val calls = Seq(
-          call("func1", "out1", viewPos0, Set(alice, bob, charlie)),
-          call("func1", "out2", viewPos1, Set(alice, bob)),
-          call("func1", "out3", viewPos2, Set(alice)),
+          call("func1", toBytes("out1"), viewPos0, Set(alice, bob, charlie)),
+          call("func1", toBytes("out2"), viewPos1, Set(alice, bob)),
+          call("func1", toBytes("out3"), viewPos2, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob, charlie))
 
@@ -262,8 +263,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
         // Both should be consistent (they each see only one call)
 
         val calls = Seq(
-          call("func1", "out1", viewPos0, Set(alice)),
-          call("func1", "out2", viewPos1, Set(bob)),
+          call("func1", toBytes("out1"), viewPos0, Set(alice)),
+          call("func1", toBytes("out2"), viewPos1, Set(bob)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob))
 
@@ -273,8 +274,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "handle overlapping parties with consistent outputs" in {
         val calls = Seq(
-          call("func1", "same-output", viewPos0, Set(alice, bob)),
-          call("func1", "same-output", viewPos1, Set(alice)),
+          call("func1", toBytes("same-output"), viewPos0, Set(alice, bob)),
+          call("func1", toBytes("same-output"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob))
 
@@ -288,15 +289,15 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       "handle three or more calls with same key" in {
         // 3 calls: two with output1, one with output2
         val calls = Seq(
-          call("func1", "output1", viewPos0, Set(alice)),
-          call("func1", "output1", viewPos1, Set(alice)),
-          call("func1", "output2", viewPos2, Set(alice)),
+          call("func1", toBytes("output1"), viewPos0, Set(alice)),
+          call("func1", toBytes("output1"), viewPos1, Set(alice)),
+          call("func1", toBytes("output2"), viewPos2, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice))
 
         result.results(alice) match {
           case Inconsistent(_, outputs, _) =>
-            outputs shouldBe Set("output1", "output2")
+            outputs shouldBe Set(toBytes("output1"), toBytes("output2"))
           case _ =>
             fail("Expected Inconsistent")
         }
@@ -305,10 +306,10 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       "handle multiple different external calls in same transaction" in {
         // func1 is consistent, func2 is inconsistent
         val calls = Seq(
-          call("func1", "out1", viewPos0, Set(alice)),
-          call("func1", "out1", viewPos1, Set(alice)),
-          call("func2", "outA", viewPos0, Set(alice)),
-          call("func2", "outB", viewPos1, Set(alice)),
+          call("func1", toBytes("out1"), viewPos0, Set(alice)),
+          call("func1", toBytes("out1"), viewPos1, Set(alice)),
+          call("func2", toBytes("outA"), viewPos0, Set(alice)),
+          call("func2", toBytes("outB"), viewPos1, Set(alice)),
         )
         val result = checker.checkConsistency(calls, Set(alice))
 
@@ -318,7 +319,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       }
 
       "handle empty signatory set for a call" in {
-        val calls = Seq(call("func1", "output1", viewPos0, Set.empty))
+        val calls = Seq(call("func1", toBytes("output1"), viewPos0, Set.empty))
         val result = checker.checkConsistency(calls, Set(alice))
 
         // Alice is not a signatory, so she doesn't validate this call
@@ -327,8 +328,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "handle party hosted but not signatory of any call" in {
         val calls = Seq(
-          call("func1", "out1", viewPos0, Set(bob)),
-          call("func1", "out2", viewPos1, Set(bob)),
+          call("func1", toBytes("out1"), viewPos0, Set(bob)),
+          call("func1", toBytes("out2"), viewPos1, Set(bob)),
         )
         val result = checker.checkConsistency(calls, Set(alice, bob))
 
@@ -340,7 +341,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "handle large number of parties efficiently" in {
         val manyParties = (1 to 50).map(i => LfPartyId.assertFromString(s"party$i")).toSet
-        val calls = Seq(call("func1", "output1", viewPos0, manyParties))
+        val calls = Seq(call("func1", toBytes("output1"), viewPos0, manyParties))
         val result = checker.checkConsistency(calls, manyParties)
 
         result.results.size shouldBe 50
@@ -349,7 +350,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
       "handle large number of calls efficiently" in {
         val manyCalls = (1 to 100).map { i =>
-          call(s"func$i", s"output$i", viewPos0, Set(alice))
+          call(s"func$i", toBytes(s"output$i"), viewPos0, Set(alice))
         }
         val result = checker.checkConsistency(manyCalls, Set(alice))
 
@@ -366,7 +367,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
           }
           MerkleSeqIndex(directions) +: ViewPosition.root
         }
-        val calls = positions.map(pos => call("func1", "same-output", pos, Set(alice)))
+        val calls = positions.map(pos => call("func1", toBytes("same-output"), pos, Set(alice)))
         val result = checker.checkConsistency(calls, Set(alice))
 
         result.results(alice) shouldBe Consistent
@@ -382,8 +383,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
     "contain the key that caused inconsistency" in {
       val calls = Seq(
-        call("myFunc", "out1", viewPos0, Set(alice)),
-        call("myFunc", "out2", viewPos1, Set(alice)),
+        call("myFunc", toBytes("out1"), viewPos0, Set(alice)),
+        call("myFunc", toBytes("out2"), viewPos1, Set(alice)),
       )
       val result = checker.checkConsistency(calls, Set(alice))
 
@@ -397,15 +398,15 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
     "contain all differing outputs" in {
       val calls = Seq(
-        call("func1", "out1", viewPos0, Set(alice)),
-        call("func1", "out2", viewPos1, Set(alice)),
-        call("func1", "out3", viewPos2, Set(alice)),
+        call("func1", toBytes("out1"), viewPos0, Set(alice)),
+        call("func1", toBytes("out2"), viewPos1, Set(alice)),
+        call("func1", toBytes("out3"), viewPos2, Set(alice)),
       )
       val result = checker.checkConsistency(calls, Set(alice))
 
       result.results(alice) match {
         case Inconsistent(_, outputs, _) =>
-          outputs shouldBe Set("out1", "out2", "out3")
+          outputs shouldBe Set(toBytes("out1"), toBytes("out2"), toBytes("out3"))
         case _ =>
           fail("Expected Inconsistent")
       }
@@ -413,8 +414,8 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
     "contain all view positions where inconsistency was found" in {
       val calls = Seq(
-        call("func1", "out1", viewPos0, Set(alice)),
-        call("func1", "out2", viewPos1, Set(alice)),
+        call("func1", toBytes("out1"), viewPos0, Set(alice)),
+        call("func1", toBytes("out2"), viewPos1, Set(alice)),
       )
       val result = checker.checkConsistency(calls, Set(alice))
 
