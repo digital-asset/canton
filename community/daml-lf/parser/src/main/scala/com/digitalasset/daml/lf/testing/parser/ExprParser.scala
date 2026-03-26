@@ -418,6 +418,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     "BIGNUMERIC_TO_TEXT" -> BBigNumericToText,
     "TYPE_REP_TYCON_NAME" -> BTypeRepTyConName,
     "FAIL_WITH_STATUS" -> BFailWithStatus,
+    "EXTERNAL_CALL" -> BExternalCall,
   )
 
   private lazy val eCallInterface: Parser[ECallInterface] =
