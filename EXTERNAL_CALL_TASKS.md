@@ -87,7 +87,7 @@ Complex multi-participant scenarios with participant-specific mock responses.
   - [ ] handle signatory on P1, observers on P2 and P3
 
 ## 7. Edge Cases & Misc (5 tests)
-- [ ] correctly replay two identical calls with different results via callIndex
+- [ ] correctly replay two identical calls with different results via sequential index
 - [ ] handle external call that takes exactly timeout duration
 - [ ] handle clock skew between participants
 - [ ] allow different parties to see different consistency results

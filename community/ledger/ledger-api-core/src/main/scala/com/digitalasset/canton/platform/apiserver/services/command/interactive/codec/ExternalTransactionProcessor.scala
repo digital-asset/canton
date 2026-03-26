@@ -208,7 +208,7 @@ class ExternalTransactionProcessor(
         transaction = SubmittedTransaction(enrichedTransaction),
         globalKeyMapping = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
         inputContracts = inputContracts,
-        synchronizerId = synchronizerId.logical,
+        synchronizer = synchronizerId,
         mediatorGroup = 0,
         transactionUUID = UUID.randomUUID(),
         maxRecordTime = maxRecordTime,
