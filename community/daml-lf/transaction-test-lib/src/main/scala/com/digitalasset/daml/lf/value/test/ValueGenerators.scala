@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
+  ExternalCallResult,
   GlobalKey,
   GlobalKeyWithMaintainers,
   Node,
@@ -323,6 +324,35 @@ object ValueGenerators {
       if gkey.isDefined
     } yield GlobalKeyWithMaintainers(gkey.get, maintainers)
 
+  /** Generates a single ExternalCallResult for testing serialization. */
+  val externalCallResultGen: Gen[ExternalCallResult] =
+    for {
+      extensionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
+      functionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
+      configHash <- Gen.alphaNumStr.map(_.take(64))
+      inputHex <- Gen.hexStr.map(_.take(200))
+      outputHex <- Gen.hexStr.map(_.take(200))
+      callIndex <- Gen.chooseNum(0, 100)
+    } yield ExternalCallResult(
+      extensionId = extensionId,
+      functionId = functionId,
+      configHash = configHash,
+      inputHex = inputHex,
+      outputHex = outputHex,
+      callIndex = callIndex,
+    )
+
+  /** Generates a list of ExternalCallResults for exercise nodes. */
+  def externalCallResultsGen(
+      version: SerializationVersion
+  ): Gen[ImmArray[ExternalCallResult]] =
+    if (version < SerializationVersion.minExternalCallResults)
+      Gen.const(ImmArray.empty[ExternalCallResult])
+    else
+      Gen
+        .listOf(externalCallResultGen)
+        .map(results => ImmArray.from(results.take(5))) // Limit to 5 for reasonable test sizes
+
   /** Makes create nodes that violate the rules:
     *
     *   1. stakeholders may not be a superset of signatories 2. key's maintainers may not be a
@@ -448,6 +478,7 @@ object ValueGenerators {
       byKey <-
         if (version < SerializationVersion.minContractKeys) Gen.const(false)
         else Gen.oneOf(true, false)
+      extCallResults <- externalCallResultsGen(version)
     } yield Node.Exercise(
       targetCoid = targetCoid,
       packageName = pkgName,
@@ -465,6 +496,7 @@ object ValueGenerators {
       exerciseResult = exerciseResult,
       keyOpt = key,
       byKey = byKey,
+      externalCallResults = extCallResults,
       version = version,
     )
 
