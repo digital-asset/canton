@@ -287,10 +287,9 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         .newBuilder()
         .setExtensionId(result.extensionId)
         .setFunctionId(result.functionId)
-        .setConfigHash(result.configHash)
-        .setInputHex(result.inputHex)
-        .setOutputHex(result.outputHex)
-        .setCallIndex(result.callIndex)
+        .setConfig(result.config.toByteString)
+        .setInput(result.input.toByteString)
+        .setOutput(result.output.toByteString)
         .build()
 
     private[this] def encodeExercise(
@@ -540,10 +539,9 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       ExternalCallResult(
         extensionId = proto.getExtensionId,
         functionId = proto.getFunctionId,
-        configHash = proto.getConfigHash,
-        inputHex = proto.getInputHex,
-        outputHex = proto.getOutputHex,
-        callIndex = proto.getCallIndex,
+        config = data.Bytes.fromByteString(proto.getConfig),
+        input = data.Bytes.fromByteString(proto.getInput),
+        output = data.Bytes.fromByteString(proto.getOutput),
       )
 
     private[this] def decodeExercise(

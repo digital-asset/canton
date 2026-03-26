@@ -223,6 +223,11 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       .withFieldConst(_.byKey, false)
       .buildTransformer
 
+    // Transformer for ByteString -> LfBytes (used by external call results)
+    private implicit val byteStringToLfBytesTransformer
+        : Transformer[ByteString, lf.data.Bytes] =
+      (bs: ByteString) => lf.data.Bytes.fromByteString(bs)
+
     // Transformer for external call results
     private implicit val externalCallResultTransformer
         : Transformer[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult] =
@@ -544,7 +549,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
     } yield {
       ExecuteTransactionData(
         submitterInfo = submitterInfo,
-        synchronizerId = synchronizerId,
+        synchronizer = synchronizerId,
         transactionMeta = transactionMeta,
         transaction = lf.transaction.SubmittedTransaction(transaction),
         globalKeyMapping = globalKeyMapping,

@@ -188,10 +188,9 @@ message ActionDescription {
   message ExternalCallResultProto {
     string extension_id = 1;    // Extension service identifier
     string function_id = 2;     // Function identifier within the extension
-    string config_hash = 3;     // Hash of the extension configuration
-    string input_hex = 4;       // Hex-encoded input data
-    string output_hex = 5;      // Hex-encoded output data
-    int32 call_index = 6;       // Index of this call within the exercise
+    bytes config = 3;           // Extension configuration (binary)
+    bytes input = 4;            // Input data (binary)
+    bytes output = 5;           // Output data (binary)
   }
 
   message FetchActionDescription {

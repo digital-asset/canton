@@ -533,6 +533,17 @@ final class StoreBackedCommandInterpreter(
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
+
+        case ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
+          // During submission, external calls are handled by the engine via needExternalCall.
+          // During validation/enrichment, storedResult should be available.
+          storedResult match {
+            case Some(storedOutput) => resolveStep(resume(Right(storedOutput)))
+            case None =>
+              resolveStep(resume(Left(
+                com.digitalasset.daml.lf.engine.ExternalCallError(500, "External call result not available", None)
+              )))
+          }
       }
 
     resolveStep(result).thereafter { _ =>

@@ -58,15 +58,12 @@ import com.digitalasset.canton.participant.store.{
   PruningOffsetServiceImpl,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.extension.{
-  ExtensionServiceExternalCallHandler,
-  ExtensionServiceManager,
-}
+import com.digitalasset.canton.participant.extension.ExtensionServiceManager
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
   ParticipantNodeParameters,
 }
-import com.digitalasset.canton.platform.apiserver.execution.{CommandProgressTracker, ExternalCallHandler}
+import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptorFactory
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.Utils
@@ -103,6 +100,7 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.language.Ast
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.{BindableService, ServerInterceptor, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
@@ -120,6 +118,7 @@ class LedgerApiServer(
     adminParty: Party,
     adminTokenConfig: AdminTokenConfig,
     engine: Engine,
+    contractStateMode: ContractStateMachine.Mode,
     syncService: CantonSyncService,
     cantonParameterConfig: ParticipantNodeParameters,
     testingTimeService: Option[TimeServiceBackend],
@@ -145,6 +144,9 @@ class LedgerApiServer(
     tracer: Tracer,
 ) extends ResourceCloseable
     with NamedLogging {
+
+  // Suppress unused warning: extensionServiceManagerOpt will be wired when extension gRPC services are registered
+  locally { val _ = extensionServiceManagerOpt }
 
   override protected def timeouts: ProcessingTimeout = cantonParameterConfig.processingTimeouts
 
@@ -209,11 +211,6 @@ class LedgerApiServer(
     val dbSupport = ledgerApiStore.value.ledgerApiDbSupport
     val inMemoryState = ledgerApiIndexer.value.inMemoryState
     val timedSyncService = new TimedSyncService(syncService, grpcApiMetrics)
-
-    // Create external call handler from the extension service manager (passed from ParticipantNode)
-    val externalCallHandler: ExternalCallHandler =
-      ExtensionServiceExternalCallHandler.create(extensionServiceManagerOpt)
-
     logger.debug(
       s"Ledger API Server is initializing with ledgerApiStore=$ledgerApiStore, ledgerApiIndexer=$ledgerApiIndexer, dbSupport=$dbSupport, inMemoryState=$inMemoryState"
     )
@@ -255,8 +252,8 @@ class LedgerApiServer(
       lfValueTranslation = new LfValueTranslation(
         metrics = grpcApiMetrics,
         engineO = Some(engine),
-        loadPackage = (packageId, loggingContext) =>
-          timedSyncService.getLfArchive(packageId)(loggingContext.traceContext),
+        loadPackage = (packageId, traceContext) =>
+          timedSyncService.getLfArchive(packageId)(traceContext),
         loggerFactory = loggerFactory,
       )
       indexService <- new IndexServiceOwner(
@@ -297,16 +294,19 @@ class LedgerApiServer(
             partyIds: Set[LfPartyId],
             validAt: Option[Offset],
         )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
-          indexService.getActiveContracts(
-            eventFormat = EventFormat(
-              filtersByParty =
-                partyIds.view.map(_ -> CumulativeFilter.templateWildcardFilter(true)).toMap,
-              filtersForAnyParty =
-                Option.when(partyIds.isEmpty)(CumulativeFilter.templateWildcardFilter(true)),
-              verbose = false,
-            ),
-            activeAt = validAt,
-          )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
+          indexService
+            .getActiveContracts(
+              eventFormat = EventFormat(
+                filtersByParty =
+                  partyIds.view.map(_ -> CumulativeFilter.templateWildcardFilter(true)).toMap,
+                filtersForAnyParty =
+                  Option.when(partyIds.isEmpty)(CumulativeFilter.templateWildcardFilter(true)),
+                verbose = false,
+              ),
+              activeAt = validAt,
+              continuationToken = None,
+            )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
+            .map(_.withEmptyChecksum)
 
         override def topologyTransactions(
             partyId: LfPartyId,
@@ -329,6 +329,7 @@ class LedgerApiServer(
                   )
                 ),
               ),
+              descendingOrder = false,
             )
             .mapConcat(_.update.topologyTransaction)
       })
@@ -362,7 +363,7 @@ class LedgerApiServer(
       // when processing unsuffixed contract IDs. For that reason we disable this requirement via the flag below.
       // When CIDs are suffixed, we can re-use the LfValueTranslation from the index service created above
       interactiveSubmissionEnricher = new InteractiveSubmissionEnricher(
-        new Engine(engine.config.copy(forbidLocalContractIds = false)),
+        new Engine(engine.config.copy(forbidLocalContractIds = false), loggerFactory),
         packageResolver = packageResolver,
       )
       apiContractService = new ApiContractService(
@@ -407,6 +408,7 @@ class LedgerApiServer(
         otherServices = Seq(apiInfoService),
         otherInterceptors = getInterceptors,
         engine = engine,
+        contractStateMode = contractStateMode,
         queryExecutionContext = queryExecutionContext,
         commandExecutionContext = executionContext,
         checkOverloaded = syncService.checkOverloaded,
@@ -417,7 +419,6 @@ class LedgerApiServer(
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         tokenExpiryGracePeriodForStreams =
           cantonParameterConfig.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,
-        engineLoggingConfig = cantonParameterConfig.engine.submissionPhaseLogging,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractValidator.authenticateHash,
@@ -429,7 +430,6 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
-        externalCallHandler = externalCallHandler,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -538,6 +538,8 @@ class LedgerApiServer(
       )
     ),
     topologyAwarePackageSelection = serverConfig.topologyAwarePackageSelection.enabled,
+    tapsMaxPassesDefault = serverConfig.topologyAwarePackageSelection.maxPassesDefault,
+    tapsMaxPassesLimit = serverConfig.topologyAwarePackageSelection.maxPassesLimit,
   )
 
   private def startHttpApiIfEnabled(
@@ -626,6 +628,7 @@ object LedgerApiServer {
       adminParty = adminParty,
       adminTokenConfig = config.ledgerApi.adminTokenConfig.merge(config.adminApi.adminTokenConfig),
       engine = ledgerApiServerBootstrapUtils.engine,
+      contractStateMode = config.parameters.engine.contractStateMode,
       syncService = sync,
       cantonParameterConfig = parameters,
       testingTimeService = ledgerTestingTimeService,

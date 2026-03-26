@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -152,12 +152,13 @@ class TransactionConfirmationResponsesFactory(
           )
 
         // Step 1: Compute hosted confirming parties for all views
-        viewsWithHostedParties <- transactionValidationResult.viewValidationResults.toSeq
-          .parTraverse { case (viewPosition, viewValidationResult) =>
-            hostedConfirmingPartiesOfView(viewValidationResult).map { hostedParties =>
-              (viewPosition, viewValidationResult, hostedParties)
+        viewsWithHostedParties: Seq[(ViewPosition, ViewValidationResult, Set[LfPartyId])] <-
+          transactionValidationResult.viewValidationResults.toSeq
+            .parTraverse { case (viewPosition, viewValidationResult) =>
+              hostedConfirmingPartiesOfView(viewValidationResult).map { hostedParties =>
+                (viewPosition, viewValidationResult, hostedParties)
+              }
             }
-          }
 
         // Step 2: Collect all external calls and check consistency per party
         allHostedConfirmingParties = viewsWithHostedParties.flatMap(_._3).toSet
@@ -173,7 +174,7 @@ class TransactionConfirmationResponsesFactory(
         _ = externalCallConsistencyResults.results.foreach {
           case (party, Inconsistent(key, outputs, viewPositions)) =>
             logger.warn(
-              show"Request $requestId: Party $party sees inconsistent external call results for ${key.functionId}: outputs=$outputs in views $viewPositions"
+              s"Request $requestId: Party $party sees inconsistent external call results for ${key.functionId}: outputs=$outputs in views $viewPositions"
             )
           case _ => // consistent, no logging needed
         }

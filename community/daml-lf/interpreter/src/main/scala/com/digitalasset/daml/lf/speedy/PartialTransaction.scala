@@ -201,15 +201,6 @@ private[lf] object PartialTransaction {
     externalCallResults = HashMap.empty,
   )
 
-  @throws[SError.SErrorDamlException]
-  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
-    either match {
-      case Right(value) =>
-        value
-      case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(context, err))
-    }
-
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
 }
 
@@ -237,6 +228,15 @@ private[speedy] case class PartialTransaction(
 ) {
 
   import PartialTransaction._
+
+  @throws[SError.SErrorDamlException]
+  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
+    either match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        throw SError.SErrorDamlException(convTxError(nodes, context, err))
+    }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
     contractState.consumedByOrInactive(cid)
@@ -315,15 +315,7 @@ private[speedy] case class PartialTransaction(
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
         val tx0 = Tx(nodes, roots)
-        val (tx, seeds) = NormalizeRollbacks.normalizeTx(
-          tx0,
-          shouldDropRollbacks = contractState.mode match {
-            case ContractStateMachine.Mode.UCKWithoutRollback => true
-            case ContractStateMachine.Mode.NoContractKey => false
-            case ContractStateMachine.Mode.LegacyNUCK => false
-            case ContractStateMachine.Mode.UCKWithRollback => false
-          }
-        )
+        val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))
 
@@ -393,12 +385,13 @@ private[speedy] case class PartialTransaction(
         ptx.contractState.visitCreate(
           cid,
           createNode.gkeyOpt,
+          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
             Right((cid, nextPtx))
           case Left(duplicate) =>
-            Left((ptx, convTxError("Create", duplicate)))
+            Left((ptx, convTxError(nodes, "Create", duplicate)))
         }
     }
   }
@@ -630,14 +623,12 @@ private[speedy] case class PartialTransaction(
       case Some(ec) =>
         val nodeId = ec.nodeId
         val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
-        val callIndex = existing.length
         val result = ExternalCallResult(
           extensionId = extensionId,
           functionId = functionId,
-          configHash = configHash,
-          inputHex = inputHex,
-          outputHex = outputHex,
-          callIndex = callIndex,
+          config = data.Bytes.fromString(configHash).getOrElse(data.Bytes.Empty),
+          input = data.Bytes.fromString(inputHex).getOrElse(data.Bytes.Empty),
+          output = data.Bytes.fromString(outputHex).getOrElse(data.Bytes.Empty),
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
@@ -696,7 +687,7 @@ private[speedy] case class PartialTransaction(
   /** Close a try context, by catching an exception,
     * i.e. a exception was thrown inside the context, and the catch associated to the try context did handle it.
     */
-  def rollbackTry(): PartialTransaction = {
+  def rollbackTry(): Either[IErr.EffectfulRollback, PartialTransaction] = {
     context.info match {
       case info: TryContextInfo =>
         // In the case of there being no children we could drop the entire rollback node.
@@ -706,12 +697,18 @@ private[speedy] case class PartialTransaction(
         // re-executes the code inside rollback scopes and needs the results at the
         // same call indices. Rolled-back results are kept so submission and validation
         // produce the same sequence of external call lookups.
-        copy(
-          context = info.parent
-            .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
-          nodes = nodes.updated(info.nodeId, rollbackNode),
-          contractState = contractState.endRollback(),
-        )
+        contractState.endRollback() match {
+          case Right(rolledBackState) =>
+            Right(
+              copy(
+                context = info.parent
+                  .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
+                nodes = nodes.updated(info.nodeId, rollbackNode),
+                contractState = rolledBackState,
+              )
+            )
+          case Left(nodeIds) => Left(convEffectfulRollbackError(nodes, TxErr.EffectfulRollback(nodeIds)))
+        }
       case _ =>
         InternalError.runtimeException(
           NameOf.qualifiedNameOfCurrentFunc,

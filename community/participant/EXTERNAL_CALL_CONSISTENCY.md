@@ -39,10 +39,10 @@ This per-party validation ensures that:
 Two external calls are considered "equal" (i.e., the same call) if they have identical:
 - `extensionId` - identifies the external service
 - `functionId` - identifies the function being called
-- `configHash` - configuration parameters hash
-- `inputHex` - the input arguments
+- `config` - configuration parameters (bytes)
+- `input` - the input arguments (bytes)
 
-**Rationale**: This treats external services as pure functions - same inputs must produce same outputs. The `callIndex` and `outputHex` are intentionally excluded from the equality definition.
+**Rationale**: This treats external services as pure functions - same inputs must produce same outputs. The `output` is intentionally excluded from the equality definition.
 
 ### 2. Validating Parties
 
