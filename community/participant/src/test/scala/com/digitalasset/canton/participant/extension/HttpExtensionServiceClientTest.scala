@@ -68,11 +68,16 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
 
     val sleptMillis: mutable.ArrayBuffer[Long] = mutable.ArrayBuffer.empty
 
-    private val now: Long = initialNowMillis
+    private var now: Long = initialNowMillis
 
     override def nowMillis(): Long = now
 
-    override def sleepMillis(ms: Long): Unit = sleptMillis += ms
+    def advanceMillis(ms: Long): Unit = now += ms
+
+    override def sleepMillis(ms: Long): Unit = {
+      sleptMillis += ms
+      advanceMillis(ms)
+    }
 
     override def newRequestId(): String =
       if (ids.nonEmpty) ids.dequeue() else fail("No request IDs left in fake runtime")
@@ -224,6 +229,7 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
         .map { result =>
           result shouldBe Right("ok")
           runtime.sleptMillis.toSeq shouldBe Seq(1000L)
+          runtime.nowMillis() shouldBe 2000L
           transport.requests should have size 2
           transport.requests.map(_.headers.find(_._1 == "X-Request-Id").map(_._2)) shouldBe Seq(
             Some("req-1"),

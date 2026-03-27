@@ -54,11 +54,11 @@ private[extension] final class JdkHttpExtensionClientTransport(httpClient: HttpC
       .uri(request.uri)
       .timeout(request.timeout)
 
-    request.headers.foreach { case (header, value) =>
-      val _ = requestBuilder.header(header, value)
+    val builderWithHeaders = request.headers.foldLeft(requestBuilder) { case (builder, (header, value)) =>
+      builder.header(header, value)
     }
 
-    val httpRequest = requestBuilder
+    val httpRequest = builderWithHeaders
       .POST(HttpRequest.BodyPublishers.ofString(request.body))
       .build()
 
