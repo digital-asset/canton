@@ -78,6 +78,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -542,15 +543,28 @@ final class StoreBackedCommandInterpreter(
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
 
-        case ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
-          // During submission, external calls are handled by the engine via needExternalCall.
-          // During validation/enrichment, storedResult should be available.
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, storedResult, resume) =>
           storedResult match {
-            case Some(storedOutput) => resolveStep(resume(Right(storedOutput)))
+            case Some(output) =>
+              // Use stored result (for replay/validation)
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(Right(output))),
+                )
+              )
             case None =>
-              resolveStep(resume(Left(
-                com.digitalasset.daml.lf.engine.ExternalCallError(500, "External call result not available", None)
-              )))
+              // Make actual external call during submission
+              externalCallHandler
+                .handleExternalCall(extensionId, functionId, configHash, input, "submission")
+                .flatMap { result =>
+                  resolveStep(
+                    Tracked.value(
+                      metrics.execution.engineRunning,
+                      trackSyncExecution(interpretationTimeNanos)(resume(result)),
+                    )
+                  )
+                }
           }
       }
 

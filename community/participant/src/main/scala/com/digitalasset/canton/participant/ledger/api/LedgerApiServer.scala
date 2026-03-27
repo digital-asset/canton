@@ -59,7 +59,7 @@ import com.digitalasset.canton.participant.store.{
   PruningOffsetServiceImpl,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.extension.ExtensionServiceManager
+import com.digitalasset.canton.participant.extension.{ExtensionServiceExternalCallHandler, ExtensionServiceManager}
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
   ParticipantNodeParameters,
@@ -145,9 +145,6 @@ class LedgerApiServer(
     tracer: Tracer,
 ) extends ResourceCloseable
     with NamedLogging {
-
-  // Suppress unused warning: extensionServiceManagerOpt will be wired when extension gRPC services are registered
-  locally { val _ = extensionServiceManagerOpt }
 
   override protected def timeouts: ProcessingTimeout = cantonParameterConfig.processingTimeouts
 
@@ -432,6 +429,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
+        externalCallHandler = ExtensionServiceExternalCallHandler.create(extensionServiceManagerOpt),
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
