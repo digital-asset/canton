@@ -81,6 +81,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -443,23 +444,17 @@ final class StoreBackedCommandInterpreter(
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
 
-        // TODO(https://github.com/digital-asset/canton/issues/513): Replace this fail-fast once command submission is wired to external calls.
-        case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
-          FutureUnlessShutdown.pure(
-            Left(
-              ErrorCause.DamlLf(
-                Error.Interpretation(
-                  Error.Interpretation.Internal(
-                    "StoreBackedCommandInterpreter",
-                    s"External calls are not supported during ledger-api command submission " +
-                      s"(extensionId=$extensionId, functionId=$functionId)",
-                    None,
-                  ),
-                  None,
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          externalCallHandler
+            .handleExternalCall(extensionId, functionId, configHash, input, "submission")
+            .flatMap { result =>
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(result)),
                 )
               )
-            )
-          )
+            }
       }
 
     resolveStep(result).thereafter { _ =>

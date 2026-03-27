@@ -124,6 +124,7 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -285,6 +286,7 @@ object ApiServices {
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
           timeProvider = timeProvider,
+          externalCallHandler = externalCallHandler,
         )
 
       val commandExecutor =
