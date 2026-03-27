@@ -56,6 +56,8 @@ class ExtensionServiceManager(
     builder.build()
   }
 
+  private val runtime: HttpExtensionClientRuntime = HttpExtensionClientRuntime.system
+
   // Extension clients by ID
   private val clients: Map[String, ExtensionServiceClient] = {
     if (engineExtensionsConfig.echoMode) {
@@ -65,7 +67,13 @@ class ExtensionServiceManager(
       }
     } else {
       extensionConfigs.map { case (id, config) =>
-        id -> new HttpExtensionServiceClient(id, config, httpClient, loggerFactory)
+        id -> new HttpExtensionServiceClient(
+          id,
+          config,
+          new JdkHttpExtensionClientTransport(httpClient),
+          runtime,
+          loggerFactory,
+        )
       }
     }
   }

@@ -3,35 +3,34 @@
 
 package com.digitalasset.canton.participant.extension
 
-import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.net.URI
-import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.file.Files
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.time.Duration
-import java.util.UUID
 import javax.net.ssl.{SSLContext, TrustManager, X509TrustManager}
 import scala.concurrent.{ExecutionContext, Future, blocking}
-import scala.util.{Random, Try}
+import scala.util.Try
 
 /** HTTP client implementation for extension services with retry logic,
   * JWT authentication, and TLS support.
   *
   * @param extensionId The extension identifier (key from config map)
   * @param config Configuration for this extension service
-  * @param sharedHttpClient Shared HTTP client with connection pooling
+  * @param transport HTTP transport for this extension service
+  * @param runtime Runtime side effects used by retry and request generation
   * @param loggerFactory Logger factory
   */
 class HttpExtensionServiceClient(
     override val extensionId: String,
     config: ExtensionServiceConfig,
-    sharedHttpClient: HttpClient,
+    transport: HttpExtensionClientTransport,
+    runtime: HttpExtensionClientRuntime,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ExtensionServiceClient
@@ -81,33 +80,24 @@ class HttpExtensionServiceClient(
           // Try to make a simple health check call
           // For now, we just verify we can establish a connection
           try {
-            val requestId = generateRequestId()
-            val requestBuilder = HttpRequest
-              .newBuilder()
-              .uri(endpoint)
-              .timeout(Duration.ofMillis(config.connectTimeout.underlying.toMillis))
-              .header("Content-Type", "application/octet-stream")
-              .header("X-Daml-External-Function-Id", "_health")
-              .header("X-Daml-External-Config-Hash", "")
-              .header("X-Daml-External-Mode", "validation")
-              .header(config.requestIdHeader, requestId)
-
-            jwtToken.foreach { token =>
-              requestBuilder.header("Authorization", s"Bearer $token")
-            }
-
-            val req = requestBuilder
-              .POST(HttpRequest.BodyPublishers.ofString(""))
-              .build()
+            val requestId = runtime.newRequestId()
+            val request = buildRequest(
+              functionId = "_health",
+              configHash = "",
+              input = "",
+              mode = "validation",
+              timeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
+              requestId = requestId,
+            )
 
             // We don't really care about the response, just that we can connect
-            val resp = sharedHttpClient.send(req, HttpResponse.BodyHandlers.ofString())
+            val resp = transport.send(request)
 
             // Any response (even 4xx) means the service is reachable
-            if (resp.statusCode() >= 200 && resp.statusCode() < 600) {
+            if (resp.statusCode >= 200 && resp.statusCode < 600) {
               ExtensionValidationResult.Valid
             } else {
-              ExtensionValidationResult.Invalid(Seq(s"Unexpected response code: ${resp.statusCode()}"))
+              ExtensionValidationResult.Invalid(Seq(s"Unexpected response code: ${resp.statusCode}"))
             }
           } catch {
             case e: java.net.ConnectException =>
@@ -122,9 +112,6 @@ class HttpExtensionServiceClient(
     }
   }
 
-  /** Generate a unique request ID for tracking */
-  private def generateRequestId(): String = UUID.randomUUID().toString
-
   /** Make an HTTP call with retry logic */
   private def callWithRetry(
       functionId: String,
@@ -132,10 +119,10 @@ class HttpExtensionServiceClient(
       input: String,
       mode: String,
   )(implicit tc: TraceContext): Either[ExtensionCallError, String] = {
-    val deadlineMs = System.currentTimeMillis() + config.maxTotalTimeout.underlying.toMillis
+    val deadlineMs = runtime.nowMillis() + config.maxTotalTimeout.underlying.toMillis
 
     def loop(attempt: Int, lastError: Option[ExtensionCallError]): Either[ExtensionCallError, String] = {
-      val nowMs = System.currentTimeMillis()
+      val nowMs = runtime.nowMillis()
       if (nowMs >= deadlineMs) {
         val finalError = lastError.getOrElse(
           ExtensionCallError(504, "Total timeout exceeded", None)
@@ -163,7 +150,7 @@ class HttpExtensionServiceClient(
             Right(response)
 
           case Left(error) if shouldRetry(error) && attempt < config.maxRetries.value =>
-            val remainingTimeMs = deadlineMs - System.currentTimeMillis()
+            val remainingTimeMs = deadlineMs - runtime.nowMillis()
             val delay = calculateBackoff(attempt + 1, error.retryAfter, remainingTimeMs)
 
             if (delay >= remainingTimeMs) {
@@ -176,7 +163,7 @@ class HttpExtensionServiceClient(
                 s"External call to extension '$extensionId' failed (attempt ${attempt + 1}/${config.maxRetries}): ${error.message} (status=${error.statusCode}). Retrying in ${delay}ms"
               )
 
-              Threading.sleep(delay)
+              runtime.sleepMillis(delay)
               loop(attempt + 1, Some(error))
             }
 
@@ -199,37 +186,28 @@ class HttpExtensionServiceClient(
       input: String,
       mode: String,
   )(implicit tc: TraceContext): Either[ExtensionCallError, String] = {
-    val requestId = generateRequestId()
+    val requestId = runtime.newRequestId()
 
     try {
-      val requestBuilder = HttpRequest
-        .newBuilder()
-        .uri(endpoint)
-        .timeout(Duration.ofMillis(config.requestTimeout.underlying.toMillis))
-        .header("Content-Type", "application/octet-stream")
-        .header("X-Daml-External-Function-Id", functionId)
-        .header("X-Daml-External-Config-Hash", configHash)
-        .header("X-Daml-External-Mode", mode)
-        .header(config.requestIdHeader, requestId)
-
-      jwtToken.foreach { token =>
-        requestBuilder.header("Authorization", s"Bearer $token")
-      }
-
-      val req = requestBuilder
-        .POST(HttpRequest.BodyPublishers.ofString(input))
-        .build()
+      val request = buildRequest(
+        functionId = functionId,
+        configHash = configHash,
+        input = input,
+        mode = mode,
+        timeout = Duration.ofMillis(config.requestTimeout.underlying.toMillis),
+        requestId = requestId,
+      )
 
       logger.debug(
         s"Making external call to extension '$extensionId': functionId=$functionId, mode=$mode, requestId=$requestId"
       )
 
-      val resp = sharedHttpClient.send(req, HttpResponse.BodyHandlers.ofString())
+      val resp = transport.send(request)
 
-      resp.statusCode() match {
+      resp.statusCode match {
         case 200 =>
           logger.debug(s"External call to extension '$extensionId' succeeded: requestId=$requestId")
-          Right(resp.body())
+          Right(resp.body)
 
         case 400 =>
           Left(parseErrorResponse(resp, requestId, "Bad Request"))
@@ -284,37 +262,34 @@ class HttpExtensionServiceClient(
   }
 
   private def parseErrorResponse(
-      resp: HttpResponse[String],
+      resp: HttpExtensionClientResponse,
       requestId: String,
       defaultMessage: String,
   ): ExtensionCallError = {
-    val body = resp.body()
+    val body = resp.body
     val message = if (body != null && body.nonEmpty && body.length < 500) {
       s"$defaultMessage: $body"
     } else {
       defaultMessage
     }
-    ExtensionCallError(resp.statusCode(), message, Some(requestId))
+    ExtensionCallError(resp.statusCode, message, Some(requestId))
   }
 
   private def parseErrorResponseWithRetry(
-      resp: HttpResponse[String],
+      resp: HttpExtensionClientResponse,
       requestId: String,
       defaultMessage: String,
   ): ExtensionCallErrorWithRetry = {
-    val retryAfter = Try {
-      val opt = resp.headers().firstValue("Retry-After")
-      if (opt.isPresent) Some(opt.get()) else None
-    }.toOption.flatten.flatMap(s => Try(s.toInt).toOption)
+    val retryAfter = firstHeaderValue(resp, "Retry-After").flatMap(s => Try(s.toInt).toOption)
 
-    val body = resp.body()
+    val body = resp.body
     val message = if (body != null && body.nonEmpty && body.length < 500) {
       s"$defaultMessage: $body"
     } else {
       defaultMessage
     }
 
-    ExtensionCallErrorWithRetry(resp.statusCode(), message, Some(requestId), retryAfter)
+    ExtensionCallErrorWithRetry(resp.statusCode, message, Some(requestId), retryAfter)
   }
 
   private def shouldRetry(error: ExtensionCallError): Boolean = {
@@ -338,12 +313,45 @@ class HttpExtensionServiceClient(
 
       case None =>
         val exponentialDelay = retryInitialDelayMs * Math.pow(2, (attempt - 1).toDouble).toLong
-        val jitter = (Random.nextDouble() * 0.3 * exponentialDelay).toLong
+        val jitter = (runtime.nextRetryJitterDouble() * 0.3 * exponentialDelay).toLong
         (exponentialDelay + jitter).min(retryMaxDelayMs).min(availableForBackoff)
     }
 
     baseDelay
   }
+
+  private def buildRequest(
+      functionId: String,
+      configHash: String,
+      input: String,
+      mode: String,
+      timeout: Duration,
+      requestId: String,
+  ): HttpExtensionClientRequest = {
+    val baseHeaders = Seq(
+      "Content-Type" -> "application/octet-stream",
+      "X-Daml-External-Function-Id" -> functionId,
+      "X-Daml-External-Config-Hash" -> configHash,
+      "X-Daml-External-Mode" -> mode,
+      config.requestIdHeader -> requestId,
+    )
+    val authHeaders = jwtToken.toList.map(token => "Authorization" -> s"Bearer $token")
+
+    HttpExtensionClientRequest(
+      uri = endpoint,
+      timeout = timeout,
+      headers = baseHeaders ++ authHeaders,
+      body = input,
+    )
+  }
+
+  private def firstHeaderValue(
+      response: HttpExtensionClientResponse,
+      headerName: String,
+  ): Option[String] =
+    response.headers.iterator.collectFirst {
+      case (name, values) if name.equalsIgnoreCase(headerName) => values.headOption
+    }.flatten
 
   private implicit class ExtensionCallErrorOps(error: ExtensionCallError) {
     def retryAfter: Option[Int] = error match {
