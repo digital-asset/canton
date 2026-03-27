@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.protocol.messages.{GeneratorsMessages, ProtocolMessage}
 import com.digitalasset.canton.sequencing.channel.{
@@ -46,8 +47,39 @@ final class GeneratorsProtocol(
   import generatorsTopology.*
   import generatorsMessages.*
 
+  implicit val mediatorGroupRecipientArb: Arbitrary[MediatorGroupRecipient] = Arbitrary(
+    Arbitrary.arbitrary[NonNegativeInt].map(MediatorGroupRecipient(_))
+  )
+
+  implicit val messageIdArb: Arbitrary[MessageId] = Arbitrary(
+    Generators.lengthLimitedStringGen(String73).map(s => MessageId.tryCreate(s.str))
+  )
+
+  // If this pattern match is not exhaustive anymore, update the generator below
+  {
+    ((_: Recipient) match {
+      case _: MemberRecipient => ()
+      case SequencersOfSynchronizer => ()
+      case _: MediatorGroupRecipient => ()
+      case AllMembersOfSynchronizer => ()
+    }).discard
+  }
+
   implicit val recipientsArb: Arbitrary[Recipients] = {
-    val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
+    // Manually defined with Gen.oneOf to avoid Magnolia macro diamond-inheritance flakiness
+    // resulting in compilation error:
+    // ```
+    //  GeneratorsProtocol.scala:50:60: magnolia: child trait MemberRecipientOrBroadcast of trait Recipient is neither final nor a case class
+    //  [error]     val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
+    // ```
+    val protocolVersionDependentRecipientArb: Arbitrary[Recipient] = Arbitrary(
+      Gen.oneOf(
+        Arbitrary.arbitrary[Member].map(MemberRecipient.apply),
+        Gen.const(SequencersOfSynchronizer),
+        Arbitrary.arbitrary[MediatorGroupRecipient], // Uses the implicit defined above!
+        Gen.const(AllMembersOfSynchronizer),
+      )
+    )
 
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
@@ -55,6 +87,7 @@ final class GeneratorsProtocol(
         depths.forgetNE.map(recipientsTreeGen(protocolVersionDependentRecipientArb)(_))
       )
     } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
+
   }
 
   implicit val acknowledgeRequestArb: Arbitrary[AcknowledgeRequest] = Arbitrary(for {
@@ -296,12 +329,6 @@ final class GeneratorsProtocol(
     }
   )
 
-  implicit val mediatorGroupRecipientArb: Arbitrary[MediatorGroupRecipient] = Arbitrary(
-    Arbitrary.arbitrary[NonNegativeInt].map(MediatorGroupRecipient(_))
-  )
-  implicit val messageIdArb: Arbitrary[MessageId] = Arbitrary(
-    Generators.lengthLimitedStringGen(String73).map(s => MessageId.tryCreate(s.str))
-  )
   private def recipientsTreeGen(
       recipientArb: Arbitrary[Recipient]
   )(depth: Int): Gen[RecipientsTree] = {

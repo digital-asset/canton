@@ -13,7 +13,7 @@ import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, SerializationVersion, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value._
 import org.scalatest.EitherValues

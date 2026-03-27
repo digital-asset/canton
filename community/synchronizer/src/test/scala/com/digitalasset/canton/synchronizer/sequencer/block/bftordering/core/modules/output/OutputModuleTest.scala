@@ -1119,6 +1119,7 @@ class OutputModuleTest
           node2 -> nodeTopologyInfo(),
           BftNodeId("node from the future") -> nodeTopologyInfo(),
         ),
+        DefaultEpochLength,
         SequencingParameters.Default,
         defaultMaxBytesToDecompress, // irrelevant for this test
         topologyActivationTime,

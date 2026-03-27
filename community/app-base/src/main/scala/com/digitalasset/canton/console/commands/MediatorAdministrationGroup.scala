@@ -31,7 +31,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30
-import com.digitalasset.canton.mediator.admin.v30.Verdict
 import com.digitalasset.canton.networking.grpc.RecordingStreamObserver
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -171,12 +170,25 @@ class MediatorInspectionGroup(
 ) extends NoTracing
     with NamedLogging
     with StreamingCommandHelper {
-  def verdicts(
+
+  @Help.Summary("Stream verdicts, in record time order")
+  @Help.Description(
+    """Returns verdicts whose record time is greater than `fromRecordTimeOfRequestExclusive`
+      |until any of the following occur:
+      | * `maxItems` responses have been returned, or
+      | * it has been at least `timeout` since we issued the call, or
+      | * the mediator determines that a logical synchronizer upgrade has anointed a successor,
+      |   at which point any pending requests will be finalized as rejected and returned as
+      |   Verdict messages, followed by a Complete message and the stream will be closed.
+      """
+  )
+  def verdicts_until_complete(
       fromRecordTimeOfRequestExclusive: CantonTimestamp,
       maxItems: PositiveInt,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded,
-  ): Seq[Verdict] = {
-    val observer = new RecordingStreamObserver[v30.Verdict](completeAfter = maxItems)
+  ): Seq[v30.VerdictsResponse.Payload] = {
+    val observer =
+      new RecordingStreamObserver[v30.VerdictsResponse.Payload](completeAfter = maxItems)
     val cmd = MediatorInspectionCommands.MediatorVerdicts(
       mostRecentlyReceivedRecordTimeOfRequest = Some(fromRecordTimeOfRequestExclusive),
       observer,
@@ -188,4 +200,13 @@ class MediatorInspectionGroup(
       timeout,
     )
   }
+
+  @deprecated("Use verdicts_until_complete instead", since = "3.5.0")
+  @Help.Summary("Deprecated form of get_verdicts that only returns Verdicts, without Complete")
+  def verdicts(
+      fromRecordTimeOfRequestExclusive: CantonTimestamp,
+      maxItems: PositiveInt,
+      timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded,
+  ): Seq[v30.Verdict] =
+    verdicts_until_complete(fromRecordTimeOfRequestExclusive, maxItems, timeout).flatMap(_.verdict)
 }

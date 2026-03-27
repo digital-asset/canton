@@ -71,7 +71,8 @@ import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.Error.Interpretation.DamlException
 import com.digitalasset.daml.lf.engine.{Error, Error as LfError}
 import com.digitalasset.daml.lf.interpretation.Error.ContractNotFound
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, *}
+import com.digitalasset.daml.lf.transaction.*
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.value.Value
 import monocle.macros.GenLens
 import monocle.{Lens, Traversal}
@@ -105,10 +106,10 @@ class ModelConformanceCheckerTest
   )
   private val testEngine = new TestEngine(
     packagePaths = Seq(CantonExamplesPath, modelConformanceExamplesPath),
-    contractStateMode = if (testedProtocolVersion >= ProtocolVersion.v35) {
-      ContractStateMachine.Mode.UCKWithoutRollback
+    contractStateMode = if (testedProtocolVersion <= ProtocolVersion.v34) {
+      NextGenContractStateMachine.Mode.NoKey
     } else {
-      ContractStateMachine.Mode.LegacyNUCK
+      NextGenContractStateMachine.Mode.NUCK
     },
     loggerFactory = loggerFactory,
   )
@@ -119,7 +120,6 @@ class ModelConformanceCheckerTest
     TransactionConfirmationRequestFactory(
       participantId,
       DefaultTestIdentities.physicalSynchronizerId,
-      wallClock,
     )(
       pureCrypto,
       contractHasher,
@@ -183,7 +183,7 @@ class ModelConformanceCheckerTest
     val damlE: DAMLe = new DAMLe(
       resolvePackage = testEngine.packageResolver,
       engine = testEngine.engine,
-      contractStateMode = ContractStateMachine.Mode.default,
+      contractStateMode = NextGenContractStateMachine.Mode.default,
       participantId = participantId,
       loggerFactory = loggerFactory,
     )
@@ -836,7 +836,7 @@ class ModelConformanceCheckerTest
           transactionUuid = seedGenerator.generateUuid(),
           topologySnapshot = topologySnapshot,
           contractOfId = contractOfId,
-          keyResolver = keyResolver,
+          keyResolver = keyResolver.asCidOptionMap,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
         )

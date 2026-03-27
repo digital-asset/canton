@@ -82,11 +82,11 @@ template PainterCleanerProposal
 
 demo : Script (ContractId PaintHouse)
 demo = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-  charlie <- allocateParty "Charlie"
-  donald <- allocateParty "Donald"
-  eric <- allocateParty "Eric"
+  alice <- allocateParty "Alice-ConjunctionChoices:demo"
+  bob <- allocateParty "Bob-ConjunctionChoices:demo"
+  charlie <- allocateParty "Charlie-ConjunctionChoices:demo"
+  donald <- allocateParty "Donald-ConjunctionChoices:demo"
+  eric <- allocateParty "Eric-ConjunctionChoices:demo"
   painterCleanerProposal <- submit bob do
     createCmd PainterCleanerProposal with
       painter = bob

@@ -13,7 +13,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
   TopologyActivationTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.endpointToTestBftNodeId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  EpochLength,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
@@ -28,6 +31,7 @@ import scala.util.Success
 
 class SimulationOrderingTopologyProvider(
     thisNode: BftNodeId,
+    epochLength: EpochLength, // TODO(#24184) make this dynamic sequencing parameter
     getEndpointsToTopologyData: () => Map[P2PEndpoint, NodeSimulationTopologyData],
     loggerFactory: NamedLoggerFactory,
 ) extends OrderingTopologyProvider[SimulationEnv] {
@@ -53,6 +57,7 @@ class SimulationOrderingTopologyProvider(
                 .toSet
             )
           }.toMap,
+          epochLength, // TODO(#24184) make this dynamic sequencing parameter
           SequencingParameters.Default,
           BaseTest.defaultMaxBytesToDecompress,
           activationTime,

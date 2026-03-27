@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -107,7 +108,13 @@ object TimeProof {
       // if we were to guess it we may get it wrong and then in the event of no activity on the synchronizer for our recipient,
       // we'd then never actually learn of the time.
       // so instead we just use the maximum value allowed.
-      maxSequencingTime = CantonTimestamp.MaxValue,
+      timestamps = SendRequestTimestamps(
+        topologyTimestamp = None,
+        // It's safe to use `clock.now` regardless of the max sequencing time, as the latter is set to `MaxValue`,
+        // which causes a fallback to the long-term key when signing.
+        approximateTimestampForSigning = client.clock.now,
+        maxSequencingTime = CantonTimestamp.MaxValue,
+      ),
       messageId = mkTimeProofRequestMessageId,
       // Do not amplify because max sequencing time is set to MaxValue and therefore will exceed the aggregation time bound
       amplify = false,

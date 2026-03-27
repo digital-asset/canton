@@ -30,7 +30,6 @@ import scala.collection.immutable.SortedMap
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
-// TODO(#24610) – Revise based on moving to ACS export based on LAPI offset
 class AcsInspection(
     synchronizerId: SynchronizerId,
     val activeContractStore: ActiveContractStore,
@@ -191,6 +190,7 @@ class AcsInspection(
     )
   }
 
+  // TODO(#24065) - Remove, if no longer useful
   /** Check that the ACS snapshot does not contain contracts that are still needed on the
     * participant. In the context of party offboarding, we want to avoid purging contracts that are
     * needed for other parties hosted on the participant.

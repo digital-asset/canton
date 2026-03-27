@@ -274,6 +274,11 @@ model_based_test:
         num_test_buckets: ""
         num_parallel_tasks: "1"
         timeout: "90m"
+        # We break this test too often for now because we don't run each on
+        # every PR and we're making many NUCK related changes. So we disable
+        # reporting to avoid spamming the flaky test rota. Paul is notified of
+        # failures on slack for now (see fixed_volunteer below).
+        report_to_datadog: false 
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U05KX5V7KJN" # Paul
 

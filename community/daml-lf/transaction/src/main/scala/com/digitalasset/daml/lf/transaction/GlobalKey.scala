@@ -94,3 +94,21 @@ object GlobalKeyWithMaintainers {
       .build(templateId, packageName, value, valueHash)
       .map(GlobalKeyWithMaintainers(_, maintainers))
 }
+
+
+/** Controls whether the engine should error out when it encounters duplicate keys.
+ * This is always turned on with the exception of Canton which allows turning this on or off
+ * and forces it to be turned off in multi-domain mode.
+ */
+sealed abstract class LegacyContractKeyUniquenessMode extends Product with Serializable
+
+object LegacyContractKeyUniquenessMode {
+
+  /** Disable key uniqueness checks and only consider byKey operations.
+   * Note that no stable semantics are provided for off mode.
+   */
+  case object Off extends LegacyContractKeyUniquenessMode
+
+  /** Considers all nodes mentioning keys as byKey operations and checks for contract key uniqueness. */
+  case object Strict extends LegacyContractKeyUniquenessMode
+}

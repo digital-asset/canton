@@ -30,8 +30,8 @@ template Account with
     maintainer key._1
 
 test = script do
-    bank <- allocateParty "Bank"
-    alice <- allocateParty "Alice"
+    bank <- allocateParty "Bank-ContractKeys:test"
+    alice <- allocateParty "Alice-ContractKeys:test"
     let account = Account with
             bank
             accountHolder = alice

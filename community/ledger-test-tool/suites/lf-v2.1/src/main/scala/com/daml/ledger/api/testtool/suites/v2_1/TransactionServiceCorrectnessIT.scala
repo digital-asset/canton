@@ -39,7 +39,7 @@ class TransactionServiceCorrectnessIT extends LedgerTestSuite {
             _.endInclusive := endAfterFirstSection
           )
         )
-      firstSection <- ledger.transactionsWithVariants(firstSectionRequest)
+      firstSection <- ledger.transactions(firstSectionRequest)
       _ <- Future.sequence(
         Vector.fill(transactionsToSubmit)(ledger.create(party, new Dummy(party)))
       )
@@ -50,8 +50,8 @@ class TransactionServiceCorrectnessIT extends LedgerTestSuite {
             _.beginExclusive := endAfterFirstSection
           )
         )
-      secondSection <- ledger.transactionsWithVariants(secondSectionRequest)
-      fullSequence <- ledger.transactionsWithVariants(AcsDelta, party)
+      secondSection <- ledger.transactions(secondSectionRequest)
+      fullSequence <- ledger.transactions(AcsDelta, party)
     } yield {
       val concatenation = Vector.concat(firstSection, secondSection)
       assert(
@@ -118,9 +118,9 @@ class TransactionServiceCorrectnessIT extends LedgerTestSuite {
       endOffsetAtTestStart <- ledger.currentEnd()
       _ <- ledger.create(alice, new Dummy(alice))
       _ <- ledger.create(bob, new Dummy(bob))
-      aliceView <- ledger.transactionsWithVariants(LedgerEffects, alice)
-      bobView <- ledger.transactionsWithVariants(LedgerEffects, bob)
-      multiSubscriptionView <- ledger.transactionsWithVariants(LedgerEffects, alice, bob)
+      aliceView <- ledger.transactions(LedgerEffects, alice)
+      bobView <- ledger.transactions(LedgerEffects, bob)
+      multiSubscriptionView <- ledger.transactions(LedgerEffects, alice, bob)
       txReq <- ledger.getTransactionsRequest(
         transactionFormat =
           ledger.transactionFormat(None, transactionShape = LedgerEffects, verbose = true),

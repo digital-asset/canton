@@ -34,6 +34,7 @@ final case class LsuSequencingBounds(
 )
 
 object LsuSequencingBounds {
+  // TODO(#31526) We should allow to override this
   def create(
       store: TopologyStore[SynchronizerStore]
   )(implicit

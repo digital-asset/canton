@@ -24,7 +24,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
@@ -86,7 +85,6 @@ import scala.util.{Failure, Random, Success}
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class StateTransferBehavior[E <: Env[E]](
-    private val epochLength: EpochLength, // Currently fixed for all epochs
     private val initialState: InitialState[E],
     stateTransferType: StateTransferType,
     catchupDetector: CatchupDetector,
@@ -127,7 +125,6 @@ final class StateTransferBehavior[E <: Env[E]](
     new StateTransferManager(
       thisNode,
       dependencies,
-      epochLength,
       epochStore,
       random,
       metrics,
@@ -212,7 +209,7 @@ final class StateTransferBehavior[E <: Env[E]](
 
           val newEpochInfo =
             currentEpochInfo.next(
-              epochLength,
+              newEpochTopologyMessage.membership.orderingTopology.epochLength,
               newEpochTopologyMessage.membership.orderingTopology.activationTime,
             )
           storeEpochs(
@@ -331,6 +328,7 @@ final class StateTransferBehavior[E <: Env[E]](
         stateTransferMessage,
         activeTopologyInfo,
         latestCompletedEpoch,
+        epochState.epoch.info,
       )(abort)
 
     handleStateTransferMessageResult(result, messageType)
@@ -462,7 +460,6 @@ final class StateTransferBehavior[E <: Env[E]](
         sequencerSnapshotAdditionalInfo = None,
       )
     val consensusBehavior = new IssConsensusModule[E](
-      epochLength,
       consensusInitialState,
       epochStore,
       clock,
@@ -557,7 +554,6 @@ object StateTransferBehavior {
       behavior: StateTransferBehavior[?]
   ): Option[
     (
-        EpochLength,
         EpochNumber,
         Option[EpochNumber],
         OrderingTopologyInfo[?],
@@ -567,7 +563,6 @@ object StateTransferBehavior {
   ] =
     Some(
       (
-        behavior.epochLength,
         behavior.initialState.stateTransferStartEpoch,
         behavior.initialState.minimumStateTransferEndEpoch,
         behavior.activeTopologyInfo,

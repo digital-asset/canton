@@ -140,7 +140,7 @@ final class InvalidAssignmentRequestIntegrationTest
       val (iou, reassignmentData) = createContractAndUnassign()
 
       maliciousP2
-        .submitAssignmentRequest(observer.toLf, reassignmentData, Some(environment.now))
+        .submitAssignmentRequest(observer.toLf, reassignmentData)
         .futureValueUS
         .value
 
@@ -189,7 +189,6 @@ final class InvalidAssignmentRequestIntegrationTest
             .submitAssignmentRequest(
               observer.toLf,
               reassignmentData,
-              Some(environment.now),
               overrideRecipients = Recipients.ofSet(
                 Set(
                   participant1.member,
@@ -268,7 +267,6 @@ final class InvalidAssignmentRequestIntegrationTest
             .submitAssignmentRequest(
               observer.toLf,
               alteredUnassignmentData(reassignmentData),
-              Some(environment.now),
             )
             .futureValueUS
             .value

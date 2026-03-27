@@ -20,7 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 import com.google.common.annotations.VisibleForTesting
 
 import java.net.URI
@@ -205,11 +205,9 @@ object ConfigValidations extends NamedLogging {
         case participant: ParticipantNodeConfig =>
           toList(
             participant.httpLedgerApi.enabled && participant.httpLedgerApi.internalPort.isEmpty,
-            portNotSetError(
-              nodeType = nodeConfig.nodeTypeName,
-              nodeName = name.unwrap,
-              service = "http-ledger-api",
-            ),
+            s"canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.port not set. " +
+              s"Either set a port (canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.port = <port>) " +
+              s"or disable the service (canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.enabled = false).",
           ) ++ toList(
             participant.ledgerApi.internalPort.isEmpty,
             portNotSetError(
@@ -379,7 +377,7 @@ object ConfigValidations extends NamedLogging {
     val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
       val mode = participantConfig.parameters.engine.contractStateMode
       Option.when(
-        mode != ContractStateMachine.Mode.default && !config.parameters.nonStandardConfig
+        mode != NextGenContractStateMachine.Mode.default && !config.parameters.nonStandardConfig
       )(
         s"Changing the contract state machine mode to $mode on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
       )

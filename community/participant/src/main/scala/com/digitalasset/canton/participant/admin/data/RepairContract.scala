@@ -86,4 +86,24 @@ object RepairContract {
       representativePackageId = representativePackageId,
     )
 
+  def toLapiActiveContract(
+      repairContract: RepairContract,
+      targetSynchronizerId: SynchronizerId,
+  ): Either[String, LapiActiveContract] =
+    for {
+      blob <- TransactionCoder
+        .encodeFatContractInstance(repairContract.contract)
+        .leftMap(err => s"Unable to encode contract event payload: ${err.errorMessage}")
+    } yield {
+      val createdEvent = com.daml.ledger.api.v2.event.CreatedEvent.defaultInstance
+        .withCreatedEventBlob(blob)
+        .withRepresentativePackageId(repairContract.representativePackageId.toString)
+        .withContractId(repairContract.contractId.coid)
+
+      LapiActiveContract(
+        createdEvent = Some(createdEvent),
+        synchronizerId = targetSynchronizerId.toProtoPrimitive,
+        reassignmentCounter = repairContract.reassignmentCounter.v,
+      )
+    }
 }

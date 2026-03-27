@@ -56,13 +56,6 @@ private[lf] object Pretty {
             stakeholders.map(prettyParty),
           ) + char('.')
 
-      case Error.CommitError(IdeLedger.CommitError.UniqueKeyViolation(gk)) =>
-        (text("Script failed due to unique key violation for key:") & prettyValue(false)(
-          gk.gk.key
-        ) & text(
-          "for template"
-        ) & prettyIdentifier(gk.gk.templateId))
-
       case Error.MustFailSucceeded(tx @ _) =>
         // TODO(JM): Further info needed. Location annotations?
         text("Script failed due to a mustfailAt that succeeded.")

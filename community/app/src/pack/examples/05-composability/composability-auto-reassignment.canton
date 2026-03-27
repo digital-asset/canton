@@ -50,7 +50,7 @@ val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("
 Seq(participant1, participant2, participant3).dars.upload(darPath, synchronizerId = iouId)
 Seq(participant2, participant3).dars.upload(darPath, synchronizerId = paintId)
 
-import com.digitalasset.canton.BigDecimalImplicits._
+import java.math.{BigDecimal => JavaBigDecimal}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.examples.java.paint.{OfferToPaintHouseByOwner, PaintHouse}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil.decodeAllCreated
@@ -63,7 +63,7 @@ import scala.jdk.CollectionConverters._
 val createIouCmd = new Iou(
   Bank.toProtoPrimitive,
   HouseOwner.toProtoPrimitive,
-  new Amount(100.0.toBigDecimal, "USD"),
+  new Amount(JavaBigDecimal.valueOf(100.0), "USD"),
   List.empty.asJava
 ).create.commands.asScala.toSeq
 val Seq(iouContractUnshared) = decodeAllCreated(Iou.COMPANION)(

@@ -31,7 +31,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
@@ -73,7 +72,6 @@ import scala.util.{Failure, Random, Success}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class IssConsensusModule[E <: Env[E]](
-    private val epochLength: EpochLength, // TODO(#19289): support variable epoch lengths
     private val initialState: InitialState[E],
     epochStore: EpochStore[E],
     clock: Clock,
@@ -108,7 +106,9 @@ final class IssConsensusModule[E <: Env[E]](
 ) extends Consensus[E]
     with HasDelayedInit[Consensus.Message[E]] {
 
-  logger.info(s"Consensus module instantiated with epoch length $epochLength")(TraceContext.empty)
+  logger.info(
+    s"Consensus module instantiated with epoch length ${initialState.topologyInfo.currentMembership.orderingTopology.epochLength}"
+  )(TraceContext.empty)
 
   private val thisNode = initialState.topologyInfo.thisNode
 
@@ -118,7 +118,6 @@ final class IssConsensusModule[E <: Env[E]](
       new StateTransferManager(
         thisNode,
         dependencies,
-        epochLength,
         epochStore,
         random,
         metrics,
@@ -171,7 +170,7 @@ final class IssConsensusModule[E <: Env[E]](
       case Consensus.Start =>
         val maybeSnapshotAdditionalInfo = initialState.sequencerSnapshotAdditionalInfo
         BootstrapDetector.detect(
-          epochLength,
+          activeTopologyInfo.currentMembership.orderingTopology.epochLength,
           maybeSnapshotAdditionalInfo,
           activeTopologyInfo.currentMembership,
           latestCompletedEpoch,
@@ -209,7 +208,7 @@ final class IssConsensusModule[E <: Env[E]](
         )
         val currentEpochInfo = epochState.epoch.info
         val newEpochInfo = currentEpochInfo.next(
-          epochLength,
+          newEpochTopologyMessage.membership.orderingTopology.epochLength,
           newEpochTopologyMessage.membership.orderingTopology.activationTime,
         )
         // Set the new epoch state before processing queued messages (including a proper segment module factory)
@@ -234,9 +233,10 @@ final class IssConsensusModule[E <: Env[E]](
 
       case newEpochTopologyMessage: Consensus.NewEpochTopology[E] =>
         val currentEpochInfo = epochState.epoch.info
+        val newEpochLength = newEpochTopologyMessage.membership.orderingTopology.epochLength
         val newTopologyActivationTime =
           newEpochTopologyMessage.membership.orderingTopology.activationTime
-        val newEpochInfo = currentEpochInfo.next(epochLength, newTopologyActivationTime)
+        val newEpochInfo = currentEpochInfo.next(newEpochLength, newTopologyActivationTime)
         processNewEpochTopology(newEpochTopologyMessage, currentEpochInfo, newEpochInfo)
 
       case newEpochStored @ Consensus.NewEpochStored(
@@ -386,6 +386,7 @@ final class IssConsensusModule[E <: Env[E]](
           msg,
           activeTopologyInfo,
           latestCompletedEpoch,
+          currentEpochInfo = epochState.epoch.info,
         )(abort) match {
           case StateTransferMessageResult.Continue =>
           case other => abort(s"Unexpected result $other from server-side state transfer manager")
@@ -567,7 +568,7 @@ final class IssConsensusModule[E <: Env[E]](
           emitEpochStartLatency()
           val currentEpochInfo = epochState.epoch.info
           val newEpochInfo = currentEpochInfo.next(
-            epochLength,
+            newMembership.orderingTopology.epochLength,
             newMembership.orderingTopology.activationTime,
           )
           if (newEpochNumber != newEpochInfo.number) {
@@ -798,7 +799,13 @@ final class IssConsensusModule[E <: Env[E]](
     val currentEpochNumber = epochState.epoch.info.number
     val latestCompletedEpochNumber = latestCompletedEpoch.info.number
     val minimumEndEpochNumber = catchupDetector.shouldCatchUpTo(currentEpochNumber)
-    if (updatedEpoch && minimumEndEpochNumber.isDefined) {
+    if (
+      updatedEpoch &&
+      minimumEndEpochNumber.isDefined &&
+      // if epochState is closed, we have probably just finished an epoch and are waiting for new topology.
+      // So we should wait with state transfer until we are in the new epoch.
+      !epochState.isClosing
+    ) {
       logger.debug(
         s"Switching to catch-up state transfer (up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
           s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
@@ -818,7 +825,6 @@ final class IssConsensusModule[E <: Env[E]](
     logger.info(s"Starting $stateTransferType state transfer from epoch $startEpochNumber")
     resetConsensusWaitingForEpochCompletion()
     val newBehavior = new StateTransferBehavior(
-      epochLength,
       StateTransferBehavior.InitialState[E](
         startEpochNumber,
         minimumEndEpochNumber,
@@ -1007,7 +1013,6 @@ object IssConsensusModule {
   @VisibleForTesting
   private[iss] def unapply(issConsensusModule: IssConsensusModule[?]): Option[
     (
-        EpochLength,
         Option[SequencerSnapshotAdditionalInfo],
         OrderingTopologyInfo[?],
         Seq[Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage],
@@ -1016,7 +1021,6 @@ object IssConsensusModule {
   ] =
     Some(
       (
-        issConsensusModule.epochLength,
         issConsensusModule.initialState.sequencerSnapshotAdditionalInfo,
         issConsensusModule.activeTopologyInfo,
         issConsensusModule.futurePbftMessageQueue.dump,

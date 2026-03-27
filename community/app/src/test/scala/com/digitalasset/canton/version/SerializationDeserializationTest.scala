@@ -7,7 +7,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
-import com.digitalasset.canton.participant.admin.data.ActiveContractOld
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.{
   OnboardingClearanceOperation,
@@ -74,7 +73,7 @@ final class SerializationDeserializationTest
         generators.protocol,
       )
     val participantGenerators =
-      new GeneratorsParticipant(generators.topology, generators.lf, generators.protocol, version)
+      new GeneratorsParticipant(generators.topology, generators.lf, version)
 
     import com.digitalasset.canton.crypto.GeneratorsCrypto.*
     import generators.data.*
@@ -199,7 +198,6 @@ final class SerializationDeserializationTest
           test(PartyReplicationSourceParticipantMessage, version)
           test(PartyReplicationTargetParticipantMessage, version)
         }
-        test(ActiveContractOld, version)
 
         // Generated sequenced events get quite big because each batched envelope has recipient trees
         // of quadratic size breadth * depth, so this test takes longer than other tests.

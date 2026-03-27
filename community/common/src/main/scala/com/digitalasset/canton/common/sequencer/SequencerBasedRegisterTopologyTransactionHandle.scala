@@ -13,6 +13,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -50,14 +51,15 @@ class SequencerBasedRegisterTopologyTransactionHandle(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcast.State]] = {
     val sendCallback = SendCallback.future
+    val now = clock.now
     val maxSequencingTime =
-      clock.now.add(topologyConfig.topologyTransactionRegistrationTimeout.toInternal.duration)
+      now.add(topologyConfig.topologyTransactionRegistrationTimeout.toInternal.duration)
     val request = TopologyTransactionsBroadcast(
       sequencerClient.psid,
       transactions,
     )
     synchronizeWithClosing(functionFullName)(
-      sendRequest(request, maxSequencingTime, sendCallback)
+      sendRequest(request, now, maxSequencingTime, sendCallback)
     )
       .biSemiflatMap(
         { sendAsyncClientError =>
@@ -95,6 +97,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
 
   private def sendRequest(
       request: TopologyTransactionsBroadcast,
+      approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
       sendCallback: SendCallback,
   )(implicit
@@ -108,7 +111,11 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     )
     sequencerClient.send(
       Batch.of(psid.protocolVersion, (request, Recipients.cc(TopologyBroadcastAddress.recipient))),
-      maxSequencingTime = maxSequencingTime,
+      timestamps = SendRequestTimestamps(
+        topologyTimestamp = None,
+        approximateTimestampForSigning = approximateTimestampForSigning,
+        maxSequencingTime = maxSequencingTime,
+      ),
       callback = sendCallback,
       // Do not amplify because we are running our own retry loop here anyway
       amplify = false,

@@ -68,6 +68,7 @@ class AssignmentProcessor(
       ephemeral,
       synchronizerCrypto,
       sequencerClient,
+      clock,
       loggerFactory,
       futureSupervisor,
       promiseFactory,

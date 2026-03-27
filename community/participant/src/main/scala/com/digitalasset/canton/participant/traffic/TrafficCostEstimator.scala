@@ -7,12 +7,13 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, SessionSigningKeysConfig}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.KeyPurpose.Signing
 import com.digitalasset.canton.crypto.SigningError.InvariantViolation
 import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.{SyncCryptoSigner, SyncCryptoSignerWithSessionKeys}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.crypto.{
@@ -106,6 +107,7 @@ class TrafficCostEstimator(
     psid: PhysicalSynchronizerId,
     participantId: ParticipantId,
     trafficStateController: TrafficStateController,
+    defaultMaxSequencingTimeOffset: NonNegativeFiniteDuration,
     clock: Clock,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -263,6 +265,7 @@ class TrafficCostEstimator(
             Some(LedgerSubmissionId.assertFromString(UUID.randomUUID().toString))
           )
       }
+      now = clock.now
       // Generate a confirmation request
       mockedConfirmationRequest <- confirmationRequestFactory
         .createConfirmationRequest(
@@ -276,9 +279,13 @@ class TrafficCostEstimator(
           keyResolver,
           mediatorGroupRecipient,
           client,
+          now,
           sessionKeyStore,
           lookupContractsWithDisclosed,
-          CantonTimestamp.MaxValue,
+          // We use `clock.now` + `defaultMaxSequencingTimeOffset` so that, when session signing keys are enabled,
+          // the request’s time span is covered by a session signing key, ensuring session keys are accounted for
+          // when computing the cost.
+          now.add(defaultMaxSequencingTimeOffset.asJava),
           psid.protocolVersion,
         )
         .leftMap(_.toString)
@@ -333,7 +340,11 @@ class TrafficCostEstimator(
           NonEmpty.mk(Seq, confirmationResponse),
           psid.protocolVersion,
         )
-        SignedProtocolMessage.trySignAndCreate(confirmationResponses, client, Some(clock.now))
+        SignedProtocolMessage.trySignAndCreate(
+          confirmationResponses,
+          client,
+          None, // `ConfirmationResponses` are always signed with a `fixed` timestamp.
+        )
       }
       batch = Batch.of(
         psid.protocolVersion,
@@ -415,7 +426,7 @@ object TrafficCostEstimator {
 
     override def sign(
         topologySnapshot: TopologySnapshot,
-        approximateTimestampOverride: Option[CantonTimestamp],
+        signingTimestampOverrides: Option[SigningTimestampOverrides],
         hash: Hash,
         usage: NonEmpty[Set[SigningKeyUsage]],
     )(implicit
@@ -428,7 +439,11 @@ object TrafficCostEstimator {
         allowedSigningKeySpecs,
       )
       maybeWithSignatureDelegation <- EitherT.fromEither[FutureUnlessShutdown](
-        maybeAddSignatureDelegation(signature, topologySnapshot, approximateTimestampOverride)
+        maybeAddSignatureDelegation(
+          signature,
+          topologySnapshot,
+          signingTimestampOverrides.map(_.approximateTimestamp),
+        )
       )
     } yield maybeWithSignatureDelegation
 
@@ -437,7 +452,7 @@ object TrafficCostEstimator {
     private def maybeAddSignatureDelegation(
         signature: Signature,
         topologySnapshot: TopologySnapshot,
-        approximateTimestampOverride: Option[CantonTimestamp],
+        approximateTimestampForSigning: Option[CantonTimestamp],
     ) = if (withSessionKeys) {
       for {
         sessionSigningKey <-
@@ -456,8 +471,8 @@ object TrafficCostEstimator {
             // but it’s a good enough estimate to provide an accurate assessment of the transaction size and
             // compute its cost.
             SignatureDelegationValidityPeriod(
-              approximateTimestampOverride.getOrElse(topologySnapshot.timestamp),
-              PositiveFiniteDuration.ofMinutes(5),
+              approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp),
+              SessionSigningKeysConfig.default.keyValidityDuration,
             ),
             signature,
           )

@@ -14,7 +14,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
@@ -28,6 +27,92 @@ import com.digitalasset.canton.version.{
 }
 
 import scala.collection.immutable.SortedSet
+
+final case class BlacklistLeaderSelectionPolicyStateWithTopology(
+    state: BlacklistLeaderSelectionPolicyState,
+    topology: OrderingTopology,
+) {
+  def epochNumber: EpochNumber = state.epochNumber
+  def startBlock: BlockNumber = state.startBlock
+
+  def computeBlockToLeader(
+      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
+  ): Map[BlockNumber, BftNodeId] =
+    Epoch.blockToLeadersFromEpochInfo(
+      computeLeaders(config),
+      state.startBlock,
+      topology.epochLength,
+    )
+
+  def update(
+      newTopology: OrderingTopology,
+      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
+      blockToLeader: Map[BlockNumber, BftNodeId],
+      nodesToPunish: Set[BftNodeId],
+  ): BlacklistLeaderSelectionPolicyStateWithTopology = {
+    val newBlacklist = updateBlacklist(newTopology, config, blockToLeader, nodesToPunish)
+    BlacklistLeaderSelectionPolicyStateWithTopology(
+      BlacklistLeaderSelectionPolicyState.create(
+        EpochNumber(epochNumber + 1),
+        BlockNumber(startBlock + topology.epochLength),
+        newBlacklist,
+      )(state.representativeProtocolVersion.representative),
+      newTopology,
+    )
+  }
+  private def updateBlacklist(
+      newTopology: OrderingTopology,
+      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
+      blockToLeader: Map[BlockNumber, BftNodeId],
+      nodesToPunish: Set[BftNodeId],
+  ): Blacklist = {
+    val nodesThatParticipated = blockToLeader.values.toSet
+    val currentBlacklistWithoutRemovedNodes = state.blacklist.filter { case (node, _) =>
+      newTopology.contains(node)
+    }
+
+    newTopology.nodes.foldLeft(currentBlacklistWithoutRemovedNodes) { case (blacklist, node) =>
+      blacklist.updatedWith(node)(
+        BlacklistStatus.transformToWorkOnBlacklistStatus { status =>
+          val howEpochWent: BlacklistStatus.HowEpochWent = if (nodesToPunish.contains(node)) {
+            BlacklistStatus.HowEpochWent.ShouldBePunished
+          } else {
+            if (nodesThatParticipated.contains(node)) {
+              BlacklistStatus.HowEpochWent.Succeeded
+            } else {
+              BlacklistStatus.HowEpochWent.DidNotParticipate
+            }
+          }
+          status.update(howEpochWent, config.howLongToBlackList)
+        }
+      )
+    }
+  }
+
+  private def selectLeaders(
+      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
+  ): SortedSet[BftNodeId] = {
+    val allBlacklistedNodes: Seq[BftNodeId] = state.blacklist
+      .collect { case (node, BlacklistStatus.Blacklisted(_, epochLeftUntilNewTrial)) =>
+        node -> epochLeftUntilNewTrial
+      }
+      .toSeq
+      .sortBy(x => x._2 -> x._1)
+      .reverse
+      .map(_._1)
+
+    val blacklistedNodes: Set[BftNodeId] = allBlacklistedNodes
+      .take(config.howManyCanWeBlacklist.howManyCanWeBlacklist(topology))
+      .toSet
+
+    SortedSet.from(topology.nodes.removedAll(blacklistedNodes))
+  }
+
+  def computeLeaders(
+      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
+  ): Seq[BftNodeId] =
+    rotateLeaders(selectLeaders(config), epochNumber)
+}
 
 final case class BlacklistLeaderSelectionPolicyState(
     epochNumber: EpochNumber,
@@ -45,87 +130,6 @@ final case class BlacklistLeaderSelectionPolicyState(
       startBlock,
       blacklist.view.mapValues(_.toProto30).toMap,
     )
-
-  def selectLeaders(
-      topology: OrderingTopology,
-      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-  ): SortedSet[BftNodeId] = {
-    val allBlacklistedNodes: Seq[BftNodeId] = blacklist
-      .collect { case (node, BlacklistStatus.Blacklisted(_, epochLeftUntilNewTrial)) =>
-        node -> epochLeftUntilNewTrial
-      }
-      .toSeq
-      .sortBy(x => x._2 -> x._1)
-      .reverse
-      .map(_._1)
-
-    val blacklistedNodes: Set[BftNodeId] = allBlacklistedNodes
-      .take(config.howManyCanWeBlacklist.howManyCanWeBlacklist(topology))
-      .toSet
-
-    SortedSet.from(topology.nodes.removedAll(blacklistedNodes))
-  }
-
-  def computeLeaders(
-      orderingTopology: OrderingTopology,
-      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-  ): Seq[BftNodeId] =
-    rotateLeaders(selectLeaders(orderingTopology, config), epochNumber)
-
-  def computeBlockToLeader(
-      orderingTopology: OrderingTopology,
-      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-      epochLength: EpochLength,
-  ): Map[BlockNumber, BftNodeId] =
-    Epoch.blockToLeadersFromEpochInfo(
-      computeLeaders(orderingTopology, config),
-      startBlock,
-      epochLength,
-    )
-
-  def update(
-      topology: OrderingTopology,
-      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-      epochLength: EpochLength,
-      blockToLeader: Map[BlockNumber, BftNodeId],
-      nodesToPunish: Set[BftNodeId],
-  ): BlacklistLeaderSelectionPolicyState = {
-    val newBlacklist = updateBlacklist(topology, config, blockToLeader, nodesToPunish)
-    BlacklistLeaderSelectionPolicyState(
-      EpochNumber(epochNumber + 1),
-      BlockNumber(startBlock + epochLength),
-      newBlacklist,
-    )(representativeProtocolVersion)
-  }
-
-  private def updateBlacklist(
-      topology: OrderingTopology,
-      config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-      blockToLeader: Map[BlockNumber, BftNodeId],
-      nodesToPunish: Set[BftNodeId],
-  ): Blacklist = {
-    val nodesThatParticipated = blockToLeader.values.toSet
-    val currentBlacklistWithoutRemovedNodes = blacklist.filter { case (node, _) =>
-      topology.contains(node)
-    }
-
-    topology.nodes.foldLeft(currentBlacklistWithoutRemovedNodes) { case (blacklist, node) =>
-      blacklist.updatedWith(node)(
-        BlacklistStatus.transformToWorkOnBlacklistStatus { status =>
-          val howEpochWent: BlacklistStatus.HowEpochWent = if (nodesToPunish.contains(node)) {
-            BlacklistStatus.HowEpochWent.ShouldBePunished
-          } else {
-            if (nodesThatParticipated.contains(node)) {
-              BlacklistStatus.HowEpochWent.Succeeded
-            } else {
-              BlacklistStatus.HowEpochWent.DidNotParticipate
-            }
-          }
-          status.update(howEpochWent, config.howLongToBlackList)
-        }
-      )
-    }
-  }
 
   override protected val companionObj: BlacklistLeaderSelectionPolicyState.type =
     BlacklistLeaderSelectionPolicyState

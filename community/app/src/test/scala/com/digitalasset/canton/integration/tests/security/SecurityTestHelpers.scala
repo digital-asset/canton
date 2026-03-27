@@ -469,7 +469,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
   def signedTransformOf[A <: SignedProtocolMessageContent](
       transform: MessageTransform[A],
       useCurrentSnapshot: Boolean = false,
-      approximateTimestampOverride: Option[CantonTimestamp] = None,
+      approximateTimestampForSigning: Option[CantonTimestamp] = None,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[A] =
@@ -479,7 +479,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
         .andThen(_.focus(_.sender).replace(sender))
         // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
-        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampOverride))(
+        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning))(
           submissionRequest
         )
     }
@@ -494,7 +494,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       transform: MessageTransform[A],
       senderRef: LocalInstanceReference,
       useCurrentSnapshot: Boolean = false,
-      approximateTimestampOverride: Option[CantonTimestamp] = None,
+      approximateTimestampForSigning: Option[CantonTimestamp] = None,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[A] =
@@ -504,7 +504,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
         .andThen(_.focus(_.sender).replace(sender))
         // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
-        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampOverride))(
+        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning))(
           submissionRequest
         )
     }

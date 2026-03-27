@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton
 
-import com.digitalasset.canton.data.SynchronizerSuccessor
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -20,9 +19,9 @@ package object topology {
       def apply(
           loggerFactory: NamedLoggerFactory,
           klass: Class[?],
-          successor: SynchronizerSuccessor,
+          successorPsid: PhysicalSynchronizerId,
       ): Logger =
-        Logger(loggerFactory.append("lsu", successor.psid.suffix).getTracedLogger(klass))
+        Logger(loggerFactory.append("lsu", successorPsid.suffix).getTracedLogger(klass))
     }
   }
 }

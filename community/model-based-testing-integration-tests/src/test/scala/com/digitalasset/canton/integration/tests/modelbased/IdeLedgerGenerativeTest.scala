@@ -14,6 +14,7 @@ import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.DurationInt
@@ -32,25 +33,29 @@ class IdeLedgerGenerativeTest
   "The IDE ledger" should {
     "not crash on valid scenarios" should {
       List(
-        "pvdev" ->
-          new ConcreteGenerators(
-            languageVersion = LanguageVersion.v2_dev,
-            readOnlyRollbacks = true,
-            // TODO(#30398): change to NUCK once NUCK state machine is implemented and plugged
-            keyMode = KeyMode.UniqueContractKeys,
-            // TODO(#30398): change to true once QueryNByKey is fully supported in the engine
-            generateQueryByKey = false,
-          ),
-        "pv34" ->
+        (
+          "pv34",
           new ConcreteGenerators(
             languageVersion = LanguageVersion.v2_2,
             readOnlyRollbacks = false,
             keyMode = KeyMode.UniqueContractKeys,
             generateQueryByKey = false,
           ),
-      ).foreach { case (pv, generators) =>
+          ContractStateMachine.Mode.NoKey,
+        ),
+        (
+          "pvdev",
+          new ConcreteGenerators(
+            languageVersion = LanguageVersion.v2_dev,
+            readOnlyRollbacks = true,
+            keyMode = KeyMode.NonUniqueContractKeys,
+            generateQueryByKey = true,
+          ),
+          ContractStateMachine.Mode.NUCK,
+        ),
+      ).foreach { case (pv, generators, csmMode) =>
         s"for $pv transactions" in {
-          val interpreter = ReferenceInterpreter(loggerFactory)
+          val interpreter = ReferenceInterpreter(loggerFactory, csmMode)
 
           val generator =
             generators.validScenarioGenerator(

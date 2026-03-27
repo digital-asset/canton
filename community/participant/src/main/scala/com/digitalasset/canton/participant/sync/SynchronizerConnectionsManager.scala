@@ -38,7 +38,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
-import com.digitalasset.canton.participant.admin.data.LateLsuRequest
+import com.digitalasset.canton.participant.admin.data.{LateLsuRequest, ManualLsuRequest}
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
   PartyReplicationTopologyWorkflow,
@@ -1325,7 +1325,7 @@ private[sync] class SynchronizerConnectionsManager(
       alias <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateManager
           .aliasForSynchronizerId(currentPsid.logical)
-          .toRight(s"Unable to find alias for synchronizer $currentPsid")
+          .toRight(s"Unable to find alias for synchronizer ${currentPsid.logical}")
       )
 
       event <- persistentState.sequencedEventStore
@@ -1359,7 +1359,7 @@ private[sync] class SynchronizerConnectionsManager(
         request.successorConnectionValidation,
       ).leftMap(_.toString)
       _ <-
-        new LateLogicalSynchronizerUpgrade(
+        new UncheckedLateLogicalSynchronizerUpgrade(
           synchronizerConnectionConfigStore,
           connectQueue,
           connectedSynchronizers,
@@ -1369,6 +1369,34 @@ private[sync] class SynchronizerConnectionsManager(
           timeouts,
           loggerFactory,
         ).upgrade(request)
+    } yield ()
+
+  def performManualLsu(manualLsuRequest: ManualLsuRequest)(implicit traceContext: TraceContext) =
+    for {
+      alias <- EitherT.fromEither[FutureUnlessShutdown](
+        syncPersistentStateManager
+          .aliasForSynchronizerId(manualLsuRequest.lsid)
+          .toRight(s"Unable to find alias for synchronizer ${manualLsuRequest.lsid}")
+      )
+
+      _ <- new ManualLogicalSynchronizerUpgrade(
+        synchronizerConnectionConfigStore,
+        ledgerApiIndexer,
+        syncPersistentStateManager,
+        connectQueue,
+        connectedSynchronizers,
+        connectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
+          connectSynchronizer(
+            alias.value,
+            keepRetrying = true,
+            connectSynchronizer = ConnectSynchronizer.Connect,
+          )(alias.traceContext),
+        disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
+          disconnectSynchronizer(alias.value)(alias.traceContext),
+        pendingHandshakesWithSuccessorsStore,
+        timeouts,
+        loggerFactory,
+      ).upgrade(alias, manualLsuRequest)
     } yield ()
 
   // Write health requires the ability to transact, i.e. connectivity to at least one synchronizer and HA-activeness.

@@ -56,9 +56,9 @@ import com.digitalasset.canton.sequencing.traffic.{
   TrafficPurchasedSubmissionHandler,
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManagerBase
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl
+import com.digitalasset.canton.synchronizer.block.{BlockSequencerStateManagerBase, RawLedgerBlock}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.PruningError.UnsafePruningPoint
@@ -87,7 +87,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficPurc
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown
 import com.digitalasset.canton.util.retry.Pause
@@ -95,7 +95,7 @@ import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, PekkoUtil, SimpleEx
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.*
-import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
@@ -289,6 +289,16 @@ class BlockSequencer(
     implicit val traceContext: TraceContext =
       TraceContext.createNew("block-sequencer-driver-source")
 
+    val pauseAtUpgradeTimeUntilLsuTrafficInitialized =
+      lsuSequencingBounds.fold(Flow[Traced[RawLedgerBlock]]) {
+        case LsuSequencingBounds(upgradeTime, _) =>
+          PekkoUtil.mapAsyncAndDrainUS(Flow[Traced[RawLedgerBlock]], 1) {
+            case block if block.value.baseSequencingTimeMicrosFromEpoch > upgradeTime.toMicros =>
+              lsuTrafficInitialized.futureUS.map(_ => block)
+            case block =>
+              FutureUnlessShutdown.pure(block)
+          }
+      }
     val driverSource = Source
       .futureSource(runtimeReady.unwrap.map {
         case UnlessShutdown.AbortedDueToShutdown =>
@@ -298,6 +308,7 @@ class BlockSequencer(
           noTracingLogger.debug("Subscribing to block source")
           blockOrderer.subscribe()
       })
+      .via(pauseAtUpgradeTimeUntilLsuTrafficInitialized)
       // Explicit async to make sure that the block processing runs in parallel with the block retrieval
       .async
       .map(updateGenerator.extractBlockEvents)
@@ -1352,7 +1363,7 @@ class BlockSequencer(
           request = request,
           hashPurpose = hashPurpose,
           snapshot = syncCryptoApi,
-          approximateTimestampOverride = None,
+          signingTimestampOverrides = None,
         )
         .leftMap { err =>
           val message = s"Error signing submission request $err"

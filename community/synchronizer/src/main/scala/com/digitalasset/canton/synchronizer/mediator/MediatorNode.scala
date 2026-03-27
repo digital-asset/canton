@@ -826,9 +826,5 @@ class MediatorNode(
     )
   }
 
-  override def close(): Unit =
-    LifeCycle.close(
-      replicaManager,
-      storage,
-    )(logger)
+  override def close(): Unit = LifeCycle.close(replicaManager, storage)(logger)
 }

@@ -246,7 +246,9 @@ object DbStorageMulti {
     // By default, ensure that storage runs with wallclock for its health checks
     val clock: Clock = customClock.getOrElse(new WallClock(timeouts, loggerFactory))
 
-    logger.info(s"Creating storage, num-reads: $readPoolSize, num-writes: $writePoolSize")
+    logger.info(
+      s"Creating storage, num-reads: $readPoolSize, num-writes: $writePoolSize, must-stay-active: $mustStayActive"
+    )
     for {
       generalDb <- DbStorage
         .createDatabase(

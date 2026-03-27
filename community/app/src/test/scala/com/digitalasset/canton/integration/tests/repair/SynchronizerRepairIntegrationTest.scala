@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger, SuppressionRule}
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
 import org.scalatest.Ignore
 import org.slf4j.event.Level
 
@@ -80,7 +80,7 @@ sealed abstract class SynchronizerRepairIntegrationTest
         (participant2, Map(Alice -> 6, Bob -> 7)),
       )
 
-      val lostSubscriptionMessage = ResilientSequencerSubscription.LostSequencerSubscription
+      val lostSubscriptionMessage = SequencerSubscriptionError.LostSequencerSubscription
         .Warn(lostSynchronizerSequencer.id, _logOnCreation = false)
         .cause
 

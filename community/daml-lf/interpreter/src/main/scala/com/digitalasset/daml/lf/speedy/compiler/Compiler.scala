@@ -391,6 +391,7 @@ private[lf] final class Compiler(
         addDef(compileContractKeyWithMaintainers(tmplId, tmpl, tmplKey))
         addDef(compileFetchByKey(tmplId, tmplKey))
         addDef(compileLookupByKey(tmplId, tmplKey))
+        addDef(compileQueryNByKey(tmplId, tmplKey))
         tmpl.choices.values.foreach { x =>
           addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
         }
@@ -957,18 +958,31 @@ private[lf] final class Compiler(
     // LookupByKeyDefRef(tmplId) = \ <key> <token> ->
     //    let <keyWithM> = { key = <key> ; maintainers = [tmplKey.maintainers] <key> }
     //        <mbCid> = $lookupKey(tmplId) <keyWithM>
-    //        _ = $insertLookup(tmplId> <keyWithM> <mbCid>
     //    in <mbCid>
     topLevelFunction2(t.LookupByKeyDefRef(tmplId)) { (keyPos, _, env) =>
       let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
         (keyWithMPos, env) =>
           let(env, SBULookupKey(tmplId)(env.toSEVar(keyWithMPos))) { (maybeCidPos, env) =>
-            let(
-              env,
-              SBUInsertLookupNode(tmplId)(env.toSEVar(keyWithMPos), env.toSEVar(maybeCidPos)),
-            ) { (_, env) =>
-              env.toSEVar(maybeCidPos)
-            }
+            env.toSEVar(maybeCidPos)
+          }
+      }
+    }
+
+  private[this] def compileQueryNByKey(
+      tmplId: Identifier,
+      tmplKey: TemplateKey,
+  ): (t.SDefinitionRef, SDefinition) =
+    // compile a template with key into
+    // QueryNByKeyDefRef(tmplId) = \ <key> <n> <token> ->
+    //    let <keyWithM> = { key = <key> ; maintainers = [tmplKey.maintainers] <key> }
+    //        <mbCid> = $queryNByKey(tmplId, n) <keyWithM>
+    //    in <mbCid>
+    topLevelFunction3(t.QueryNByKeyDefRef(tmplId)) { (nPos, keyPos, _, env) =>
+      let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
+        (keyWithMPos, env) =>
+          let(env, SBUQueryNByKey(tmplId)(env.toSEVar(keyWithMPos), env.toSEVar(nPos))) {
+            (resultPos, env) =>
+              env.toSEVar(resultPos)
           }
       }
     }

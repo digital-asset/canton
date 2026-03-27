@@ -9,15 +9,15 @@ import com.daml.grpc.adapter.server.pekko.ServerAdapter
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{CantonTimestamp, TransactionView}
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor, TransactionView}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30 as mediatorV30
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.protocol.messages.InformeeMessage
-import com.digitalasset.canton.synchronizer.mediator.FinalizedResponse
 import com.digitalasset.canton.synchronizer.mediator.store.FinalizedResponseStore
+import com.digitalasset.canton.synchronizer.mediator.{FinalizedResponse, Mediator}
 import com.digitalasset.canton.time.TimeAwaiter
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureUtil
@@ -32,27 +32,21 @@ import scala.concurrent.ExecutionContext
 import GrpcMediatorInspectionService.*
 
 /** The mediator inspection service delivers a stream of finalized verdicts. The verdicts are sorted
-  * by the finalization time, which additionally is capped by the watermark tracked via the provided
-  * time awaiter. In case the watermark is reached and no new verdicts are found, the stream waits
-  * to be notified by the time awaiter when new watermarks are encountered. In practice, the time
-  * awaiter follows the observed sequencing.
+  * by the request time. The request and finalization times are both capped by the watermark tracked
+  * via the provided time awaiter. In case the watermark is reached and no new verdicts are found,
+  * the stream waits to be notified by the time awaiter when new watermarks are encountered. In
+  * practice, the time awaiter follows the observed sequencing.
   *
-  * <strong>Notice:</strong>While returning the results in order of the request time would be a more
-  * natural way to consume the information, this would add significant complexity to the
-  * implementation, because of various reasons:
-  *   - a later request could be completed sooner than an earlier requests
-  *   - the inspection service would have to interact with the ongoing mediator state to understand
-  *     which requests are still pending and not emit verdicts of requests after the oldest pending
-  *     request
-  *
-  * In contrast, using the finalization time for sorting the verdicts is a simple and stable way to
-  * deliver all known verdicts purely based on the verdicts persisted in the finalized response
-  * store.
+  * <strong>Notice:</strong>Due to returning the results in order of the request time, a later
+  * request could be completed sooner than an earlier requests. This will result in the later,
+  * completed request's verdict being blocked behind that of the earlier, incomplete request until
+  * the incomplete request times out or gets finalized
   */
 class GrpcMediatorInspectionService(
     finalizedResponseStore: FinalizedResponseStore,
     watermarkTracker: TimeAwaiter,
     batchSize: PositiveInt,
+    getActiveLsuSuccessor: Mediator.GetActiveLsuSuccessor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory, materializer: Materializer)
     extends mediatorV30.MediatorInspectionServiceGrpc.MediatorInspectionService
@@ -113,30 +107,49 @@ class GrpcMediatorInspectionService(
 
     val doneF = Source
       .unfoldAsync(
-        QueryRange(CantonTimestamp.MinValue, queryRange.fromRequestExclusive) -> Seq
-          .empty[FinalizedResponse]
-      ) { case (queryRange, previousResponses) =>
-        val resultFUS = for {
-          nextTimeStamps <- determineNextTimestamps(
-            previousResponses,
-            queryRange.toRequestInclusive,
-          )
-          QueryRange(fromRequestTime, toRequestTime) = nextTimeStamps
-          _ = logger.debug(
-            s"Loading verdicts between ]$fromRequestTime, $toRequestTime]"
-          )
+        (
+          QueryRange(CantonTimestamp.MinValue, queryRange.fromRequestExclusive),
+          Seq.empty[FinalizedResponse],
+          false, // do not stop the stream
+        )
+      ) { case (queryRange, previousResponses, stop) =>
+        val resultFUS =
+          if (stop) FutureUnlessShutdown.pure(None)
+          else
+            for {
+              nextTimeStamps <- determineNextTimestamps(
+                previousResponses,
+                queryRange.toRequestInclusive,
+              )
+              QueryRange(fromRequestTimeExclusive, toRequestTimeInclusive) = nextTimeStamps
+              _ = logger.debug(
+                s"Loading verdicts between ]$fromRequestTimeExclusive, $toRequestTimeInclusive]"
+              )
 
-          finalizedResponses <- finalizedResponseStore
-            .readFinalizedVerdicts(
-              fromRequestTime,
-              toRequestTime,
-              batchSize,
-            )
-        } yield {
-          val verdicts = buildVerdictResponses(finalizedResponses)
-          Some((nextTimeStamps, finalizedResponses) -> verdicts)
-        }
+              finalizedResponses <- finalizedResponseStore
+                .readFinalizedVerdicts(
+                  fromRequestTimeExclusive,
+                  toRequestTimeInclusive,
+                  batchSize,
+                )
 
+              successorO <- getActiveLsuSuccessor(toRequestTimeInclusive)
+            } yield {
+              val (shouldStop, verdicts) = successorO match {
+                case Some(successor) =>
+                  logger.info(
+                    s"We have passed the LSU upgrade time of ${successor.upgradeTime} so send Complete and close stream"
+                  )
+                  (
+                    true,
+                    buildVerdictResponses(finalizedResponses) :+ buildCompletedPassedLsu(successor),
+                  )
+                case None =>
+                  (false, buildVerdictResponses(finalizedResponses))
+              }
+
+              Some((nextTimeStamps, finalizedResponses, shouldStop) -> verdicts)
+            }
         resultFUS.onShutdown(None)
       }
       .mapConcat(identity)
@@ -190,6 +203,22 @@ class GrpcMediatorInspectionService(
 
   }
 
+  private def buildCompletedPassedLsu(
+      successor: SynchronizerSuccessor
+  ): mediatorV30.VerdictsResponse =
+    mediatorV30.VerdictsResponse(
+      mediatorV30.VerdictsResponse.Payload.Complete(
+        mediatorV30.VerdictsResponse.Complete(
+          mediatorV30.VerdictsResponse.Complete.Reason.PassedLsuTime(
+            mediatorV30.VerdictsResponse.Complete.PassedLsuTime(
+              upgradeTime = Some(successor.upgradeTime.toProtoTimestamp),
+              successorPhysicalSynchronizerId = successor.psid.toProtoPrimitive,
+            )
+          )
+        )
+      )
+    )
+
   /** Converts the responses to inspection api verdicts
     */
   private def buildVerdictResponses(
@@ -233,19 +262,21 @@ class GrpcMediatorInspectionService(
             views = flattened,
             rootNodes,
           )
-        val protoVerdict = mediatorV30.Verdict(
-          submittingParties = fullInformeeTree.tree.submitterMetadata.tryUnwrap.actAs.toSeq,
-          submittingParticipantUid = request.submittingParticipant.uid.toProtoPrimitive,
-          verdict =
-            if (verdict.isApprove) mediatorV30.VerdictResult.VERDICT_RESULT_ACCEPTED
-            else mediatorV30.VerdictResult.VERDICT_RESULT_REJECTED,
-          finalizationTime = Some(finalizationTime.toProtoTimestamp),
-          recordTime = Some(requestId.unwrap.toProtoTimestamp),
-          mediatorGroup = request.mediator.group.value,
-          views = mediatorV30.Verdict.Views.TransactionViews(views),
-          updateId = request.rootHash.unwrap.toHexString,
+        val protoVerdict = mediatorV30.VerdictsResponse.Payload.Verdict(
+          mediatorV30.Verdict(
+            submittingParties = fullInformeeTree.tree.submitterMetadata.tryUnwrap.actAs.toSeq,
+            submittingParticipantUid = request.submittingParticipant.uid.toProtoPrimitive,
+            verdict =
+              if (verdict.isApprove) mediatorV30.VerdictResult.VERDICT_RESULT_ACCEPTED
+              else mediatorV30.VerdictResult.VERDICT_RESULT_REJECTED,
+            finalizationTime = Some(finalizationTime.toProtoTimestamp),
+            recordTime = Some(requestId.unwrap.toProtoTimestamp),
+            mediatorGroup = request.mediator.group.value,
+            views = mediatorV30.Verdict.Views.TransactionViews(views),
+            updateId = request.rootHash.unwrap.toHexString,
+          )
         )
-        mediatorV30.VerdictsResponse(Some(protoVerdict))
+        mediatorV30.VerdictsResponse(protoVerdict)
     }
 
   private def convertTransactionView(

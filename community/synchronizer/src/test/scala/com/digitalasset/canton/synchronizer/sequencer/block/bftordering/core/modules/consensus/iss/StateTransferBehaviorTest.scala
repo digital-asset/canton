@@ -166,6 +166,7 @@ class StateTransferBehaviorTest
             any[Consensus.StateTransferMessage],
             any[OrderingTopologyInfo[ProgrammableUnitTestEnv]],
             any[EpochStore.Epoch],
+            any[EpochInfo],
           )(any[String => Nothing])(any[ContextType], any[TraceContext])
         ) thenReturn StateTransferMessageResult.Continue
         val (context, stateTransferBehavior) =
@@ -175,13 +176,14 @@ class StateTransferBehaviorTest
           )
         implicit val ctx: ContextType = context
 
-        val aStateTransferMessage = BlockStored(aCommitCert, myId)
+        val aStateTransferMessage = BlockStored(aCommitCert, anEpochInfo, myId)
         stateTransferBehavior.receive(aStateTransferMessage)
 
         verify(stateTransferManagerMock, times(1)).handleStateTransferMessage(
           eqTo(aStateTransferMessage),
           eqTo(aTopologyInfo),
           eqTo(anEpochStoreEpoch),
+          eqTo(anEpochInfo),
         )(any[String => Nothing])(any[ContextType], any[TraceContext])
 
         succeed
@@ -290,7 +292,6 @@ class StateTransferBehaviorTest
           inside(becomes) {
             case Seq(
                   consensusModule @ IssConsensusModule(
-                    TestEpochLength,
                     None, // snapshotAdditionalInfo
                     `aTopologyInfo`,
                     futurePbftMessageQueue,
@@ -396,7 +397,6 @@ class StateTransferBehaviorTest
           // Should have set the new epoch state.
           stateTransferBehavior should matchPattern {
             case StateTransferBehavior(
-                  TestEpochLength,
                   _,
                   _,
                   _,
@@ -486,7 +486,6 @@ class StateTransferBehaviorTest
       outputModuleRef: ModuleRef[Output.Message[ProgrammableUnitTestEnv]] =
         fakeModuleExpectingSilence,
       p2pNetworkOutModuleRef: ModuleRef[P2PNetworkOut.Message] = fakeModuleExpectingSilence,
-      epochLength: EpochLength = TestEpochLength,
       topologyInfo: OrderingTopologyInfo[ProgrammableUnitTestEnv] = aTopologyInfo,
       epochStore: EpochStore[ProgrammableUnitTestEnv] =
         new InMemoryUnitTestEpochStore[ProgrammableUnitTestEnv],
@@ -561,7 +560,6 @@ class StateTransferBehaviorTest
 
     context ->
       new StateTransferBehavior(
-        epochLength,
         initialState,
         stateTransferType,
         maybeCatchupDetector.getOrElse(
@@ -606,8 +604,8 @@ object StateTransferBehaviorTest {
     TopologyActivationTime(CantonTimestamp.Epoch),
   )
   private val otherId: BftNodeId = BftNodeId("other")
-  private val aMembership =
-    Membership.forTesting(myId, otherNodes = Set(otherId))
+  private def aMembership =
+    Membership.forTesting(myId, otherNodes = Set(otherId), epochLength = TestEpochLength)
   private val anEpoch = EpochState.Epoch(
     anEpochInfo,
     currentMembership = aMembership,

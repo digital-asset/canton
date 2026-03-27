@@ -22,6 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
+  EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
@@ -35,6 +36,7 @@ import scala.concurrent.ExecutionContext
 
 class FixedFileBasedOrderingTopologyProvider(
     standaloneConfig: BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig,
+    epochLength: EpochLength,
     crypto: CryptoPureApi,
     metrics: BftOrderingMetrics,
 )(implicit executionContext: ExecutionContext)
@@ -77,6 +79,7 @@ class FixedFileBasedOrderingTopologyProvider(
             )
           )
       },
+      epochLength,
       SequencingParameters.Default,
       MaxBytesToDecompress(DynamicSynchronizerParameters.defaultMaxRequestSize.value),
       ConventionalBootstrapTopologyActivationTime,

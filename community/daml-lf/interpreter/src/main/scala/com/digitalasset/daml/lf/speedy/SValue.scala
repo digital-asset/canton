@@ -451,4 +451,16 @@ object SValue {
       case (acc, SContractId(cid)) => acc + cid
       case (acc, _) => acc
     }
+
+  object SPair {
+    private val fieldNames =
+      ImmArray(Ref.Name.assertFromString("_1"), Ref.Name.assertFromString("_2"))
+
+    def apply(fst: SValue, snd: SValue) =
+      SRecord(
+        stablepackages.StablePackagesV2.Tuple2,
+        fieldNames,
+        ArraySeq(fst, snd),
+      )
+  }
 }

@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
@@ -37,7 +38,7 @@ import scala.concurrent.ExecutionContext
 
 class InMemoryLogicalSyncPersistentState(
     override val synchronizerIdx: IndexedSynchronizer,
-    override val enableAdditionalConsistencyChecks: Boolean,
+    parameters: ParticipantNodeParameters,
     indexedStringStore: IndexedStringStore,
     contractStore: ContractStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
@@ -45,6 +46,8 @@ class InMemoryLogicalSyncPersistentState(
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends LogicalSyncPersistentState {
+  override val enableAdditionalConsistencyChecks: Boolean =
+    parameters.enableAdditionalConsistencyChecks
 
   override val activeContractStore =
     new InMemoryActiveContractStore(
@@ -72,6 +75,12 @@ class InMemoryLogicalSyncPersistentState(
 
   override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     new InMemoryPendingOperationStore(OnboardingClearanceOperation)
+
+  override val partyReplicationIndexingStoreIfOnPREnabled
+      : Option[InMemoryPartyReplicationIndexingStore] =
+    Option.when(parameters.alphaOnlinePartyReplicationSupport.nonEmpty)(
+      new InMemoryPartyReplicationIndexingStore()
+    )
 
   override def close(): Unit = ()
 }

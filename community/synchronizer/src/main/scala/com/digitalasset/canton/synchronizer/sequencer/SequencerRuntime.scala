@@ -268,8 +268,7 @@ class SequencerRuntime(
         svcDef: ServerServiceDefinition
     ) = {
       import scala.jdk.CollectionConverters.*
-
-      // use the auth service interceptor together with the rate interceptor
+      // use the auth service interceptor
       val interceptors =
         (List(
           authenticationServices.authenticationServerInterceptor

@@ -162,7 +162,6 @@ sealed trait InvalidReassignmentIdIntegrationTest
                 .submitAssignmentRequest(
                   signatory.toLf,
                   unassignment2,
-                  Some(environment.now),
                   overrideReassignmentId = Some(unassignment1.reassignmentId),
                 )
                 .futureValueUS

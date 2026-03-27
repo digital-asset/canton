@@ -9,6 +9,7 @@ import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -180,7 +181,6 @@ class ReplayClientImpl(
   private def replaySubmit(
       submission: SubmissionRequest,
       snapshot: SyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
   ): FutureUnlessShutdown[Either[SendAsyncClientError, Unit]] = {
     val startedAt = CantonTimestamp.now()
     // we'll correlate received events by looking at their message-id and calculate the
@@ -188,12 +188,10 @@ class ReplayClientImpl(
     pendingSends.put(submission.messageId, startedAt).discard
 
     // Picking a correct max sequencing time could be technically difficult,
-    // so instead we pick the next day, which should ensure the sequencer always
+    // so instead we pick max value, which ensures the sequencer always
     // attempts to sequence valid sends
     def extendMaxSequencingTime(submission: SubmissionRequest): SubmissionRequest =
-      submission.updateMaxSequencingTime(maxSequencingTime =
-        CantonTimestamp.now().plus(24.hours.toJava)
-      )
+      submission.updateMaxSequencingTime(maxSequencingTime = CantonTimestamp.MaxValue)
 
     def handleSendResult(
         result: Either[SendAsyncClientError, Unit]
@@ -236,7 +234,14 @@ class ReplayClientImpl(
             withExtendedMst,
             HashPurpose.SubmissionRequestSignature,
             snapshot,
-            approximateTimestampOverride,
+            Some(
+              SigningTimestampOverrides(
+                // It's safe to re-sign with a new timestamp because the max sequencing time is set to `MaxValue`,
+                // which causes a fallback to the long-term key when signing.
+                approximateTimestamp = clock.now,
+                validityPeriodEnd = Some(withExtendedMst.maxSequencingTime),
+              )
+            ),
           )
           .leftMap(error => SendAsyncClientError.RequestFailed(error))
         connection <- EitherT.fromEither[FutureUnlessShutdown](
@@ -277,9 +282,7 @@ class ReplayClientImpl(
 
       val submissionReplay =
         intermediateSource
-          .mapAsyncUnordered(sendParallelism)(sr =>
-            replaySubmit(sr, syncCryptoApi, Some(clock.now)).unwrap
-          )
+          .mapAsyncUnordered(sendParallelism)(sr => replaySubmit(sr, syncCryptoApi).unwrap)
           .toMat(Sink.fold(SendReplayReport()(sendDuration))(_.update(_)))(Keep.right)
 
       PekkoUtil.runSupervised(

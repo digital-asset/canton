@@ -47,7 +47,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Engine
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
@@ -64,6 +64,8 @@ object ApiServiceOwner {
       address: Option[String] = DefaultAddress, // This defaults to "localhost" when set to `None`.
       maxInboundMessageSize: Int = DefaultMaxInboundMessageSize,
       maxInboundMetadataSize: Int = ServerConfig.defaultMaxInboundMetadataSize.unwrap,
+      maxConcurrentStreamsPerConnection: Int =
+        ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
       port: Port = DefaultPort,
       tls: Option[TlsServerConfig] = DefaultTls,
       seeding: Seeding = DefaultSeeding,
@@ -217,6 +219,7 @@ object ApiServiceOwner {
         port,
         maxInboundMessageSize,
         maxInboundMetadataSize,
+        maxConcurrentStreamsPerConnection,
         address,
         tls,
         // TODO (i28340) fix order of interceptors

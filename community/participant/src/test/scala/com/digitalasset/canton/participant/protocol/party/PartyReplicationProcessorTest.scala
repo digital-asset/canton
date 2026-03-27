@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.participant.protocol.party
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Hash, TestHash}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerUpdate
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
@@ -21,13 +22,18 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.party.{
+  GeneratesUniqueUpdateIds,
   PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
-import com.digitalasset.canton.participant.store.PartyReplicationStateManager
+import com.digitalasset.canton.participant.store.{
+  ContractStore,
+  PartyReplicationIndexingStore,
+  PartyReplicationStateManager,
+}
 import com.digitalasset.canton.participant.util.{CreatesActiveContracts, TimeOfChange}
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.resource.MemoryStorage
@@ -92,6 +98,8 @@ final class PartyReplicationProcessorTest
     private def mkTP(): PartyReplicationTargetParticipantProcessor = {
       val rop = mock[RecordOrderPublisher]
       val requestTracker = mock[RequestTracker]
+      val indexingStore = mock[PartyReplicationIndexingStore]
+      val contractStoreEval = Eval.always(mock[ContractStore])
       when(
         rop.schedulePublishAddContracts(any[CantonTimestamp => SynchronizerUpdate])(
           anyTraceContext
@@ -113,6 +121,25 @@ final class PartyReplicationProcessorTest
         )(anyTraceContext)
       )
         .thenReturn(EitherTUtil.unitUS)
+      when(
+        indexingStore.addImportedContractActivations(
+          any[PartyId],
+          any[TimeOfChange],
+          any[NonEmpty[Seq[ContractReassignment]]],
+        )(anyTraceContext)
+      )
+        .thenReturn(FutureUnlessShutdown.unit)
+      // Don't bother handling indexing of contracts as indexing is to be driven asynchronously by the PartyReplicator.
+      when(
+        indexingStore.consumeNextActivationChangesBatch(
+          any[PartyId],
+          any[NonNegativeLong],
+          any[PositiveInt],
+        )(any[GeneratesUniqueUpdateIds])(anyTraceContext)
+      )
+        .thenReturn(FutureUnlessShutdown.pure(None))
+      when(indexingStore.purgeContractActivationChanges(any[PartyId])(anyTraceContext))
+        .thenReturn(FutureUnlessShutdown.unit)
 
       val inMemoryStorageForTesting = new MemoryStorage(loggerFactory, timeouts)
       val sourceParticipantId = DefaultTestIdentities.participant1
@@ -161,6 +188,7 @@ final class PartyReplicationProcessorTest
       }
 
       new PartyReplicationTargetParticipantProcessor(
+        partyId = alice,
         requestId = addPartyRequestId,
         psid = psid,
         partyOnboardingAt = EffectiveTime(CantonTimestamp.ofEpochSecond(10)),
@@ -170,13 +198,17 @@ final class PartyReplicationProcessorTest
         persistsContracts = persistsContracts,
         requestTracker = requestTracker,
         new PartyReplicationIndexingWorkflow(
-          requestId = addPartyRequestId,
+          partyId = alice,
           psid = psid,
+          indexingStore = indexingStore,
+          contractStore = contractStoreEval,
           recordOrderPublisher = rop,
           pureCrypto = testSymbolicCrypto,
           pauseSynchronizerIndexingDuringPartyReplication = true,
+          batchingConfig = BatchingConfig(),
           loggerFactory = loggerFactory,
         ),
+        indexingStore = indexingStore,
         futureSupervisor = futureSupervisor,
         exitOnFatalFailures = true,
         timeouts = timeouts,

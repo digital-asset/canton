@@ -88,7 +88,7 @@ class ReassignmentTargetTimestampIntegrationTest
 
       loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(
         within = maliciousP1
-          .submitUnassignmentRequest(unvalidatableUnassignReq, Some(environment.now))
+          .submitUnassignmentRequest(unvalidatableUnassignReq)
           .futureValueUS
           .value,
         logs =>

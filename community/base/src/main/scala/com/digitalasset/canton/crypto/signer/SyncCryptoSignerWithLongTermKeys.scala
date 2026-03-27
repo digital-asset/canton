@@ -6,8 +6,8 @@ package com.digitalasset.canton.crypto.signer
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.Member
@@ -32,7 +32,7 @@ class SyncCryptoSignerWithLongTermKeys(
   override def sign(
       topologySnapshot: TopologySnapshot,
       // not used; only needed when using session signing keys
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       hash: Hash,
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit

@@ -11,10 +11,13 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
+import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult.*
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.daml.lf.language.LanguageVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.util.concurrent.atomic.AtomicInteger
 
 class GeneratorTestPVDev
     extends GeneratorTest(
@@ -48,20 +51,38 @@ abstract class GeneratorTest(
     "synthesize valid scenarios" in {
       val numParties = 3
       val numPackages = 1
+      val maxSamples = 20
 
       val generator =
         generators.validScenarioGenerator(numParties, numPackages, numParticipants = 3)
 
-      PropertyChecker
+      // Track how many samples the validator couldn't decide (z3 returned unknown/timeout).
+      // We tolerate some unknowns but fail if more than half of the samples are inconclusive.
+      val unknownCount = new AtomicInteger(0)
+
+      val result = PropertyChecker
         .checkProperty(
           generate = () => generator.generate(size = 30),
           shrink = Shrinker.shrinkScenario,
           property = (scenario: Concrete.Scenario) =>
-            if (SymbolicSolver.valid(scenario, numPackages, numParties)) Right(())
-            else Left("Scenario failed validity check"),
-          maxSamples = 10,
+            SymbolicSolver.valid(scenario, numPackages, numParties) match {
+              case Valid => Right(())
+              case Invalid => Left("Expected Valid, got Invalid")
+              // Unknown results (z3 timeout or inconclusive) are not treated as failures:
+              // we can't shrink them meaningfully. We just count them and check below.
+              case Unknown =>
+                unknownCount.incrementAndGet()
+                Right(())
+            },
+          maxSamples = maxSamples,
         )
-        .assertPassed(Pretty.prettyScenario)
+
+      result.assertPassed(Pretty.prettyScenario)
+
+      assert(
+        unknownCount.get() <= maxSamples / 2,
+        s"Too many inconclusive (unknown) results from z3: ${unknownCount.get()} out of $maxSamples. Check for possible regression.",
+      )
     }
   }
 }

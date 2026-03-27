@@ -418,7 +418,7 @@ class SequencerAggregatorPekkoTest
           ).map(_.map(event => normalize(event.asOrdinarySerializedEvent)))
           outputs shouldBe expected
         },
-        _.errorMessage should include(ResilientSequencerSubscription.ForkHappened.id),
+        _.errorMessage should include(SequencerSubscriptionError.ForkHappened.id),
         _.warningMessage should include(s"Sequencer subscription for $sequencerBob failed with"),
       )
       source.complete()

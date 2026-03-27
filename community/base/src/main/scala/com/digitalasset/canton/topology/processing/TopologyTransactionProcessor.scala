@@ -452,7 +452,7 @@ class TopologyTransactionProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     // processing an event with a sequencing time less than what was already in the store
     // when initializing TopologyTransactionProcessor means that it is being replayed
-    // after crash recovery (eg reconnecting to a synchronizer or restart after a crash)
+    // after crash recovery (e.g., reconnecting to a synchronizer or restart after a crash)
     for {
       maxSequencedTimeAtInitialization <- synchronizeWithClosing(
         "max-sequenced-time-at-initialization"

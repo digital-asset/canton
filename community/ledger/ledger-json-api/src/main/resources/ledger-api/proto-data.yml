@@ -4643,28 +4643,24 @@ fileComments:
           comments: null
           fieldComments:
             begin_exclusive: |-
-              Exclusive lower bound offset of the requested ledger section (non-negative integer).
+              Beginning of the requested ledger section (non-negative integer).
               The response will only contain transactions whose offset is strictly greater than this.
-              If set to zero, the lower bound is set to the the beginning of the ledger.
-              If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
-              Required
-            end_inclusive: |-
-              Inclusive higher bound offset of the requested ledger section.
-              If specified the response will only contain transactions whose offset is less than or equal to this.
-              If not specified,
+              If not populated or set to zero, the stream will start from the beginning of the ledger.
+              If positive, the streaming will start after this absolute offset.
+              If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
 
-              - the descending_order must not be selected,
-              - the stream will not terminate.
+              Optional
+            end_inclusive: |-
+              End of the requested ledger section.
+              The response will only contain transactions whose offset is less than or equal to this.
+              If empty, the stream will not terminate.
+              If specified, the stream will terminate after this absolute offset (positive integer) is reached.
 
               Optional
             update_format: |-
               The update format for this request
 
               Required
-            descending_order: |-
-              If set, the stream will populate the elements in descending order.
-
-              Optional
       GetUpdatesResponse:
         message:
           comments: null

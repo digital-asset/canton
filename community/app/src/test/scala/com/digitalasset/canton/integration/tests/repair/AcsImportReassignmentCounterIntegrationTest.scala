@@ -94,7 +94,7 @@ sealed trait AcsImportReassignmentCounterIntegrationTest
       synchronizerId = Some(acmeId),
     )
     participant2.synchronizers.disconnect_all()
-    participant2.repair.import_acs(acsSnapshotPath.canonicalPath)
+    participant2.repair.import_acs(acmeId, acsSnapshotPath.canonicalPath)
     participant2.synchronizers.reconnect_all()
 
     participant2.ledger_api.state.acs

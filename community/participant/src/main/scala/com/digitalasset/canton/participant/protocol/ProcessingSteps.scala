@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
@@ -161,15 +161,22 @@ trait ProcessingSteps[
     *   Read-only access to the [[com.digitalasset.canton.participant.sync.SyncEphemeralState]]
     * @param recentSnapshot
     *   A recent snapshot of the topology state to be used for submission
+    * @param generateMaxSequencingTime
+    *   Function to generate the max sequencing time, based on a given start timestamp.
     */
   def createSubmission(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
       ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SubmissionError, (Submission, PendingSubmissionData)]
+  ): EitherT[
+    FutureUnlessShutdown,
+    SubmissionError,
+    (Submission, PendingSubmissionData),
+  ]
 
   def embedNoMediatorError(error: NoMediatorError): SubmissionError
 
@@ -179,12 +186,17 @@ trait ProcessingSteps[
 
   sealed trait Submission {
 
-    /** Optional timestamp for the max sequencing time of the event.
-      *
-      * If possible, set it to the upper limit when the event could be successfully processed. If
-      * [[scala.None]], then the sequencer client default will be used.
+    /** Timestamp used for signing the request (i.e., to select the correct session signing key).
+      * Since this trait models submission requests, the topology is not fixed, so we use an
+      * approximate timestamp to better reflect the current time. Typically, the local clock is
+      * suitable.
       */
-    def maxSequencingTimeO: OptionT[FutureUnlessShutdown, CantonTimestamp]
+    def approximateTimestampForSigning: CantonTimestamp
+
+    /** Timestamp representing the maximum sequencing time for this event. Should be set to the
+      * latest time the event can be processed successfully.
+      */
+    def maxSequencingTime: CantonTimestamp
   }
 
   /** Submission to be sent off without tracking the in-flight submission and without deduplication.
@@ -256,6 +268,7 @@ trait ProcessingSteps[
       */
     def prepareBatch(
         actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
+        approximateTimestampForSigning: CantonTimestamp,
         maxSequencingTime: CantonTimestamp,
         sessionKeyStore: SessionKeyStore,
     ): EitherT[FutureUnlessShutdown, SubmissionTrackingData, PreparedBatch]

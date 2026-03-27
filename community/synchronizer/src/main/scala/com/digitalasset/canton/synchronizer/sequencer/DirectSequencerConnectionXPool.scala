@@ -42,7 +42,7 @@ class DirectSequencerConnectionXPool(
     extends SequencerConnectionXPool {
   import DirectSequencerConnectionXPool.*
 
-  private val directConnection = new DirectSequencerConnectionX(
+  val directConnection = new DirectSequencerConnectionX(
     directConnectionDummyConfig,
     sequencer,
     mySynchronizerId,

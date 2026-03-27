@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithLongTermKeys
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -46,6 +47,7 @@ class FixedSyncCryptoApiForSigning(
     staticSynchronizerParameters: StaticSynchronizerParameters,
     signingKey: SigningPublicKey,
     override val loggerFactory: NamedLoggerFactory,
+    timestampOverride: CantonTimestamp = CantonTimestamp.MinValue,
 )(implicit ec: ExecutionContext)
     extends SyncCryptoApi
     with NamedLogging {
@@ -63,11 +65,11 @@ class FixedSyncCryptoApiForSigning(
   override def sign(
       hash: Hash,
       usage: NonEmpty[Set[SigningKeyUsage]],
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature] =
-    signer.sign(ipsSnapshot, approximateTimestampOverride: Option[CantonTimestamp], hash, usage)
+    signer.sign(ipsSnapshot, signingTimestampOverrides, hash, usage)
 
   override val ipsSnapshot: TopologySnapshot = new TopologySnapshot
     with BaseTopologySnapshotClient
@@ -77,7 +79,7 @@ class FixedSyncCryptoApiForSigning(
     override protected def loggerFactory: NamedLoggerFactory =
       FixedSyncCryptoApiForSigning.this.loggerFactory
 
-    override def timestamp: CantonTimestamp = CantonTimestamp.MinValue
+    override def timestamp: CantonTimestamp = timestampOverride
 
     override def signingKeys(owner: Member, filterUsage: NonEmpty[Set[SigningKeyUsage]])(implicit
         traceContext: TraceContext

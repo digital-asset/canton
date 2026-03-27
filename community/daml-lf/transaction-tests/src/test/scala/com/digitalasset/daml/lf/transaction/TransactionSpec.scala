@@ -15,11 +15,7 @@ import com.digitalasset.daml.lf.transaction.Transaction.{
   NotWellFormedError,
   OrphanedNode,
 }
-import com.digitalasset.daml.lf.transaction.TransactionError.{
-  DuplicateContractId,
-  DuplicateContractKey,
-  InconsistentContractKey,
-}
+import com.digitalasset.daml.lf.transaction.TransactionError._
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
@@ -418,7 +414,6 @@ class TransactionSpec
   }
 
   "contractKeyInputs" - {
-    import Transaction._
     val dummyBuilder = new TxBuilder()
     val parties = List("Alice")
     val keyPkgName = Ref.PackageName.assertFromString("key-package-name")
@@ -462,9 +457,7 @@ class TransactionSpec
       val builder = new TxBuilder()
       val createNode = create(cid("#0"), "k0")
       builder.add(createNode)
-      builder.build().contractKeyInputs shouldBe Right(
-        Map(globalKey("k0") -> KeyCreate)
-      )
+      builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
     "return Some(_) for fetch and fetch-by-key" in {
       val builder = new TxBuilder()
@@ -474,8 +467,7 @@ class TransactionSpec
       builder.add(fetchNode1)
       builder.build().contractKeyInputs shouldBe Right(
         Map(
-          globalKey("k0") -> KeyActive(cid("#0")),
-          globalKey("k1") -> KeyActive(cid("#1")),
+          globalKey("k1") -> KeyMapping(Vector(cid("#1")), false),
         )
       )
     }
@@ -491,10 +483,8 @@ class TransactionSpec
       builder.add(exe3)
       builder.build().contractKeyInputs shouldBe Right(
         Map(
-          globalKey("k0") -> KeyActive(cid("#0")),
-          globalKey("k1") -> KeyActive(cid("#1")),
-          globalKey("k2") -> KeyActive(cid("#2")),
-          globalKey("k3") -> KeyActive(cid("#3")),
+          globalKey("k2") -> KeyMapping(Vector(cid("#2")), false),
+          globalKey("k3") -> KeyMapping(Vector(cid("#3")), false),
         )
       )
     }
@@ -504,7 +494,7 @@ class TransactionSpec
       val lookupNode = lookup(cid("#0"), "k0", found = false)
       builder.add(lookupNode)
       builder.build().contractKeyInputs shouldBe Right(
-        Map(globalKey("k0") -> NegativeKeyLookup)
+        Map(globalKey("k0") -> KeyMapping.Empty)
       )
     }
 
@@ -515,7 +505,7 @@ class TransactionSpec
       inside(lookupNode.result) { case Vector(contractId) =>
         contractId shouldBe cid("#0")
         builder.build().contractKeyInputs shouldBe Right(
-          Map(globalKey("k0") -> KeyActive(contractId))
+          Map(globalKey("k0") -> KeyMapping(Vector(contractId), false))
         )
       }
     }
@@ -530,14 +520,7 @@ class TransactionSpec
       builder.add(exerciseNode, rollback)
       builder.add(fetchNode, rollback)
       builder.add(lookupNode, rollback)
-      builder.build().contractKeyInputs shouldBe Right(
-        Map(
-          globalKey("k0") -> KeyCreate,
-          globalKey("k1") -> KeyActive(exerciseNode.targetCoid),
-          globalKey("k2") -> KeyActive(fetchNode.coid),
-          globalKey("k3") -> NegativeKeyLookup,
-        )
-      )
+      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
     }
     "fetch and create conflict for the same contract ID" in {
       val builder = new TxBuilder()
@@ -575,23 +558,21 @@ class TransactionSpec
       val builder = new TxBuilder()
       builder.add(create(cid("#0"), "k0"))
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
-      )
+      builder.build().contractKeyInputs shouldBe  Right(Map.empty)
     }
     "two creates do not conflict if interleaved with archive" in {
       val builder = new TxBuilder()
       builder.add(create(cid("#0"), "k0"))
       builder.add(exe(cid("#0"), "k0", consuming = true, byKey = false))
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Right(Map(globalKey("k0") -> KeyCreate))
+      builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
     "two creates do not conflict if one is in rollback" in {
       val builder = new TxBuilder()
       val rollback = builder.add(builder.rollback())
       builder.add(create(cid("#0"), "k0"), rollback)
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Right(Map(globalKey("k0") -> KeyCreate))
+      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
     }
     "negative lookup after create fails" in {
       val builder = new TxBuilder()
@@ -622,8 +603,8 @@ class TransactionSpec
       val builder = new TxBuilder()
       builder.add(lookup(cid("#0"), "k0", found = true))
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+      builder.build().contractKeyInputs shouldBe Right(
+        Map(globalKey("k0") -> KeyMapping(Vector(cid("#0")), false))
       )
     }
     "positive lookup in rollback conflicts with create" in {
@@ -631,8 +612,8 @@ class TransactionSpec
       val rollback = builder.add(builder.rollback())
       builder.add(lookup(cid("#0"), "k0", found = true), rollback)
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+      builder.build().contractKeyInputs shouldBe Right(
+        Map(globalKey("k0") -> KeyMapping(Vector(cid("#0")), false))
       )
     }
     "rolled back archive does not prevent conflict" in {
@@ -641,9 +622,7 @@ class TransactionSpec
       val rollback = builder.add(builder.rollback())
       builder.add(exe(cid("#0"), "k0", consuming = true, byKey = true), rollback)
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
-      )
+      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(2))))
     }
     "successful, inconsistent lookups conflict" in {
       val builder = new TxBuilder()
@@ -666,9 +645,7 @@ class TransactionSpec
       builder.add(lookup1, rollback)
       builder.add(lookup0)
       builder.add(create1)
-      builder.build().contractKeyInputs shouldBe Right(
-        Map(globalKey("k0") -> KeyCreate, globalKey("k1") -> NegativeKeyLookup)
-      )
+      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
     }
   }
 
@@ -693,6 +670,7 @@ class TransactionSpec
     )
     (cid, node)
   }
+
   def exercise(
       builder: TxBuilder,
       create: Node.Create,
@@ -742,15 +720,24 @@ class TransactionSpec
   }
 
   "updatedContractKeys" - {
+    import Transaction._
     "return all the updated contract keys" in {
       val builder = new TxBuilder()
       val parties = Seq("Alice")
+      // Key0 is created and exercised in a non-consuming exercise, should still exist
       val (cid0, create0) = create(builder, parties, Some("key0"))
+      // Key1 is created and exercised in a consuming exercise, so leads to no overall change to active keys
       val (_, create1) = create(builder, parties, Some("key1"))
+      // Key2 is created then consumed with create2, then created with create3
+      // then consumed and created with create4, however that is rolled back, so current activeness should be only cid3/create3
       val (_, create2) = create(builder, parties, Some("key2"))
       val (cid3, create3) = create(builder, parties, Some("key2"))
       val (_, create4) = create(builder, parties, Some("key2"))
+      // Key3 is created only in a rollback, so should not show in updatedContractKeys
       val (_, create5) = create(builder, parties, Some("key3"))
+      // Key4 is an "external" key, its creation is not added to the tx, so assumed to already exist
+      // It should show as consumed in updatedContractKeys
+      val (cid6, create6) = create(builder, parties, Some("key4"))
       builder.add(create0)
       builder.add(exercise(builder, create0, parties, false))
       builder.add(create1)
@@ -763,6 +750,7 @@ class TransactionSpec
       builder.add(create5, rollback)
       builder.add(exercise(builder, create3, parties, true), rollback)
       builder.add(create4, rollback)
+      builder.add(exercise(builder, create6, parties, true))
 
       def key(s: String) = GlobalKey.assertBuild(
         "Mod:T",
@@ -771,7 +759,11 @@ class TransactionSpec
         crypto.Hash.hashPrivateKey(s),
       )
       builder.build().updatedContractKeys shouldBe
-        Map(key("key0") -> Some(cid0), key("key1") -> None, key("key2") -> Some(cid3))
+        Map(
+          key("key0") -> ContractKeyUpdate(Vector(cid0), Set.empty),
+          key("key2") -> ContractKeyUpdate(Vector(cid3), Set.empty),
+          key("key4") -> ContractKeyUpdate(Vector.empty, Set(cid6))
+        )
     }
   }
 

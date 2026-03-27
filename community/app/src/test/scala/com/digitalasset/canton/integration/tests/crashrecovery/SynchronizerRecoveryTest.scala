@@ -13,8 +13,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisconnect,
 }
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencers
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
 import org.scalatest.Assertion
 
 import scala.concurrent.duration.*
@@ -55,7 +54,7 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
       "fatally disconnected because of Trust threshold 1 is no longer reachable"
     )),
     _.message should (include("PERMISSION_DENIED") and include("access is disabled")),
-    _.message should include(LostSequencerSubscription.id),
+    _.message should include(SequencerSubscriptionError.LostSequencerSubscription.id),
     _.message should include(SyncServiceSynchronizerDisabledUs.id),
     _.message should include("Token refresh aborted due to shutdown."),
   )
@@ -258,12 +257,12 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
                 // If a client reconnects before the server has generated further events,
                 // the server will complain that the client tries to acknowledge an non-existing event.
                 succeed
-              } else if (logEntry.message.contains(LostSequencerSubscription.id)) {
+              } else if (
+                logEntry.message.contains(SequencerSubscriptionError.LostSequencerSubscription.id)
+              ) {
                 // the resilient sequencer subscription will complain about the lost message
                 succeed
-              } else if (
-                logEntry.message.contains(ResilientSequencerSubscription.ForkHappened.id)
-              ) {
+              } else if (logEntry.message.contains(SequencerSubscriptionError.ForkHappened.id)) {
                 // Additionally to the handler event below, the system will emit an appropriate error code with instructions
                 succeed
               } else if (logEntry.message.contains(SyncServiceSynchronizerDisconnect.id)) {

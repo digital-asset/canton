@@ -9,6 +9,7 @@ import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -187,24 +188,19 @@ object SignedContent
     *   traffic-cost validation, it is compared against the most recent known synchronizer timestamp
     *   to decide whether to reject the request, use the current snapshot, or wait for a future one.
     *   The value reflects the last perceived topology state rather than the "current" time, which
-    *   is why using `approximateTimestampOverride` (that takes the value 'clock.now') does not make
-    *   sense and would require adjusting the validation logic to also rely on the current time of
-    *   the validator node.
-    * @param approximateTimestampOverride
-    *   an optional timestamp used during signing to compute the validity period of session signing
-    *   keys. This should only be set when signing submission requests, encrypted view messages, or
-    *   any other cases where the topology is not yet fixed, i.e., when using a topology snapshot
-    *   approximation. The snapshot used during signing is still that snapshot approximation. The
-    *   local clock is often a suitable value for `approximateTimestampOverride`, as it reflects the
-    *   signer's current time. On the verifier side, the current node time must also be taken into
-    *   account when validating the signature (and the session signing key).
+    *   is why using `approximateTimestampForSigning` (that takes the value 'clock.now') does not
+    *   make sense and would require adjusting the validation logic to also rely on the current time
+    *   of the validator node.
+    * @param signingTimestampOverrides
+    *   Optional overrides for selecting an approximate signing timestamp and validity end, used to
+    *   select the correct session signing key whenever session signing keys are enabled.
     */
   def create[A <: HasCryptographicEvidence](
       cryptoApi: CryptoPureApi,
       cryptoPrivateApi: SyncCryptoApi,
       content: A,
       timestampOfSigningKey: Option[CantonTimestamp],
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       purpose: HashPurpose,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -215,7 +211,11 @@ object SignedContent
     // so fine to call once for the hash here and then again when serializing to protobuf
     val hash = hashContent(cryptoApi, content, purpose)
     cryptoPrivateApi
-      .sign(hash, SigningKeyUsage.ProtocolOnly, approximateTimestampOverride)
+      .sign(
+        hash,
+        SigningKeyUsage.ProtocolOnly,
+        signingTimestampOverrides,
+      )
       .map(signature => SignedContent(content, signature, timestampOfSigningKey, protocolVersion))
   }
 
@@ -231,7 +231,7 @@ object SignedContent
       cryptoPrivateApi: SyncCryptoApi,
       content: A,
       timestampOfSigningKey: Option[CantonTimestamp],
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       purpose: HashPurpose,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -243,7 +243,7 @@ object SignedContent
       cryptoPrivateApi,
       content,
       timestampOfSigningKey,
-      approximateTimestampOverride,
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       purpose,
       protocolVersion,
     )

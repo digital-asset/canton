@@ -13,15 +13,19 @@ import com.digitalasset.canton.admin.participant.v30.RegisterSynchronizerRequest
 import com.digitalasset.canton.admin.participant.v30.{
   DisconnectAllSynchronizersRequest,
   DisconnectAllSynchronizersResponse,
+  PerformManualLsuRequest,
+  PerformManualLsuResponse,
 }
 import com.digitalasset.canton.admin.sequencer.v30 as sequencerV30
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.error.LsuError.FailedLsu
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
+import com.digitalasset.canton.participant.admin.data.ManualLsuRequest
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInternalError.{
   PhysicalSynchronizerIdNotConfigured,
   SynchronizerIsMissingInternally,
@@ -409,7 +413,27 @@ class GrpcSynchronizerConnectivityService(
       physicalSynchronizerId = result.psid.toProtoPrimitive,
       synchronizerId = result.psid.logical.toProtoPrimitive,
     )
+
     _mapErrNewEUS(ret)
   }
 
+  override def performManualLsu(
+      request: PerformManualLsuRequest
+  ): Future[PerformManualLsuResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val res = for {
+      request <- EitherT.fromEither[FutureUnlessShutdown](
+        ManualLsuRequest
+          .fromProtoV30(request)
+          .leftMap[CantonBaseError](ProtoDeserializationFailure.WrapNoLogging(_))
+      )
+
+      _ <- sync
+        .performManualLsu(request)
+        .leftMap[CantonBaseError](FailedLsu.Error(_))
+    } yield PerformManualLsuResponse()
+
+    _mapErrNewEUS(res)
+  }
 }

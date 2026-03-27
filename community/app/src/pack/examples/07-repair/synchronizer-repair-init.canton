@@ -28,7 +28,7 @@ utils.retry_until_true {
     participant1.synchronizers.active("lostSynchronizer") && participant2.synchronizers.active("lostSynchronizer")
 }
 
-import com.digitalasset.canton.BigDecimalImplicits._
+import java.math.{BigDecimal => JavaBigDecimal}
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.protocol.ContractIdSyntax._
@@ -38,7 +38,7 @@ import scala.jdk.CollectionConverters._
 def createIou(participant: ParticipantReference, payer: PartyId, owner: PartyId, value: Int) =
   participant.ledger_api.javaapi.commands.submit(Seq(payer), new iou.Iou(payer.toProtoPrimitive,
                                                                          owner.toProtoPrimitive,
-                                                                         new iou.Amount(value.toLong.toBigDecimal, "USD"),
+                                                                         new iou.Amount(JavaBigDecimal.valueOf(value.toLong), "USD"),
                                                                          List.empty.asJava
                                                                         ).create.commands.asScala.toSeq)
 

@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CacheConfig, CryptoConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SyncCryptoError.{KeyNotAvailable, SyncCryptoEncryptionError}
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.verifier.SyncCryptoVerifier
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -486,11 +487,16 @@ class SynchronizerSnapshotSyncCryptoApi(
   override def sign(
       hash: Hash,
       usage: NonEmpty[Set[SigningKeyUsage]],
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature] =
-    syncCryptoSigner.sign(ipsSnapshot, approximateTimestampOverride, hash, usage)
+    syncCryptoSigner.sign(
+      ipsSnapshot,
+      signingTimestampOverrides,
+      hash,
+      usage,
+    )
 
   override def verifySignature(
       hash: Hash,

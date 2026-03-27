@@ -113,7 +113,7 @@ final class PreventDupContractsFailureIntegrationTest
 
       repair.acs.read_from_file(acsSnapshotPath) should have size 2
 
-      target.repair.import_acsV2(daId, acsSnapshotPath)
+      target.repair.import_acs(daId, acsSnapshotPath)
 
       loggerFactory.assertLogsUnorderedOptional(
         target.synchronizers.reconnect(daName),
@@ -166,7 +166,7 @@ final class PreventDupContractsSuccessOnAcsImportFilteringIntegrationTest
 
       repair.acs.read_from_file(acsSnapshotPath) should have size 2
 
-      target.repair.import_acsV2(daId, acsSnapshotPath, excludedStakeholders = Set(bob))
+      target.repair.import_acs(daId, acsSnapshotPath, excludedStakeholders = Set(bob))
 
       target.synchronizers.reconnect(daName)
 
@@ -193,7 +193,7 @@ final class PreventDupContractsUponAcsImportIntegrationTest
 
     repair.acs.read_from_file(acsSnapshotPath) should have size 1
 
-    target.repair.import_acsV2(daId, acsSnapshotPath)
+    target.repair.import_acs(daId, acsSnapshotPath)
 
     target.synchronizers.reconnect(daName)
 
@@ -222,7 +222,7 @@ final class PreventDupContractsIntegrationTest extends PreventDuplicateContracts
 
     repair.acs.read_from_file(acsSnapshotPath) should have size 1
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     target.synchronizers.reconnect(daName)
 

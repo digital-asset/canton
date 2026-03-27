@@ -7,6 +7,7 @@ import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
@@ -14,6 +15,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   SequencingSubmissionCost,
 }
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -23,7 +25,7 @@ import scala.jdk.CollectionConverters.*
 
 /** Test implementation that stores all requests in a queue.
   */
-class TestSequencerClientSend(implicit
+class TestSequencerClientSend(override protected[canton] val clock: Clock)(implicit
     val executionContext: ExecutionContext
 ) extends SequencerClientSend {
 
@@ -36,8 +38,7 @@ class TestSequencerClientSend(implicit
 
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
-      topologyTimestamp: Option[CantonTimestamp],
-      maxSequencingTime: CantonTimestamp,
+      timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
@@ -48,13 +49,22 @@ class TestSequencerClientSend(implicit
       metricsContext: MetricsContext,
   ): SendAsyncResult = {
     requestsQueue.add(
-      Request(batch, topologyTimestamp, maxSequencingTime, messageId, aggregationRule, None)
+      Request(
+        batch,
+        timestamps.topologyTimestamp,
+        timestamps.maxSequencingTime,
+        messageId,
+        aggregationRule,
+        None,
+      )
     )
 
     Nested(EitherT.pure(EitherTUtil.unitUS[SendAsyncClientError]))
   }
 
-  override def generateMaxSequencingTime: CantonTimestamp =
+  override def generateMaxSequencingTime(
+      referenceTimestamp: CantonTimestamp
+  ): CantonTimestamp =
     CantonTimestamp.MaxValue
 }
 

@@ -16,10 +16,10 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout, TestingConfigInternal}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -31,9 +31,9 @@ import com.digitalasset.canton.health.{
   HealthComponent,
   HealthQuasiComponent,
 }
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, *}
 import com.digitalasset.canton.logging.pretty.{CantonPrettyPrinter, Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -59,8 +59,12 @@ import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements.FetchC
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.SendTracker.{LatestAttempt, LatestAttemptRef}
-import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
+import com.digitalasset.canton.sequencing.client.SequencerClient.{
+  ConnectionContainer,
+  SequencerTransports,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientImpl.SequencerClientTimeSourcesPool
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.time.fetcher.SequencingTimeFetcher.TimeSourcesPool
 import com.digitalasset.canton.sequencing.client.time.fetcher.{
@@ -71,10 +75,6 @@ import com.digitalasset.canton.sequencing.client.time.fetcher.{
 import com.digitalasset.canton.sequencing.client.transports.replay.{
   NullSequencerSubscriptionXFactory,
   ReplaySequencerSubscriptionXFactory,
-}
-import com.digitalasset.canton.sequencing.client.transports.{
-  SequencerClientTransport,
-  SequencerClientTransportPekko,
 }
 import com.digitalasset.canton.sequencing.handlers.{
   CleanSequencerCounterTracker,
@@ -212,7 +212,7 @@ trait RichSequencerClient extends SequencerClient {
   def getConnectionPoolHealthStatus: Seq[HealthQuasiComponent]
 
   def changeTransport(
-      sequencerTransports: SequencerTransports[?],
+      sequencerTransports: SequencerTransports,
       newConnectionPoolConfig: SequencerConnectionXPoolConfig,
   )(implicit traceContext: TraceContext): Either[String, Unit]
 
@@ -232,7 +232,7 @@ trait RichSequencerClient extends SequencerClient {
 abstract class SequencerClientImpl(
     val psid: PhysicalSynchronizerId,
     val member: Member,
-    sequencerTransports: SequencerTransports[?],
+    sequencerTransports: SequencerTransports,
     connectionPool: SequencerConnectionXPool,
     val config: SequencerClientConfig,
     synchronizerParametersLookup: DynamicSynchronizerParametersLookup[
@@ -265,19 +265,14 @@ abstract class SequencerClientImpl(
     connectionPool.getAllConnections().parTraverse_(_.logout())
 
   protected val sequencersTransportState: SequencersTransportState =
-    new SequencersTransportState(
-      sequencerTransports,
-      timeouts,
-      loggerFactory,
-    )
+    new SequencersTransportState(sequencerTransports)
 
   private lazy val printer =
     new CantonPrettyPrinter(loggingConfig.api.maxStringLength, loggingConfig.api.maxMessageLines)
 
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
-      topologyTimestamp: Option[CantonTimestamp],
-      maxSequencingTime: CantonTimestamp,
+      timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
@@ -289,8 +284,7 @@ abstract class SequencerClientImpl(
   ): SendAsyncResult =
     sendAsyncInternal(
       batch,
-      topologyTimestamp,
-      maxSequencingTime,
+      timestamps,
       messageId,
       aggregationRule,
       callback,
@@ -318,8 +312,7 @@ abstract class SequencerClientImpl(
 
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
-      topologyTimestamp: Option[CantonTimestamp],
-      maxSequencingTime: CantonTimestamp,
+      timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
@@ -340,8 +333,8 @@ abstract class SequencerClientImpl(
             member,
             messageId,
             Batch.closeEnvelopes(batch),
-            maxSequencingTime,
-            topologyTimestamp,
+            timestamps.maxSequencingTime,
+            timestamps.topologyTimestamp,
             aggregationRule,
             cost,
             SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion),
@@ -426,7 +419,7 @@ abstract class SequencerClientImpl(
           sendTracker
             .track(
               messageId,
-              maxSequencingTime,
+              timestamps.maxSequencingTime,
               wrappedCallback,
             )
             .leftMap[SendAsyncClientError] { case SavePendingSendError.MessageIdAlreadyTracked =>
@@ -479,6 +472,7 @@ abstract class SequencerClientImpl(
             () => peekAtSendResult(),
             latestAttemptRef,
             syncCryptoApi,
+            timestamps.approximateTimestampForSigning,
           ).value
         } yield res
 
@@ -521,6 +515,14 @@ abstract class SequencerClientImpl(
   }
 
   /** Perform the send, without any check.
+    *
+    * @param approximateTimestampForSigning
+    *   The timestamp used during signing to compute the validity period of session signing keys.
+    *   For submission requests, the topology is not yet fixed (i.e., only a topology snapshot
+    *   approximation is available), so we override the signing timestamp to better reflect the
+    *   signer’s current time. The current local clock is typically a suitable choice. On the
+    *   verifier side, the current node time (e.g., sequencing time) must also be taken into account
+    *   when validating both the signature and the session signing key.
     */
   private def performSend(
       messageId: MessageId,
@@ -530,6 +532,7 @@ abstract class SequencerClientImpl(
       peekAtSendResult: () => Option[UnlessShutdown[SendResult]],
       latestAttemptRef: LatestAttemptRef,
       topologySnapshot: SyncCryptoApi,
+      approximateTimestampForSigning: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
@@ -554,7 +557,11 @@ abstract class SequencerClientImpl(
           amplifiableRequest,
           HashPurpose.SubmissionRequestSignature,
           topologySnapshot,
-          Some(clock.now),
+          SigningTimestampOverrides
+            .createOption(
+              Some(approximateTimestampForSigning),
+              Some(amplifiableRequest.maxSequencingTime),
+            ),
         )
         .leftMap[SendAsyncClientError] { err =>
           val message = s"Error signing submission request $err"
@@ -856,8 +863,10 @@ abstract class SequencerClientImpl(
     )
   }
 
-  override def generateMaxSequencingTime: CantonTimestamp =
-    clock.now.add(config.defaultMaxSequencingTimeOffset.asJava)
+  override def generateMaxSequencingTime(
+      referenceTimestamp: CantonTimestamp
+  ): CantonTimestamp =
+    referenceTimestamp.add(config.defaultMaxSequencingTimeOffset.asJava)
 
   override def generateMessageId: MessageId = MessageId.randomMessageId()
 
@@ -981,13 +990,25 @@ abstract class SequencerClientImpl(
     def ack(
         request: AcknowledgeRequest,
         approximateSnapshot: SyncCryptoApi,
-        approximateTimestampOverride: Option[CantonTimestamp],
+        protocolVersion: ProtocolVersion,
     ): EitherT[FutureUnlessShutdown, String, Boolean] = for {
       signedRequest <- requestSigner.signRequest(
         request,
         HashPurpose.AcknowledgementSignature,
         approximateSnapshot,
-        approximateTimestampOverride,
+        // In PV34, session signing keys are not intended to be used. However, to maintain the
+        // previous behavior, we do not assign an end validity period and simply let Canton choose
+        // a session signing key that is valid for the current approximate signing timestamp.
+        if (protocolVersion < ProtocolVersion.v35)
+          Some(
+            SigningTimestampOverrides(
+              clock.now,
+              None,
+            )
+          )
+        // In PV35, acknowledgements are signed and verified using the same `fixed` timestamp - the timestamp
+        // being acknowledged.
+        else None,
       )
       ackRes <- acknowledgeWithConnectionPool(signedRequest)
     } yield ackRes
@@ -995,19 +1016,18 @@ abstract class SequencerClientImpl(
     if (LogicalUpgradeTime.canProcessKnowingPredecessor(synchronizerPredecessor, timestamp)) {
       val request = AcknowledgeRequest(member, timestamp, protocolVersion)
       for {
-        snapshotAndTimestamp <- EitherT.liftF(
+        snapshot <- EitherT.liftF(
           if (protocolVersion < ProtocolVersion.v35)
-            syncCryptoClient.currentSnapshotApproximation.map((_, Some(clock.now)))
-          else syncCryptoClient.snapshot(timestamp).map((_, None))
+            syncCryptoClient.currentSnapshotApproximation
+          else syncCryptoClient.snapshot(timestamp)
         )
-        (snapshotToSign, approximateTimestampOverride) = snapshotAndTimestamp
         synchronizerSuccessor <- EitherT
-          .liftF(snapshotToSign.ipsSnapshot.announcedLsu())
+          .liftF(snapshot.ipsSnapshot.announcedLsu())
           .map(_.map { case (successor, _) => successor })
 
         result <-
           if (LogicalUpgradeTime.canProcessKnowingSuccessor(synchronizerSuccessor, timestamp)) {
-            ack(request, snapshotToSign, approximateTimestampOverride)
+            ack(request, snapshot, protocolVersion)
           } else {
             logger.debug(
               s"Not acknowledging the timestamp $timestamp past the upgrade time (${synchronizerSuccessor
@@ -1178,7 +1198,7 @@ class RichSequencerClientImpl(
     override val psid: PhysicalSynchronizerId,
     override val synchronizerPredecessor: Option[SynchronizerPredecessor],
     member: Member,
-    sequencerTransports: SequencerTransports[?],
+    sequencerTransports: SequencerTransports,
     connectionPool: SequencerConnectionXPool,
     config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
@@ -1187,7 +1207,7 @@ class RichSequencerClientImpl(
     ],
     timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
-    clock: Clock,
+    override protected[canton] val clock: Clock,
     requestSigner: RequestSigner,
     sequencedEventStore: SequencedEventStore,
     sendTracker: SendTracker,
@@ -1618,7 +1638,7 @@ class RichSequencerClientImpl(
       }
 
   override def changeTransport(
-      sequencerTransports: SequencerTransports[?],
+      sequencerTransports: SequencerTransports,
       newConnectionPoolConfig: SequencerConnectionXPoolConfig,
   )(implicit traceContext: TraceContext): Either[String, Unit] =
     for {
@@ -1662,7 +1682,6 @@ class RichSequencerClientImpl(
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
     Seq(
-      SyncCloseable("sequencer-client-subscription", sequencersTransportState.close()),
       SyncCloseable(
         "sequencer-subscription-pool",
         toCloseableOption(sequencerSubscriptionPoolRef.get).close(),
@@ -1743,10 +1762,14 @@ object RichSequencerClientImpl {
   }
 }
 
+/** This sequencer client implementation is specialized for a direct connection by a sequencer to
+  * itself. It only supports a single direct connection for a subscription.
+  */
 class SequencerClientImplPekko[E: Pretty](
     psid: PhysicalSynchronizerId,
     member: Member,
-    sequencerTransports: SequencerTransports[E],
+    connectionContainer: ConnectionContainer[E],
+    sequencerTransports: SequencerTransports,
     connectionPool: SequencerConnectionXPool,
     config: SequencerClientConfig,
     synchronizerParametersLookup: DynamicSynchronizerParametersLookup[
@@ -1754,7 +1777,7 @@ class SequencerClientImplPekko[E: Pretty](
     ],
     timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
-    clock: Clock,
+    override protected[canton] val clock: Clock,
     requestSigner: RequestSigner,
     sequencedEventStore: SequencedEventStore,
     sendTracker: SendTracker,
@@ -1915,25 +1938,19 @@ class SequencerClientImplPekko[E: Pretty](
         val replayedEventsSource =
           Source(batchedReplayedEvents).map(Right(_)).viaMat(KillSwitches.single)(Keep.right)
 
+        val connection = connectionContainer.connection
+        val sequencerId = connection.attributes.sequencerId
+        val subscriptionFactory = SequencerSubscriptionFactoryPekko.fromConnection(
+          sequencerId,
+          connection,
+          member,
+          protocolVersion,
+        )
+
         val sequencerConnectionConfig =
           OrderedBucketMergeConfig[SequencerId, HasSequencerSubscriptionFactoryPekko[E]](
             sequencerTransports.sequencerTrustThreshold,
-            sequencerTransports.sequencerIdToTransportMapO
-              .getOrElse(
-                ErrorUtil.invalidState(
-                  "sequencerIdToTransportMapO undefined while using transports"
-                )
-              )
-              .toNEF
-              .fmap { transportContainer =>
-                SequencerSubscriptionFactoryPekko.fromTransport(
-                  transportContainer.sequencerId,
-                  transportContainer.clientTransport,
-                  member,
-                  protocolVersion,
-                )
-              }
-              .fromNEF,
+            NonEmpty(Map, sequencerId -> subscriptionFactory),
           )
 
         val configSource = Source
@@ -2041,13 +2058,7 @@ class SequencerClientImplPekko[E: Pretty](
         val handle = SubscriptionHandle(killSwitch, subscriptionDoneF, completion)
         subscriptionHandle.getAndSet(Some(handle)).foreach { _ =>
           // TODO(#13789) Clean up the error logging.
-          //  Currently, this mimics com.digitalasset.canton.sequencing.client.SequencersTransportState.addSubscription
-          logger.warn(
-            "Cannot create additional subscriptions to the sequencer from the same client"
-          )
-          throw new IllegalArgumentException(
-            s"The sequencer client already has a running subscription"
-          )
+          ErrorUtil.invalidState(s"The sequencer client already has a running subscription")
         }
 
         // periodically acknowledge that we've successfully processed up to the clean counter
@@ -2162,66 +2173,44 @@ object SequencerClientImplPekko {
 object SequencerClient {
   val healthName: String = "sequencer-client"
 
-  final case class SequencerTransportContainer[E](
-      sequencerAlias: SequencerAlias,
-      sequencerId: SequencerId,
-      clientTransport: SequencerClientTransport & SequencerClientTransportPekko.Aux[E],
+  final case class ConnectionContainer[E](
+      connection: SequencerConnectionWithPekkoSubscribe.Aux[E]
   )
 
-  final case class SequencerTransports[E] private (
-      sequencerToTransportMapO: Option[
-        NonEmpty[Map[SequencerAlias, SequencerTransportContainer[E]]]
-      ],
+  final case class SequencerTransports private (
       sequencerTrustThreshold: PositiveInt,
       sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
-  ) {
-    def sequencerIdToTransportMapO
-        : Option[NonEmpty[Map[SequencerId, SequencerTransportContainer[E]]]] =
-      sequencerToTransportMapO.map(_.map { case (_, transport) =>
-        transport.sequencerId -> transport
-      }.toMap)
-  }
+  )
 
   object SequencerTransports {
-    def from[E](
+    def from(
         sequencerSignatureThreshold: PositiveInt,
         sequencerLivenessMargin: NonNegativeInt,
         submissionRequestAmplification: SubmissionRequestAmplification,
         sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
-    ): Either[String, SequencerTransports[E]] =
-      Right(
-        SequencerTransports(
-          sequencerToTransportMapO = None,
-          sequencerTrustThreshold = sequencerSignatureThreshold,
-          sequencerLivenessMargin = sequencerLivenessMargin,
-          submissionRequestAmplification = submissionRequestAmplification,
-          sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
-        )
+    ): SequencerTransports =
+      SequencerTransports(
+        sequencerTrustThreshold = sequencerSignatureThreshold,
+        sequencerLivenessMargin = sequencerLivenessMargin,
+        submissionRequestAmplification = submissionRequestAmplification,
+        sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
       )
 
-    private def single[E](
-        sequencerAlias: SequencerAlias,
-        sequencerId: SequencerId,
-        transport: SequencerClientTransport & SequencerClientTransportPekko.Aux[E],
-    ): SequencerTransports[E] = {
-      val container = SequencerTransportContainer(sequencerAlias, sequencerId, transport)
+    def default: SequencerTransports =
       SequencerTransports(
-        sequencerToTransportMapO = Some(NonEmpty.mk(Seq, sequencerAlias -> container).toMap),
         sequencerTrustThreshold = PositiveInt.one,
         sequencerLivenessMargin = NonNegativeInt.zero,
         SubmissionRequestAmplification.NoAmplification,
         SequencerConnectionPoolDelays.default,
       )
-    }
-
-    def default[E](
-        sequencerId: SequencerId,
-        transport: SequencerClientTransport & SequencerClientTransportPekko.Aux[E],
-    ): SequencerTransports[E] =
-      single(SequencerAlias.Default, sequencerId, transport)
   }
+
+  def wrapConnection[E](
+      connection: SequencerConnectionWithPekkoSubscribe.Aux[E]
+  ): ConnectionContainer[E] =
+    ConnectionContainer(connection)
 
   sealed trait CloseReason
 

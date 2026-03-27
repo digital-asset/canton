@@ -28,10 +28,10 @@ object MediatorInspectionCommands {
 
   final case class MediatorVerdicts(
       mostRecentlyReceivedRecordTimeOfRequest: Option[CantonTimestamp] = None,
-      override val observer: StreamObserver[v30.Verdict],
+      override val observer: StreamObserver[v30.VerdictsResponse.Payload],
   )(override implicit val loggingContext: ErrorLoggingContext)
       extends BaseScanCommand[v30.VerdictsRequest, AutoCloseable, AutoCloseable]
-      with SubscribeBase[v30.VerdictsRequest, v30.VerdictsResponse, v30.Verdict] {
+      with SubscribeBase[v30.VerdictsRequest, v30.VerdictsResponse, v30.VerdictsResponse.Payload] {
 
     override def doRequest(
         service: Svc,
@@ -39,8 +39,10 @@ object MediatorInspectionCommands {
         rawObserver: StreamObserver[v30.VerdictsResponse],
     ): Unit = service.verdicts(request, rawObserver)
 
-    override def extractResults(response: v30.VerdictsResponse): IterableOnce[v30.Verdict] =
-      response.verdict
+    override def extractResults(
+        response: v30.VerdictsResponse
+    ): IterableOnce[v30.VerdictsResponse.Payload] =
+      Iterator(response.payload)
 
     override protected def createRequest(): Either[String, v30.VerdictsRequest] =
       Right(

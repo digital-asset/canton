@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
-import com.digitalasset.canton.participant.admin.data.{ActiveContract, ActiveContractOld}
+import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   AcsIndexingProgress,
@@ -37,7 +37,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   TransactionSubmissionTrackingData,
 }
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
-import com.digitalasset.canton.protocol.{GeneratorsProtocol, LfContractId}
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{
@@ -62,7 +62,6 @@ import org.scalacheck.{Arbitrary, Gen}
 final class GeneratorsParticipant(
     generatorsTopology: GeneratorsTopology,
     generatorsLf: GeneratorsLf,
-    generatorsProtocol: GeneratorsProtocol,
     version: ProtocolVersion,
 ) {
 
@@ -70,7 +69,6 @@ final class GeneratorsParticipant(
   import com.digitalasset.canton.Generators.*
   import generatorsTopology.*
   import generatorsLf.*
-  import generatorsProtocol.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
 
@@ -137,19 +135,6 @@ final class GeneratorsParticipant(
           LapiActiveContract(None, synchronizerId.toProtoPrimitive, reassignmentCounter.unwrap)
         )
       } yield ActiveContract.create(lapiActiveContract)(version)
-    )
-
-  implicit val activeContractOldArb: Arbitrary[ActiveContractOld] =
-    Arbitrary(
-      for {
-        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
-        serializableContract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
-        reassignmentCounter <- Arbitrary.arbitrary[ReassignmentCounter]
-      } yield ActiveContractOld.create(
-        synchronizerId,
-        serializableContract,
-        reassignmentCounter,
-      )(version)
     )
 
   // If this pattern match is not exhaustive anymore, update the message generator below

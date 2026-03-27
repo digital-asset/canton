@@ -71,6 +71,7 @@ final case class StaticSynchronizerParameters(
     param("required hash algorithms", _.requiredHashAlgorithms),
     param("required crypto key formats", _.requiredCryptoKeyFormats),
     param("topology change delay", _.topologyChangeDelay),
+    paramIfTrue("enable transparency checks", _.enableTransparencyChecks),
     param("protocol version", _.protocolVersion),
     param("serial", _.serial),
   )

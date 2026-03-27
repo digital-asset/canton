@@ -51,6 +51,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     batchingConfig: BatchingConfig,
+    getActiveLsuSuccessor: Mediator.GetActiveLsuSuccessor,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with Spanning
@@ -172,16 +173,25 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
   private[mediator] def handleTimeouts(
       timestamp: CantonTimestamp
-  ): HandlerResult =
+  )(implicit traceContext: TraceContext): HandlerResult =
     // Determine the timed-out requests in the synchronous processing stage, ...
-    mediatorState
+    (mediatorState
       .pendingTimedoutRequest(timestamp) match {
-      case Nil => HandlerResult.done
+      case Nil =>
+        HandlerResult.done
       case nonEmptyTimeouts =>
         // ... but perform the actual timeout handling in the asynchronous processing stage.
         // This allows us to wait for the individual requests' previous processing to finish without blocking
         // the synchronous processing stage of subsequent events.
         HandlerResult.asynchronous(nonEmptyTimeouts.map(handleTimeout(_, timestamp)).sequence_)
+    }).map { result =>
+      // If we have passed the LSU upgrade time there will be no further requests, so after the
+      // timeouts have been handled, signal that all requests are now finalized to the timestamp.
+      result.andThenF { _ =>
+        getActiveLsuSuccessor(timestamp).map { lsu =>
+          lsu.foreach(s => mediatorState.allRequestsFinalizedTo(s.upgradeTime))
+        }
+      }
     }
 
   @VisibleForTesting
@@ -207,7 +217,9 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           s"Phase 6: Request ${requestId.unwrap}: Timeout in state ${responseAggregation.state} at $timestamp"
         )
 
-        val timedOut = responseAggregation.timeout()
+        val timedOut = responseAggregation.timeout(
+          mediatorState.metrics.timeoutNonResponsiveParticipants
+        )
         MonadUtil.whenM(mediatorState.replace(responseAggregation, timedOut))(
           sendResultIfDone(timedOut, responseAggregation.decisionTime)
         )
@@ -904,24 +916,20 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, MediatorVerdict.MediatorReject, Result] =
     check(sequencingSnapshot).leftFlatMap { reject =>
-      val errorLoggedAtAdjustedLevel = for {
-        validAtSubmissionTopologyTimestamp <-
-          submissionTimeSnapshotO.existsM(
-            check(_).isRight
-          )
-      } yield {
-        if (validAtSubmissionTopologyTimestamp) {
-          // Log the error at INFO level, since it was just a race between the request and a topology change.
-          logger.info(
-            s"""$reject
+      val errorLoggedAtAdjustedLevel = submissionTimeSnapshotO.existsM(check(_).isRight).map {
+        validAtSubmissionTopologyTimestamp =>
+          if (validAtSubmissionTopologyTimestamp) {
+            // Log the error at INFO level, since it was just a race between the request and a topology change.
+            logger.info(
+              s"""$reject
                | This error is due to a change of topology state between the declared topology timestamp used
                | for submission and the sequencing time of the request.""".stripMargin
-          )
-        } else {
-          // otherwise log the error at the original log level.
-          reject.log()
-        }
-        MediatorVerdict.MediatorReject(reject)
+            )
+          } else {
+            // otherwise log the error at the original log level.
+            reject.log()
+          }
+          MediatorVerdict.MediatorReject(reject)
       }
 
       EitherT.left(errorLoggedAtAdjustedLevel)

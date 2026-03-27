@@ -25,7 +25,6 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcUSExtended
-import com.digitalasset.canton.participant.admin.data.ActiveContractOld
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.{
   InFlightCount,
   SyncStateInspectionError,
@@ -46,12 +45,7 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.{
   Matched,
   fromIntValidSentPeriodState,
 }
-import com.digitalasset.canton.protocol.{
-  ContractInstance,
-  LfContractId,
-  ReassignmentId,
-  SerializableContract,
-}
+import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
 import com.digitalasset.canton.pruning.{
   ConfigForSlowCounterParticipants,
   ConfigForSynchronizerThresholds,
@@ -71,7 +65,6 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.ReassignmentTag.Source
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -83,7 +76,6 @@ import com.digitalasset.canton.{
 }
 import com.google.common.annotations.VisibleForTesting
 
-import java.io.OutputStream
 import java.time.Instant
 import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
@@ -115,7 +107,6 @@ final class SyncStateInspection(
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     timeouts: ProcessingTimeout,
-    journalCleaningControl: JournalGarbageCollectorControl,
     connectedSynchronizersLookup: ConnectedSynchronizersLookup,
     syncCrypto: SyncCryptoApiParticipantProvider,
     participantId: ParticipantId,
@@ -252,121 +243,6 @@ final class SyncStateInspection(
         ).activeContractStore.pruningStatus
       )
       .asGrpcResponse
-
-  private def disableJournalCleaningForFilter(
-      synchronizers: Map[PhysicalSynchronizerId, SyncPersistentState],
-      filterSynchronizerId: SynchronizerId => Boolean,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, AcsInspectionError, Unit] = {
-    val disabledCleaningF = Future
-      .sequence(synchronizers.collect {
-        case (synchronizerId, _) if filterSynchronizerId(synchronizerId.logical) =>
-          journalCleaningControl.disable(synchronizerId)
-      })
-      .map(_ => ())
-    EitherT.right(disabledCleaningF)
-  }
-
-  def exportAcsDumpActiveContracts(
-      outputStream: OutputStream,
-      filterSynchronizerId: SynchronizerId => Boolean,
-      parties: Set[LfPartyId],
-      timestamp: Option[CantonTimestamp],
-      skipCleanTimestampCheck: Boolean,
-      partiesOffboarding: Boolean,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, AcsInspectionError, Unit] = {
-    // To disable/re-enable background pruning
-    val allSynchronizers: Map[PhysicalSynchronizerId, SyncPersistentState] =
-      syncPersistentStateManager.getAll
-
-    // For the ACS export
-    val latestSynchronizers = syncPersistentStateManager.getAllLatest
-
-    def writeACSToStream(synchronizerId: SynchronizerId, state: SyncPersistentState) = {
-      val pv = state.staticSynchronizerParameters.protocolVersion
-
-      val acsInspection = state.acsInspection
-      val timeOfSnapshotO = timestamp.map(TimeOfChange.apply)
-      for {
-        result <- acsInspection
-          .forEachVisibleActiveContract(
-            synchronizerId.logical,
-            parties,
-            timeOfSnapshotO,
-            skipCleanTocCheck = skipCleanTimestampCheck,
-          ) { case (contractInst, reassignmentCounter) =>
-            (for {
-              contract <- SerializableContract.fromLfFatContractInst(contractInst.inst)
-              activeContract = ActiveContractOld.create(
-                synchronizerId,
-                contract,
-                reassignmentCounter,
-              )(pv)
-
-              _ <- activeContract.writeDelimitedTo(outputStream)
-            } yield ()) match {
-              case Left(errorMessage) =>
-                Left(
-                  AcsInspectionError.SerializationIssue(
-                    synchronizerId.logical,
-                    contractInst.contractId,
-                    errorMessage,
-                  )
-                )
-              case Right(_) =>
-                outputStream.flush()
-                Either.unit
-            }
-          }
-
-        _ <- result match {
-          case Some((allStakeholders, snapshotToc)) if partiesOffboarding =>
-            for {
-              connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
-                connectedSynchronizersLookup.get(synchronizerId),
-                AcsInspectionError.OffboardingParty(
-                  synchronizerId.logical,
-                  s"Unable to get topology client for synchronizer $synchronizerId; check synchronizer connectivity.",
-                ),
-              )
-
-              _ <- acsInspection.checkOffboardingSnapshot(
-                participantId,
-                // the empty parties filter serves as wildcard, and therefore we consider all stakeholder parties to be offboarded
-                offboardedParties = if (parties.isEmpty) allStakeholders else parties,
-                allStakeholders = allStakeholders,
-                snapshotToc = snapshotToc,
-                topologyClient = connectedSynchronizer.topologyClient,
-              )
-            } yield ()
-
-          // Snapshot is empty or partiesOffboarding is false
-          case _ => EitherTUtil.unitUS[AcsInspectionError]
-        }
-      } yield ()
-    }
-
-    // disable journal cleaning for the duration of the dump
-    val res: EitherT[FutureUnlessShutdown, AcsInspectionError, Unit] =
-      disableJournalCleaningForFilter(allSynchronizers, filterSynchronizerId)
-        .mapK(FutureUnlessShutdown.outcomeK)
-        .flatMap { _ =>
-          MonadUtil.sequentialTraverse_(latestSynchronizers) {
-            case (synchronizerId, state) if filterSynchronizerId(synchronizerId) =>
-              writeACSToStream(synchronizerId, state)
-            case _ =>
-              EitherTUtil.unitUS
-          }
-        }
-
-    // re-enable journal cleaning after the dump
-    res.thereafter { _ =>
-      allSynchronizers.keys.foreach(journalCleaningControl.enable)
-    }
-  }
 
   def contractCount(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
     participantNodePersistentState.value.contractStore.contractCount()

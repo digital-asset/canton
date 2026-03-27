@@ -10,8 +10,9 @@ import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.interpretation.{Error => IErr}
 import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
+  NextGenContractStateMachine => ContractStateMachine,
   GlobalKeyWithMaintainers,
+  KeyMapping,
   Node,
   NodeId,
   SubmittedTransaction => SubmittedTx,
@@ -19,7 +20,6 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionError => TxErr,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
@@ -185,7 +185,7 @@ private[lf] object PartialTransaction {
   }
 
   def initial(
-      contractKeyUniqueness: ContractStateMachine.Mode,
+      csmMode: ContractStateMachine.Mode,
       initialSeeds: InitialSeeding,
       committers: Set[Party],
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
@@ -194,7 +194,7 @@ private[lf] object PartialTransaction {
     nodes = HashMap.empty,
     actionNodeSeeds = BackStack.empty,
     context = Context(initialSeeds, committers),
-    contractState = ContractStateMachine.initial[NodeId](contractKeyUniqueness),
+    contractState = ContractStateMachine.empty(csmMode),
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
   )
@@ -219,7 +219,7 @@ private[speedy] case class PartialTransaction(
     nodes: HashMap[NodeId, Node],
     actionNodeSeeds: BackStack[crypto.Hash],
     context: PartialTransaction.Context,
-    contractState: ContractStateMachine.State[NodeId],
+    contractState: CSMState,
     actionNodeLocations: BackStack[Option[Location]],
     authorizationChecker: AuthorizationChecker,
 ) {
@@ -380,15 +380,15 @@ private[speedy] case class PartialTransaction(
         Left((ptx, IErr.FailedAuthorization(nid, fa)))
       case Nil =>
         ptx.contractState.visitCreate(
+          nid,
           cid,
           createNode.gkeyOpt,
-          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
             Right((cid, nextPtx))
-          case Left(duplicate) =>
-            Left((ptx, convTxError(nodes, "Create", duplicate)))
+          case Left(err) =>
+            Left(this -> convTxError(nodes, "Create", err))
         }
     }
   }
@@ -436,37 +436,37 @@ private[speedy] case class PartialTransaction(
       }
     }
 
-  def insertLookup(
+  def insertQueryByKey(
       optLocation: Option[Location],
       key: CachedKey,
-      result: Option[Value.ContractId],
+      result: KeyMapping,
       keyVersion: SerializationVersion,
-  ): Either[IErr, PartialTransaction] =
-    mustBeActive(NameOf.qualifiedNameOfCurrentFunc, result) {
-      val auth = Authorize(context.info.authorizers)
-      val nid = NodeId(nextNodeIdx)
-      val node = Node.LookupByKey(
-        key.globalKey.packageName,
-        key.templateId,
-        key.globalKeyWithMaintainers,
-        result,
-        keyVersion,
+  ): Either[IErr, PartialTransaction] = {
+
+    val auth = Authorize(context.info.authorizers)
+    val nid = NodeId(nextNodeIdx)
+    val node = Node.QueryByKey(
+      packageName = key.globalKey.packageName,
+      templateId = key.templateId,
+      exhaustive = result.exhaustive,
+      key = key.globalKeyWithMaintainers,
+      result = result.queue,
+      version = keyVersion,
+    )
+    // This method is only called after we have already resolved the key in com.digitalasset.daml.lf.speedy.SBuiltin.SBUKeyBuiltin.execute
+    // so the current state's global key inputs must resolve the key.
+    val newContractState =
+      assertRightKey(
+        "Lookup",
+        contractState.visitQueryByKey(key.globalKey, result.queue, result.exhaustive),
       )
-      // This method is only called after we have already resolved the key in com.digitalasset.daml.lf.speedy.SBuiltin.SBUKeyBuiltin.execute
-      // so the current state's global key inputs must resolve the key.
-      val keyInput = contractState.globalKeyInputs(key.globalKey)
-      val newContractState =
-        assertRightKey(
-          "Lookup",
-          contractState.visitQueryByKey(key.globalKey, keyInput.toKeyMapping, result.asCidVector),
-        )
-      authorizationChecker.authorizeLookupByKey(optLocation, node)(auth) match {
-        case fa :: _ =>
-          Left(IErr.FailedAuthorization(nid, fa))
-        case Nil =>
-          Right(insertLeafNode(node, keyVersion, optLocation, newContractState))
-      }
+    authorizationChecker.authorizeLookupByKey(optLocation, node)(auth) match {
+      case fa :: _ =>
+        Left(IErr.FailedAuthorization(nid, fa))
+      case Nil =>
+        Right(insertLeafNode(node, keyVersion, optLocation, newContractState))
     }
+  }
 
   /** Open an exercises context.
     * Must be closed by a `endExercises` or an `abortExercise`.
@@ -615,7 +615,7 @@ private[speedy] case class PartialTransaction(
     copy(
       nextNodeIdx = nextNodeIdx + 1,
       context = Context(info).copy(nextActionChildIdx = context.nextActionChildIdx),
-      contractState = contractState.beginRollback(),
+      contractState = contractState.beginTry,
     )
   }
 
@@ -630,7 +630,7 @@ private[speedy] case class PartialTransaction(
             children = info.parent.children :++ context.children.toImmArray,
             nextActionChildIdx = context.nextActionChildIdx,
           ),
-          contractState = contractState.dropRollback(),
+          contractState = contractState.endTry,
         )
       case _ =>
         InternalError.runtimeException(
@@ -642,23 +642,28 @@ private[speedy] case class PartialTransaction(
   /** Close a try context, by catching an exception,
     * i.e. a exception was thrown inside the context, and the catch associated to the try context did handle it.
     */
-  def rollbackTry(): Either[IErr.EffectfulRollback, PartialTransaction] = {
+  def rollbackTry: Either[IErr.EffectfulRollback, PartialTransaction] = {
     context.info match {
       case info: TryContextInfo =>
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
-        contractState.endRollback() match {
-          case Right(rolledBackState) =>
+        contractState.endRollback match {
+          case Right(newState) =>
             Right(
               copy(
                 context = info.parent
-                  .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
+                  .addNonActionChild(
+                    info.nodeId,
+                    context.minChildVersion,
+                    context.nextActionChildIdx,
+                  ),
                 nodes = nodes.updated(info.nodeId, rollbackNode),
-                contractState = rolledBackState,
+                contractState = newState,
               )
             )
-          case Left(nodeIds) => Left(convEffectfulRollbackError(nodes, TxErr.EffectfulRollback(nodeIds)))
+          case Left(nodeIds) =>
+            Left(convEffectfulRollbackError(nodes, TxErr.EffectfulRollback(nodeIds)))
         }
       case _ =>
         InternalError.runtimeException(
@@ -692,7 +697,7 @@ private[speedy] case class PartialTransaction(
       node: Node.LeafOnlyAction,
       version: SerializationVersion,
       optLocation: Option[Location],
-      newContractState: ContractStateMachine.State[NodeId],
+      newContractState: CSMState,
   ): PartialTransaction = {
     val _ = version
     val nid = NodeId(nextNodeIdx)

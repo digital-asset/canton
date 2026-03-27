@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.SymmetricKeyScheme.Aes128Gcm
 import com.digitalasset.canton.crypto.provider.jce.{JcePrivateCrypto, JcePureCrypto}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys.{
   PendingUsableSessionKeysAndMetadata,
   SessionKeyAndDelegation,
@@ -387,7 +388,7 @@ class SyncCryptoSignerWithSessionKeys(
 
   override def sign(
       topologySnapshot: TopologySnapshot,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       hash: Hash,
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit
@@ -402,7 +403,8 @@ class SyncCryptoSignerWithSessionKeys(
         ),
       )
       activeLongTermKey <- findSigningKey(member, topologySnapshot, usage)
-      timestamp = approximateTimestampOverride.getOrElse(topologySnapshot.timestamp)
+      approximateTimestampForSigning = signingTimestampOverrides.map(_.approximateTimestamp)
+      timestamp = approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp)
       // The only exception where we cannot use a session signing key is for the sequencer initialization request,
       // where the timestamp has not yet been assigned and is set with `CantonTimestamp.MinValue` as the reference time
       // (e.g. 0001-01-01T00:00:00.000002Z).
@@ -418,7 +420,7 @@ class SyncCryptoSignerWithSessionKeys(
           for {
             sessionKeyAndDelegation <- getSessionKey(
               timestamp,
-              approximateTimestampOverride.isDefined, // if an approximate timestamp is used for signing
+              approximateTimestampForSigning.isDefined, // if an approximate timestamp is used for signing
               // (e.g., the current local time), a `cutOff` is applied to both ends of the validity period.
               activeLongTermKey,
             )

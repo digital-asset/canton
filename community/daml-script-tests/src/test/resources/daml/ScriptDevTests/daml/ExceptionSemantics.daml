@@ -159,37 +159,37 @@ template Fetcher
            E -> pure ()
 
 uncaughtUserException = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:uncaughtUserException"
   _ <- submitMustFail p $ createAndExerciseCmd (T p) Throw
   pure ()
 
 unhandledUserException = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:unhandledUserException"
   _ <- submit p $ createAndExerciseCmd (T p) Throw
   pure ()
 
 handledUserException = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:handledUserException"
   _ <- submit p $ createAndExerciseCmd (T p) Catch
   pure ()
 
 uncaughtArithmeticError = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:uncaughtArithmeticError"
   _ <- submitMustFail p $ createAndExerciseCmd (T p) ThrowArithmeticError
   pure ()
 
 unhandledArithmeticError = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:unhandledArithmeticError"
   _ <- submit p $ createAndExerciseCmd (T p) ThrowArithmeticError
   pure ()
 
 handledArithmeticError = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:handledArithmeticError"
   r <- submit p $ createAndExerciseCmd (T p) CatchArithmeticError
   r === 42
 
 duplicateKey = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:duplicateKey"
   -- transient duplicate key in rollback
   submitMustFail p $ createAndExerciseCmd (T p) (TransientDuplicate 0)
   submit p $ createCmd (K p 1)
@@ -200,22 +200,22 @@ duplicateKey = script do
   pure ()
 
 rollbackArchive = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:rollbackArchive"
   submitMustFail p $ createAndExerciseCmd (T p) (NonRollbackArchive 0)
   submit p $ createAndExerciseCmd (T p) (RollbackArchive 0)
 
 rollbackConsumingExercise = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:rollbackConsumingExercise"
   submitMustFail p $ createAndExerciseCmd (T p) (NonRollbackConsumingExercise 0)
   submit p $ createAndExerciseCmd (T p) (RollbackConsumingExercise 0)
 
 rollbackCreate = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:rollbackCreate"
   submit p $ createAndExerciseCmd (T p) (RollbackCreate 0)
 
 divulgence = script do
-  p1 <- allocateParty "p1"
-  p2 <- allocateParty "p2"
+  p1 <- allocateParty "p1-ExceptionSemantics:divulgence"
+  p2 <- allocateParty "p2-ExceptionSemantics:divulgence"
   cid <- submit p1 $ createCmd (K p1 0)
   divulger <- submit p2 $ createCmd (Fetcher p2 p1)
   fetcher <- submit p1 $ createCmd (Fetcher p1 p2)
@@ -225,7 +225,7 @@ divulgence = script do
   pure ()
 
 tryContext = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ExceptionSemantics:tryContext"
   kCid <- submit p $ createCmd (K p 0)
   submit p $ archiveCmd kCid
   c <- submit p $ createCmd (T p)

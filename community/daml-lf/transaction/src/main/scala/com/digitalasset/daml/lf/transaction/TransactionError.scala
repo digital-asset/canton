@@ -14,7 +14,7 @@ sealed trait TransactionError extends Serializable with Product
 
 sealed trait TransactionContractError extends TransactionError
 
-/** Defines the errors raised by [[ContractStateMachine]] and its clients:
+/** Defines the errors raised by [[LegacyContractStateMachine]] and its clients:
   *  - [[TransactionError.DuplicateContractId]]
   *  - [[TransactionError.DuplicateContractKey]]
   *  - [[TransactionError.InconsistentContractKey]]

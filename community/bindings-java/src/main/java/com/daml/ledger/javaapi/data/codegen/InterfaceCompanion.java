@@ -62,7 +62,8 @@ public abstract class InterfaceCompanion<I, Id, View>
       String contractId,
       Map<Identifier, DamlRecord> interfaceViews,
       Set<String> signatories,
-      Set<String> observers)
+      Set<String> observers,
+      UnknownTrailingFieldPolicy policy)
       throws IllegalArgumentException {
     Optional<DamlRecord> maybeRecord =
         Optional.ofNullable(interfaceViews.get(TEMPLATE_ID_WITH_PACKAGE_ID));
@@ -71,7 +72,14 @@ public abstract class InterfaceCompanion<I, Id, View>
     return maybeRecord
         .map(
             record -> {
-              View view = valueDecoder.decode(record);
+              if (policy != UnknownTrailingFieldPolicy.STRICT) {
+                throw new UnsupportedOperationException(
+                    String.format(
+                        "The decoder for interface only supports "
+                            + "UnknownTrailingFieldPolicy.STRICT, but %s was provided.",
+                        policy));
+              }
+              View view = valueDecoder.decode(record, policy);
               return new ContractWithInterfaceView<>(this, id, view, signatories, observers);
             })
         .orElseThrow(
@@ -83,10 +91,17 @@ public abstract class InterfaceCompanion<I, Id, View>
   @Override
   public final Contract<Id, View> fromCreatedEvent(CreatedEvent event)
       throws IllegalArgumentException {
+    return fromCreatedEvent(event, UnknownTrailingFieldPolicy.STRICT);
+  }
+
+  @Override
+  public final Contract<Id, View> fromCreatedEvent(
+      CreatedEvent event, UnknownTrailingFieldPolicy policy) throws IllegalArgumentException {
     return fromIdAndRecord(
         event.getContractId(),
         event.getInterfaceViews(),
         event.getSignatories(),
-        event.getObservers());
+        event.getObservers(),
+        policy);
   }
 }

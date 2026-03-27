@@ -9,8 +9,9 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import scala.reflect.ClassTag
 
-/** Policy for what errors are considered retryable. Each [[transports.SequencerClientTransport]] is
-  * expected to supply their own policy which can consider error types they have defined.
+/** Policy for what errors are considered retryable. Each
+  * [[com.digitalasset.canton.sequencing.SequencerConnectionX]] is expected to supply their own
+  * policy which can consider error types they have defined.
   */
 trait SubscriptionErrorRetryPolicy {
   def retryOnError(subscriptionError: SubscriptionError, receivedItems: Boolean)(implicit

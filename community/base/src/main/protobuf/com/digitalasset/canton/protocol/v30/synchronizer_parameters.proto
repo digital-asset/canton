@@ -53,6 +53,8 @@ message DynamicSynchronizerParameters {
   google.protobuf.Duration ledger_time_record_time_tolerance = 5;
   google.protobuf.Duration reconciliation_interval = 6;
   google.protobuf.Duration mediator_deduplication_timeout = 7;
+
+  // when updated, the new value is effective only after a restart
   uint32 max_request_size = 8;
 
   // topology related validation parameters

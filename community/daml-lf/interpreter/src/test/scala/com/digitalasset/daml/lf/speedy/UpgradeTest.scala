@@ -16,7 +16,7 @@ import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.testing.parser.Implicits._
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine}
 import com.digitalasset.daml.lf.transaction.GlobalKeyWithMaintainers
 import com.digitalasset.daml.lf.transaction.SerializationVersion.VDev
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -481,7 +481,7 @@ class UpgradeTest
       sexprToEval,
       Set(alice, bob),
       MachineLogger(),
-      mode = ContractStateMachine.Mode.UCKWithRollback
+      mode = ContractStateMachine.Mode.NUCK
     )
 
     val contract = TransactionBuilder
@@ -525,7 +525,7 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       packageResolution = packageResolution,
-      mode = ContractStateMachine.Mode.UCKWithRollback,
+      mode = ContractStateMachine.Mode.NUCK,
     )
   }
 

@@ -33,7 +33,7 @@ template Tplt
       getOwner = owner
 
 main = script do
-    alice <- allocateParty "alice"
+    alice <- allocateParty "Alice-InterfaceArchive:main"
     tid <- alice `submit` createCmd (Tplt alice)
     alice `submit` exerciseCmd tid TChoiceNonconsuming
     let iid = toInterfaceContractId @Iface tid

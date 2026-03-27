@@ -50,6 +50,7 @@ import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -370,7 +371,7 @@ class ModelConformanceChecker(
           transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,
           contractOfId = TransactionTreeFactory.contractInstanceLookup(contractAndKeyLookup),
-          keyResolver = resolverFromReinterpretation,
+          keyResolver = resolverFromReinterpretation.asCidOptionMap,
           absolutizer = absolutizer,
         )
       ).leftMap(err => TransactionTreeError(err, view.viewHash))

@@ -38,7 +38,6 @@ import monocle.Monocle.toAppliedFocusOps
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext, Future}
 
@@ -376,11 +375,7 @@ protected abstract class DumpTestSet extends LargeAcsExportAndImportTestBase {
   }
 }
 
-@nowarn("cat=deprecation") // Usage of old acs export
 protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBase {
-  // If true, use legacy export/import (Canton internal instead of LAPI)
-  def useLegacyExportImport: Boolean
-  def useV2ExportImport: Boolean
 
   protected def testContractIdImportMode: ContractImportMode
 
@@ -478,36 +473,25 @@ protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBas
       )
     )
 
-    if (useLegacyExportImport) {
-      acsExportFile.get.foreach { acsExport =>
-        participant1.repair.export_acs_old(
-          Set(bank),
-          partiesOffboarding = false,
-          outputFile = acsExport.canonicalPath,
-        )
-      }
-    } else {
-      // no need to check the flag useV2ExportImport,
-      // because the data exported via export_acs works for both import endpoints
-      val bankAddedOnP3Offset = participant1.parties.find_party_max_activation_offset(
-        partyId = bank,
-        synchronizerId = daId,
-        participantId = participant3.id,
-        beginOffsetExclusive = ledgerOffsetBeforePartyOnboarding.getOrElse(
-          throw new RuntimeException("missing begin offset")
-        ),
-        completeAfter = PositiveInt.one,
-        onboarding = false,
-      )
+    val bankAddedOnP3Offset = participant1.parties.find_party_max_activation_offset(
+      partyId = bank,
+      synchronizerId = daId,
+      participantId = participant3.id,
+      beginOffsetExclusive = ledgerOffsetBeforePartyOnboarding.getOrElse(
+        throw new RuntimeException("missing begin offset")
+      ),
+      completeAfter = PositiveInt.one,
+      onboarding = false,
+    )
 
-      acsExportFile.get.foreach { acsExport =>
-        participant1.repair.export_acs(
-          parties = Set(bank),
-          exportFilePath = acsExport.canonicalPath,
-          ledgerOffset = bankAddedOnP3Offset,
-        )
-      }
+    acsExportFile.get.foreach { acsExport =>
+      participant1.repair.export_acs(
+        parties = Set(bank),
+        exportFilePath = acsExport.canonicalPath,
+        ledgerOffset = bankAddedOnP3Offset,
+      )
     }
+
   }
 
   "import ACS for Bank on P3" in { implicit env =>
@@ -523,25 +507,13 @@ protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBas
     acsExportFile.get.foreach { acsExportFile =>
       val startImport = System.nanoTime()
 
-      if (useLegacyExportImport) {
-        participant3.repair.import_acs(
-          acsExportFile.canonicalPath,
-          contractImportMode = testContractIdImportMode,
-        )
-      } else if (useV2ExportImport) {
-        val bank = grabPartyId(participant1, "Bank")
-        participant3.parties.import_party_acsV2(
-          synchronizerId.logical,
-          Some(bank),
-          acsExportFile.canonicalPath,
-          contractImportMode = testContractIdImportMode,
-        )
-      } else {
-        participant3.parties.import_party_acs(
-          acsExportFile.canonicalPath,
-          contractImportMode = testContractIdImportMode,
-        )
-      }
+      val bank = grabPartyId(participant1, "Bank")
+      participant3.parties.import_party_acs(
+        synchronizerId.logical,
+        Some(bank),
+        acsExportFile.canonicalPath,
+        contractImportMode = testContractIdImportMode,
+      )
 
       val importDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startImport)
 
@@ -573,31 +545,6 @@ final class LargeAcsCreateContractsTest extends DumpTestSet {
 /** The actual test */
 final class LargeAcsExportAndImportTest extends EstablishTestSet {
   override protected def testSet: TestSet = TestSet(250000, transientContracts = 0)
-
-  override def useLegacyExportImport: Boolean = false
-  override def useV2ExportImport: Boolean = false
-
-  override protected def testContractIdImportMode: ContractImportMode =
-    ContractImportMode.Validation
-}
-
-/** The actual test */
-final class LargeAcsExportAndImportTestV2 extends EstablishTestSet {
-  override protected def testSet: TestSet = TestSet(250000, transientContracts = 0)
-
-  override def useLegacyExportImport: Boolean = false
-  override def useV2ExportImport: Boolean = true
-
-  override protected def testContractIdImportMode: ContractImportMode =
-    ContractImportMode.Validation
-}
-
-/** The actual test using legacy ACS export / import endpoints */
-final class LargeAcsExportAndImportTestLegacy extends EstablishTestSet {
-  override protected def testSet: TestSet = TestSet(10, transientContracts = 1)
-
-  override def useLegacyExportImport: Boolean = true
-  override def useV2ExportImport: Boolean = false
 
   override protected def testContractIdImportMode: ContractImportMode =
     ContractImportMode.Validation

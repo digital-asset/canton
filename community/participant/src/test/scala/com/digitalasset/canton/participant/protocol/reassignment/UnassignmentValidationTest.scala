@@ -345,7 +345,11 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       reassigningParticipants.toSeq.tail*
     )
     val signature = cryptoSnapshot
-      .sign(fullUnassignmentTree.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+      .sign(
+        fullUnassignmentTree.rootHash.unwrap,
+        SigningKeyUsage.ProtocolOnly,
+        None, // not needed for unit tests; session signing keys disabled
+      )
       .futureValueUS
       .value
     val parsed = mkParsedRequest(fullUnassignmentTree, recipients, Some(signature))

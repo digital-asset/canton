@@ -14,6 +14,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   TopologyTransactionsBroadcast,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
@@ -44,6 +45,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
@@ -102,8 +104,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         verify(mockSequencerClient, never)
           .send(
             any[Batch[DefaultOpenEnvelope]],
-            any[Option[CantonTimestamp]],
-            any[CantonTimestamp],
+            any[SendRequestTimestamps],
             any[MessageId],
             any[Option[AggregationRule]],
             any[SendCallback],
@@ -126,8 +127,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       when(
         sequencerClient.send(
           batch = any[Batch[DefaultOpenEnvelope]],
-          topologyTimestamp = any[Option[CantonTimestamp]],
-          maxSequencingTime = any[CantonTimestamp],
+          timestamps = any[SendRequestTimestamps],
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
@@ -191,18 +191,23 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           .plus(config.pollBackoff.asJava)
       )
 
+      val timestampsCapture = ArgumentCaptor.forClass(classOf[SendRequestTimestamps])
+
       // then
       verify(sequencerClient)
         .send(
           batch = eqTo(expectedBatch),
-          topologyTimestamp = eqTo(None),
-          maxSequencingTime = eqTo(effectiveTime.value.plus(config.maxSequencingTimeWindow.asJava)),
+          timestamps = timestampsCapture.capture(),
           messageId = any[MessageId],
           aggregationRule = eqTo(Some(expectedAggregationRule)),
           callback = any[SendCallback],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
+
+      val ts = timestampsCapture.getValue
+      ts.topologyTimestamp shouldBe None
+      ts.maxSequencingTime shouldBe effectiveTime.value.plus(config.maxSequencingTimeWindow.asJava)
 
       subscriber.close()
     }
@@ -265,8 +270,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       always() {
         verify(mockSequencerClient, never).send(
           any[Batch[DefaultOpenEnvelope]],
-          any[Option[CantonTimestamp]],
-          any[CantonTimestamp],
+          any[SendRequestTimestamps],
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
@@ -302,8 +306,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       when(
         mockSequencerClient.send(
           any[Batch[DefaultOpenEnvelope]],
-          any[Option[CantonTimestamp]],
-          any[CantonTimestamp],
+          any[SendRequestTimestamps],
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
@@ -379,8 +382,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       // then
       verify(sequencerClient, never).send(
         any[Batch[DefaultOpenEnvelope]],
-        any[Option[CantonTimestamp]],
-        any[CantonTimestamp],
+        any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
@@ -402,8 +404,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       when(
         sequencerClient.send(
           batch = any[Batch[DefaultOpenEnvelope]],
-          topologyTimestamp = any[Option[CantonTimestamp]],
-          maxSequencingTime = any[CantonTimestamp],
+          timestamps = any[SendRequestTimestamps],
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
@@ -476,8 +477,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         verify(sequencerClient, never)
           .send(
             batch = any[Batch[DefaultOpenEnvelope]],
-            topologyTimestamp = any[Option[CantonTimestamp]],
-            maxSequencingTime = any[CantonTimestamp],
+            timestamps = any[SendRequestTimestamps],
             messageId = any[MessageId],
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],
@@ -500,8 +500,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       when(
         sequencerClient.send(
           batch = any[Batch[DefaultOpenEnvelope]],
-          topologyTimestamp = any[Option[CantonTimestamp]],
-          maxSequencingTime = any[CantonTimestamp],
+          timestamps = any[SendRequestTimestamps],
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
@@ -564,8 +563,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         verify(sequencerClient, times(1))
           .send(
             batch = any[Batch[DefaultOpenEnvelope]],
-            topologyTimestamp = any[Option[CantonTimestamp]],
-            maxSequencingTime = any[CantonTimestamp],
+            timestamps = any[SendRequestTimestamps],
             messageId = any[MessageId],
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],

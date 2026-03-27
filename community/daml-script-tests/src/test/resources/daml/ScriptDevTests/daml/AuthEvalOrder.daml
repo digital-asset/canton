@@ -26,7 +26,7 @@ template T1_create_success
 -- @ERROR range=28:1-28:18; t1 finished with no authorization failure
 t1_create_success : Script ()
 t1_create_success = script do
-  ivy <- allocateParty "Ivy"
+  ivy <- allocateParty "Ivy-AuthEvalOrder:t1_create_success"
   _ <- ivy `submit` createAndExerciseCmd (T1_create_success ivy) T1Call
   abort "t1 finished with no authorization failure"
 
@@ -43,8 +43,8 @@ template T2_create_success
 -- @ERROR range=45:1-45:26; failed due to a missing authorization from 'Ivy'
 t2_create_badlyAuthorized : Script ()
 t2_create_badlyAuthorized = script do
-  mach <- allocateParty "Mach"
-  ivy <- allocateParty "Ivy"
+  mach <- allocateParty "Mach-AuthEvalOrder:t2_create_badlyAuthorized"
+  ivy <- allocateParty "Ivy-AuthEvalOrder:t2_create_badlyAuthorized"
   _ <- mach `submit` createAndExerciseCmd (T2_create_success ivy mach) T2Call
   abort "t2 Finished"
 
@@ -78,8 +78,8 @@ template T3_createViaExerice_success
 -- @ERROR range=80:1-80:28; t3 finished with no authorization failure
 t3_createViaExerice_success : Script ()
 t3_createViaExerice_success = script do
-  ivy <- allocateParty "Ivy"
-  mach <- allocateParty "Mach"
+  ivy <- allocateParty "Ivy-AuthEvalOrder:t3_createViaExerice_success"
+  mach <- allocateParty "Mach-AuthEvalOrder:t3_createViaExerice_success"
   builder <-
     ivy `submit` createCmd (TheContractBuilder with p1 = ivy; p2 = mach)
   _ <- mach `submit` createAndExerciseCmd (T3_createViaExerice_success builder ivy mach) T3Call
@@ -99,8 +99,8 @@ template T4_createViaExerice_success
 -- @ERROR range=101:1-101:36; failed due to a missing authorization from 'Ivy'
 t4_createViaExerice_badlyAuthorized : Script ()
 t4_createViaExerice_badlyAuthorized = script do
-  ivy <- allocateParty "Ivy"
-  mach <- allocateParty "Mach"
+  ivy <- allocateParty "Ivy-AuthEvalOrder:t4_createViaExerice_badlyAuthorized"
+  mach <- allocateParty "Mach-AuthEvalOrder:t4_createViaExerice_badlyAuthorized"
   builder <-
     mach `submit` createCmd (TheContractBuilder with p1 = mach; p2 = mach)
   _ <- mach `submit` createAndExerciseCmd (T4_createViaExerice_success builder ivy mach) T4Call

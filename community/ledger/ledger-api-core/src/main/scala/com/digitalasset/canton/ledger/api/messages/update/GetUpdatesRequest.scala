@@ -10,5 +10,4 @@ final case class GetUpdatesRequest(
     startExclusive: Option[Offset],
     endInclusive: Option[Offset],
     updateFormat: UpdateFormat,
-    descendingOrder: Boolean,
 )

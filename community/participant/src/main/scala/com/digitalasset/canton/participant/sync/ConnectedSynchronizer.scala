@@ -97,6 +97,7 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessor,
 }
+import com.digitalasset.canton.topology.store.NoPackageDependencies
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.PositiveStoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
@@ -205,7 +206,6 @@ class ConnectedSynchronizer(
     TransactionConfirmationRequestFactory(
       participantId,
       psid,
-      clock,
     )(
       synchronizerCrypto.crypto.pureCrypto,
       contractHasher,
@@ -231,6 +231,7 @@ class ConnectedSynchronizer(
       psid,
       participantId,
       trafficStateController,
+      parameters.sequencerClient.defaultMaxSequencingTimeOffset,
       clock,
       loggerFactory,
     )
@@ -277,6 +278,7 @@ class ConnectedSynchronizer(
     ephemeral,
     commandProgressTracker,
     metrics.transactionProcessing,
+    clock,
     timeouts,
     loggerFactory,
     futureSupervisor,
@@ -350,6 +352,7 @@ class ConnectedSynchronizer(
       synchronizerCrypto,
       sequencerClient,
       participantId,
+      clock,
       timeouts,
       loggerFactory,
     )
@@ -1308,6 +1311,10 @@ object ConnectedSynchronizer {
           participantId,
           synchronizerHandle.sequencerClient,
           synchronizerCrypto,
+          Option.when(parameters.commitmentUseDbSnapshotForParticipantLookup)(
+            synchronizerHandle.topologyFactory
+              .createTopologySnapshot(_, NoPackageDependencies, preferCaching = false)
+          ),
           sortedReconciliationIntervalsProvider,
           persistentState.acsCommitmentStore,
           journalGarbageCollector.observer,

@@ -228,8 +228,8 @@ class ConcreteToCommands(universalTemplatePkgId: Ref.PackageId) {
             "Universal:TxAction.QueryByKey",
             "keyId" -> V.ValueInt64(keyId.longValue),
             "maintainers" -> concreteMaintainers,
-            "contractIds" -> concreteContractIds,
             "exhaustive" -> V.ValueBool(exhaustive),
+            "expectedContractIds" -> concreteContractIds,
           ),
         )
       case Rollback(subTransaction) =>

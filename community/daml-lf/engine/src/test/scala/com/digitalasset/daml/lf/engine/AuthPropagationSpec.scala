@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Time}
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, PackageId, ParticipantId, Party, QualifiedName}
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.ledger.FailedAuthorization.{CreateMissingAuthorization, ExerciseMissingAuthorization}
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, SerializationVersion, SubmittedTransaction}
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, FatContractInstance, SerializationVersion, SubmittedTransaction}
 import com.digitalasset.daml.lf.transaction.Transaction.Metadata
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueContractId, ValueList, ValueParty, ValueRecord}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -30,7 +30,7 @@ class AuthPropagationSpecV2 extends AuthPropagationSpec(LanguageVersion.Major.V2
 class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyFreeSpec
     with Matchers
-    with Inside 
+    with Inside
     with SuppressingLogging {
   implicit private def toName(s: String): Name = Name.assertFromString(s)
   implicit private def toParty(s: String): Party = Party.assertFromString(s)
@@ -95,7 +95,7 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
   private val contractStateMode = ContractStateMachine.Mode.devDefault
 
 private val testEngine: Engine = Engine.DevEngine(loggerFactory)
-  
+
   private def go(
       submitters: Set[Party],
       command: ApiCommand,

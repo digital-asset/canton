@@ -186,18 +186,34 @@ public abstract class ContractCompanion<Ct, Id, Data>
 
     public Ct fromIdAndRecord(
         String contractId, DamlRecord record$, Set<String> signatories, Set<String> observers) {
+      return fromIdAndRecord(
+          contractId, record$, signatories, observers, UnknownTrailingFieldPolicy.STRICT);
+    }
+
+    public Ct fromIdAndRecord(
+        String contractId,
+        DamlRecord record$,
+        Set<String> signatories,
+        Set<String> observers,
+        UnknownTrailingFieldPolicy policy) {
       Id id = newContractId.apply(contractId);
-      Data data = fromValue.apply(record$);
+      Data data = getValueDecoder().decode(record$, policy);
       return newContract.newContract(id, data, signatories, observers);
     }
 
     @Override
     public Ct fromCreatedEvent(CreatedEvent event) {
+      return fromCreatedEvent(event, UnknownTrailingFieldPolicy.STRICT);
+    }
+
+    @Override
+    public Ct fromCreatedEvent(CreatedEvent event, UnknownTrailingFieldPolicy policy) {
       return fromIdAndRecord(
           event.getContractId(),
           event.getArguments(),
           event.getSignatories(),
-          event.getObservers());
+          event.getObservers(),
+          policy);
     }
 
     @FunctionalInterface
@@ -274,21 +290,36 @@ public abstract class ContractCompanion<Ct, Id, Data>
         Optional<Key> key,
         Set<String> signatories,
         Set<String> observers) {
+      return fromIdAndRecord(
+          contractId, record$, key, signatories, observers, UnknownTrailingFieldPolicy.STRICT);
+    }
+
+    public Ct fromIdAndRecord(
+        String contractId,
+        DamlRecord record$,
+        Optional<Key> key,
+        Set<String> signatories,
+        Set<String> observers,
+        UnknownTrailingFieldPolicy policy) {
       Id id = newContractId.apply(contractId);
-      Data data = fromValue.apply(record$);
+      Data data = getValueDecoder().decode(record$, policy);
       return newContract.newContract(id, data, key, signatories, observers);
     }
 
     @Override
     public Ct fromCreatedEvent(CreatedEvent event) {
+      return fromCreatedEvent(event, UnknownTrailingFieldPolicy.STRICT);
+    }
+
+    @Override
+    public Ct fromCreatedEvent(CreatedEvent event, UnknownTrailingFieldPolicy policy) {
       return fromIdAndRecord(
           event.getContractId(),
           event.getArguments(),
-          event
-              .getContractKey()
-              .map(value -> keyDecoder.decode(value, UnknownTrailingFieldPolicy.STRICT)),
+          event.getContractKey().map(value -> keyDecoder.decode(value, policy)),
           event.getSignatories(),
-          event.getObservers());
+          event.getObservers(),
+          policy);
     }
 
     @FunctionalInterface

@@ -4,14 +4,14 @@
 package com.digitalasset.daml.lf
 package transaction
 
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.View
 
 case class NeedContract[+X](resume: Option[GlobalKey] => ErrOr[X])
-
-trait NeedKeyContinuationToken
 
 sealed trait NeedKeyProgression
 
@@ -24,11 +24,30 @@ object NeedKeyProgression {
   /** The progression can yield more results. */
   sealed trait CanContinue extends NeedKeyProgression
 
+  object CanContinue {
+    def unapply(progression: CanContinue): Some[Option[NeedKeyContinuationToken]] =
+      progression match {
+        case InProgress(token: NeedKeyContinuationToken) => Some(Some(token))
+        case Unstarted => Some(None)
+        case InProgress(token) =>
+          throw new IllegalArgumentException(
+            s"Unexpected continuation token of type ${token.getClass} in InProgress state"
+          )
+      }
+  }
+
   /** The progression has been started; valid as a resume argument. */
   sealed trait HasStarted extends NeedKeyProgression
+  object HasStarted {
+    def apply(option: Option[NeedKeyContinuationToken]): HasStarted =
+      option match {
+        case None => Finished
+        case Some(token) => InProgress(token)
+      }
+  }
 
   case object Unstarted extends CanContinue
-  final case class InProgress(token: NeedKeyContinuationToken) extends CanContinue with HasStarted
+  final case class InProgress(token: Any) extends CanContinue with HasStarted
   case object Finished extends HasStarted
 }
 
@@ -41,6 +60,11 @@ case class NeedKey[+X](
     ) => Either[NeedKey[X], ErrOr[(KeyMapping, X)]],
 )
 final case class KeyMapping(queue: Vector[ContractId], exhaustive: Boolean)
+
+object KeyMapping {
+  val Unknown: KeyMapping = KeyMapping(Vector.empty, exhaustive = false)
+  val Empty: KeyMapping = KeyMapping(Vector.empty, exhaustive = true)
+}
 
 object NextGenContractStateMachine {
 
@@ -85,19 +109,19 @@ object NextGenContractStateMachine {
     def empty(n: Int): KeyMappingBuilder = KeyMappingBuilder(Vector.empty, n)
   }
 
-  final case class StateMachineResult (
-                                        inputContractIds: Set[ContractId],
-                                        globalKeyInputs: Map[GlobalKey, KeyMapping],
-                                        localKeys: Map[GlobalKey, Vector[ContractId]],
-                                        consumed: Set[ContractId]
-                                      )
+  final case class StateMachineResult(
+      inputContractIds: Set[ContractId],
+      globalKeyInputs: Map[GlobalKey, KeyMapping],
+      localKeys: Map[GlobalKey, Vector[ContractId]],
+      consumed: Set[ContractId],
+  )
 
   object StateMachineResult {
     def empty = StateMachineResult(
       inputContractIds = Set.empty[ContractId],
       globalKeyInputs = Map.empty[GlobalKey, KeyMapping],
       localKeys = Map.empty[GlobalKey, Vector[ContractId]],
-      consumed = Set.empty[ContractId]
+      consumed = Set.empty[ContractId],
     )
 
     def emptyWith(
@@ -113,17 +137,25 @@ object NextGenContractStateMachine {
     )
   }
 
-  trait LLState[Nid] {
-    private[lf] def create(nid: Nid, cid: ContractId, mbKey: Option[GlobalKey]): ErrOr[LLState[Nid]]
+  sealed abstract class LLState[Nid] {
+    private[lf] def create(
+        nid: Nid,
+        cid: ContractId,
+        mbKey: Option[GlobalKey],
+    ): ErrOr[LLState[Nid]]
+
     private[lf] def queryById(
         cid: ContractId
     ): Either[NeedContract[LLState[Nid]], ErrOr[LLState[Nid]]]
+
     private[lf] def queryNByKey(
         key: GlobalKey,
         n: Int,
     ): Either[NeedKey[LLState[Nid]], ErrOr[(KeyMapping, LLState[Nid])]]
+
     // return None if cid is unknown
     private[lf] def archive(cid: ContractId, nid: Nid): Option[ErrOr[State[Nid]]]
+
     private[lf] def beginTry: LLState[Nid]
 
     // TODO(#31454)
@@ -131,6 +163,7 @@ object NextGenContractStateMachine {
     // polymorphic in Nid, which would require all use sites of TransactionError
     // to become polymorphic in Nid also.
     private[lf] def rollbackTry: Either[Set[Nid], LLState[Nid]]
+
     private[lf] def endTry: LLState[Nid]
 
     private[lf] def onlyQueriedById(gkey: GlobalKey): Set[ContractId]
@@ -141,31 +174,35 @@ object NextGenContractStateMachine {
     //  - check if we really need those methods
     //  - check if it will be better to have lazz val for the Sets/Maps
     def knownContracts: Set[ContractId]
+
     def knownKeys: Set[GlobalKey]
 
     def inputContracts: Set[ContractId]
+
     def keyInputs: Map[GlobalKey, KeyMapping]
 
     def activeContract(cid: ContractId): Boolean
+
     def activeKeyMapping(key: GlobalKey): KeyMapping
 
-    def toStateMachineResult: StateMachineResult
+    @VisibleForTesting
+    private[transaction] def toStateMachineResult: StateMachineResult
 
     //  TODO(#30913): remove this method
     def consumedByOrInactive(cid: ContractId): Option[Either[Nid, Unit]]
 
     //  TODO(#30913): remove this method
-    def localContracts: Map[ContractId, _]
+    def localContracts: Map[ContractId, ?]
   }
 
   object HHState {
-    private case object ContinuationToken extends NeedKeyContinuationToken
+    private case object ContinuationToken
     private val InProgress = NeedKeyProgression.InProgress(ContinuationToken)
   }
 
   implicit class HHState[Nid](val llState: LLState[Nid]) extends AnyVal {
 
-    import HHState._
+    import HHState.*
 
     def visitCreate(
         nid: Nid,
@@ -182,7 +219,7 @@ object NextGenContractStateMachine {
         case Left(needContract) =>
           needContract.resume(mbKey)
         case Right(result) =>
-          result.map(_ => llState)
+          result
       }
 
     def visitQueryByKey(
@@ -314,7 +351,12 @@ object NextGenContractStateMachine {
       activeLedgerState.localKeys
 
     override def keyInputs: Map[GlobalKey, KeyMapping] =
-      internalKeyInputs.transform((_, keyInput) => keyInput.toKeyMapping)
+      internalKeyInputs.flatMap { case (key, keyInput) =>
+        keyInput.toKeyMapping match {
+          case KeyMapping.Unknown => List.empty
+          case mapping => List(key -> mapping)
+        }
+      }
 
     def consumedBy: Map[ContractId, Nid] =
       activeLedgerState.consumedBy
@@ -543,12 +585,22 @@ object NextGenContractStateMachine {
           )
         case headState :: tailStack =>
           // locallyCreated and consumedBy increase monotonically, so can quickly check their size did not change since the last try block.
-          if (activeLedgerState.createdInThisTimeline.size != headState.createdInThisTimeline.size || activeLedgerState.consumedBy.size != headState.consumedBy.size) {
+          if (
+            activeLedgerState.createdInThisTimeline.size != headState.createdInThisTimeline.size || activeLedgerState.consumedBy.size != headState.consumedBy.size
+          ) {
             val consumedByChanges =
-              activeLedgerState.consumedBy.view.filterKeys(consumedBy.keySet -- headState.consumedBy.keySet).values.toSet
+              activeLedgerState.consumedBy.view
+                .filterKeys(consumedBy.keySet -- headState.consumedBy.keySet)
+                .values
+                .toSet
 
             val locallyCreatedChanges =
-              activeLedgerState.createdInThisTimeline.view.filterKeys(activeLedgerState.createdInThisTimeline.keySet -- headState.createdInThisTimeline.keySet).values.toSet
+              activeLedgerState.createdInThisTimeline.view
+                .filterKeys(
+                  activeLedgerState.createdInThisTimeline.keySet -- headState.createdInThisTimeline.keySet
+                )
+                .values
+                .toSet
 
             Left(consumedByChanges ++ locallyCreatedChanges)
           } else {
@@ -604,8 +656,8 @@ object NextGenContractStateMachine {
     }
 
     def fromString: String => Option[Mode] = {
-      case "nuck" => Some(NUCK)
-      case "nokey" => Some(NoKey)
+      case "NUCK" => Some(NUCK)
+      case "NoKey" => Some(NoKey)
       case _ => None
     }
   }

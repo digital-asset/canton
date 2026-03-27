@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
@@ -90,7 +90,7 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
-import com.digitalasset.canton.time.SynchronizerTimeTracker
+import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
@@ -129,6 +129,7 @@ class TransactionProcessingSteps(
     staticSynchronizerParameters: StaticSynchronizerParameters,
     crypto: SynchronizerCryptoClient,
     metrics: TransactionProcessingMetrics,
+    clock: Clock,
     transactionEnricher: TransactionEnricher,
     createNodeEnricher: ContractEnricher,
     authorizationValidator: AuthorizationValidator,
@@ -195,6 +196,7 @@ class TransactionProcessingSteps(
       mediator: MediatorGroupRecipient,
       ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -210,18 +212,48 @@ class TransactionProcessingSteps(
       disclosedContracts,
     ) = submissionParam
 
-    val tracked = new TrackedTransactionSubmission(
-      submitterInfo,
-      transactionMeta,
-      keyResolver,
-      wfTransaction,
-      mediator,
-      recentSnapshot,
-      ephemeralState.contractLookup,
-      disclosedContracts,
-    )
-
-    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError]((tracked, None))
+    val now = clock.now
+    for {
+      maxSequencingTime <-
+        EitherT.right(
+          recentSnapshot.ipsSnapshot
+            .findDynamicSynchronizerParametersOrDefault(protocolVersion)
+            .map { synchronizerParameters =>
+              val maxSequencingTimeFromLET = CantonTimestamp(transactionMeta.ledgerEffectiveTime)
+                .add(synchronizerParameters.ledgerTimeRecordTimeTolerance.unwrap)
+              // For PV34 we didn't want to change the protocol so used adjusted the max sequencing time
+              // not to exceed the max record time if provided. For PV35 onwards we do this checking in phase 3
+              // so we restore the pre-existing.
+              if (protocolVersion >= ProtocolVersion.v35) {
+                maxSequencingTimeFromLET
+              } else {
+                submitterInfo.externallySignedSubmission
+                  .flatMap(_.maxRecordTime)
+                  .map(CantonTimestamp.apply)
+                  .map(_.min(maxSequencingTimeFromLET))
+                  .getOrElse(maxSequencingTimeFromLET)
+              }
+            }
+        )
+      tracked = new TrackedTransactionSubmission(
+        submitterInfo,
+        transactionMeta,
+        keyResolver,
+        wfTransaction,
+        mediator,
+        recentSnapshot,
+        ephemeralState.contractLookup,
+        disclosedContracts,
+        now,
+        maxSequencingTime,
+      )
+      submission <- EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError](
+        (
+          tracked,
+          None,
+        )
+      )
+    } yield submission
   }
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
@@ -241,6 +273,8 @@ class TransactionProcessingSteps(
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
       contractLookup: ContractLookup { type ContractsCreatedAtTime <: CreationTime.CreatedAt },
       disclosedContracts: Map[LfContractId, ContractInstance],
+      override val approximateTimestampForSigning: CantonTimestamp,
+      override val maxSequencingTime: CantonTimestamp,
   )(implicit traceContext: TraceContext)
       extends TrackedSubmission {
 
@@ -311,28 +345,9 @@ class TransactionProcessingSteps(
 
     override def submissionId: Option[LedgerSubmissionId] = submitterInfo.submissionId
 
-    override def maxSequencingTimeO: OptionT[FutureUnlessShutdown, CantonTimestamp] = OptionT.liftF(
-      recentSnapshot.ipsSnapshot.findDynamicSynchronizerParametersOrDefault(protocolVersion).map {
-        synchronizerParameters =>
-          val maxSequencingTimeFromLET = CantonTimestamp(transactionMeta.ledgerEffectiveTime)
-            .add(synchronizerParameters.ledgerTimeRecordTimeTolerance.unwrap)
-          // For PV34 we didn't want to change the protocol so used adjusted the max sequencing time
-          // not to exceed the max record time if provided. For PV35 onwards we do this checking in phase 3
-          // so we restore the pre-existing.
-          if (protocolVersion >= ProtocolVersion.v35) {
-            maxSequencingTimeFromLET
-          } else {
-            submitterInfo.externallySignedSubmission
-              .flatMap(_.maxRecordTime)
-              .map(CantonTimestamp.apply)
-              .map(_.min(maxSequencingTimeFromLET))
-              .getOrElse(maxSequencingTimeFromLET)
-          }
-      }
-    )
-
     override def prepareBatch(
         actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
+        approximateTimestampForSigning: CantonTimestamp,
         maxSequencingTime: CantonTimestamp,
         sessionKeyStore: SessionKeyStore,
     ): EitherT[FutureUnlessShutdown, SubmissionTrackingData, PreparedBatch] = {
@@ -369,6 +384,7 @@ class TransactionProcessingSteps(
               keyResolver,
               mediator,
               recentSnapshot,
+              approximateTimestampForSigning,
               sessionKeyStore,
               TransactionProcessingSteps
                 .lookupContractsWithDisclosed(disclosedContracts, contractLookup),

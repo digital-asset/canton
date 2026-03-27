@@ -12,7 +12,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.*
@@ -84,6 +84,16 @@ private[mediator] class Mediator(
     with FlagCloseableAsync
     with HasCloseContext {
 
+  val getActiveLsuSuccessor: Mediator.GetActiveLsuSuccessor = new Mediator.GetActiveLsuSuccessor {
+    override def apply(ts: CantonTimestamp)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[SynchronizerSuccessor]] = for {
+      snapshot <- syncCrypto.awaitSnapshot(ts)
+      lsuO <- snapshot.ipsSnapshot.announcedLsu()
+      activeSuccessor = lsuO.collect { case (s, _) if s.upgradeTime <= ts => s }
+    } yield activeSuccessor
+  }
+
   def psid: PhysicalSynchronizerId = sequencerClient.psid
   def protocolVersion: ProtocolVersion = sequencerClient.protocolVersion
 
@@ -110,6 +120,7 @@ private[mediator] class Mediator(
     loggerFactory,
     timeouts,
     parameters.batchingConfig,
+    getActiveLsuSuccessor,
   )
 
   private val deduplicator = MediatorEventDeduplicator.create(
@@ -129,7 +140,7 @@ private[mediator] class Mediator(
     lsuTestSequencingMessageHandler,
     processor,
     deduplicator,
-    loggerFactory,
+    loggerFactory = loggerFactory,
   )
 
   val stateInspection: MediatorStateInspection = new MediatorStateInspection(state)
@@ -361,6 +372,19 @@ private[mediator] class Mediator(
 }
 
 private[mediator] object Mediator {
+  trait GetActiveLsuSuccessor {
+    def apply(at: CantonTimestamp)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
+  }
+  object GetActiveLsuSuccessor {
+    @VisibleForTesting
+    val Never = new GetActiveLsuSuccessor {
+      override def apply(at: CantonTimestamp)(implicit tc: TraceContext) =
+        FutureUnlessShutdown.pure(None)
+    }
+  }
+
   sealed trait PruningError {
     def message: String
   }

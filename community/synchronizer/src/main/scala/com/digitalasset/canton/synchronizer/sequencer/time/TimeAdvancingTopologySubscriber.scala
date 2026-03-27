@@ -14,6 +14,7 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
@@ -148,9 +149,12 @@ final class TimeAdvancingTopologySubscriberV1(
             sequencerClient
               .send(
                 batch,
-                topologyTimestamp = None,
-                maxSequencingTime = desiredTimestamp.value
-                  .plus(TimeAdvancingTopologyConfig.defaultMaxSequencingTimeWindow.asJava),
+                timestamps = SendRequestTimestamps(
+                  topologyTimestamp = None,
+                  approximateTimestampForSigning = clock.now,
+                  maxSequencingTime = desiredTimestamp.value
+                    .plus(TimeAdvancingTopologyConfig.defaultMaxSequencingTimeWindow.asJava),
+                ),
                 aggregationRule = maybeAggregationRule,
                 messageId = mkTimeAdvanceBroadcastMessageId(),
                 callback = SendCallback.empty,
@@ -349,8 +353,11 @@ final class TimeAdvancingTopologySubscriberV2(
             MetricsContext("type" -> "time-adv-broadcast")
           val sendResult = sequencerClient.send(
             batch,
-            topologyTimestamp = None,
-            maxSequencingTime = maxSequencingTime,
+            timestamps = SendRequestTimestamps(
+              topologyTimestamp = None,
+              approximateTimestampForSigning = clock.now,
+              maxSequencingTime = maxSequencingTime,
+            ),
             aggregationRule = Some(aggregationRule),
             messageId = messageId,
             callback = SendCallback.empty,

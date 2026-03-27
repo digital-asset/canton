@@ -12,7 +12,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
@@ -37,7 +36,6 @@ import scala.util.{Failure, Success}
 final class StateTransferMessageSender[E <: Env[E]](
     thisNode: BftNodeId,
     consensusDependencies: ConsensusModuleDependencies[E],
-    epochLength: EpochLength, // TODO(#19289) support variable epoch lengths
     epochStore: EpochStore[E],
     override val loggerFactory: NamedLoggerFactory,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, metricsContext: MetricsContext)
@@ -62,8 +60,6 @@ final class StateTransferMessageSender[E <: Env[E]](
       to: BftNodeId,
       forEpoch: EpochNumber,
       latestCompletedEpoch: EpochStore.Epoch,
-  )(
-      abort: String => Nothing
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     val latestCompletedEpochNumber = latestCompletedEpoch.info.number
     if (latestCompletedEpochNumber < forEpoch) {
@@ -75,19 +71,12 @@ final class StateTransferMessageSender[E <: Env[E]](
         StateTransferMessage.BlockTransferResponse.create(commitCertificate = None, from = thisNode)
       sendResponse(response, activeCryptoProvider, to)
     } else {
-      logger.debug(s"Loading blocks from epoch $forEpoch (length=$epochLength)")
+      logger.debug(s"Loading blocks from epoch $forEpoch")
       context.pipeToSelf(
         // We load only one epoch at a time to avoid OOM errors.
         epochStore.loadCompleteBlocks(forEpoch, forEpoch)
       ) {
         case Success(blocks) =>
-          if (blocks.length != epochLength) {
-            abort(
-              "Internal invariant violation: " +
-                s"only whole epochs with blocks that have been ordered can be state transferred, but ${blocks.length} " +
-                s"blocks have been loaded instead of $epochLength"
-            )
-          }
           val commitCerts = blocks.map(_.commitCertificate)
           val startBlockNumber = blocks.map(_.blockNumber).minOption
           logger.info(

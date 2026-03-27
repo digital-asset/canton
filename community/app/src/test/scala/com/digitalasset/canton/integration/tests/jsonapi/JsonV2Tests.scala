@@ -2011,7 +2011,6 @@ class JsonV2Tests
         includeTopologyEvents = None,
       )
     ),
-    descendingOrder = false,
   )
 
   private def transactionFormat(party: String): Option[TransactionFormat] = Some(

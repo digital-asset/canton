@@ -65,16 +65,20 @@ final class ApiUpdateService(
               logging.startExclusive(req.startExclusive),
               logging.endInclusive(req.endInclusive),
               logging.updateFormat(req.updateFormat),
-              logging.descendingOrder(req.descendingOrder),
             ) { implicit loggingContext =>
               logger.info(
                 s"Received request for updates, ${loggingContext
-                    .serializeFiltered("startExclusive", "endInclusive", "updateFormat", "descendingOrder")}."
+                    .serializeFiltered("startExclusive", "endInclusive", "updateFormat")}."
               )(loggingContext.traceContext)
             }
             logger.trace(s"Update request: $req.")
             updateService
-              .updates(req.startExclusive, req.endInclusive, req.updateFormat, req.descendingOrder)
+              .updates(
+                req.startExclusive,
+                req.endInclusive,
+                req.updateFormat,
+                descendingOrder = false,
+              )
               .via(logger.enrichedDebugStream("Responding with updates.", updatesLoggable))
               .via(logger.logErrorsOnStream)
               .via(StreamMetrics.countElements(metrics.lapi.streams.updates))

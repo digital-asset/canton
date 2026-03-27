@@ -14,14 +14,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.participant.admin.data.ActiveContractOld
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 
-import scala.annotation.nowarn
-
-@nowarn("cat=deprecation") // Usage of old acs export
 final class ExportContractsIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -166,8 +162,6 @@ final class ExportContractsIntegrationTest
       for {
         explicitExport <- File.temporaryFile()
         wildcardExport <- File.temporaryFile()
-        explicitExportOld <- File.temporaryFile()
-        wildcardExportOld <- File.temporaryFile()
       } {
         val ledgerEndP1 = participant1.ledger_api.state.end()
         val p1Parties = participant1.parties
@@ -181,11 +175,6 @@ final class ExportContractsIntegrationTest
           exportFilePath = explicitExport.canonicalPath,
           ledgerOffset = ledgerEndP1,
         )
-        participant1.repair.export_acs_old(
-          parties = p1Parties,
-          partiesOffboarding = false,
-          outputFile = explicitExportOld.canonicalPath,
-        )
 
         // export contracts for all parties with the wildcard filter
         participant1.repair.export_acs(
@@ -193,32 +182,17 @@ final class ExportContractsIntegrationTest
           exportFilePath = wildcardExport.canonicalPath,
           ledgerOffset = ledgerEndP1,
         )
-        participant1.repair.export_acs_old(
-          parties = Set.empty,
-          partiesOffboarding = false,
-          outputFile = wildcardExportOld.canonicalPath,
-        )
 
         val forExplicit = repair.acs
           .read_from_file(explicitExport.canonicalPath)
           .map(_.getCreatedEvent.contractId)
-        val forExplicitOld = ActiveContractOld
-          .loadFromByteString(utils.read_byte_string_from_file(explicitExportOld.canonicalPath))
-          .value
-          .map(_.contract.contractId.coid)
 
         val forWildcard = repair.acs
           .read_from_file(wildcardExport.canonicalPath)
           .map(_.getCreatedEvent.contractId)
-        val forWildcardOld = ActiveContractOld
-          .loadFromByteString(utils.read_byte_string_from_file(wildcardExportOld.canonicalPath))
-          .value
-          .map(_.contract.contractId.coid)
 
         forExplicit should not be empty
         forExplicit should contain theSameElementsAs forWildcard
-        forExplicit should contain theSameElementsAs forExplicitOld
-        forExplicit should contain theSameElementsAs forWildcardOld
       }
     }
   }

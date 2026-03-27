@@ -73,7 +73,7 @@ template T4 with
 
 contractKeyNotFound : Script ()
 contractKeyNotFound = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:contractKeyNotFound"
   res <- alice `trySubmit` exerciseByKeyCmd @T1 alice Archive
   case res of
     Left (ContractKeyNotFound (fromAnyContractKey @T1 -> Some shouldBeAlice)) -> shouldBeAlice === alice
@@ -82,8 +82,8 @@ contractKeyNotFound = script do
 
 authorizationError : Script ()
 authorizationError = script do
-  alice <- allocateParty "alice"
-  bob <- allocateParty "bob"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:authorizationError"
+  bob <- allocateParty "Bob-DamlScriptTrySubmit:authorizationError"
   res <- alice `trySubmit` createCmd T1 with t1_p = bob
   case res of
     Left (AuthorizationError err) ->
@@ -93,7 +93,7 @@ authorizationError = script do
 
 contractNotActive : Script ()
 contractNotActive = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:contractNotActive"
   cid <- alice `submit` createCmd T1 with t1_p = alice
   res <- alice `trySubmit` do
     exerciseCmd cid Archive
@@ -119,7 +119,7 @@ contractNotActive = script do
 
 -- contractNotActiveSeparate : Script ()
 -- contractNotActiveSeparate = script do
---   alice <- allocateParty "alice"
+--   alice <- allocateParty "Alice-DamlScriptTrySubmit:contractNotActiveSeparate"
 --   cid <- alice `submit` createCmd T1 with t1_p = alice
 --   alice `submit` exerciseCmd cid Archive
 --   res <- alice `trySubmit` exerciseCmd cid Archive
@@ -132,7 +132,7 @@ contractNotActive = script do
 
 duplicateContractKey : Script ()
 duplicateContractKey = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:duplicateContractKey"
   alice `submit` createCmd T1 with t1_p = alice
   res <- alice `trySubmit` createCmd T1 with t1_p = alice
   case res of
@@ -146,7 +146,7 @@ duplicateContractKey = script do
 
 failureStatusError : Script ()
 failureStatusError = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:failureStatusError"
   res <- alice `trySubmit` createCmd T2 with t2_p = alice, moreThan3 = 2
   case res of
     Left (FailureStatusError fsError) -> assert $ "Template precondition violated" `isInfixOf` fsError.message
@@ -160,7 +160,7 @@ failureStatusError = script do
 
 createEmptyContractKeyMaintainers : Script ()
 createEmptyContractKeyMaintainers = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:createEmptyContractKeyMaintainers"
   let t3 = T3 with t3_p = alice, ms = []
   res <- alice `trySubmit` createCmd t3
   case res of
@@ -170,7 +170,7 @@ createEmptyContractKeyMaintainers = script do
 
 fetchEmptyContractKeyMaintainers : Script ()
 fetchEmptyContractKeyMaintainers = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers"
   let t3Key = (alice, [])
   res <- alice `trySubmit` createAndExerciseCmd (FetchByKeyT3 with fetcher = alice, fetchKey = t3Key) DoFetch
   case res of
@@ -180,7 +180,7 @@ fetchEmptyContractKeyMaintainers = script do
 
 wronglyTypedContract : Script ()
 wronglyTypedContract = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:wronglyTypedContract"
   t1Cid <- alice `submit` createCmd T1 with t1_p = alice
   let t2Cid = coerceContractId @T1 @T2 t1Cid
   res <- alice `trySubmit` exerciseCmd t2Cid Archive
@@ -200,7 +200,7 @@ wronglyTypedContract = script do
 
 devError : Script ()
 devError = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:devError"
   cid <- alice `submit` createCmd T1 with t1_p = alice
   res <- alice `trySubmit` exerciseCmd (toInterfaceContractId @ExerciseGuardedInterface cid) ExerciseGuarded with shouldArchive = False
   case res of
@@ -214,7 +214,7 @@ devError = script do
 -- Using contractKeyNotFound with an enormous key
 truncatedError : Script ()
 truncatedError = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-DamlScriptTrySubmit:truncatedError"
   let t4Key = (alice, replicate 10000 alice)
   res <- alice `trySubmit` exerciseByKeyCmd @T4 t4Key Archive
   case res of

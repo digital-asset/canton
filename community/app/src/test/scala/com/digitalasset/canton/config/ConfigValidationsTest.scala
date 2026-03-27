@@ -297,9 +297,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           _.focus(_.ledgerApi.internalPort).replace(None)
         ),
         ConfigTransforms.updateParticipantConfig("p1")(
-          _.focus(_.httpLedgerApi.internalPort).replace(None)
-        ),
-        ConfigTransforms.updateParticipantConfig("p1")(
           _.focus(_.adminApi.internalPort).replace(None)
         ),
       )
@@ -312,6 +309,16 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           ".port not set"
         ))
       }
+
+      // http-ledger-api has a specific error message with a hint
+      val httpLedgerApiConfig = ConfigTransforms.updateParticipantConfig("p1")(
+        _.focus(_.httpLedgerApi.internalPort).replace(None)
+      )(config)
+      getErrors(httpLedgerApiConfig, ensurePortsSet = false) shouldBe empty
+      getErrors(httpLedgerApiConfig, ensurePortsSet = true).loneElement shouldBe
+        "canton.participants.p1.http-ledger-api.port not set. " +
+        "Either set a port (canton.participants.p1.http-ledger-api.port = <port>) " +
+        "or disable the service (canton.participants.p1.http-ledger-api.enabled = false)."
     }
 
     "prevent DB sequencer in sequencer configuration without non-standard config option" in {

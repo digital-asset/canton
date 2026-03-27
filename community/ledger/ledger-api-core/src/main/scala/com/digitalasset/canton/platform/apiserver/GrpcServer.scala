@@ -21,6 +21,7 @@ object GrpcServer {
       desiredPort: Port,
       maxInboundMessageSize: Int,
       maxInboundMetadataSize: Int,
+      maxConcurrentStreamsPerConnection: Int,
       sslContext: Option[SslContext] = None,
       keepAlive: Option[KeepAliveServerConfig],
       interceptors: List[ServerInterceptor] = List.empty,
@@ -36,8 +37,8 @@ object GrpcServer {
         .executor(servicesExecutor)
         .maxInboundMessageSize(maxInboundMessageSize)
         .maxInboundMetadataSize(maxInboundMetadataSize)
+        .maxConcurrentCallsPerConnection(maxConcurrentStreamsPerConnection)
         .addTransportFilter(GrpcConnectionLogger(loggerFactory))
-
     val builderWithKeepAlive = configureKeepAlive(keepAlive, builder)
     addServicesAndInterceptors(builderWithKeepAlive, interceptors, services)
   }

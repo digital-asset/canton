@@ -37,11 +37,11 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencer.admin.v30.SequencerInitializationServiceGrpc
-import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.{
   RequestSigner,
   SendTracker,
   SequencedEventValidatorFactory,
+  SequencerClient,
   SequencerClientImplPekko,
 }
 import com.digitalasset.canton.store.SequencedEventStore.SearchCriterion
@@ -792,19 +792,12 @@ class SequencerNodeBootstrap(
 
           _ = addCloseable(sequencedEventStore)
           sequencerClient = new SequencerClientImplPekko[
-            DirectSequencerClientTransport.SubscriptionError
+            DirectSequencerConnectionX.SubscriptionError
           ](
             psid,
             sequencerId,
-            SequencerTransports.default(
-              sequencerId,
-              new DirectSequencerClientTransport(
-                sequencer,
-                parameters.processingTimeouts,
-                loggerFactory,
-                staticSynchronizerParameters.protocolVersion,
-              ),
-            ),
+            SequencerClient.wrapConnection(directPool.directConnection),
+            SequencerClient.SequencerTransports.default,
             connectionPool = directPool,
             parameters.sequencerClient,
             synchronizerParamsLookup,

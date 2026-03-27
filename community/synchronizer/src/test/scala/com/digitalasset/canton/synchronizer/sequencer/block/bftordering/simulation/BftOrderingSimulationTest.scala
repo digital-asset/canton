@@ -14,8 +14,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   P2PEndpoint,
   PlainTextP2PEndpoint,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.SimulationAvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.SimulationEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.EpochChecker
@@ -31,11 +31,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.SimulationBlockSubscription
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
+  BlockNumber,
   EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.{
+  BlockMetadata,
+  EpochInfo,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Mempool
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
@@ -185,7 +189,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
       logger.debug(s"$alreadyOnboardedAll")
 
-      val epochChecker = new SimEpochChecker(loggerFactory)
+      val epochChecker = new SimEpochChecker(
+        simulationTestSettings.epochLength, // TODO(#24184) make this dynamic sequencing parameter
+        loggerFactory,
+      )
       val allSimulationTestNodeDataCell =
         new AtomicReference[Map[BftNodeId, SimulationTestNodeData]](Map.empty)
       stages.zipWithIndex.foreach {
@@ -267,7 +274,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                   }.toMap,
                   alreadyOnboardedAll.keys.toSeq,
                   simSettings,
-                  DefaultEpochLength,
+                  epochChecker,
                   loggerFactory,
                 )
               val onboardingManager = new SequencerSnapshotOnboardingManager(
@@ -395,18 +402,19 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
     val logger = loggerFactory.append("endpoint", s"${endpoint.address}")
 
     val thisBftNodeId = endpointToTestBftNodeId(endpoint)
-    val orderingTopologyProvider =
-      new SimulationOrderingTopologyProvider(
-        thisBftNodeId,
-        getAllEndpointsToTopologyData,
-        loggerFactory,
-      )
 
     val p2pGrpcConnectionState = new P2PGrpcConnectionState(thisBftNodeId, logger)
     val config = BftBlockOrdererConfig(
       epochLength = epochLength,
       availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100,
     )
+    val orderingTopologyProvider =
+      new SimulationOrderingTopologyProvider(
+        thisBftNodeId,
+        EpochLength(config.epochLength),
+        getAllEndpointsToTopologyData,
+        loggerFactory,
+      )
 
     SimulationInitializer(
       {
@@ -432,7 +440,6 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             thisBftNodeId,
             config,
             initialApplicationHeight,
-            EpochLength(config.epochLength),
             stores,
             orderingTopologyProvider,
             new SimulationBlockSubscription(thisBftNodeId, sendQueue),
@@ -457,12 +464,21 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
 object BftOrderingSimulationTest {
 
-  private class SimEpochChecker(override val loggerFactory: NamedLoggerFactory)
-      extends EpochChecker
+  class SimEpochChecker(
+      initialEpochLength: EpochLength,
+      override val loggerFactory: NamedLoggerFactory,
+  ) extends EpochChecker
       with Matchers
       with NamedLogging {
 
-    private val allPrevious = mutable.Map.empty[EpochNumber, (BftNodeId, Membership)]
+    private val allPrevious: mutable.Map[EpochNumber, (BftNodeId, Membership)] =
+      mutable.Map.empty[EpochNumber, (BftNodeId, Membership)]
+    private var latestEpoch = EpochNumber(-1L)
+    private val firstBlockOfEpoch =
+      mutable.Map[EpochNumber, BlockNumber](
+        EpochNumber.First -> BlockNumber.First,
+        EpochNumber(-1L) -> BlockNumber.First,
+      )
 
     override def check(
         thisNode: BftNodeId,
@@ -475,9 +491,63 @@ object BftOrderingSimulationTest {
             membership.leaders shouldBe otherMembership.leaders
           }
         case None =>
+          if (latestEpoch == EpochNumber(-1L)) {
+            // we will not see epoch 0, but we will see -1 (but -1 and 0 have the same membership)
+            require(epochNumber == latestEpoch || epochNumber == EpochNumber(1L))
+          } else {
+            require(epochNumber == EpochNumber(latestEpoch + 1))
+          }
+          latestEpoch = epochNumber
+          if (epochNumber >= EpochNumber.First) {
+            firstBlockOfEpoch(epochNumber) = {
+              val previousEpoch = EpochNumber(epochNumber - 1)
+              BlockNumber(
+                firstBlockOfEpoch(previousEpoch) + allPrevious
+                  .get(previousEpoch)
+                  .fold(0L)(_._2.orderingTopology.epochLength)
+              )
+            }
+          }
+
+          if (epochNumber == EpochNumber(-1L)) {
+            // also store this as 0L
+            allPrevious(EpochNumber(0L)) = (thisNode, membership)
+          }
           allPrevious(epochNumber) = (thisNode, membership)
       }
 
+    private def blockNumberToEpochNumber(blockNumber: BlockNumber): EpochNumber =
+      -1L
+        .to(latestEpoch)
+        .reverse
+        .map(EpochNumber(_))
+        .find { x =>
+          firstBlockOfEpoch(x) <= blockNumber
+        }
+        .getOrElse(
+          fail(s"can't find epoch for $blockNumber")
+        )
+
+    private def getEpochLengthForEpoch(epochNumber: EpochNumber): EpochLength =
+      if (epochNumber == EpochNumber.First) {
+        initialEpochLength
+      } else {
+        allPrevious(
+          epochNumber
+        )._2.orderingTopology.epochLength
+      }
+
+    def getLastBlockOfSameEpoch(blockNumber: BlockNumber): BlockNumber = {
+      val epochNumber = blockNumberToEpochNumber(blockNumber)
+      val firstBlock = firstBlockOfEpoch(epochNumber)
+      val epochLength = getEpochLengthForEpoch(epochNumber)
+      EpochInfo(
+        epochNumber,
+        firstBlock,
+        epochLength,
+        TopologyActivationTime(CantonTimestamp.Epoch), // dummy-value that is not used
+      ).lastBlockNumber
+    }
   }
 
   val SimulationStartTime: CantonTimestamp = CantonTimestamp.Epoch

@@ -258,7 +258,9 @@ class DefaultVerdictSenderTest
         identityFactory.forOwnerAndSynchronizer(mediatorId, psid)
       }
 
-    private val sequencerClientSend: TestSequencerClientSend = new TestSequencerClientSend
+    private val sequencerClientSend: TestSequencerClientSend = new TestSequencerClientSend(
+      wallClock
+    )
 
     def interceptedMessages: Seq[(Batch[DefaultOpenEnvelope], Option[AggregationRule])] =
       sequencerClientSend.requestsQueue.asScala.map { request =>

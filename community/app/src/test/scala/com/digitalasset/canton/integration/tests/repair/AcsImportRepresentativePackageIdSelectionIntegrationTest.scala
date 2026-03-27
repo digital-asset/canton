@@ -585,7 +585,7 @@ trait WithRepairServiceImportAcs {
       synchronizerId: SynchronizerId,
   ): Unit =
     importParticipant.repair
-      .import_acsV2(
+      .import_acs(
         importFilePath = file.canonicalPath,
         synchronizerId = synchronizerId,
         representativePackageIdOverride = RepresentativePackageIdOverride(
@@ -611,10 +611,10 @@ trait WithImportPartyAcs {
       synchronizerId: SynchronizerId,
   ): Unit =
     // Using the repair import ACS endpoing as the offline party replication specific
-    // behaviour of the parties.import_party_acsV2 is irrelevant for the representative
+    // behaviour of the parties.import_party_acs is irrelevant for the representative
     // PackageId selection test.
     importParticipant.repair
-      .import_acsV2(
+      .import_acs(
         importFilePath = file.canonicalPath,
         synchronizerId = synchronizerId,
         representativePackageIdOverride = RepresentativePackageIdOverride(

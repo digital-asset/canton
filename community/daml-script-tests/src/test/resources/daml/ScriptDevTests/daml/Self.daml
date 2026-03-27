@@ -17,6 +17,6 @@ template Self with
     do self === other
 
 main = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-Self:main"
   cid1 <- alice `submit` createCmd Self with p = alice
   alice `submit` exerciseCmd cid1 Same with other = cid1

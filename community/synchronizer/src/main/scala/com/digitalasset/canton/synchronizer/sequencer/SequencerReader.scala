@@ -740,8 +740,9 @@ class SequencerReader(
             topologySnapshot.pureCrypto,
             topologySnapshot,
             event,
-            None,
-            None,
+            timestampOfSigningKey = None,
+            // this is a sequenced event, so we know the exact timestamp to use and do not need an approximate one.
+            signingTimestampOverrides = None,
             HashPurpose.SequencedEventSignature,
             protocolVersion,
           )

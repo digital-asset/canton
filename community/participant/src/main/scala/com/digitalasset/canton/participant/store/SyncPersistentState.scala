@@ -49,6 +49,8 @@ class SyncPersistentState(
   override def reassignmentStore: ReassignmentStore = logical.reassignmentStore
   override def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     logical.pendingOnboardingClearanceStore
+  override def partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore] =
+    logical.partyReplicationIndexingStoreIfOnPREnabled
 
   override def pureCryptoApi: CryptoPureApi = physical.pureCryptoApi
 
@@ -87,6 +89,7 @@ trait LogicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def reassignmentStore: ReassignmentStore
   def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore
 
+  def partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore]
 }
 
 /** Stores that tied to a specific physical synchronizer. */
@@ -126,7 +129,7 @@ object LogicalSyncPersistentState {
       case _: MemoryStorage =>
         new InMemoryLogicalSyncPersistentState(
           synchronizerIdx,
-          parameters.enableAdditionalConsistencyChecks,
+          parameters,
           indexedStringStore,
           contractStore.value,
           acsCounterParticipantConfigStore,

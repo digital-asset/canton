@@ -7,7 +7,11 @@ package speedy
 import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, Node, SerializationVersion}
+import com.digitalasset.daml.lf.transaction.{
+  NextGenContractStateMachine => ContractStateMachine,
+  Node,
+  SerializationVersion,
+}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest._
 import org.scalatest.matchers.should.Matchers
@@ -29,7 +33,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
   private[this] val committers: Set[data.Ref.Party] = Set(party)
 
   private[this] val initialStateRollbacksAllowed = PartialTransaction.initial(
-    ContractStateMachine.Mode.NoContractKey,
+    ContractStateMachine.Mode.NoKey,
     InitialSeeding.TransactionSeed(transactionSeed),
     committers,
   )
@@ -54,7 +58,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
       keyOpt = None,
     )
 
-    def insertFetch_(cid: Value.ContractId) : PartialTransaction =
+    def insertFetch_(cid: Value.ContractId): PartialTransaction =
       ptx
         .insertFetch(
           coid = cid,
@@ -112,7 +116,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
       ptx.endExercises(Value.ValueNone)
 
     def rollbackTry_ : PartialTransaction =
-      ptx.rollbackTry() match {
+      ptx.rollbackTry match {
         case Left(err) => throw new IErrorThrowable(err)
         case Right(ptx) => ptx
       }
@@ -221,7 +225,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
   }
 
   private[this] val initialStateEffectfulRollbacksDisallowed = PartialTransaction.initial(
-    ContractStateMachine.Mode.UCKWithoutRollback,
+    ContractStateMachine.Mode.NUCK,
     InitialSeeding.TransactionSeed(transactionSeed),
     committers,
   )
@@ -233,8 +237,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_0
           .beginConsumingExercises_ // open an exercise context
           .insertCreateWithContractId_ // create the contract cid_1_0
-      txIntermediate
-        .insertCreate_ // create the contract cid_1_2
+      txIntermediate.insertCreate_ // create the contract cid_1_2
         .insertFetch_(cid) // fetch
         .insertCreate_ // create the contract cid_1_3
         .endExercises_ // close the exercise context normally
@@ -255,7 +258,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .beginTry // open a try context
           .insertCreate_ // create the contract cid_1_1
           .endTry // close the try context
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .insertCreate_ // create the contract cid_1_2
           .endExercises_ // close the exercise context normally
           .insertCreate_ // create the contract cid_2
@@ -270,7 +273,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .beginConsumingExercises_ // open an exercise context
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_2
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .insertCreate_ // create the contract cid_1_3
           .endExercises_ // close the exercise context normally
           .endTry // close the try context
@@ -291,7 +294,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_2
           .beginTry //
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .rollbackTry_ //
           .insertCreate_ // create the contract cid_1_3
           .endExercises_ // close the exercise context normally
@@ -307,7 +310,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_0
           .beginTry //
           .beginNonConsumingExercises_ // open an exercise context
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .endExercises_ // close the exercise context normally
           .rollbackTry_ //
           .insertCreate_ // create the contract cid_2
@@ -318,7 +321,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
         initialStateEffectfulRollbacksDisallowed //
           .insertCreate_ // create the contract cid_0
           .beginNonConsumingExercises_ // open an exercise context
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .endExercises_ // close the exercise context normally
           .insertCreate_ // create the contract cid_2
       )
@@ -332,7 +335,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_1_0
           .insertCreate_ // create the contract cid_1_2
           .beginTry //
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .insertCreate_ // create the contract cid_1_3
           .rollbackTry_ //
           .endExercises_ // close the exercise context normally
@@ -346,7 +349,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           .insertCreate_ // create the contract cid_0
           .beginTry //
           .beginConsumingExercises_ // open an exercise context
-          .insertFetch_(with_pure_cid_1_0)  // fetch a contract
+          .insertFetch_(with_pure_cid_1_0) // fetch a contract
           .endExercises_ // close the exercise context normally
           .rollbackTry_ //
           .insertCreate_ // create the contract cid_2

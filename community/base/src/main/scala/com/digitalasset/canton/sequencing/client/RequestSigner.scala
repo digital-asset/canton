@@ -4,8 +4,8 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
@@ -22,7 +22,7 @@ trait RequestSigner {
       request: A,
       hashPurpose: HashPurpose,
       snapshot: SyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -39,12 +39,14 @@ object RequestSigner {
         request: A,
         hashPurpose: HashPurpose,
         snapshot: SyncCryptoApi,
-        approximateTimestampOverride: Option[CantonTimestamp],
+        signingTimestampOverrides: Option[SigningTimestampOverrides],
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
     ): EitherT[FutureUnlessShutdown, String, SignedContent[A]] = {
-      val desiredTimestamp = approximateTimestampOverride.getOrElse(snapshot.ipsSnapshot.timestamp)
+      val desiredTimestamp = signingTimestampOverrides
+        .map(_.approximateTimestamp)
+        .getOrElse(snapshot.ipsSnapshot.timestamp)
       logger.trace(
         s"Signing request with snapshot at ${snapshot.ipsSnapshot.timestamp} " +
           s"using timestamp $desiredTimestamp"
@@ -55,7 +57,7 @@ object RequestSigner {
           snapshot,
           request,
           Some(snapshot.ipsSnapshot.timestamp),
-          approximateTimestampOverride,
+          signingTimestampOverrides,
           hashPurpose,
           topologyClient.protocolVersion,
         )

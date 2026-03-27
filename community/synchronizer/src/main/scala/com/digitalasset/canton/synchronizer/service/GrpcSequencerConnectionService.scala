@@ -213,13 +213,11 @@ object GrpcSequencerConnectionService extends HasLoggerName {
               _ = connectionPool.close()
               newPoolConfig = connectionPool.config
 
-              sequencerTransports <- EitherT.fromEither[FutureUnlessShutdown](
-                SequencerTransports.from(
-                  newSequencerConnections.sequencerTrustThreshold,
-                  newSequencerConnections.sequencerLivenessMargin,
-                  newSequencerConnections.submissionRequestAmplification,
-                  newSequencerConnections.sequencerConnectionPoolDelays,
-                )
+              sequencerTransports = SequencerTransports.from(
+                newSequencerConnections.sequencerTrustThreshold,
+                newSequencerConnections.sequencerLivenessMargin,
+                newSequencerConnections.submissionRequestAmplification,
+                newSequencerConnections.sequencerConnectionPoolDelays,
               )
 
               // important to only save the config and change the transport after the `makeTransport` has run and done the handshake

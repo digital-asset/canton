@@ -68,9 +68,6 @@ object Error {
       stakeholders: Set[Party],
   ) extends Error
 
-  /** The transaction failed due to a commit error */
-  final case class CommitError(commitError: IdeLedger.CommitError) extends Error
-
   /** The transaction produced by the update expression in a 'mustFailAt' succeeded. */
   final case class MustFailSucceeded(tx: VersionedTransaction) extends Error
 

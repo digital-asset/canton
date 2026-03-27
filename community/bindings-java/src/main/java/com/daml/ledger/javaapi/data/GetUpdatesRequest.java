@@ -18,24 +18,13 @@ public final class GetUpdatesRequest {
 
   @NonNull private final UpdateFormat updateFormat;
 
-  private final boolean descendingOrder;
-
   public GetUpdatesRequest(
       @NonNull Long beginExclusive,
       @NonNull Optional<Long> endInclusive,
       @NonNull UpdateFormat updateFormat) {
-    this(beginExclusive, endInclusive, updateFormat, false);
-  }
-
-  public GetUpdatesRequest(
-      @NonNull Long beginExclusive,
-      @NonNull Optional<Long> endInclusive,
-      @NonNull UpdateFormat updateFormat,
-      boolean descendingOrder) {
     this.beginExclusive = beginExclusive;
     this.endInclusive = endInclusive;
     this.updateFormat = updateFormat;
-    this.descendingOrder = descendingOrder;
   }
 
   public static GetUpdatesRequest fromProto(UpdateServiceOuterClass.GetUpdatesRequest request) {
@@ -43,8 +32,7 @@ public final class GetUpdatesRequest {
       return new GetUpdatesRequest(
           request.getBeginExclusive(),
           request.hasEndInclusive() ? Optional.of(request.getEndInclusive()) : Optional.empty(),
-          UpdateFormat.fromProto(request.getUpdateFormat()),
-          request.getDescendingOrder());
+          UpdateFormat.fromProto(request.getUpdateFormat()));
     } else {
       throw new IllegalArgumentException("Request has no updateFormat defined.");
     }
@@ -54,8 +42,7 @@ public final class GetUpdatesRequest {
     UpdateServiceOuterClass.GetUpdatesRequest.Builder builder =
         UpdateServiceOuterClass.GetUpdatesRequest.newBuilder()
             .setBeginExclusive(beginExclusive)
-            .setUpdateFormat(this.updateFormat.toProto())
-            .setDescendingOrder(this.descendingOrder);
+            .setUpdateFormat(this.updateFormat.toProto());
 
     endInclusive.ifPresent(builder::setEndInclusive);
     return builder.build();
@@ -78,13 +65,13 @@ public final class GetUpdatesRequest {
     GetUpdatesRequest that = (GetUpdatesRequest) o;
     return Objects.equals(beginExclusive, that.beginExclusive)
         && Objects.equals(endInclusive, that.endInclusive)
-        && Objects.equals(updateFormat, that.updateFormat)
-        && descendingOrder == that.descendingOrder;
+        && Objects.equals(updateFormat, that.updateFormat);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(beginExclusive, endInclusive, updateFormat, descendingOrder);
+
+    return Objects.hash(beginExclusive, endInclusive, updateFormat);
   }
 
   @Override
@@ -96,8 +83,6 @@ public final class GetUpdatesRequest {
         + endInclusive
         + ", updateFormat="
         + updateFormat
-        + ", descendingOrder="
-        + descendingOrder
         + '}';
   }
 }

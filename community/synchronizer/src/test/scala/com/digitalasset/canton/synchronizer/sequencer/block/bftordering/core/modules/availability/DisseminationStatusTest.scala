@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.digitalasset.canton.BaseTest.defaultMaxBytesToDecompress
 import com.digitalasset.canton.crypto.Signature.noSignature
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
@@ -760,6 +761,7 @@ object DisseminationStatusTest {
             )
           )
           .toMap,
+        DefaultEpochLength,
         SequencingParameters.Default, // irrelevant for this test
         defaultMaxBytesToDecompress, // irrelevant for this test
         AnActivationTime, // irrelevant for this test

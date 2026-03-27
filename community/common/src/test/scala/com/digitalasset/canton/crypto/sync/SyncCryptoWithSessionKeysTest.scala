@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.sync
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{PositiveFiniteDuration, SessionSigningKeysConfig}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -73,7 +74,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       p: SynchronizerCryptoClient = p1,
       validityPeriodLength: PositiveFiniteDuration =
         PositiveFiniteDuration.ofSeconds(validityDuration.underlying.toSeconds),
-      approximateTimestampOverride: Option[CantonTimestamp] = None,
+      approximateTimestampForSigning: Option[CantonTimestamp] = None,
   ): SignatureDelegation = {
 
     val cache = sessionKeysCache(p)
@@ -97,7 +98,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
     signature.signedBy shouldBe sessionKeyId
 
     // Verify it has the correct validity period
-    val ts = approximateTimestampOverride.getOrElse(topologySnapshot.timestamp)
+    val ts = approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp)
     validityPeriod shouldBe SignatureDelegationValidityPeriod(
       ts.minus(toleranceShiftDuration(p1).asJava),
       validityPeriodLength,
@@ -197,7 +198,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       // select a timestamp that is after the "end" cut-off period
       val (_, end) =
         currentSessionKey.signatureDelegation.validityPeriod
-          .computeCutOffTimestamp(cutOffDuration(p1).asJava, approximateTimestamp = true)
+          .computeCutOffTimestamp(cutOffDuration(p1).asJava, isUsingAnApproximateTimestamp = true)
 
       val testSnapshotWithEndTimestamp = testingTopology.topologySnapshot(timestampOfSnapshot = end)
 
@@ -228,13 +229,20 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       // select a timestamp that is after the "end" cut-off period
       val (start, end) =
         currentSessionKey.signatureDelegation.validityPeriod
-          .computeCutOffTimestamp(cutOffDuration(p1).asJava, approximateTimestamp = true)
+          .computeCutOffTimestamp(cutOffDuration(p1).asJava, isUsingAnApproximateTimestamp = true)
 
       // we use an "approximate" timestamp to sign
       val signatureEnd = syncCryptoSignerP1
         .sign(
           testSnapshot,
-          Some(end),
+          Some(
+            SigningTimestampOverrides(
+              approximateTimestamp = end,
+              // Use `None` to ignore the validity period end and select the session signing key
+              // using only the approximate timestamp
+              validityPeriodEnd = None,
+            )
+          ),
           hash,
           defaultUsage,
         )
@@ -244,7 +252,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       checkSignatureDelegation(
         testSnapshot,
         signatureEnd,
-        approximateTimestampOverride = Some(end),
+        approximateTimestampForSigning = Some(end),
       )
 
       // There must be a second key in the cache because we used a different session key for the latest sign call.
@@ -254,7 +262,14 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       val signatureStart = syncCryptoSignerP1
         .sign(
           testSnapshot,
-          Some(start),
+          Some(
+            SigningTimestampOverrides(
+              approximateTimestamp = start,
+              // Use `None` to ignore the validity period end and select the session signing key
+              // using only the approximate timestamp
+              validityPeriodEnd = None,
+            )
+          ),
           hash,
           defaultUsage,
         )
@@ -264,7 +279,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       checkSignatureDelegation(
         testSnapshot,
         signatureStart,
-        approximateTimestampOverride = Some(start),
+        approximateTimestampForSigning = Some(start),
       )
 
       // There must be a third key in the cache because we used a different session key for the latest sign call.

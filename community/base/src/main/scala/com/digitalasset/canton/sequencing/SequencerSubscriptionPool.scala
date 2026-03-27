@@ -94,7 +94,7 @@ object SequencerSubscriptionPool {
       * TODO(i27260): remove when no longer needed
       */
     def fromSequencerTransports(
-        sequencerTransports: SequencerTransports[?]
+        sequencerTransports: SequencerTransports
     ): SequencerSubscriptionPoolConfig =
       SequencerSubscriptionPoolConfig(
         livenessMargin = sequencerTransports.sequencerLivenessMargin,

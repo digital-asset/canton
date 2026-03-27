@@ -84,6 +84,7 @@ final class MediatorRuntime(
       mediator.state.finalizedResponseStore,
       mediator.state.recordOrderTimeAwaiter,
       batchingConfig.maxItemsInBatch,
+      mediator.getActiveLsuSuccessor,
       loggerFactory,
     ),
     ec,

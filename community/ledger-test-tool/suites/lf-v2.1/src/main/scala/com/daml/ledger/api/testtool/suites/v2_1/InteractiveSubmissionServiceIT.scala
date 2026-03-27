@@ -966,7 +966,6 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
           beginExclusive = ledger.begin,
           endInclusive = Some(end),
           updateFormat = Some(formatByPartyAndTemplate(owner, DummyFlexibleController.TEMPLATE_ID)),
-          descendingOrder = false,
         )
       )
       tx = assertSingleton("Owners' transactions", witnessTxs)

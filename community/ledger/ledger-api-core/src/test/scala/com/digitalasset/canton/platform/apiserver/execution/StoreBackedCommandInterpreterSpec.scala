@@ -28,9 +28,9 @@ import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   CreationTime,
   FatContractInstance,
+  NextGenContractStateMachine as ContractStateMachine,
   Node as LfNode,
 }
 import com.digitalasset.daml.lf.value.Value

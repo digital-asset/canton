@@ -46,7 +46,15 @@ class CantonCryptoProvider(
       () =>
         timeCrypto(
           metrics,
-          cryptoApi.sign(hash, BftOrderingSigningKeyUsage, None).value,
+          cryptoApi
+            .sign(
+              hash,
+              BftOrderingSigningKeyUsage,
+              // It is fine to not specify any timestamps here because all signatures in the orderer are checked
+              // against the topology snapshot at the start of the epoch.
+              None,
+            )
+            .value,
           operationId,
         ),
     )

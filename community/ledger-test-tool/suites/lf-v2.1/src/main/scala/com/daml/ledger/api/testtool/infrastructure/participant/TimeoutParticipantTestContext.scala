@@ -417,13 +417,11 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       transactionFormat: TransactionFormat,
       begin: Long = referenceOffset,
       end: Option[Long],
-      descendingOrder: Boolean = false,
   ): GetUpdatesRequest =
     delegate.getTransactionsRequestWithEnd(
       transactionFormat = transactionFormat,
       begin = begin,
       end = end,
-      descendingOrder = descendingOrder,
     )
 
   override def getUpdatesRequestWithEnd(
@@ -432,7 +430,6 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       topologyFilterO: Option[Seq[Party]] = None,
       begin: Long = referenceOffset,
       end: Option[Long] = None,
-      descendingOrder: Boolean = false,
   ): GetUpdatesRequest =
     delegate.getUpdatesRequestWithEnd(
       transactionFormatO = transactionFormatO,
@@ -440,7 +437,6 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       topologyFilterO = topologyFilterO,
       begin = begin,
       end = end,
-      descendingOrder = descendingOrder,
     )
 
   override def transactionsByTemplateId(
@@ -449,14 +445,6 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Vector[Transaction]] = withTimeout(
     s"Flat transaction by template id $templateId for parties $parties",
     delegate.transactionsByTemplateId(templateId, parties),
-  )
-
-  override def transactionsByTemplateIdWithVariants(
-      templateId: Identifier,
-      parties: Option[Seq[Party]],
-  ): Future[Vector[Transaction]] = withTimeout(
-    s"Flat transaction by template id $templateId for parties $parties",
-    delegate.transactionsByTemplateIdWithVariants(templateId, parties),
   )
   override def transactions(
       request: GetUpdatesRequest
@@ -470,15 +458,6 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     withTimeout(
       s"Flat transactions for parties $parties",
       delegate.transactions(transactionShape, parties*),
-    )
-
-  override def transactionsWithVariants(
-      transactionShape: TransactionShape,
-      parties: Party*
-  ): Future[Vector[Transaction]] =
-    withTimeout(
-      s"Flat transactions for parties $parties",
-      delegate.transactionsWithVariants(transactionShape, parties*),
     )
 
   override def transactions(
@@ -829,10 +808,4 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       contractId: String,
   ): Future[Option[CreatedEvent]] =
     delegate.contract(queryingParties, contractId)
-
-  override def transactionsWithVariants(request: GetUpdatesRequest): Future[Vector[Transaction]] =
-    withTimeout(
-      s"Flat transactions for request $request",
-      delegate.transactionsWithVariants(request),
-    )
 }

@@ -50,6 +50,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -149,7 +150,7 @@ class TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: ContractInstanceOfId,
-          _keyResolver: LfKeyResolver,
+          _keyResolver: LegacyContractStateMachine.KeyResolver,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
       )(implicit
@@ -184,7 +185,7 @@ class TransactionConfirmationRequestFactoryTest
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
           _rbContext: RollbackContext,
-          _keyResolver: LfKeyResolver,
+          _keyResolver: LegacyContractStateMachine.KeyResolver,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
@@ -199,7 +200,6 @@ class TransactionConfirmationRequestFactoryTest
     // in the end.
     new TransactionConfirmationRequestFactory(
       submittingParticipant,
-      wallClock,
       LoggingConfig(),
       loggerFactory,
       parallel = false,
@@ -416,6 +416,7 @@ class TransactionConfirmationRequestFactoryTest
                 example.keyResolver,
                 mediator,
                 newCryptoSnapshot,
+                wallClock.now, // not needed for unit tests; session signing keys disabled
                 sessionKeyStore,
                 contractInstanceOfId,
                 maxSequencingTime,
@@ -444,6 +445,7 @@ class TransactionConfirmationRequestFactoryTest
             multipleRoots.keyResolver,
             mediator,
             newCryptoSnapshot,
+            wallClock.now, // not needed for unit tests; session signing keys disabled
             store,
             contractInstanceOfId,
             maxSequencingTime,
@@ -477,6 +479,7 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.keyResolver,
               mediator,
               cryptoSnapshot,
+              wallClock.now, // not needed for unit tests; session signing keys disabled
               sessionKeyStore,
               contractInstanceOfId,
               maxSequencingTime,
@@ -541,6 +544,7 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.keyResolver,
               mediator,
               emptyCryptoSnapshot,
+              wallClock.now, // not needed for unit tests; session signing keys disabled
               sessionKeyStore,
               contractInstanceOfId,
               maxSequencingTime,
@@ -584,6 +588,7 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.keyResolver,
               mediator,
               confirmationOnlyCryptoSnapshot,
+              wallClock.now, // not needed for unit tests; session signing keys disabled
               sessionKeyStore,
               contractInstanceOfId,
               maxSequencingTime,
@@ -624,6 +629,7 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.keyResolver,
               mediator,
               newCryptoSnapshot,
+              wallClock.now, // not needed for unit tests; session signing keys disabled
               sessionKeyStore,
               contractInstanceOfId,
               maxSequencingTime,
@@ -661,6 +667,7 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.keyResolver,
               mediator,
               submitterOnlyCryptoSnapshot,
+              wallClock.now, // not needed for unit tests; session signing keys disabled
               sessionKeyStore,
               contractInstanceOfId,
               maxSequencingTime,

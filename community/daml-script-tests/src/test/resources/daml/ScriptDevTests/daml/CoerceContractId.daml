@@ -21,7 +21,7 @@ template Bar with
     signatory sign
 
 test = script do
-  sign <- allocateParty "Sign"
+  sign <- allocateParty "Sign-CoerceContractId:test"
   let foo = Foo with sign
   fooId <- submit sign do createCmd foo
   barId <- submit sign do createCmd Bar with sign; cid = coerceContractId fooId

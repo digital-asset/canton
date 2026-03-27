@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
+  NextGenContractStateMachine => ContractStateMachine,
   Node, NodeId,
   TransactionError => TxErr,
 }
@@ -23,9 +23,9 @@ package object speedy {
     err match {
       case TxErr.DuplicateContractId(contractId) =>
         // TODO(#30398) make these proper IE errors instead of crashing the engine.
-        throw SErrorCrash(context, s"Unexpected duplicate contract ID ${contractId}")
+        throw SErrorCrash(context, s"Unexpected duplicate contract ID $contractId")
       case TxErr.DuplicateContractKey(key) =>
-        IE.DuplicateContractKey(key)
+        throw SErrorCrash(context, s"Unexpected duplicate key $key")
       case TxErr.InconsistentContractKey(key) =>
         IE.InconsistentContractKey(key)
       case TxErr.AlreadyConsumed(cid, _: Any) =>
@@ -63,5 +63,5 @@ package object speedy {
     }
   }
 
-  type CSMState = ContractStateMachine.State[NodeId]
+  type CSMState = ContractStateMachine.LLState[NodeId]
 }

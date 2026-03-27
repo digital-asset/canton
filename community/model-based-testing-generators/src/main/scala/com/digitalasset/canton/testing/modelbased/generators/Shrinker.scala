@@ -5,6 +5,7 @@ package com.digitalasset.canton.testing.modelbased.generators
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete.*
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
+import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult
 import org.scalacheck.Shrink
 
 import scala.annotation.nowarn
@@ -15,15 +16,10 @@ object Shrinker {
     val numParties = scenario.topology.flatMap(_.parties).toSet.size
     val maxPackageId =
       scenario.ledger.flatMap(_.commands.flatMap(_.packageId)).maxOption.getOrElse(0)
-    val res =
-      try {
-        SymbolicSolver.valid(scenario, maxPackageId, numParties)
-      } catch {
-        case _: Throwable =>
-          // sometimes z3 times out on ground constraints (!)
-          false
-      }
-    res
+    // For shrinking, we only care whether the scenario is definitely valid.
+    // If the solver returns Unknown (timeout or inconclusive), we conservatively treat it
+    // as invalid and drop the shrink candidate.
+    SymbolicSolver.valid(scenario, maxPackageId, numParties) == ValidityResult.Valid
   }
 
   lazy val shrinkPartyId: Shrink[PartyId] =

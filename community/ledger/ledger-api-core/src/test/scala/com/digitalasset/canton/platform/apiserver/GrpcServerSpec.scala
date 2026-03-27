@@ -9,6 +9,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.daml.testing.utils.TestResourceContext
 import com.digitalasset.base.error.{ErrorGenerator, RpcError}
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.ServerConfig
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
@@ -275,6 +276,8 @@ object GrpcServerSpec {
         desiredPort = Port.Dynamic,
         maxInboundMessageSize = maxInboundMessageSize,
         maxInboundMetadataSize = maxInboundMetadataSize.getOrElse(8 * 1024),
+        maxConcurrentStreamsPerConnection =
+          ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
         metrics = metrics,
         servicesExecutor = executor,
         services = Seq(helloService(ec)),

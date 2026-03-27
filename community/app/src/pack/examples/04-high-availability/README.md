@@ -83,8 +83,25 @@ Keep in mind it is also possible to source values in these configuration files f
 ../../bin/canton daemon --log-file-name=participant-b.log \
   --config postgres.conf,participant-b.conf &
 
+# start the sequencer-a process
+../../bin/canton daemon --log-file-name=sequencer-a.log \
+  --config postgres.conf,sequencer-a.conf &
+
+# start the sequencer-b process
+../../bin/canton daemon --log-file-name=sequencer-b.log \
+  --config postgres.conf,sequencer-b.conf &
+
+# start the mediator-a process
+../../bin/canton daemon --log-file-name=mediator-a.log \
+  --config postgres.conf,mediator-a.conf &
+
+# start the mediator-b process
+../../bin/canton daemon --log-file-name=mediator-b.log \
+  --config postgres.conf,mediator-b.conf &
+
 # run the onboarding bootstrap script remotely against all nodes
 ../../bin/canton run --log-file-name=bootstrap.log \
   --config admin/remote-mediator-a.conf,admin/remote-mediator-b.conf,admin/remote-sequencer-a.conf,admin/remote-sequencer-b.conf,admin/remote-participant-a.conf,admin/remote-participant-b.conf \
   admin/bootstrap.canton
 ```
+

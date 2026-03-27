@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   ProcessingTimeout,
 }
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -184,7 +185,15 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           cryptoSnapshot,
           request,
           signingTimestamp.orElse(Some(cryptoSnapshot.ipsSnapshot.timestamp)),
-          Some(clock.now),
+          // Timestamp overrides do not need to share the same reference here, since the max sequencing
+          // time is not derived from it. Therefore, it is safe to use different reference timestamps
+          // for different attempts, regardless of the chosen max sequencing time.
+          Some(
+            SigningTimestampOverrides(
+              approximateTimestamp = clock.now,
+              validityPeriodEnd = Some(request.maxSequencingTime),
+            )
+          ),
           HashPurpose.SubmissionRequestSignature,
           testedProtocolVersion,
         )

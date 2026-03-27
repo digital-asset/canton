@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.{EmptyRootHashMessagePayload, RootHashMessage}
 import com.digitalasset.canton.protocol.{LocalRejectError, RootHash}
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult}
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
@@ -162,6 +163,11 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
       }
       val ts = env.environment.clock.now
       val maxTs = ts.plusSeconds(300)
+      val timestamps = SendRequestTimestamps(
+        topologyTimestamp = Some(ts.minusSeconds(5)),
+        approximateTimestampForSigning = ts,
+        maxSequencingTime = maxTs,
+      )
       val aggregationRule = AggregationRule(
         NonEmpty(Seq, participant1.id, participant2.id),
         PositiveInt.tryCreate(2),
@@ -182,8 +188,7 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
         val callback = SendCallback.future
         val sendAsync = client.send(
           batch,
-          topologyTimestamp = Some(ts.minusSeconds(5)),
-          maxSequencingTime = maxTs,
+          timestamps = timestamps,
           aggregationRule = Some(aggregationRule),
           callback = callback,
         )

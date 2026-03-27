@@ -51,22 +51,21 @@ object SequencerNodeBootstrapFactoryImpl extends SequencerNodeBootstrapFactory {
       executionSequencerFactory: ExecutionSequencerFactory,
       actorSystem: ActorSystem,
   ): Either[String, SequencerNodeBootstrap] = {
+
     val storageFactory = new StorageMultiFactory(
       arguments.config.storage,
       exitOnFatalFailures = arguments.parameters.exitOnFatalFailures,
       arguments.config.replication,
-      onActive = logger => {
+      onActive = logger =>
         FatalError.exitOnFatalError(
           "Sequencer storage went active from passive. This should never happen, considering this Sequencer's storage should never go passive",
           logger,
-        )(TraceContext.empty)
-      },
-      onPassive = logger => {
+        )(TraceContext.empty),
+      onPassive = logger =>
         FatalError.exitOnFatalError(
           "Sequencer storage went passive. This indicates another process is accessing this Sequencer's database simultaneously, which is not permitted.",
           logger,
-        )(TraceContext.empty)
-      },
+        )(TraceContext.empty),
       mustStayActive = true,
       DbLockCounters.SEQUENCER_INIT,
       DbLockCounters.SEQUENCER_INIT_WORKER,

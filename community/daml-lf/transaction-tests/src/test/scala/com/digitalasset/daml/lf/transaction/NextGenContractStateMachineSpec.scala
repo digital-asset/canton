@@ -5,8 +5,9 @@ package com.digitalasset.daml.lf
 package transaction
 
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.transaction.ContractStateMachineSpec.*
+import scala.language.implicitConversions
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.{
+  HHState,
   LLState,
   State,
   StateMachineResult,
@@ -14,7 +15,6 @@ import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.{
 import com.digitalasset.daml.lf.transaction.TransactionError.{
   AlreadyConsumed,
   DuplicateContractId,
-  DuplicateContractKey,
   EffectfulRollback,
   InconsistentContractKey,
 }
@@ -25,7 +25,10 @@ import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
   toName,
   toParty,
 }
+import com.daml.scalautil.Statement.discard
 import cats.syntax.foldable.*
+import cats.syntax.option.*
+import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -37,6 +40,8 @@ class NextGenContractStateMachineSpec
     with Inside
     with Matchers
     with TableDrivenPropertyChecks {
+
+  import NextGenContractStateMachineSpec.*
 
   type OptStateMachineResult = ErrOr[StateMachineResult]
   lazy val alice: Ref.Party = "Alice"
@@ -101,8 +106,7 @@ class NextGenContractStateMachineSpec
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Right(
         Map(
-          globalKey("k0") -> Vector(),
-          globalKey("k1") -> Vector(cid(1)),
+          globalKey("k1") -> Vector(cid(1))
         )
       )
     }
@@ -120,8 +124,6 @@ class NextGenContractStateMachineSpec
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Right(
         Map(
-          globalKey("k0") -> Vector(),
-          globalKey("k1") -> Vector(),
           globalKey("k2") -> Vector(cid(2)),
           globalKey("k3") -> Vector(cid(3)),
         )
@@ -211,7 +213,7 @@ class NextGenContractStateMachineSpec
       builder.add(create(cid(1), "k0"))
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+        Map(globalKey("k0") -> Vector(cid(1), cid(0)))
       )
     }
     "two creates do not conflict if interleaved with archive" in {
@@ -264,7 +266,7 @@ class NextGenContractStateMachineSpec
       builder.add(create(cid(1), "k0"))
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+        Map(globalKey("k0") -> Vector(cid(1), cid(0)))
       )
     }
     "positive lookup in rollback conflicts with create" ignore {
@@ -274,7 +276,7 @@ class NextGenContractStateMachineSpec
       builder.add(create(cid(1), "k0"))
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+        Map(globalKey("k0") -> Vector(cid(1), cid(0)))
       )
     }
     "rolled back archive does not prevent conflict" ignore {
@@ -285,7 +287,7 @@ class NextGenContractStateMachineSpec
       builder.add(create(cid(1), "k0"))
       val tx = builder.build()
       contractKeyInputs(tx) shouldBe Left(
-        DuplicateContractKey(globalKey("k0"))
+        Map(globalKey("k0") -> Vector(cid(1), cid(0)))
       )
     }
     "successful, inconsistent lookups conflict" in {
@@ -338,8 +340,8 @@ class NextGenContractStateMachineSpec
     ).map(_.keyInputs.transform((_, v) => v.queue))
 
   // TODO(#31454)
-  def handleViaEmptyEffectfulRollback[A](
-      eOrA: Either[Set[NodeId], A]
+  def handleViaEmptyEffectfulRollback[Nid, A](
+      eOrA: Either[Set[Nid], A]
   ): Either[TransactionError, A] =
     eOrA.left.map(_ => TransactionError.EffectfulRollback(Set()))
 
@@ -354,17 +356,23 @@ class NextGenContractStateMachineSpec
     V.ContractId.V1(hash)
   }
 
-  def gkey(key: String): GlobalKey =
-    GlobalKey.assertBuild(
-      templateId,
-      pkgName,
-      V.ValueText(key),
-      crypto.Hash.hashPrivateKey(key),
-    )
+  implicit class GKeyStringOps(private val key: String) {
+    def gkey: GlobalKey =
+      GlobalKey.assertBuild(
+        templateId,
+        pkgName,
+        V.ValueText(key),
+        crypto.Hash.hashPrivateKey(key),
+      )
+  }
+
+  implicit def stringToGKey(key: String): GlobalKey = key.gkey
+
+  implicit def optStringToOptGkey(key: Option[String]): Option[GlobalKey] = key.map(_.gkey)
 
   def mkCreate(
       contractId: V.ContractId,
-      key: String = "",
+      key: Option[String] = None,
   ): Node.Create =
     Node.Create(
       coid = contractId,
@@ -379,10 +387,9 @@ class NextGenContractStateMachineSpec
 
   private def toOptKeyWithMaintainers(
       templateId: Ref.TypeConId,
-      key: String,
+      key: Option[String],
   ): Option[GlobalKeyWithMaintainers] =
-    if (key.isEmpty) None
-    else Some(toKeyWithMaintainers(templateId, key))
+    key.map(toKeyWithMaintainers(templateId, _))
 
   private def toKeyWithMaintainers(
       templateId: Ref.TypeConId,
@@ -399,7 +406,7 @@ class NextGenContractStateMachineSpec
   def mkExercise(
       contractId: V.ContractId,
       consuming: Boolean = true,
-      key: String = "",
+      key: Option[String] = None,
       byKey: Boolean = false,
   ): Node.Exercise =
     Node.Exercise(
@@ -424,7 +431,7 @@ class NextGenContractStateMachineSpec
 
   def mkFetch(
       contractId: V.ContractId,
-      key: String = "",
+      key: Option[String] = None,
       byKey: Boolean = false,
   ): Node.Fetch =
     Node.Fetch(
@@ -439,6 +446,56 @@ class NextGenContractStateMachineSpec
       version = txVersion,
       interfaceId = None,
     )
+
+  def mkQueryByKey(
+      result: Vector[V.ContractId],
+      key: String,
+      exhaustive: Boolean,
+  ): Node.QueryByKey =
+    Node.QueryByKey(
+      packageName = pkgName,
+      templateId = templateId,
+      exhaustive = exhaustive,
+      key = toKeyWithMaintainers(templateId, key),
+      result = result,
+      version = txVersion,
+    )
+
+  implicit def nodeToTx(node: Node): HasTxNodes[?] = {
+    val builder = new TxBuilder()
+    val _ = builder.add(node)
+    builder.build()
+  }
+
+  // Recursively replay a sub-transaction's nodes into a builder
+  private def addSubTx(
+      builder: TxBuilder,
+      tx: HasTxNodes[?],
+      nodeId: NodeId,
+      parentId: Option[NodeId],
+  ): Unit = {
+    val node = tx.nodes(nodeId)
+    val newId = parentId.fold(builder.add(node))(builder.add(node, _))
+    node match {
+      case rb: Node.Rollback => rb.children.foreach(addSubTx(builder, tx, _, Some(newId)))
+      case ex: Node.Exercise => ex.children.foreach(addSubTx(builder, tx, _, Some(newId)))
+      case _ => ()
+    }
+  }
+
+  // add HasTxNodes* below a Rollback node (indicating that the passed nodes have been rolled back)
+  def mkRollbackTx(nodes: HasTxNodes[?]*): HasTxNodes[?] = {
+    val builder = new TxBuilder()
+    val rollbackId = builder.add(Node.Rollback(ImmArray.empty))
+    nodes.foreach(tx => tx.roots.foreach(addSubTx(builder, tx, _, Some(rollbackId))))
+    builder.build()
+  }
+
+  def mkTx(nodes: HasTxNodes[?]*): HasTxNodes[?] = {
+    val builder = new TxBuilder()
+    nodes.foreach(tx => tx.roots.foreach(addSubTx(builder, tx, _, None)))
+    builder.build()
+  }
 
   "the contract state machine" - {
 
@@ -562,6 +619,7 @@ class NextGenContractStateMachineSpec
    *    ** queryNByKey caching
    *    *** queryNByKey same key twice
    *    *** queryNByKey inside try, rollback, then same key (reads survive rollback)
+   *    *** querynbykey twice but inconsistent results (HH-only)
    *    ** create, querybykey
    *    *** create then querybykey
    *    *** querybykey then create
@@ -597,44 +655,77 @@ class NextGenContractStateMachineSpec
     }
 
   def runUnitTestWithoutAndWithKey(
-      key: GlobalKey,
-      mkUnitTest: Option[GlobalKey] => UnitTest,
+      key: String,
+      mkUnitTest: Option[String] => UnitTest,
   ): Unit = {
     "with key unset" - {
       runUnitTest(mkUnitTest(None))
     }
     "with key set" - {
-      runUnitTest(mkUnitTest(Some(key)))
+      runUnitTest(mkUnitTest(key.some))
     }
   }
 
-  def runUnitTest(unitTest: UnitTest): Unit =
+  def runUnitTest(unitTest: UnitTest): Unit = {
+    require(
+      unitTest.interaction.isDefined || unitTest.transaction.isDefined,
+      s"UnitTest '${unitTest.description}' must have at least one of interaction or transaction defined",
+    )
     unitTest.description - {
       unitTest.expected.foreach { case (mode, expectedResult) =>
-        s"mode $mode" in {
-          val fresh = NextGenContractStateMachine.empty[Unit](mode)
-          val result = unitTest.interaction.apply(fresh).map(_.toStateMachineResult)
-
-          (result, expectedResult) match {
-            case (Left(err1), Left(err2)) => err1 shouldBe err2
-            case (Right(state), Right(res)) =>
-              withClue("inputContractIds") {
-                state.inputContractIds shouldBe res.inputContractIds
-              }
-              withClue("globalKeyInputs") {
-                // TODO: remove cleaning
-                cleanGlobalKeyInputs(state.globalKeyInputs) shouldBe res.globalKeyInputs
-              }
-              withClue("localKeys") {
-                state.localKeys shouldBe res.localKeys
-              }
-              withClue("consumed") {
-                state.consumed shouldBe res.consumed
-              }
-            case _ => fail(s"$result was not equal to $expectedResult")
+        s"mode $mode" - {
+          unitTest.interaction.foreach { interaction =>
+            "LL" in {
+              val fresh = NextGenContractStateMachine.empty[Unit](mode)
+              val result = interaction.apply(fresh).map(_.toStateMachineResult)
+              compareResult(result, expectedResult)
+            }
+          }
+          unitTest.transaction.foreach { tx =>
+            "HH" in {
+              val hhResult = walkTransactionOnHHState(tx, mode).map(_.toStateMachineResult)
+              compareResult(hhResult, expectedResult)
+            }
           }
         }
       }
+    }
+  }
+
+  def walkTransactionOnHHState[Tx](
+      tx: HasTxNodes[Tx],
+      mode: NextGenContractStateMachine.Mode,
+  ): ErrOr[LLState[Unit]] =
+    tx.foldInExecutionOrder[ErrOr[LLState[Unit]]](
+      Right(NextGenContractStateMachine.empty[Unit](mode))
+    )(
+      exerciseBegin = (acc, _, exe) =>
+        (acc.flatMap(_.handleExercise((), exe)), Transaction.ChildrenRecursion.DoRecurse),
+      exerciseEnd = (acc, _, _) => acc,
+      rollbackBegin =
+        (acc, _, _) => (acc.map(_.beginRollback), Transaction.ChildrenRecursion.DoRecurse),
+      rollbackEnd = (acc, _, _) => acc.flatMap(s => handleViaEmptyEffectfulRollback(s.endRollback)),
+      leaf = (acc, _, leaf) => acc.flatMap(_.handleNode((), leaf)),
+    )
+
+  def compareResult(result: OptStateMachineResult, expectedResult: OptStateMachineResult): Unit =
+    (result, expectedResult) match {
+      case (Left(err1), Left(err2)) => discard(err1 shouldBe err2)
+      case (Right(state), Right(res)) =>
+        withClue("inputContractIds") {
+          state.inputContractIds shouldBe res.inputContractIds
+        }
+        withClue("globalKeyInputs") {
+          // TODO: remove cleaning
+          cleanGlobalKeyInputs(state.globalKeyInputs) shouldBe res.globalKeyInputs
+        }
+        withClue("localKeys") {
+          state.localKeys shouldBe res.localKeys
+        }
+        withClue("consumed") {
+          discard(state.consumed shouldBe res.consumed)
+        }
+      case _ => fail(s"$result was not equal to $expectedResult")
     }
 
   /** Remove entries from globalKeyInputs where the queue is empty and exhaustive is false, so that
@@ -690,6 +781,7 @@ class NextGenContractStateMachineSpec
       UnitTest(
         description = "null (no interaction)",
         interaction = Right(_),
+        transaction = mkTx(),
         expected = Right(StateMachineResult.empty),
       )
     )
@@ -736,6 +828,7 @@ class NextGenContractStateMachineSpec
             s <- Right(s.beginTry)
             s <- rollbackTryForTesting(s)
           } yield s,
+        transaction = mkRollbackTx(),
         expected = Right(StateMachineResult.empty),
       )
     )
@@ -752,6 +845,7 @@ class NextGenContractStateMachineSpec
           for {
             s <- s.create((), id, None)
           } yield s,
+        transaction = mkTx(mkCreate(id)),
         expected = Right(StateMachineResult.empty),
       )
     )
@@ -761,7 +855,7 @@ class NextGenContractStateMachineSpec
   /// ** double-create (same cid)
   "doubleCreateSameCidUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -774,6 +868,10 @@ class NextGenContractStateMachineSpec
               s <- s.create((), id, optkey)
               s <- s.create((), id, optkey)
             } yield s,
+          transaction = mkTx(
+            mkCreate(id),
+            mkCreate(id),
+          ),
           expected = Left(DuplicateContractId(id)),
         )
       },
@@ -784,7 +882,7 @@ class NextGenContractStateMachineSpec
   "doubleCreateVaryingCidUnitTests" - {
     val id1 = cid(1)
     val id2 = cid(2)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -797,12 +895,16 @@ class NextGenContractStateMachineSpec
               s <- s.create((), id1, optkey)
               s <- s.create((), id2, optkey)
             } yield s,
+          transaction = mkTx(
+            mkCreate(id1, optkey),
+            mkCreate(id2, optkey),
+          ),
           expected = Right(
             StateMachineResult.emptyWith(
               localKeys =
                 if (optkey.isEmpty) Map.empty
                 else
-                  Map(key -> Vector(id2, id1))
+                  Map(key.gkey -> Vector(id2, id1))
             )
           ),
         )
@@ -813,17 +915,21 @@ class NextGenContractStateMachineSpec
   // *** double-create (same cid, different key)
   "createSameCidDifferentKeysUnitTest" - {
     val id = cid(1)
-    val key1 = gkey("foo")
-    val key2 = gkey("bar")
+    val key1 = "foo"
+    val key2 = "bar"
 
     runUnitTest(
       UnitTest(
         description = s"create(key=K1) then create same cid with key=K2",
         interaction = s =>
           for {
-            s <- s.create((), id, Some(key1))
-            s <- s.create((), id, Some(key2))
+            s <- s.create((), id, key1.some)
+            s <- s.create((), id, key2.some)
           } yield s,
+        transaction = mkTx(
+          mkCreate(id, key1.some),
+          mkCreate(id, key2.some),
+        ),
         expected = Left(DuplicateContractId(id)),
       )
     )
@@ -859,7 +965,8 @@ class NextGenContractStateMachineSpec
             s <- s.create((), id, None)
             s <- rollbackTryForTesting(s)
           } yield s,
-        Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+        transaction = mkRollbackTx(mkCreate(id)),
+        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
           NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
         ),
@@ -871,7 +978,7 @@ class NextGenContractStateMachineSpec
   "beginTryCreateKeyRollbackThenCreateSameKeyUnitTest" - {
     val id1 = cid(1)
     val id2 = cid(2)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -879,15 +986,19 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- Right(s.beginTry)
-            s <- s.create((), id1, Some(key))
+            s <- s.create((), id1, key.some)
             s <- rollbackTryForTesting(s)
-            s <- s.create((), id2, Some(key))
+            s <- s.create((), id2, key.some)
           } yield s,
-        Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+        transaction = mkTx(
+          mkRollbackTx(mkCreate(id1, key.some)),
+          mkCreate(id2, key.some),
+        ),
+        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
           NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(
             StateMachineResult.emptyWith(
-              localKeys = Map(key -> Vector(id2))
+              localKeys = Map(key.gkey -> Vector(id2))
             )
           ),
         ),
@@ -914,7 +1025,7 @@ class NextGenContractStateMachineSpec
   // ** create archive
   "createArchiveUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -926,13 +1037,19 @@ class NextGenContractStateMachineSpec
               s <- s.create((), id, optkey)
               s <- s.archive(id, ()).get
             } yield s,
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            // our only access to archive is an consuming exercise, which will insert a queryById but its the best we
+            // can get. The qyeryById will always be fully cached, so it doesn't affect expected end state
+            mkExercise(id, consuming = true, optkey, byKey = false),
+          ),
           expected = Right(
             StateMachineResult.emptyWith(
               consumed = Set[V.ContractId](id),
               localKeys =
                 if (optkey.isEmpty) Map.empty
                 else
-                  Map(key -> Vector(id)),
+                  Map(key.gkey -> Vector(id)),
             )
           ),
         )
@@ -943,7 +1060,7 @@ class NextGenContractStateMachineSpec
   // ** double-create archive
   "createArchiveCreateUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -957,6 +1074,12 @@ class NextGenContractStateMachineSpec
               s <- s.archive(id, ()).get
               s <- s.create((), id, optkey)
             } yield s,
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            // same note as test above, accessing archive via consuming exercise
+            mkExercise(id, consuming = true, optkey, byKey = false),
+            mkCreate(id, optkey),
+          ),
           expected = Left(DuplicateContractId(id)),
         )
       },
@@ -976,6 +1099,12 @@ class NextGenContractStateMachineSpec
             s <- s.archive(id, ()).get
             s <- s.archive(id, ()).get
           } yield s,
+        transaction = mkTx(
+          mkCreate(id),
+          // same note as test above, accessing archive via consuming exercise
+          mkExercise(id, consuming = true, key = None, byKey = false),
+          mkExercise(id, consuming = true, key = None, byKey = false),
+        ),
         expected = Left(AlreadyConsumed(id, ())),
       )
     )
@@ -985,7 +1114,7 @@ class NextGenContractStateMachineSpec
   // *** create try archive endtry
   "createBeginTryArchiveEndTryUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1006,7 +1135,7 @@ class NextGenContractStateMachineSpec
               localKeys =
                 if (optkey.isEmpty) Map.empty
                 else
-                  Map(key -> Vector(id)),
+                  Map(key.gkey -> Vector(id)),
             )
           ),
         )
@@ -1017,7 +1146,7 @@ class NextGenContractStateMachineSpec
   // *** create try archive rollback
   "createBeginTryArchiveRollbackUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1032,14 +1161,21 @@ class NextGenContractStateMachineSpec
               s <- s.archive(id, ()).get
               s <- rollbackTryForTesting(s)
             } yield s,
-          Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            mkRollbackTx(
+              // same note as test above, accessing archive via consuming exercise
+              mkExercise(id, consuming = true, optkey, byKey = false)
+            ),
+          ),
+          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
             NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(
               StateMachineResult.emptyWith(
                 localKeys =
                   if (optkey.isEmpty) Map.empty
                   else
-                    Map(key -> Vector(id))
+                    Map(key.gkey -> Vector(id))
               )
             ),
           ),
@@ -1053,7 +1189,7 @@ class NextGenContractStateMachineSpec
   // the same id is not allowed. As its already written, keep it. If this tests requires maitenence, remove it instead.
   "createBeginTryArchiveEndTryCreateUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1081,7 +1217,7 @@ class NextGenContractStateMachineSpec
   // the same id is not allowed. As its already written, keep it. If this tests requires maitenence, remove it instead.
   "createBeginTryArchiveRollbackCreateUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1098,7 +1234,15 @@ class NextGenContractStateMachineSpec
               s <- rollbackTryForTesting(s)
               s <- s.create((), id, optkey)
             } yield s,
-          Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            mkRollbackTx(
+              // same note as test above, accessing archive via consuming exercise
+              mkExercise(id, consuming = true, optkey, byKey = false)
+            ),
+            mkCreate(id, optkey),
+          ),
+          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
             NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Left(DuplicateContractId(id)),
           ),
@@ -1110,7 +1254,7 @@ class NextGenContractStateMachineSpec
   // *** try create  archive endtry
   "beginTryCreateArchiveEndTryUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1131,7 +1275,7 @@ class NextGenContractStateMachineSpec
               localKeys =
                 if (optkey.isEmpty) Map.empty
                 else
-                  Map(key -> Vector(id)),
+                  Map(key.gkey -> Vector(id)),
             )
           ),
         )
@@ -1142,7 +1286,7 @@ class NextGenContractStateMachineSpec
   // *** try create archive rollback
   "beginTryCreateArchiveRollbackUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1157,6 +1301,13 @@ class NextGenContractStateMachineSpec
               s <- s.archive(id, ()).get
               s <- rollbackTryForTesting(s)
             } yield s,
+          transaction = mkTx(
+            mkRollbackTx(
+              mkCreate(id, optkey),
+              // same note as test above, accessing archive via consuming exercise
+              mkExercise(id, consuming = true, optkey, byKey = false),
+            )
+          ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
             NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
@@ -1181,7 +1332,15 @@ class NextGenContractStateMachineSpec
             s <- rollbackTryForTesting(s)
             s <- s.archive(id, ()).get
           } yield s,
-        Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+        transaction = mkTx(
+          mkCreate(id),
+          mkRollbackTx(
+            // same note as test above, accessing archive via consuming exercise
+            mkExercise(id, consuming = true, key = None, byKey = false)
+          ),
+          mkExercise(id, consuming = true, key = None, byKey = false),
+        ),
+        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
           NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(
             StateMachineResult.emptyWith(
@@ -1197,7 +1356,7 @@ class NextGenContractStateMachineSpec
   // ** querybyid
   "queryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1211,6 +1370,7 @@ class NextGenContractStateMachineSpec
                 resume(optkey)
               }
             } yield s,
+          transaction = mkTx(mkFetch(id, key.some)),
           expected = Right(
             StateMachineResult.emptyWith(
               inputContractIds = Set[V.ContractId](id)
@@ -1224,7 +1384,7 @@ class NextGenContractStateMachineSpec
   // ** queryById same contract twice (caching)
   "queryByIdTwiceCachingUnitTest" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1233,7 +1393,7 @@ class NextGenContractStateMachineSpec
           for {
             s <- {
               val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
-              resume(Some(key))
+              resume(key.some)
             }
             s <- s
               .queryById(id)
@@ -1252,7 +1412,7 @@ class NextGenContractStateMachineSpec
   // *** create then querybyid
   "createQueryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1270,7 +1430,7 @@ class NextGenContractStateMachineSpec
               localKeys =
                 if (optkey.isEmpty) Map.empty
                 else
-                  Map(key -> Vector(id))
+                  Map(key.gkey -> Vector(id))
             )
           ),
         )
@@ -1281,7 +1441,7 @@ class NextGenContractStateMachineSpec
   // *** querybyid then create
   "queryByIdCreateUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTestWithoutAndWithKey(
       key,
@@ -1297,6 +1457,10 @@ class NextGenContractStateMachineSpec
               }
               s <- s.create((), id, optkey)
             } yield s,
+          transaction = mkTx(
+            mkFetch(id, key.some, byKey = false),
+            mkCreate(id, optkey),
+          ),
           expected = Left(DuplicateContractId(id)),
         )
       },
@@ -1306,17 +1470,23 @@ class NextGenContractStateMachineSpec
   // ** create, archive, querybyid
   "createArchiveQueryByIdUnitTest" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
         description = s"create with key then archive then queryById",
         interaction = s =>
           for {
-            s <- s.create((), id, Some(key))
+            s <- s.create((), id, key.some)
             s <- s.archive(id, ()).get
             s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
           } yield s,
+        transaction = mkTx(
+          mkCreate(id, key.some),
+          // same note as test above, accessing archive via consuming exercise
+          mkExercise(id, consuming = true, key = key.some, byKey = false),
+          mkFetch(id, key.some, byKey = false),
+        ),
         expected = Left(AlreadyConsumed(id, ())),
       )
     )
@@ -1326,7 +1496,7 @@ class NextGenContractStateMachineSpec
   // *** try querybyid endtry
   "beginTryQueryByIdEndTryUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1356,7 +1526,7 @@ class NextGenContractStateMachineSpec
   // *** try querybyid rollback
   "beginTryQueryByIdRollbackUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1373,6 +1543,7 @@ class NextGenContractStateMachineSpec
               }
               s <- rollbackTryForTesting(s)
             } yield s,
+          transaction = mkRollbackTx(mkFetch(id, key.some, byKey = false)),
           expected = Right(
             StateMachineResult.emptyWith(
               inputContractIds = Set[V.ContractId](id)
@@ -1386,7 +1557,7 @@ class NextGenContractStateMachineSpec
   // *** try querybyid rollback (reads survive rollback)
   "queryByIdTryRollbackQueryByIdUnitTest" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1397,7 +1568,7 @@ class NextGenContractStateMachineSpec
             s <- Right(s.beginTry)
             s <- {
               val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
-              resume(Some(key))
+              resume(key.some)
             }
             s <- rollbackTryForTesting(s)
             s <- s
@@ -1417,7 +1588,7 @@ class NextGenContractStateMachineSpec
   // *** querybyid then archive
   "queryByIdArchiveUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1446,7 +1617,7 @@ class NextGenContractStateMachineSpec
   // *** querybyid then archive then querybyid
   "queryByIdArchiveQueryByIdUnitTest" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1455,11 +1626,15 @@ class NextGenContractStateMachineSpec
           for {
             s <- {
               val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
-              resume(Some(key))
+              resume(key.some)
             }
             s <- s.archive(id, ()).get
             s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
           } yield s,
+        transaction = mkTx(
+          mkExercise(id, consuming = true, key = key.some, byKey = false),
+          mkFetch(id, key.some, byKey = false),
+        ),
         expected = Left(AlreadyConsumed(id, ())),
       )
     )
@@ -1468,7 +1643,7 @@ class NextGenContractStateMachineSpec
   // ** create, archive, querybyid
   "createArchiveQueryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1481,6 +1656,12 @@ class NextGenContractStateMachineSpec
               s <- s.archive(id, ()).get
               s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
             } yield s,
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            // same note as test above, accessing archive via consuming exercise
+            mkExercise(id, consuming = true, optkey, byKey = false),
+            mkFetch(id, optkey, byKey = false),
+          ),
           expected = Left(AlreadyConsumed(id, ())),
         )
       },
@@ -1491,7 +1672,7 @@ class NextGenContractStateMachineSpec
   // *** create, archive, querybyid, endtry
   "createBeginTryArchiveEndTryQueryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1516,7 +1697,7 @@ class NextGenContractStateMachineSpec
   // *** create, archive, querybyid, rollback
   "createBeginTryArchiveRollbackQueryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
@@ -1533,14 +1714,22 @@ class NextGenContractStateMachineSpec
               s <- rollbackTryForTesting(s)
               s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
             } yield s,
-          Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+          transaction = mkTx(
+            mkCreate(id, optkey),
+            mkRollbackTx(
+              // same note as test above, accessing archive via consuming exercise
+              mkExercise(id, consuming = true, optkey, byKey = false)
+            ),
+            mkFetch(id, optkey, byKey = false),
+          ),
+          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
             NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(
               StateMachineResult.emptyWith(
                 localKeys =
                   if (optkey.isEmpty) Map.empty
                   else
-                    Map(key -> Vector(id))
+                    Map(key.gkey -> Vector(id))
               )
             ),
           ),
@@ -1552,11 +1741,10 @@ class NextGenContractStateMachineSpec
   // *** try create, archive, rollback, querybyid
   "beginTryCreateArchiveRollbackQueryByIdUnitTests" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
     runUnitTestWithoutAndWithKey(
       key,
       optkey => {
-
         UnitTest(
           description =
             s"beginTry then create (with key ${if (optkey.isEmpty) "unset" else "set"}) then archive then rollbackTry" +
@@ -1569,7 +1757,15 @@ class NextGenContractStateMachineSpec
               s <- rollbackTryForTesting(s)
               s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
             } yield s,
-          Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
+          transaction = mkTx(
+            mkRollbackTx(
+              mkCreate(id, optkey),
+              // same note as test above, accessing archive via consuming exercise
+              mkExercise(id, consuming = true, optkey, byKey = false),
+            ),
+            mkFetch(id, optkey, byKey = false),
+          ),
+          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
             NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
           ),
@@ -1582,7 +1778,7 @@ class NextGenContractStateMachineSpec
   // *** simple querybykey
   "simpleQuerybykeyUnitTest" - {
     val id = cid(1)
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1604,10 +1800,11 @@ class NextGenContractStateMachineSpec
               }
             }
           } yield s,
+        transaction = mkTx(mkQueryByKey(Vector(id), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
           )
         ),
       )
@@ -1616,7 +1813,7 @@ class NextGenContractStateMachineSpec
 
   // *** querybykey (varying n)
   "querybykeyUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
     val ids = Vector(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).map(cid)
 
     runUnitTestQueryToN(
@@ -1631,10 +1828,11 @@ class NextGenContractStateMachineSpec
               replyToNeedsKeyWith = ids.take(n),
               state = s,
             ),
+          transaction = mkTx(mkQueryByKey(ids.take(n), key, exhaustive = true)),
           expected = Right(
             StateMachineResult.emptyWith(
               inputContractIds = ids.take(n).toSet,
-              globalKeyInputs = Map(key -> KeyMapping(queue = ids.take(n), exhaustive = true)),
+              globalKeyInputs = Map(key.gkey -> KeyMapping(queue = ids.take(n), exhaustive = true)),
             )
           ),
         ),
@@ -1643,7 +1841,7 @@ class NextGenContractStateMachineSpec
 
   // *** negative querynbykey
   "querybykeyNegativeUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1659,7 +1857,7 @@ class NextGenContractStateMachineSpec
 
   // *** queryNByKey with n=0
   "queryNByKeyZeroUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
@@ -1669,22 +1867,32 @@ class NextGenContractStateMachineSpec
           Right(s)
         },
         expected = Right(StateMachineResult.empty),
+        // framework does not support catching thrown exceptions from transactions
+        // TODO[#30913]: extract to separate test
+//        transaction =
+//          Some(mkTx(mkQueryByKey(Vector.empty[V.ContractId], key, exhaustive = false))),
       )
     )
   }
 
   // *** queryNByKey empty exhaustive search
   "queryNByKeyEmptyExhaustiveUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
 
     runUnitTest(
       UnitTest(
         description = s"queryNByKey(n=3) returning [] + Finished",
-        interaction =
-          s => queryNByKeyAndReplyToNeedsKey(key = key, n = 3, replyToNeedsKeyWith = Seq.empty, state = s),
+        interaction = s =>
+          queryNByKeyAndReplyToNeedsKey(
+            key = key,
+            n = 3,
+            replyToNeedsKeyWith = Seq.empty,
+            state = s,
+          ),
+        transaction = mkTx(mkQueryByKey(Vector.empty, key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector.empty, exhaustive = true))
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector.empty, exhaustive = true))
           )
         ),
       )
@@ -1694,12 +1902,10 @@ class NextGenContractStateMachineSpec
   // ** queryNByKey continuation
   // *** queryNByKey with InProgress (multi-step)
   "queryNByKeyMultiStepContinuationUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
     val ids = Vector(1, 2, 3, 4, 5).map(cid)
     val firstBatch = ids.take(3)
     val secondBatch = ids.drop(3)
-
-    case object TestToken extends NeedKeyContinuationToken
 
     runUnitTest(
       UnitTest(
@@ -1707,7 +1913,7 @@ class NextGenContractStateMachineSpec
         interaction = s => {
           val Left(nk) = s.queryNByKey(key, 6): @unchecked
           nk.n shouldBe 6
-          nk.resume(firstBatch.view, NeedKeyProgression.InProgress(TestToken)) match {
+          nk.resume(firstBatch.view, NeedKeyProgression.InProgress(())) match {
             case Left(nk2) =>
               nk2.n shouldBe 3
               nk2.resume(secondBatch.view, NeedKeyProgression.Finished) match {
@@ -1723,10 +1929,12 @@ class NextGenContractStateMachineSpec
             case Right(_) => fail("expected NeedKeys continuation after InProgress, got Right")
           }
         },
+        // visitQueryByKey does only support calling needskeys once per node
+        transaction = mkTx(mkQueryByKey(ids, key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = ids.toSet,
-            globalKeyInputs = Map(key -> KeyMapping(queue = ids, exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = ids, exhaustive = true)),
           )
         ),
       )
@@ -1735,13 +1943,11 @@ class NextGenContractStateMachineSpec
 
   // *** queryNByKey continuation returns more results than requested
   "queryNByKeyContinuationExtraResultsUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
     val ids = Vector(1, 2, 3, 4, 5).map(cid)
     val firstBatch = ids.take(1)
     val secondBatch = ids.drop(1)
     val firstThree = ids.take(3)
-
-    case object TestToken extends NeedKeyContinuationToken
 
     ignoreUnitTest(
       UnitTest(
@@ -1750,7 +1956,7 @@ class NextGenContractStateMachineSpec
         interaction = s => {
           val Left(nk) = s.queryNByKey(key, 3): @unchecked
           nk.n shouldBe 3
-          nk.resume(firstBatch.view, NeedKeyProgression.InProgress(TestToken)) match {
+          nk.resume(firstBatch.view, NeedKeyProgression.InProgress(())) match {
             case Left(nk2) =>
               nk2.n shouldBe 2
               nk2.resume(secondBatch.view, NeedKeyProgression.Finished) match {
@@ -1766,10 +1972,12 @@ class NextGenContractStateMachineSpec
             case Right(_) => fail("expected NeedKeys continuation after InProgress, got Right")
           }
         },
+        // visitQueryByKey does only support calling needskeys once per node
+        transaction = mkTx(mkQueryByKey(firstThree, key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = firstThree.toSet,
-            globalKeyInputs = Map(key -> KeyMapping(queue = firstThree, exhaustive = false)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = firstThree, exhaustive = false)),
           )
         ),
       )
@@ -1778,11 +1986,9 @@ class NextGenContractStateMachineSpec
 
   // *** queryNByKey with duplicates across batches (dedup)
   "queryNByKeyDuplicateInSingleResponseUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
     val id1 = cid(1)
     val id2 = cid(2)
-
-    case object TestToken extends NeedKeyContinuationToken
 
     runUnitTest(
       UnitTest(
@@ -1790,10 +1996,10 @@ class NextGenContractStateMachineSpec
         interaction = s => {
           val Left(nk) = s.queryNByKey(key, 3): @unchecked
           nk.n shouldBe 3
-          nk.resume(Seq(id1, id1).view, NeedKeyProgression.InProgress(TestToken)) match {
+          nk.resume(Seq(id1, id1).view, NeedKeyProgression.InProgress(())) match {
             case Left(nk2) =>
               nk2.n shouldBe 2
-              nk2.resume(Seq(id1, id2).view, NeedKeyProgression.InProgress(TestToken)) match {
+              nk2.resume(Seq(id1, id2).view, NeedKeyProgression.InProgress(())) match {
                 case Left(nk3) =>
                   nk3.n shouldBe 1
                   nk3.resume(Seq.empty[V.ContractId].view, NeedKeyProgression.Finished) match {
@@ -1811,23 +2017,39 @@ class NextGenContractStateMachineSpec
             case Right(_) => fail("expected NeedKeys after batch 1, got Right")
           }
         },
+        // visitQueryByKey errors on duplicate contracts so we can only test supplying it with the deduped list, HH only
+        // test below
+        transaction = mkTx(mkQueryByKey(Vector(id1, id2), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id1, id2),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
+            globalKeyInputs =
+              Map(key.gkey -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
           )
         ),
       )
     )
   }
 
-  // *** queryNByKey with duplicate spanning two batches
-  "queryNByKeyDuplicateAcrossBatchesUnitTest" - {
-    val key = gkey("foo")
+  "queryNByKeyDuplicateInSingleResponseHHUnitTest" - {
+    val key = "foo"
     val id1 = cid(1)
     val id2 = cid(2)
 
-    case object TestToken extends NeedKeyContinuationToken
+    runUnitTest(
+      UnitTest(
+        description = s"queryNByKey(n=3) with duplicates across batches — dedup",
+        transaction = mkTx(mkQueryByKey(Vector(id1, id1, id2), key, exhaustive = false)),
+        expected = Left(InconsistentContractKey(key)),
+      )
+    )
+  }
+
+  // *** queryNByKey with duplicate spanning two batches
+  "queryNByKeyDuplicateAcrossBatchesUnitTest" - {
+    val key = "foo"
+    val id1 = cid(1)
+    val id2 = cid(2)
 
     runUnitTest(
       UnitTest(
@@ -1836,10 +2058,10 @@ class NextGenContractStateMachineSpec
         interaction = s => {
           val Left(nk) = s.queryNByKey(key, 3): @unchecked
           nk.n shouldBe 3
-          nk.resume(Seq(id1).view, NeedKeyProgression.InProgress(TestToken)) match {
+          nk.resume(Seq(id1).view, NeedKeyProgression.InProgress(())) match {
             case Left(nk2) =>
               nk2.n shouldBe 2
-              nk2.resume(Seq(id1, id2).view, NeedKeyProgression.InProgress(TestToken)) match {
+              nk2.resume(Seq(id1, id2).view, NeedKeyProgression.InProgress(())) match {
                 case Left(nk3) =>
                   nk3.n shouldBe 1
                   nk3.resume(Seq.empty[V.ContractId].view, NeedKeyProgression.Finished) match {
@@ -1857,10 +2079,13 @@ class NextGenContractStateMachineSpec
             case Right(_) => fail("expected NeedKeys after batch 1, got Right")
           }
         },
+        // visitQueryByKey errors on duplicate contracts so we can only test supplying it with the deduped list
+        transaction = mkTx(mkQueryByKey(Vector(id1, id2), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id1, id2),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
+            globalKeyInputs =
+              Map(key.gkey -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
           )
         ),
       )
@@ -1870,7 +2095,7 @@ class NextGenContractStateMachineSpec
   // ** queryNByKey caching
   // *** queryNByKey same key twice
   "queryNByKeySameKeyTwiceCachingUnitTest" - {
-    val key = gkey("foo")
+    val key = "foo"
     val ids = Vector(1, 2, 3).map(cid)
 
     runUnitTest(
@@ -1878,7 +2103,12 @@ class NextGenContractStateMachineSpec
         description = s"queryNByKey(n=4) then queryNByKey(n=2) same key — cached",
         interaction = s =>
           for {
-            s <- queryNByKeyAndReplyToNeedsKey(key = key, n = 4, replyToNeedsKeyWith = ids, state = s)
+            s <- queryNByKeyAndReplyToNeedsKey(
+              key = key,
+              n = 4,
+              replyToNeedsKeyWith = ids,
+              state = s,
+            )
             result <- s
               .queryNByKey(key, 2)
               .getOrElse(fail("unexpected NeedKeys on second queryNByKey")): ErrOr[
@@ -1887,10 +2117,12 @@ class NextGenContractStateMachineSpec
             (mp, s) = result
             _ = mp.queue shouldBe ids.take(2)
           } yield s,
+        // visitQueryByKey does only support calling needskeys with final result
+        transaction = mkTx(mkQueryByKey(ids, key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = ids.toSet,
-            globalKeyInputs = Map(key -> KeyMapping(queue = ids, exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = ids, exhaustive = true)),
           )
         ),
       )
@@ -1899,8 +2131,8 @@ class NextGenContractStateMachineSpec
 
   // *** queryNByKey inside try, rollback, then same key (reads survive rollback)
   "queryNByKeyTryRollbackQueryNByKeyUnitTest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -1924,10 +2156,82 @@ class NextGenContractStateMachineSpec
             (mp, s) = result
             _ = mp.queue shouldBe Vector(id)
           } yield s,
+        // we cannot observe the needskeys or cached return, so we ommit the second query and observe that the state
+        // returns as expected either way -- ensuring the read survived the rollback`
+        transaction = mkRollbackTx(mkQueryByKey(Vector(id), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
+          )
+        ),
+      )
+    )
+  }
+
+  // *** querynbykey twice but inconsistent order (HH-only)
+  "querynbykeyTwiceSameKeyInconsistantOrderUnitTest" - {
+    val key = "foo"
+    val id1 = cid(1)
+    val id2 = cid(2)
+
+    runUnitTest(
+      UnitTest(
+        description =
+          s"QueryByKey([cid1, cid2], exhaustive = true); QueryByKey([cid2, cid1], exhaustive = true)",
+        transaction = mkTx(
+          mkQueryByKey(Vector(id1, id2), key, exhaustive = true),
+          mkQueryByKey(Vector(id2, id1), key, exhaustive = true),
+        ),
+        expected = Left(InconsistentContractKey(key)),
+      )
+    )
+  }
+
+  // *** querynbykey twice but varying (but consistent) exhaustiveness (HH-only)
+  "querynbykeyTwiceSameKeyVaryingOrderUnitTest" - {
+    val key = "foo"
+    val id1 = cid(1)
+    val id2 = cid(2)
+
+    runUnitTest(
+      UnitTest(
+        description =
+          s"QueryByKey([cid1, cid2], exhaustive = false); QueryByKey([cid1, cid2], exhaustive = true) (first query was for 2, second for > 2)",
+        transaction = mkTx(
+          mkQueryByKey(Vector(id1, id2), key, exhaustive = false),
+          mkQueryByKey(Vector(id1, id2), key, exhaustive = true),
+        ),
+        expected = Right(
+          StateMachineResult.emptyWith(
+            inputContractIds = Set[V.ContractId](id1, id2),
+            globalKeyInputs =
+              Map(key.gkey -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
+          )
+        ),
+      )
+    )
+  }
+
+  // *** querynbykey twice but inconsistent exhaustiveness (HH-only)
+  "querynbykeyTwiceSameKeyVaryingExhaustiveUnitTest" - {
+    val key = "foo"
+    val id1 = cid(1)
+    val id2 = cid(2)
+
+    runUnitTest(
+      UnitTest(
+        description =
+          s"QueryByKey([cid1, cid2], exhaustive = true); QueryByKey([cid1, cid2], exhaustive = false) (inconsistent)",
+        transaction = mkTx(
+          mkQueryByKey(Vector(id1, id2), key, exhaustive = true),
+          mkQueryByKey(Vector(id1, id2), key, exhaustive = false),
+        ),
+        expected = Right(
+          StateMachineResult.emptyWith(
+            inputContractIds = Set[V.ContractId](id1, id2),
+            globalKeyInputs =
+              Map(key.gkey -> KeyMapping(queue = Vector(id1, id2), exhaustive = true)),
           )
         ),
       )
@@ -1937,8 +2241,8 @@ class NextGenContractStateMachineSpec
   // ** create, querybykey
   // *** create then querybykey
   "createQuerybykeyUnitTest" - {
+    val key = "foo"
     val ids = Vector(1, 2, 3, 4).map(cid)
-    val key = gkey("foo")
 
     runUnitTestQueryToN(
       maxN = 10,
@@ -1948,7 +2252,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- ids.foldLeftM[ErrOr, LLState[Unit]](s) { (s, id) =>
-                s.create((), id, Some(key))
+                s.create((), id, key.some)
               }
               s <- s.queryNByKey(key, n) match {
                 case Right(errOrResult) if n <= ids.size =>
@@ -1959,14 +2263,30 @@ class NextGenContractStateMachineSpec
                   } yield s.asInstanceOf[State[Unit]]
                 case Left(nk) if n > ids.size =>
                   nk.n shouldBe (n - ids.size)
-                  Right(s)
+                  val Right(errOrResult) =
+                    nk.resume(Seq.empty.view, NeedKeyProgression.Finished): @unchecked
+                  for {
+                    result <- errOrResult
+                    (_, s) = result
+                  } yield s
                 case Right(_) => fail(s"expected NeedKeys for n=$n but got Right")
                 case Left(nk) => fail(s"unexpected NeedKeys for n=$n: $nk")
               }
             } yield s,
+          transaction = mkTx(
+            (ids.map(mkCreate(_, key.some)) :+ mkQueryByKey(
+              ids.reverse.take(n),
+              key,
+              exhaustive = n > ids.size,
+            )).map(nodeToTx)*
+          ),
           expected = Right(
             StateMachineResult.emptyWith(
-              localKeys = Map(key -> ids.reverse)
+              localKeys = Map(key.gkey -> ids.reverse),
+              globalKeyInputs =
+                if (n > ids.size)
+                  Map(key.gkey -> KeyMapping(queue = Vector.empty, exhaustive = true))
+                else Map.empty,
             )
           ),
         ),
@@ -1975,8 +2295,8 @@ class NextGenContractStateMachineSpec
 
   // *** querybykey then create
   "querybykeyCreateUnitTest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -1995,8 +2315,12 @@ class NextGenContractStateMachineSpec
                 case Left(nk) => fail(s"unexpected NeedKeys: $nk")
               }
             }
-            s <- s.create((), id, Some(key))
+            s <- s.create((), id, key.some)
           } yield s,
+        transaction = mkTx(
+          mkQueryByKey(Vector(id), key, exhaustive = true),
+          mkCreate(id, key.some),
+        ),
         expected = Left(DuplicateContractId(id)),
       )
     )
@@ -2004,15 +2328,15 @@ class NextGenContractStateMachineSpec
 
   // *** create then queryNByKey, ledger returns local cid
   "createThenQueryNByKeyLedgerReturnsLocalCidUnitTest" - {
+    val key = "foo"
     val id1 = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
         description = s"create(key=K), queryNByKey(K, 2), ledger returns same cid",
         interaction = s =>
           for {
-            s <- s.create((), id1, Some(key))
+            s <- s.create((), id1, key.some)
             s <- queryNByKeyAndReplyToNeedsKey(
               key = key,
               n = 2,
@@ -2021,6 +2345,7 @@ class NextGenContractStateMachineSpec
             )
           } yield s,
         expected = Left(DuplicateContractId(id1)),
+        // we cannot test this with a transaction
       )
     )
   }
@@ -2028,15 +2353,15 @@ class NextGenContractStateMachineSpec
   // ** querybykey, archive
   // *** create then archive then querybykey
   "createArchiveQueryByKeyUnitTests" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
         description = s"create with key then archive then queryBykey",
         interaction = s =>
           for {
-            s <- s.create((), id, Some(key))
+            s <- s.create((), id, key.some)
             s <- s.archive(id, ()).get
             s <- {
               val Left(nk) = s.queryNByKey(key, 1): @unchecked
@@ -2056,10 +2381,29 @@ class NextGenContractStateMachineSpec
     )
   }
 
+  "createArchiveQueryByKeyHHUnitTests" - {
+    val key = "foo"
+    val id = cid(1)
+
+    runUnitTest(
+      UnitTest(
+        description = s"create with key then archive then queryBykey",
+        transaction = mkTx(
+          mkCreate(id, key.some),
+          mkExercise(id, key = key.some, consuming = true),
+          mkQueryByKey(Vector(id), key, exhaustive = true),
+        ),
+        // for some reason, this gives InconsistentContractKey (but the important bit is that it gives a Left, the
+        // reason is less important
+        expected = Left(InconsistentContractKey(key)),
+      )
+    )
+  }
+
   // *** querybykey then archive
   "queryByKeyCreateArchiveUnitTests" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -2080,10 +2424,14 @@ class NextGenContractStateMachineSpec
             }
             s <- s.archive(id, ()).get
           } yield s,
+        transaction = mkTx(
+          mkQueryByKey(Vector(id), key, exhaustive = true),
+          mkExercise(id, key = key.some, consuming = true),
+        ),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
             consumed = Set(id),
           )
         ),
@@ -2093,9 +2441,9 @@ class NextGenContractStateMachineSpec
 
   //  ** archive, querybykey
   "createQueryByKeyArchiveQueryByKeyRollbackUnitTest" - {
+    val key = "foo"
     val ids = Vector(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).map(cid)
     val perm = Vector(10, 8, 7, 3, 6, 1, 9, 4, 2, 5).map(cid)
-    val key = gkey("foo")
 
     (0 to 10).foreach { nrToArchive =>
       val toArchive = perm.take(nrToArchive)
@@ -2113,7 +2461,7 @@ class NextGenContractStateMachineSpec
                 interaction = s =>
                   for {
                     s <- ids.foldLeft[ErrOr[LLState[Unit]]](Right(s)) { (acc, id) =>
-                      acc.flatMap(_.create((), id, Some(key)))
+                      acc.flatMap(_.create((), id, key.some))
                     }
                     result <- s
                       .queryNByKey(key, n)
@@ -2132,9 +2480,19 @@ class NextGenContractStateMachineSpec
                     (km2, s) = result
                     _ = km1.queue.filterNot(toArchiveSet) shouldBe km2.queue
                   } yield s,
+                transaction = mkTx(
+                  (ids.map(mkCreate(_, key.some))
+                    :+ mkQueryByKey(ids.reverse.take(n), key, exhaustive = false)
+                    :++ toArchive.map(mkExercise(_, key = key.some, consuming = true))
+                    :+ mkQueryByKey(
+                      ids.reverse.take(n).filterNot(toArchiveSet),
+                      key,
+                      exhaustive = false,
+                    )).map(nodeToTx)*
+                ),
                 expected = Right(
                   StateMachineResult.emptyWith(
-                    localKeys = Map(key -> ids.reverse),
+                    localKeys = Map(key.gkey -> ids.reverse),
                     consumed = perm.take(nrToArchive).toSet,
                   )
                 ),
@@ -2149,8 +2507,8 @@ class NextGenContractStateMachineSpec
   // ** querybykey, trycatch
   // *** try querybykey endtry
   "beginTryQueryByKeyEndTryUnitTest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -2172,10 +2530,11 @@ class NextGenContractStateMachineSpec
             }
             s <- Right(s.endTry)
           } yield s,
+        transaction = mkTx(mkQueryByKey(Vector(id), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
           )
         ),
       )
@@ -2184,8 +2543,8 @@ class NextGenContractStateMachineSpec
 
   // *** try querybykey rollback
   "beginTryQueryByKeyRollbackUnitTest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -2207,10 +2566,11 @@ class NextGenContractStateMachineSpec
             }
             s <- rollbackTryForTesting(s)
           } yield s,
+        transaction = mkRollbackTx(mkQueryByKey(Vector(id), key, exhaustive = true)),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
           )
         ),
       )
@@ -2220,8 +2580,8 @@ class NextGenContractStateMachineSpec
   // ** querybyid, querybykey
   // *** queryById then queryByKey
   "queryByKeyQueryNByKeyUnittest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -2230,7 +2590,7 @@ class NextGenContractStateMachineSpec
           for {
             s <- {
               val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
-              resume(Some(key))
+              resume(key.some)
             }
             s <- {
               val Left(nk) = s.queryNByKey(key, 1): @unchecked
@@ -2245,10 +2605,14 @@ class NextGenContractStateMachineSpec
               }
             }
           } yield s,
+        transaction = mkTx(
+          mkFetch(id, key = key.some, byKey = false),
+          mkQueryByKey(Vector(id), key, exhaustive = true),
+        ),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
           )
         ),
       )
@@ -2257,8 +2621,8 @@ class NextGenContractStateMachineSpec
 
   // *** queryByKey then queryById
   "queryNByKeyQueryByKeyUnittest" - {
+    val key = "foo"
     val id = cid(1)
-    val key = gkey("foo")
 
     runUnitTest(
       UnitTest(
@@ -2279,10 +2643,14 @@ class NextGenContractStateMachineSpec
             }
             s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState[Unit]]
           } yield s,
+        transaction = mkTx(
+          mkQueryByKey(Vector(id), key, exhaustive = true),
+          mkFetch(id, key = key.some, byKey = false),
+        ),
         expected = Right(
           StateMachineResult.emptyWith(
             inputContractIds = Set[V.ContractId](id),
-            globalKeyInputs = Map(key -> KeyMapping(queue = Vector(id), exhaustive = true)),
+            globalKeyInputs = Map(key.gkey -> KeyMapping(queue = Vector(id), exhaustive = true)),
           )
         ),
       )
@@ -2293,18 +2661,18 @@ class NextGenContractStateMachineSpec
   // ** queryNByKey
   // *** inconsistent querybyid/queryNByKey
   // **** positive case: queryById reports contract+key EXISTS that queryNByKey DID NOT find
-  // TODO[#30398]: implmement when its ready!
+  // TODO[#30398]: implement when it's ready!
   "inconsistentQueryByIdBetweenQueryNByKeyUnittest" - {
     "positive case" - {
+      val key = "foo"
       val id1 = cid(1)
       val id2 = cid(2)
-      val key = gkey("foo")
 
       runUnitTest(
         UnitTest(
           description =
-            s"inconsistent case: queryNByKey($key, 2) finding [cid1] (exhaustive) then queryById finds " +
-              s"cid2 with key=$key",
+            s"inconsistent case: queryNByKey(${key}, 2) finding [cid1] (exhaustive) then queryById finds " +
+              s"cid2 with key=${key}",
           interaction = s =>
             for {
               s <- queryNByKeyAndReplyToNeedsKey(
@@ -2315,32 +2683,35 @@ class NextGenContractStateMachineSpec
               )
               s <- {
                 val Left(NeedContract(resume)) = s.queryById(id2): @unchecked;
-                resume(Some(key))
+                resume(key.some)
               }
             } yield s,
+          transaction = mkTx(
+            mkQueryByKey(Vector(id1), key, exhaustive = true),
+            mkFetch(id2, key = key.some, byKey = false),
+          ),
           expected = Left(InconsistentContractKey(key)),
         )
       )
     }
 
     // **** negative case: queryNByKey reports contract+key EXISTS that queryById DID NOT find
-    // TODO[#30398]: implmement when its ready!
     "negative case" - {
+      val key = "foo"
       val id1 = cid(1)
       val id2 = cid(2)
-      val key = gkey("foo")
 
       runUnitTest(
         UnitTest(
           description =
-            s"inconsistent case: queryById(1) finds a contract with key $key, then queryNByKey($key, 2) finds [cid2] " +
+            s"inconsistent case: queryById(1) finds a contract with key ${key}, then queryNByKey(${key}, 2) finds [cid2] " +
               s"(exshaustive) (cid1 missing) " +
-              s"finds cid2 with key=$key",
+              s"finds cid2 with key=${key}",
           interaction = s =>
             for {
               s <- {
                 val Left(NeedContract(resume)) = s.queryById(id1): @unchecked;
-                resume(Some(key))
+                resume(key.some)
               }
               s <- queryNByKeyAndReplyToNeedsKey(
                 key = key,
@@ -2349,6 +2720,10 @@ class NextGenContractStateMachineSpec
                 state = s,
               )
             } yield s,
+          transaction = mkTx(
+            mkFetch(id1, key = key.some, byKey = false),
+            mkQueryByKey(Vector(id2), key, exhaustive = true),
+          ),
           expected = Left(InconsistentContractKey(key)),
         )
       )
@@ -2357,8 +2732,11 @@ class NextGenContractStateMachineSpec
 
   case class UnitTest(
       description: String,
-      interaction: LLState[Unit] => ErrOr[LLState[Unit]],
+      interaction: Option[LLState[Unit] => ErrOr[LLState[Unit]]],
       expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
+      // when both an interaction and transaction are supplied, evaluating the set transactino should lead to the same
+      // expected result. Note that there is no 1-to-1 mapping between interactions and transactions.
+      transaction: Option[HasTxNodes[?]] = None,
   )
 
   object UnitTest {
@@ -2366,7 +2744,38 @@ class NextGenContractStateMachineSpec
         description: String,
         interaction: LLState[Unit] => Either[TransactionError, LLState[Unit]],
         expected: OptStateMachineResult,
-    ): UnitTest = UnitTest(description, interaction, allModesMap(expected))
+        transaction: HasTxNodes[?],
+    ): UnitTest =
+      UnitTest(description, Some(interaction), allModesMap(expected), Some(transaction))
+
+    def apply(
+        description: String,
+        interaction: LLState[Unit] => Either[TransactionError, LLState[Unit]],
+        expected: OptStateMachineResult,
+    ): UnitTest =
+      UnitTest(description, Some(interaction), allModesMap(expected))
+
+    def apply(
+        description: String,
+        interaction: LLState[Unit] => Either[TransactionError, LLState[Unit]],
+        expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
+    ): UnitTest =
+      UnitTest(description, Some(interaction), expected)
+
+    def apply(
+        description: String,
+        interaction: LLState[Unit] => Either[TransactionError, LLState[Unit]],
+        expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
+        transaction: HasTxNodes[?],
+    ): UnitTest =
+      UnitTest(description, Some(interaction), expected, Some(transaction))
+
+    def apply(
+        description: String,
+        expected: OptStateMachineResult,
+        transaction: HasTxNodes[?],
+    ): UnitTest =
+      UnitTest(description, None, allModesMap(expected), Some(transaction))
 
     def allModesMap(expected: OptStateMachineResult) =
       Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
@@ -2374,5 +2783,11 @@ class NextGenContractStateMachineSpec
         NextGenContractStateMachine.Mode.NoKey -> expected,
       )
   }
+
+}
+
+object NextGenContractStateMachineSpec {
+
+  class TxBuilder extends NodeIdTransactionBuilder with TestNodeBuilder
 
 }

@@ -7,9 +7,12 @@ package speedy
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.speedy.SError._
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers}
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  GlobalKeyWithMaintainers,
+  NeedKeyProgression,
+}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 object Question {
@@ -40,9 +43,9 @@ object Question {
     final case class NeedKey(
         key: GlobalKeyWithMaintainers,
         limit: Int,
-        continuationToken: Option[NeedKeyContinuationToken],
+        progression: NeedKeyProgression.CanContinue,
         committers: Set[Party],
-        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
+        callback: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Unit,
     ) extends Update
   }
 }

@@ -12,13 +12,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
-  EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
   SimulationSettings,
   SimulationVerifier,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.BftOrderingSimulationTest.SimEpochChecker
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.data.StorageHelpers
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.scalatest.matchers.should.Matchers
@@ -36,7 +36,7 @@ final class BftOrderingVerifier(
     offboardingTimes: Map[BftNodeId, CantonTimestamp],
     initialNodes: Seq[BftNodeId],
     simSettings: SimulationSettings,
-    epochLength: EpochLength,
+    simEpochChecker: SimEpochChecker,
     override val loggerFactory: NamedLoggerFactory,
 ) extends SimulationVerifier
     with Matchers
@@ -116,7 +116,7 @@ final class BftOrderingVerifier(
         newOffboardingTimes,
         Seq.empty,
         simulationSettings,
-        epochLength,
+        simEpochChecker,
         loggerFactory,
       )
     newVerifier.currentLog ++= currentLog
@@ -189,7 +189,7 @@ final class BftOrderingVerifier(
               block.requests.exists(_.value.microsecondsSinceEpoch >= offboardingTime.toMicros)
 
             if (blockPartOfLastEpoch) {
-              val lastBlockInEpoch = computeLastBlockInEpoch(blockNumber)
+              val lastBlockInEpoch = simEpochChecker.getLastBlockOfSameEpoch(blockNumber)
               if (blockNumber == lastBlockInEpoch) {
                 offboardingProgress(node) = OffboardingStatus.FinishedOffboarding
               } else {
@@ -200,11 +200,6 @@ final class BftOrderingVerifier(
 
       case None =>
     }
-
-  // TODO(#19289) this assumes an ever static epoch length
-  private def computeLastBlockInEpoch(blockNumber: BlockNumber): BlockNumber = BlockNumber(
-    epochLength * ((blockNumber / epochLength) + 1) - 1
-  )
 
   private def checkStores(): Unit = {
     implicit val traceContext: TraceContext = TraceContext.empty

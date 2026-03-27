@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.participant.admin.data.ContractImportMode.{Accept, Validation}
 import com.digitalasset.canton.participant.admin.data.RepairContract
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.protocol.*
@@ -41,27 +42,29 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.{ValueParty, ValueRecord}
+import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.{Assertion, Tag}
 
-import java.time.Duration
 import java.util.UUID
-import scala.annotation.nowarn
 import scala.concurrent.{Future, Promise}
 import scala.language.implicitConversions
 
 /** The RepairService"Integration"Test is more of a unit test addressing coverage of the
   * RepairService matrix of actually encountered contract states and expected contract states, but
-  * implemented using the integration test framework. Accordingly the test checks are based on
+  * implemented using the integration test framework. Accordingly, the test checks are based on
   * testing.pcs_search to test the outcomes (not always visible via the ledger api in the case of
   * move).
   */
-@nowarn("msg=match may not be exhaustive")
 sealed trait RepairServiceIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
     with RepairTestUtil
-    with NeedsNewLfContractIds {
+    with NeedsNewLfContractIds
+    with SecurityTestSuite {
+
+  // Workaround to avoid false errors reported by IDEA.
+  implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
 
   protected def cantonTestsPath: String
 
@@ -73,7 +76,6 @@ sealed trait RepairServiceIntegrationTest
 
   override val defaultParticipant: String = "participant1"
 
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var initialized = false
 
   // Placing this helper in every test enables running any subset of tests in any order and provides syntactic sugar
@@ -131,7 +133,8 @@ sealed trait RepairServiceIntegrationTest
       initialized = true
     }
 
-    val Seq(alice, bob) = Seq(aliceS, bobS).map(_.toPartyId(participant1))
+    val alice = aliceS.toPartyId(participant1)
+    val bob = bobS.toPartyId(participant1)
     test(alice, bob)
   }
 
@@ -152,7 +155,7 @@ sealed trait RepairServiceIntegrationTest
   )(implicit env: TestConsoleEnvironment): A = {
     import env.*
 
-    val contract = createContractInstance(participant2, acmeName, acmeId, alice, bob)
+    val contract = createContractInstance(participant2, acmeId, alice, bob)
 
     try {
       code(contract)
@@ -172,13 +175,8 @@ sealed trait RepairServiceIntegrationTest
   }
 }
 
-sealed trait RepairServiceIntegrationTestStableLf
-    extends RepairServiceIntegrationTest
-    with SecurityTestSuite {
+sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrationTest {
   override protected def cantonTestsPath: String = CantonTestsPath
-
-  // Workaround to avoid false errors reported by IDEA.
-  implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
 
   "RepairService" should {
     "prevent concurrent synchronizer reconnect" when {
@@ -229,7 +227,12 @@ sealed trait RepairServiceIntegrationTestStableLf
         withParticipantsInitialized { (alice, bob) =>
           withContractFromParticipant2AndAcme(alice, bob) { contractInstance =>
             import env.*
-            participant1.repair.add(daId, testedProtocolVersion, Seq(contractInstance))
+            participant1.repair.add(
+              daId,
+              testedProtocolVersion,
+              Seq(contractInstance),
+              contractImportMode = Validation,
+            )
 
             withSynchronizerConnected(daName) {
               eventually() {
@@ -252,12 +255,16 @@ sealed trait RepairServiceIntegrationTestStableLf
           }
 
         withParticipantsInitialized { (alice, bob) =>
-          val c1 = createContractInstance(participant2, acmeName, acmeId, alice, bob)
-            .copy(representativePackageId = "should-not-be-used")
-          val c2 = createContractInstance(participant2, acmeName, acmeId, alice, bob)
+          val c1 = createContractInstance(participant2, acmeId, alice, bob)
+          val c2 = createContractInstance(participant2, acmeId, alice, bob)
 
           val acsBeforeRepair = queryContracts().toSet
-          participant1_.repair.add(daId, testedProtocolVersion, Seq(c1, c2))
+          participant1_.repair.add(
+            daId,
+            testedProtocolVersion,
+            Seq(c1, c2),
+            contractImportMode = Validation,
+          )
 
           withSynchronizerConnected(daName) {
             eventually() {
@@ -274,70 +281,8 @@ sealed trait RepairServiceIntegrationTestStableLf
                     .value
                     .underlying shouldBe expectedRepairContract.contract.createdAt.time
 
-                  // Limitation: ImportAcsOld assigns the representative package ID as the original contract package ID
-                  // TODO(#24610): Adapt to assert that the representative package ID of the repair contract is used
-                  queriedCreatedEvent.representativePackageId shouldBe expectedRepairContract.contract.templateId.packageId
+                  queriedCreatedEvent.representativePackageId shouldBe expectedRepairContract.representativePackageId
               }
-            }
-          }
-        }
-      }
-
-      // TODO(#24610) - Un-ignore this test part once #27325 has been re-implemented; depends on repair.add
-      "contract has been unassigned" taggedAs SecurityTest(
-        SecurityTest.Property.Integrity,
-        "virtual shared ledger",
-        Attack(
-          "a participant",
-          "initiates an unassignment, but the assignment cannot be completed due to concurrent topology changes",
-          "resurrect the contract via repair",
-        ),
-      ) ignore { implicit env =>
-        withParticipantsInitialized { (alice, bob) =>
-          import env.*
-
-          val contractInstance = withSynchronizerConnected(daName) {
-            val created = createContract(participant1, alice, bob)
-            val contract = readContractInstance(participant1, daName, daId, created)
-            withSynchronizerConnected(acmeName) {
-              participant1.ledger_api.commands
-                .submit_unassign(
-                  bob,
-                  Seq(created.toLf),
-                  daId,
-                  acmeId,
-                )
-            }.discard
-
-            eventually() {
-              val res =
-                participant1.testing.pcs_search(
-                  daName,
-                  exactId = contract.contract.contractId.coid,
-                )
-              res.headOption.map(_._1) shouldBe Some(false)
-            }
-
-            // Create another contract to bump clean head
-            createContractInstance(participant1, daName, daId, alice, bob).discard
-
-            // Adjust the reassignment counter such that the contract can be added again (participant1.repair.add);
-            // assuming the acme synchronizer disappears after this unassignment, following a recovery of the contract
-            // to the da synchronizer
-            contract.copy(reassignmentCounter = ReassignmentCounter(2))
-          }
-
-          // TODO(#24610) - Note that the repair.add fails because it goes through ACS import (Old)
-          participant1.repair.add(daId, testedProtocolVersion, Seq(contractInstance))
-
-          // Ideally we should be able to query the contract as active
-          withSynchronizerConnected(daName) {
-            eventually() {
-              val res = participant1.testing.pcs_search(
-                daName,
-                exactId = contractInstance.contract.contractId.coid,
-              )
-              res.headOption.map(_._1) shouldBe Some(true)
             }
           }
         }
@@ -350,10 +295,15 @@ sealed trait RepairServiceIntegrationTestStableLf
           val created = withSynchronizerConnected(daName) {
             createContract(participant1, alice, bob)
           }
-          val repairContract = readContractInstance(participant1, daName, daId, created)
+          val repairContract = readContractInstance(participant1, daId, created)
 
           participant1.repair.purge(daName, Seq(repairContract.contract.contractId))
-          participant1.repair.add(daId, testedProtocolVersion, Seq(repairContract))
+          participant1.repair.add(
+            daId,
+            testedProtocolVersion,
+            Seq(repairContract),
+            contractImportMode = Validation,
+          )
         }
       }
     }
@@ -364,11 +314,16 @@ sealed trait RepairServiceIntegrationTestStableLf
           import env.*
 
           val contractInstance = withSynchronizerConnected(daName) {
-            createArchivedContractInstance(participant1, daName, daId, alice, bob)
+            createArchivedContractInstance(participant1, daId, alice, bob)
           }
 
           loggerFactory.assertThrowsAndLogs[CommandFailure](
-            participant1.repair.add(daId, testedProtocolVersion, Seq(contractInstance)),
+            participant1.repair.add(
+              daId,
+              testedProtocolVersion,
+              Seq(contractInstance),
+              contractImportMode = Validation,
+            ),
             _.commandFailureMessage should include(
               "Cannot add previously archived contract ContractId("
             ),
@@ -382,8 +337,8 @@ sealed trait RepairServiceIntegrationTestStableLf
 
           val (contractUsd, contractChf) = withSynchronizerConnected(daName) {
             (
-              createContractInstance(participant1, daName, daId, alice, bob, "USD"),
-              createContractInstance(participant1, daName, daId, alice, bob, "CHF"),
+              createContractInstance(participant1, daId, alice, bob, "EUR"),
+              createContractInstance(participant1, daId, alice, bob, "CHF"),
             )
           }
 
@@ -399,42 +354,90 @@ sealed trait RepairServiceIntegrationTestStableLf
           }
 
           loggerFactory.assertThrowsAndLogs[CommandFailure](
-            participant1.repair.add(daId, testedProtocolVersion, Seq(contractChfWithUsdContractId)),
+            participant1.repair.add(
+              daId,
+              testedProtocolVersion,
+              Seq(contractChfWithUsdContractId),
+              contractImportMode = Accept,
+            ),
             _.commandFailureMessage should include(
-              "Failed to authenticate contract with id"
+              "exists in synchronizer, but does not match with contract being added"
             ),
           )
         }
       }
 
-      // TODO(#24610): Add test cases for ContractImportMode.ACCEPT to showcase that authentication is bypassed
-      "contract authentication fails" in { implicit env =>
-        withParticipantsInitialized { (alice, bob) =>
+      "contract authentication behavior based on ContractImportMode" should {
+
+        // Helper to generate a completely novel, unauthenticated contract by faking the Contract ID.
+        // This avoids polluting the sequencer, ensuring the node doesn't crash upon reconnection.
+        def generateTamperedContract(alice: PartyId, bob: PartyId, currency: String)(implicit
+            env: TestConsoleEnvironment
+        ): RepairContract = {
           import env.*
 
-          val contract = withSynchronizerConnected(daName) {
-            createContractInstance(participant1, daName, daId, alice, bob, "YEN")
+          val baseContract = withSynchronizerConnected(daName) {
+            createContractInstance(participant1, daId, alice, bob, currency)
           }
 
-          val modifiedContract = {
-            val fci = contract.contract
-            contract.copy(contract =
-              LfFatContractInst.fromCreateNode(
-                fci.toCreateNode,
-                fci.createdAt.copy(fci.createdAt.time.add(Duration.ofSeconds(1337L))),
-                fci.authenticationData,
-              )
+          // Mutate the last character of the hex string to create a syntactically valid but cryptographically faked ID
+          val originalCidStr = baseContract.contract.contractId.coid
+          val newLastChar = if (originalCidStr.last == '0') '1' else '0'
+          val fakeCidStr = originalCidStr.init + newLastChar
+          val fakeCid = LfContractId.assertFromString(fakeCidStr)
+
+          val fci = baseContract.contract
+          baseContract.copy(contract =
+            LfFatContractInst.fromCreateNode(
+              fci.toCreateNode.copy(coid = fakeCid), // The faked ID alone makes it fail auth
+              fci.createdAt,
+              fci.authenticationData,
+            )
+          )
+        }
+
+        "fail validation when tampered and mode is Validation" in { implicit env =>
+          withParticipantsInitialized { (alice, bob) =>
+            import env.*
+            val tamperedContract = generateTamperedContract(alice, bob, "YEN")
+
+            // Validation mode strictly checks the hash/signature and must reject the faked ID
+            loggerFactory.assertThrowsAndLogs[CommandFailure](
+              participant1.repair.add(
+                acmeId,
+                testedProtocolVersion,
+                Seq(tamperedContract),
+                contractImportMode = Validation,
+              ),
+              _.commandFailureMessage should include("Failed to authenticate contract with id"),
             )
           }
+        }
 
-          loggerFactory.assertThrowsAndLogs[CommandFailure](
+        "bypass validation when tampered and mode is Accept" in { implicit env =>
+          withParticipantsInitialized { (alice, bob) =>
+            import env.*
+            val tamperedContract = generateTamperedContract(alice, bob, "RUB")
+
+            // Accept mode bypasses strict cryptographic validation, accepts the contract as is
             participant1.repair.add(
               acmeId,
               testedProtocolVersion,
-              Seq(modifiedContract),
-            ),
-            _.commandFailureMessage should include(s"Failed to authenticate contract with id"),
-          )
+              Seq(tamperedContract),
+              contractImportMode = Accept,
+            )
+
+            // Verify the faked contract was successfully forced into the ACS
+            withSynchronizerConnected(acmeName) {
+              eventually() {
+                val res = participant1.testing.pcs_search(
+                  acmeName,
+                  exactId = tamperedContract.contract.contractId.coid,
+                )
+                res.headOption.map(_._1) shouldBe Some(true)
+              }
+            }
+          }
         }
       }
     }
@@ -447,7 +450,7 @@ sealed trait RepairServiceIntegrationTestStableLf
           import env.*
 
           val contract = withSynchronizerConnected(daName) {
-            createContractInstance(participant1, daName, daId, alice, bob)
+            createContractInstance(participant1, daId, alice, bob)
           }
 
           participant1.repair.purge(daName, Seq(contract.contract.contractId))
@@ -568,7 +571,7 @@ sealed trait RepairServiceIntegrationTestStableLf
           import env.*
 
           val contract = withSynchronizerConnected(daName) {
-            createContractInstance(participant1, daName, daId, alice, bob)
+            createContractInstance(participant1, daId, alice, bob)
           }
           val cid = contract.contract.contractId
 
@@ -611,12 +614,17 @@ sealed trait RepairServiceIntegrationTestStableLf
           import env.*
 
           val contract = withSynchronizerConnected(daName) {
-            createContractInstance(participant1, daName, daId, alice, alice)
+            createContractInstance(participant1, daId, alice, alice)
           }
           val cid = contract.contract.contractId
 
           participant1.repair.purge(daName, Seq(cid))
-          participant1.repair.add(acmeId, testedProtocolVersion, Seq(contract))
+          participant1.repair.add(
+            acmeId,
+            testedProtocolVersion,
+            Seq(contract),
+            contractImportMode = Validation,
+          )
           participant1.repair.change_assignation(Seq(cid), acmeName, daName)
         }
       }
@@ -666,8 +674,8 @@ sealed trait RepairServiceIntegrationTestStableLf
 
           val (activeContract, activeContractModified) = withSynchronizerConnected(daName) {
             (
-              createContractInstance(participant1, daName, daId, alice, bob, "USD"),
-              createContractInstance(participant1, daName, daId, alice, bob, "CHF"),
+              createContractInstance(participant1, daId, alice, bob, "EUR"),
+              createContractInstance(participant1, daId, alice, bob, "CHF"),
             )
           }
 
@@ -688,9 +696,10 @@ sealed trait RepairServiceIntegrationTestStableLf
               acmeId,
               testedProtocolVersion,
               Seq(modifiedContractId),
+              contractImportMode = Accept,
             ),
             _.commandFailureMessage should include(
-              s"Failed to authenticate contract with id"
+              s"already exists in the contract store, but differs from contract to be created"
             ),
           )
         }
@@ -702,16 +711,26 @@ sealed trait RepairServiceIntegrationTestStableLf
 
           val (activeContract1, activeContract2) = withSynchronizerConnected(daName) {
             (
-              createContractInstance(participant1, daName, daId, alice, bob),
-              createContractInstance(participant1, daName, daId, alice, bob),
+              createContractInstance(participant1, daId, alice, bob),
+              createContractInstance(participant1, daId, alice, bob),
             )
           }
 
           val cidActive1 = activeContract1.contract.contractId
           val cidActive2 = activeContract2.contract.contractId
 
-          participant1.repair.add(acmeId, testedProtocolVersion, Seq(activeContract1))
-          participant1.repair.add(acmeId, testedProtocolVersion, Seq(activeContract2))
+          participant1.repair.add(
+            acmeId,
+            testedProtocolVersion,
+            Seq(activeContract1),
+            contractImportMode = Validation,
+          )
+          participant1.repair.add(
+            acmeId,
+            testedProtocolVersion,
+            Seq(activeContract2),
+            contractImportMode = Validation,
+          )
 
           participant1.repair.purge(
             acmeName,
@@ -725,7 +744,12 @@ sealed trait RepairServiceIntegrationTestStableLf
               .map(_._1) shouldBe Some(false)
           }
 
-          participant1.repair.add(acmeId, testedProtocolVersion, Seq(activeContract2))
+          participant1.repair.add(
+            acmeId,
+            testedProtocolVersion,
+            Seq(activeContract2),
+            contractImportMode = Validation,
+          )
 
           withSynchronizerConnected(acmeName) {
             participant1.testing
@@ -750,7 +774,7 @@ sealed trait RepairServiceIntegrationTestStableLf
 
           val contractInstance = withSynchronizerConnected(daName) {
             val created = createContract(participant1, alice, bob)
-            val contract = readContractInstance(participant1, daName, daId, created)
+            val contract = readContractInstance(participant1, daId, created)
             withSynchronizerConnected(acmeName) {
               participant1.ledger_api.commands
                 .submit_unassign(bob, Seq(created.toLf), daId, acmeId)
@@ -781,7 +805,7 @@ sealed trait RepairServiceIntegrationTestStableLf
               )
 
             val created = createContract(participant1, charlie, charlie)
-            val contract = readContractInstance(participant1, daName, daId, created)
+            val contract = readContractInstance(participant1, daId, created)
             contract
           }
           val contractId = contractInstance.contract.contractId
@@ -905,14 +929,103 @@ sealed trait RepairServiceIntegrationTestDevLf extends RepairServiceIntegrationT
                     absolutizedContractInstance.templateId.packageId,
                   )
                 ),
+                contractImportMode = Validation,
               ),
               _.commandFailureMessage should (
                 include("InvalidIndependentOfSystemState") and include(
-                  "has key without maintainers"
+                  "key without maintainers"
                 )
               ),
             )
           }
+      }
+    }
+  }
+}
+
+/** Enables the alpha multi-synchronizer support flag for a given test runner.
+  *
+  * Multi-synchronizer support is necessary for tests requiring an accurate `ReassignmentCounter`
+  * when adding contracts via `repair.add` (which delegates to `repair.import_acs` for this
+  * capability).
+  */
+sealed trait WithMultiSynchronizerSupport extends RepairServiceIntegrationTest {
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransforms(
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(true)
+        ),
+      )
+}
+
+/** Contains tests that ONLY work when alphaMultiSynchronizerSupport = true */
+sealed trait RepairServiceMultiSynchronizerTests extends RepairServiceIntegrationTest {
+
+  "RepairServiceMultiSynchronizerTests" must {
+
+    "run test only with enabled `alphaMultiSynchronizerSupport`" in { implicit env =>
+      import env.*
+
+      participants.local.foreach { participant =>
+        assert(
+          participant.config.parameters.alphaMultiSynchronizerSupport,
+          s"alphaMultiSynchronizerSupport must be true for ${participant.name} in this test suite",
+        )
+      }
+    }
+  }
+
+  "RepairService.add_contract (multi-synchronizer support)" should {
+    "add contract" when {
+      "contract has been unassigned" taggedAs SecurityTest(
+        SecurityTest.Property.Integrity,
+        "virtual shared ledger",
+        Attack(
+          "a participant",
+          "initiates an unassignment, but the assignment cannot be completed due to concurrent topology changes",
+          "resurrect the contract via repair",
+        ),
+      ) in { implicit env =>
+        withParticipantsInitialized { (alice, bob) =>
+          import env.*
+
+          val contractInstance = withSynchronizerConnected(daName) {
+            val created = createContract(participant1, alice, bob)
+            val contract = readContractInstance(participant1, daId, created)
+            withSynchronizerConnected(acmeName) {
+              participant1.ledger_api.commands
+                .submit_unassign(bob, Seq(created.toLf), daId, acmeId)
+            }.discard
+
+            eventually() {
+              val res =
+                participant1.testing.pcs_search(daName, exactId = contract.contract.contractId.coid)
+              res.headOption.map(_._1) shouldBe Some(false)
+            }
+
+            createContractInstance(participant1, daId, alice, bob).discard
+            contract.copy(reassignmentCounter = ReassignmentCounter(2))
+          }
+
+          participant1.repair.add(
+            daId,
+            testedProtocolVersion,
+            Seq(contractInstance),
+            contractImportMode = Validation,
+          )
+
+          withSynchronizerConnected(daName) {
+            eventually() {
+              val res = participant1.testing.pcs_search(
+                daName,
+                exactId = contractInstance.contract.contractId.coid,
+              )
+              res.headOption.map(_._1) shouldBe Some(true)
+            }
+          }
+        }
       }
     }
   }
@@ -937,6 +1050,12 @@ sealed trait RepairServiceBftSequencerPostgresTest {
 class RepairServiceIntegrationTestPostgresStableLf
     extends RepairServiceIntegrationTestStableLf
     with RepairServiceBftSequencerPostgresTest
+
+class RepairServiceIntegrationTestPostgresStableLf_MultiSync
+    extends RepairServiceIntegrationTestStableLf
+    with RepairServiceBftSequencerPostgresTest
+    with WithMultiSynchronizerSupport
+    with RepairServiceMultiSynchronizerTests
 
 @NuckTest
 class RepairServiceIntegrationTestPostgresDevLf

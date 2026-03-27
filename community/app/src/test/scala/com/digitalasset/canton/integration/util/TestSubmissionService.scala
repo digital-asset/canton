@@ -66,7 +66,7 @@ import com.digitalasset.daml.lf.engine.{
   ResultPrefetch,
 }
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.*
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine, *}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import io.grpc.stub.StreamObserver
 import org.scalatest.OptionValues.*
@@ -87,7 +87,7 @@ class TestSubmissionService(
     packageResolver: PackageResolver,
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
-    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
+    contractStateMode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.default,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -416,7 +416,8 @@ object TestSubmissionService {
       customKeyResolver: Option[TestKeyResolver] = None,
       checkAuthorization: Boolean = true,
       enableLfDev: Boolean = false,
-      contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.devDefault,
+      contractStateMode: NextGenContractStateMachine.Mode =
+        NextGenContractStateMachine.Mode.devDefault,
   )(implicit env: TestConsoleEnvironment): TestSubmissionService = {
     import env.*
 

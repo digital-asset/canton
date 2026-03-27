@@ -78,7 +78,8 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
           .trySignAndCreate(
             setTrafficPurchased,
             synchronizerCrypto.currentSnapshotApproximation.futureValueUS,
-            None,
+            signingTimestampOverrides =
+              None, // not needed for unit tests; session signing keys disabled
           )
           .failOnShutdown
           .futureValue

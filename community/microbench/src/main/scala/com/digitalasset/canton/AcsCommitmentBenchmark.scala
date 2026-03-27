@@ -21,70 +21,29 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{
-  LtHash16,
-  SyncCryptoClient,
-  SynchronizerSnapshotSyncCryptoApi,
-}
+import com.digitalasset.canton.crypto.{LtHash16, SyncCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.ledger.participant.state.{
-  AcsChange,
-  ContractStakeholdersAndReassignmentCounter,
-}
+import com.digitalasset.canton.ledger.participant.state.{AcsChange, ContractStakeholdersAndReassignmentCounter}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.participant.event.RecordTime
-import com.digitalasset.canton.participant.metrics.{
-  ConnectedSynchronizerMetrics,
-  ParticipantHistograms,
-  ParticipantMetrics,
-}
+import com.digitalasset.canton.participant.metrics.{ConnectedSynchronizerMetrics, ParticipantHistograms, ParticipantMetrics}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.commitmentsFromStkhdCmts
-import com.digitalasset.canton.participant.store.memory.{
-  InMemoryAcsCommitmentConfigStore,
-  InMemoryAcsCommitmentStore,
-  InMemoryActiveContractStore,
-  InMemoryContractStore,
-}
-import com.digitalasset.canton.participant.store.{
-  AcsCommitmentStore,
-  AcsCounterParticipantConfigStore,
-}
+import com.digitalasset.canton.participant.store.memory.{InMemoryAcsCommitmentConfigStore, InMemoryAcsCommitmentStore, InMemoryActiveContractStore, InMemoryContractStore}
+import com.digitalasset.canton.participant.store.{AcsCommitmentStore, AcsCounterParticipantConfigStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
-  DefaultOpenEnvelope,
-  SignedProtocolMessage,
-}
+import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
-import com.digitalasset.canton.sequencing.protocol.{
-  AggregationRule,
-  Batch,
-  MessageId,
-  OpenEnvelope,
-  Recipients,
-}
+import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId, OpenEnvelope, Recipients}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{
-  ParticipantId,
-  SynchronizerId,
-  TestingTopology,
-  UniqueIdentifier,
-}
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, TestingTopology, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  HasExecutorServiceGeneric,
-  LfPartyId,
-  ReassignmentCounter,
-  RepairCounter,
-  SynchronizerAlias,
-  TestEssentials,
-}
+import com.digitalasset.canton.{HasExecutorServiceGeneric, LfPartyId, ReassignmentCounter, RepairCounter, SynchronizerAlias, TestEssentials}
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
 import org.openjdk.jmh.annotations.*
@@ -430,8 +389,7 @@ class AcsCommitmentBenchmark
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
-        any[Option[CantonTimestamp]],
-        any[CantonTimestamp],
+        any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
@@ -453,6 +411,7 @@ class AcsCommitmentBenchmark
       localId,
       sequencerClient,
       synchronizerCrypto,
+      None,
       sortedReconciliationIntervalsProvider,
       store,
       _ => (),
@@ -653,7 +612,11 @@ class AcsCommitmentBenchmark
             .create(synchronizerId, participant, localId, period, cmt, testedProtocolVersion)
         snapshotF.flatMap { snapshot =>
           SignedProtocolMessage
-            .trySignAndCreate(payload, snapshot, None)
+            .trySignAndCreate(
+              payload,
+              snapshot,
+              None, // not needed for benchmark tests; session signing keys disabled
+            )
         }
       }
     )

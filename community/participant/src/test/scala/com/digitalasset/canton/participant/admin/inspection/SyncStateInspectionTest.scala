@@ -124,7 +124,6 @@ sealed trait SyncStateInspectionTest
       Eval.now(participantNodePersistentState),
       mock[SynchronizerConnectionConfigStore],
       timeouts,
-      JournalGarbageCollectorControl.NoOp,
       mock[ConnectedSynchronizersLookup],
       mock[SyncCryptoApiParticipantProvider],
       localId,

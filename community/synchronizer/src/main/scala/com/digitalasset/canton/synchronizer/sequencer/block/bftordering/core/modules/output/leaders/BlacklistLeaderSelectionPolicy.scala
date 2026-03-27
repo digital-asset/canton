@@ -25,7 +25,6 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     initialState: BlacklistLeaderSelectionPolicyState,
     initialOrderingTopology: OrderingTopology,
     config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
-    epochLength: EpochLength,
     store: OutputMetadataStore[E],
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
@@ -33,10 +32,11 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     extends LeaderSelectionPolicy[E]
     with NamedLogging {
 
-  private var state = initialState
+  private var state =
+    BlacklistLeaderSelectionPolicyStateWithTopology(initialState, initialOrderingTopology)
 
   private var blockToLeader: Map[BlockNumber, BftNodeId] =
-    initialState.computeBlockToLeader(initialOrderingTopology, config, epochLength)
+    state.computeBlockToLeader(config)
 
   private val nodesToPunish: mutable.Set[BftNodeId] = mutable.Set.empty
 
@@ -77,7 +77,7 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
       s"Leader selection is asked for leaders in epoch $epochNumber but expects epoch ${state.epochNumber}",
     )
 
-    state.computeLeaders(orderingTopology, config)
+    state.computeLeaders(config)
   }
 
   private def updateState(
@@ -87,13 +87,13 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     assert(EpochNumber(state.epochNumber + 1) == epochNumber)
 
     logger.trace(s"old blacklist state $state")(TraceContext.empty)
-    state = state.update(topology, config, epochLength, blockToLeader, nodesToPunish.toSet)
+    state = state.update(topology, config, blockToLeader, nodesToPunish.toSet)
     logger.trace(s"new blacklist state $state")(TraceContext.empty)
     nodesToPunish.clear()
 
     updateMetrics(topology)
 
-    val newBlockToLeader = state.computeBlockToLeader(topology, config, epochLength)
+    val newBlockToLeader = state.computeBlockToLeader(config)
     blockToLeader = newBlockToLeader
   }
 
@@ -123,14 +123,14 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     )
     updateState(orderingTopology, epochNumber)
 
-    store.insertLeaderSelectionPolicyState(epochNumber, state)
+    store.insertLeaderSelectionPolicyState(epochNumber, state.state)
   }
 
   private def updateMetrics(topology: OrderingTopology): Unit = {
     metrics.blacklistLeaderSelectionPolicyMetrics.cleanupBlacklistGauges(topology.nodes)
 
     topology.nodes.foreach { node =>
-      val epochsBlacklisted: Long = state.blacklist.get(node) match {
+      val epochsBlacklisted: Long = state.state.blacklist.get(node) match {
         case Some(BlacklistStatus.OnTrial(numberOfConsecutiveFailedAttempts)) => 0L
         case Some(BlacklistStatus.Blacklisted(failedAttemptsBefore, epochsLeftUntilNewTrial)) =>
           epochsLeftUntilNewTrial
@@ -149,7 +149,6 @@ object BlacklistLeaderSelectionPolicy {
 
   def create[E <: Env[E]](
       state: BlacklistLeaderSelectionPolicyState,
-      config: BftBlockOrdererConfig,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       orderingTopology: OrderingTopology,
       store: OutputMetadataStore[E],
@@ -160,9 +159,6 @@ object BlacklistLeaderSelectionPolicy {
       state,
       orderingTopology,
       blacklistLeaderSelectionPolicyConfig,
-      EpochLength(
-        config.epochLength
-      ), // TODO(#19289) support variable epoch lengths or leave the default if not relevant
       store,
       metrics,
       loggerFactory,

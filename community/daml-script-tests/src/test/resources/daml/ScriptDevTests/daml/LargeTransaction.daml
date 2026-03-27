@@ -81,7 +81,7 @@ template ListUtil
 
 rangeOfIntsToListTest : Script ()
 rangeOfIntsToListTest = script do
-    p <- allocateParty "Dummy"
+    p <- allocateParty "Dummy-LargeTransaction:rangeOfIntsToListTest"
     cid <- submit p do
       createCmd RangeOfInts with
         party = p
@@ -93,7 +93,7 @@ rangeOfIntsToListTest = script do
 
 rangeOfIntsToListContainerTest : Script ()
 rangeOfIntsToListContainerTest = script do
-    p <- allocateParty "Dummy"
+    p <- allocateParty "Dummy-LargeTransaction:rangeOfIntsToListContainerTest"
     cid <- submit p do
       createCmd RangeOfInts with
         party = p
@@ -106,7 +106,7 @@ rangeOfIntsToListContainerTest = script do
 
 listSizeTest : Script ()
 listSizeTest = script do
-  p <- allocateParty "Dummy"
+  p <- allocateParty "Dummy-LargeTransaction:listSizeTest"
   cid <- submit p do
     createCmd ListUtil with party = p
   cid <- submit p (exerciseCmd cid Size with list = [0, 1, 2, 3, 4, 5, 6])
@@ -116,7 +116,7 @@ listSizeTest = script do
 largeTransactionWithOneContractTest : Script ()
 largeTransactionWithOneContractTest = script do
     let expectedSize: Int = 100
-    p: Party <- allocateParty "Dummy"
+    p: Party <- allocateParty "Dummy-LargeTransaction:largeTransactionWithOneContractTest"
     cid: ContractId RangeOfInts <- submit p do
       createCmd RangeOfInts with party = p, start = 0, step = 1, size = expectedSize
     cid: ContractId ListContainer <- submit p do exerciseCmd cid ToListContainer
@@ -127,7 +127,7 @@ largeListAsAChoiceArgTest : Script ()
 largeListAsAChoiceArgTest = script do
     let expectedSize: Int = 100
     let list: [Int] = range 0 (\x -> x + 1) expectedSize
-    p: Party <- allocateParty "Dummy"
+    p: Party <- allocateParty "Dummy-LargeTransaction:largeListAsAChoiceArgTest"
     cid: ContractId ListUtil <- submit p do createCmd ListUtil with party = p
     cid: ContractId IntContainer <- submit p do exerciseCmd cid Size with list = list
     sizeContainer: IntContainer <- submit p do createAndExerciseCmd (IntFetchHelper p) (IntFetchExe cid)
@@ -136,7 +136,7 @@ largeListAsAChoiceArgTest = script do
 largeTransactionWithManyContractsTest : Script ()
 largeTransactionWithManyContractsTest = script do
     let expectedSize: Int = 100
-    p: Party <- allocateParty "Dummy"
+    p: Party <- allocateParty "Dummy-LargeTransaction:largeTransactionWithManyContractsTest"
     cid: ContractId RangeOfInts <- submit p do
       createCmd RangeOfInts with party = p, start = 0, step = 1, size = expectedSize
     cids: [ContractId IntContainer] <- submit p do exerciseCmd cid ToListOfIntContainers

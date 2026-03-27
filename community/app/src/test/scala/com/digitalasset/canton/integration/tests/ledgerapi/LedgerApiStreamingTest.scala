@@ -295,7 +295,6 @@ class LedgerApiStreamingTest extends CommunityIntegrationTest with SharedEnviron
                         includeTopologyEvents = None,
                       )
                     ),
-                    descendingOrder = false,
                   )
                 )
 

@@ -62,11 +62,6 @@ package object logging {
   ): LoggingEntry =
     "endInclusive" -> offset
 
-  private[services] def descendingOrder(
-      descendingOrder: Boolean
-  ): LoggingEntry =
-    "descendingOrder" -> descendingOrder
-
   private[services] def offset(offset: Long): LoggingEntry =
     "offset" -> offset.toString
 

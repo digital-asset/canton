@@ -107,6 +107,11 @@ class DbLogicalSyncPersistentState(
       SynchronizerId.fromString,
     )
 
+  override val partyReplicationIndexingStoreIfOnPREnabled: Option[DbPartyReplicationIndexingStore] =
+    Option.when(parameters.alphaOnlinePartyReplicationSupport.nonEmpty)(
+      new DbPartyReplicationIndexingStore(storage, synchronizerIdx, timeouts, loggerFactory)
+    )
+
   override def close(): Unit =
     LifeCycle.close(
       activeContractStore,

@@ -21,8 +21,8 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   FatContractInstance,
+  NextGenContractStateMachine,
   Node,
   TransactionCoder,
 }
@@ -115,7 +115,7 @@ class DisclosedContractNormalizationTest
     val underTest =
       new StoreBackedCommandInterpreter(
         engine = testEngine.engine,
-        contractStateMode = ContractStateMachine.Mode.default,
+        contractStateMode = NextGenContractStateMachine.Mode.default,
         participant = Ref.ParticipantId.assertFromString("anId"),
         packageResolver = testEngine.packageResolver,
         contractStore = mock[ContractStore],

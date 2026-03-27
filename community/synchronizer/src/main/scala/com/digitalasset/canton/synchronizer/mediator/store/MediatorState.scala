@@ -250,6 +250,9 @@ private[mediator] class MediatorState(
     } yield true).getOrElse(false)
   }
 
+  def allRequestsFinalizedTo(ts: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
+    checkAndPublishNewRecordTime(RequestId(ts))
+
   private def checkAndPublishNewRecordTime(
       requestId: RequestId
   )(implicit traceContext: TraceContext): Unit = {

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.config
 
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 
 import java.nio.file.Path
 

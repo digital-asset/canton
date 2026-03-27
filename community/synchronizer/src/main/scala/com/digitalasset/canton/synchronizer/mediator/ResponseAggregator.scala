@@ -53,7 +53,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
       sender: ParticipantId,
   ): Unit =
     firstResponseReceived.getAndUpdate(_.orElse(Some(responseTimestamp))).foreach { firstTs =>
-      timer.update(firstTs.toEpochMilli - responseTimestamp.toEpochMilli, TimeUnit.MILLISECONDS)(
+      timer.update(responseTimestamp.toEpochMilli - firstTs.toEpochMilli, TimeUnit.MILLISECONDS)(
         new MetricsContext(Map("sender" -> sender.uid.toString))
       )
     }

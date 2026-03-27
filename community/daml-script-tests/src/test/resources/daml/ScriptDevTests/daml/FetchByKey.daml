@@ -33,14 +33,14 @@ template Helper
          pure ()
 
 failLedger = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-FetchByKey:failLedger"
   submit p $ createAndExerciseCmd (Helper p) Fail1
 
 failSpeedy = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-FetchByKey:failSpeedy"
   submit p $ createAndExerciseCmd (Helper p) Fail2
 
 mustFail = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-FetchByKey:mustFail"
   submitMustFail p $ createAndExerciseCmd (Helper p) Fail1
   submitMustFail p $ createAndExerciseCmd (Helper p) Fail2

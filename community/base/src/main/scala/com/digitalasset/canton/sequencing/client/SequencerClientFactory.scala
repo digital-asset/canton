@@ -177,17 +177,13 @@ object SequencerClientFactory {
 
           } yield result
 
+        val sequencerTransports = SequencerTransports.from(
+          sequencerConnections.sequencerTrustThreshold,
+          sequencerConnections.sequencerLivenessMargin,
+          sequencerConnections.submissionRequestAmplification,
+          sequencerConnections.sequencerConnectionPoolDelays,
+        )
         for {
-          sequencerTransports <- EitherT
-            .fromEither[FutureUnlessShutdown](
-              SequencerTransports.from(
-                sequencerConnections.sequencerTrustThreshold,
-                sequencerConnections.sequencerLivenessMargin,
-                sequencerConnections.submissionRequestAmplification,
-                sequencerConnections.sequencerConnectionPoolDelays,
-              )
-            )
-            .leftMap(NonRetryableError.apply)
           // Reinitialize the sequencer counter allocator to ensure that passive->active replica transitions
           // correctly track the counters produced by other replicas
           _ <- EitherT.right(

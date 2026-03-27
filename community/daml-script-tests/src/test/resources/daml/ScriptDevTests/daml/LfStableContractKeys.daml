@@ -91,8 +91,8 @@ template Helper
 
 -- @LEDGER run LfStableContractKeys.EXPECTED.ledger
 run = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-LfStableContractKeys:run"
+  bob <- allocateParty "Bob-LfStableContractKeys:run"
 
   cid1 <- submit alice do
     createCmd TextKey with

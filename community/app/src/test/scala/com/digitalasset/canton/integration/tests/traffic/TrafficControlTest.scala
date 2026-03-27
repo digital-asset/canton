@@ -40,7 +40,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.OutdatedTrafficCost
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{

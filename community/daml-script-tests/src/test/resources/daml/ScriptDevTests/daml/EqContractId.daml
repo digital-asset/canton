@@ -12,7 +12,7 @@ template Foo with
   signatory p
 
 main = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-EqContractId:main"
   cid1 <- submit alice do createCmd Foo{p = alice}
   cid2 <- submit alice do createCmd Foo{p = alice}
   cid1 === cid1

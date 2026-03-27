@@ -18,6 +18,7 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides.createTimestampsOverrideWithDefaultOffset
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
@@ -1779,7 +1780,13 @@ trait LedgerAuthorizationIntegrationTest
         .finish()
       val signature =
         cryptoSnapshot
-          .sign(hash, SigningKeyUsage.ProtocolOnly, Some(environment.now))
+          .sign(
+            hash,
+            SigningKeyUsage.ProtocolOnly,
+            createTimestampsOverrideWithDefaultOffset(
+              environment.clock
+            ), // re-sign with new timestamps; does not affect the test
+          )
           .failOnShutdown
           .futureValue
 

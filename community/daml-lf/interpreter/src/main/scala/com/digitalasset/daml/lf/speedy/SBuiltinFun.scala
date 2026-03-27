@@ -22,11 +22,12 @@ import com.digitalasset.daml.lf.speedy.Speedy._
 import com.digitalasset.daml.lf.speedy.{SExpr => runTime}
 import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => compileTime}
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   FatContractInstance,
-  GlobalKey,
   GlobalKeyWithMaintainers,
+  KeyMapping,
+  NeedKey,
   SerializationVersion,
+  TransactionError,
 }
 import com.digitalasset.daml.lf.value.{Value => V}
 
@@ -2003,88 +2004,111 @@ private[lf] object SBuiltinFun {
 
   }
 
-  /** $insertLookup[T]
-    *    :: { key : key, maintainers: List Party}
-    *    -> Maybe (ContractId T)
-    *    -> ()
-    */
-  final case class SBUInsertLookupNode(templateId: TypeConId) extends UpdateBuiltin(2) {
-    override protected def executeUpdate(
-        args: ArraySeq[SValue],
-        machine: UpdateMachine,
-    ): Control[Nothing] = {
-      val keyVersion = machine.tmplId2TxVersion(templateId)
-      val pkgName = machine.tmplId2PackageName(templateId)
-      val cachedKey =
-        extractKey(NameOf.qualifiedNameOfCurrentFunc, pkgName, templateId, args(0))
-      val mbCoid = args(1) match {
-        case SOptional(mb) =>
-          mb.map {
-            case SContractId(coid) => coid
-            case _ => crash(s"Non contract id value when inserting lookup node")
-          }
-        case _ => crash(s"Non option value when inserting lookup node")
-      }
-      machine.ptx.insertLookup(
-        optLocation = machine.getLastLocation,
-        key = cachedKey,
-        result = mbCoid,
-        keyVersion = keyVersion,
-      ) match {
-        case Right(ptx) =>
-          machine.ptx = ptx
-          machine.metrics.incrCount[TxNodeCount]()
-          Control.Value(SUnit)
-        case Left(err) =>
-          Control.Error(err)
-      }
-    }
-  }
-
-  private[this] abstract class KeyOperation {
+  private[this] abstract class KeyOperation(
+                                             final val name: String,
+                                             // if false, feed n with 1
+                                             // if true, take n as snd argument on the stack
+                                             final val needN: Boolean) {
     val templateId: TypeConId
 
+    final val arity: Int = if (needN) 2 else 1
+
     def handleKnownInputKey(
-        gkey: GlobalKey,
-        keyMapping: ContractStateMachine.KeyMapping,
+        machine: UpdateMachine,
+        cachedKey: CachedKey,
+        result: KeyMapping,
+        payloads: List[SValue],
     ): Control[Nothing]
   }
 
-  private[this] object KeyOperation {
-    final class Fetch(override val templateId: TypeConId) extends KeyOperation {
+  object SPair {
+    private val fieldNames =
+      ImmArray(Ref.Name.assertFromString("_1"), Ref.Name.assertFromString("_2"))
 
-      @scala.annotation.nowarn("msg=match may not be exhaustive.")
+    def apply(fst: SValue, snd: SValue) =
+      SValue.SRecord(
+        stablepackages.StablePackagesV2.Tuple2,
+        fieldNames,
+        ArraySeq(fst, snd),
+      )
+  }
+
+  private[this] object KeyOperation {
+    final class Fetch(override val templateId: TypeConId) extends KeyOperation("FetchByKey", needN = false) {
+
       override final def handleKnownInputKey(
-          gkey: GlobalKey,
-          keyMapping: Vector[V.ContractId],
+          machine: UpdateMachine,
+          cachedKey: CachedKey,
+          result: KeyMapping,
+          payloads: List[SValue],
       ): Control[Nothing] =
-        keyMapping match {
-          case ContractStateMachine.KeyActive(coid) =>
+        result.queue.headOption match {
+          case Some(coid) =>
             Control.Value(SContractId(coid))
-          case ContractStateMachine.KeyInactive() =>
-            Control.Error(IE.ContractKeyNotFound(gkey))
+          case None =>
+            Control.Error(IE.ContractKeyNotFound(cachedKey.globalKey))
         }
     }
 
-    final class Lookup(override val templateId: TypeConId) extends KeyOperation {
-      @scala.annotation.nowarn("msg=match may not be exhaustive.")
+    final class Lookup(override val templateId: TypeConId) extends KeyOperation("LookupByKey", needN = false) {
+      import transaction.BackwardsCompatibilityImplicits._
+
       override final def handleKnownInputKey(
-          gkey: GlobalKey,
-          keyMapping: Vector[V.ContractId],
+          machine: UpdateMachine,
+          cachedKey: CachedKey,
+          result: KeyMapping,
+          payloads: List[SValue],
+      ): Control[Nothing] = {
+        machine.ptx.insertQueryByKey(
+          optLocation = machine.getLastLocation,
+          key = cachedKey,
+          result = result,
+          keyVersion = machine.tmplId2TxVersion(templateId),
+        ) match {
+          case Right(ptx) =>
+            machine.ptx = ptx
+            machine.metrics.incrCount[TxNodeCount]()
+            Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
+          case Left(err) =>
+            Control.Error(err)
+        }
+      }
+    }
+
+    final class QueryNByKey(override val templateId: TypeConId)
+        extends KeyOperation("QueryNByKey",  needN = true) {
+
+      override final def handleKnownInputKey(
+          machine: UpdateMachine,
+          cachedKey: CachedKey,
+          result: KeyMapping,
+          payloads: List[SValue],
       ): Control[Nothing] =
-        keyMapping match {
-          case ContractStateMachine.KeyActive(coid) =>
-            Control.Value(SOptional(Some(SContractId(coid))))
-          case ContractStateMachine.KeyInactive() =>
-            Control.Value(SOptional(None))
+        machine.ptx.insertQueryByKey(
+          optLocation = machine.getLastLocation,
+          key = cachedKey,
+          result = result,
+          keyVersion = machine.tmplId2TxVersion(templateId),
+        ) match {
+          case Right(ptx) =>
+            machine.ptx = ptx
+            machine.metrics.incrCount[TxNodeCount]()
+            Control.Value(
+              SList(
+                (result.queue.view.map(SContractId(_)) zip payloads)
+                  .map { case (cid, payload) => SValue.SPair(cid, payload) }
+                  .to(FrontStack)
+              )
+            )
+          case Left(err) =>
+            Control.Error(err)
         }
     }
   }
 
   private[speedy] sealed abstract class SBUKeyBuiltin(
       operation: KeyOperation
-  ) extends UpdateBuiltin(1)
-      with Product {
+  ) extends UpdateBuiltin(operation.arity) {
 
     override protected def executeUpdate(
         args: ArraySeq[SValue],
@@ -2096,40 +2120,57 @@ private[lf] object SBuiltinFun {
       val templateId = operation.templateId
 
       val keyValue = args(0)
-      val pkgName = machine.tmplId2PackageName(templateId)
-      val cachedKey =
-        extractKey(NameOf.qualifiedNameOfCurrentFunc, pkgName, templateId, keyValue)
-      if (cachedKey.maintainers.isEmpty) {
-        Control.Error(
-          IE.FetchEmptyContractKeyMaintainers(
-            cachedKey.templateId,
-            cachedKey.lfValue,
-            cachedKey.globalKey.packageName,
-          )
-        )
-      } else {
-        val gkey = cachedKey.globalKey
-        val keyMapping = for {
-          entry <- machine.ptx.contractState.resolveKey(gkey) match {
-            case Left(handle) =>
-              for {
-                result <- machine.needKeys(
-                  NameOf.qualifiedNameOfCurrentFunc,
-                  GlobalKeyWithMaintainers(gkey, cachedKey.maintainers),
-                  1,
-                  None,
-                )
-                (contracts, _) = result
-              } yield handle(contracts.map(_.contractId))
-            case Right(entry) =>
-              ContU.pure(entry)
-          }
-          (keyMapping, next) = entry
-          _ = machine.ptx = machine.ptx.copy(contractState = next)
-          _ <- keyMapping.toList.traverse(fetchTemplateK(machine, templateId, _))
-        } yield keyMapping
 
-        keyMapping.run(operation.handleKnownInputKey(gkey, _))
+      val n =
+        if (operation.needN) (getSInt64(args, 1) min Int.MaxValue).toInt else 1
+
+      if (n < 1) {
+        // TODO (#30398): add a proper error
+        crash(s"Invalid argument n for ${operation.name}: $n. Expected a positive integer.")
+      } else {
+
+        val pkgName = machine.tmplId2PackageName(templateId)
+        val cachedKey =
+          extractKey(NameOf.qualifiedNameOfCurrentFunc, pkgName, templateId, keyValue)
+        if (cachedKey.maintainers.isEmpty) {
+          Control.Error(
+            IE.FetchEmptyContractKeyMaintainers(
+              cachedKey.templateId,
+              cachedKey.lfValue,
+              cachedKey.globalKey.packageName,
+            )
+          )
+        } else {
+          val gkey = cachedKey.globalKey
+
+          def loop(
+                    queryResult: Either[NeedKey[CSMState], Either[TransactionError, (KeyMapping, CSMState)]]
+                  ): ContU[(KeyMapping, List[SValue])] =
+            queryResult match {
+              case Left(NeedKey(m, mbToken, resume)) =>
+                for {
+                  entry <- machine.needKeys(
+                    NameOf.qualifiedNameOfCurrentFunc,
+                    cachedKey.globalKeyWithMaintainers,
+                    m,
+                    mbToken,
+                  )
+                  (result, newMbtoken) = entry
+                  result <- loop(resume(result.view.map(_.contractId), newMbtoken))
+                } yield result
+              case Right(Right((mapping, next))) =>
+                for {
+                  payloads <- mapping.queue.toList.traverse(fetchTemplateK(machine, templateId, _))
+                  _ = machine.ptx = machine.ptx.copy(contractState = next)
+                } yield (mapping, payloads)
+              case Right(Left(error)) =>
+                ContU.throwError(convTxError(machine.ptx.nodes, operation.name, error))
+            }
+
+          loop(machine.ptx.contractState.queryNByKey(gkey, n)).run { case (keyMapping, payloads) =>
+            operation.handleKnownInputKey(machine, cachedKey, keyMapping, payloads)
+          }
+        }
       }
     }
   }
@@ -2137,6 +2178,7 @@ private[lf] object SBuiltinFun {
   /** $fetchKey[T]
     *   :: { key: key, maintainers: List Party }
     *   -> ContractId T
+    *  Does not insert node.
     */
   final case class SBUFetchKey(
       templateId: TypeConId
@@ -2145,10 +2187,20 @@ private[lf] object SBuiltinFun {
   /** $lookupKey[T]
     *   :: { key: key, maintainers: List Party }
     *   -> Maybe (ContractId T)
+    * Inserts a QueryByKey node
     */
   final case class SBULookupKey(
       templateId: TypeConId
   ) extends SBUKeyBuiltin(new KeyOperation.Lookup(templateId))
+
+  /** $queryNByKey[T]
+    *   :: { key: key, n: Int,  maintainers: List Party }
+    *   -> Maybe (ContractId T)
+    * Inserts a QueryByKey node
+    */
+  final case class SBUQueryNByKey(
+      templateId: TypeConId
+  ) extends SBUKeyBuiltin(new KeyOperation.QueryNByKey(templateId))
 
   /** $getTime :: Token -> Timestamp */
   final case object SBUGetTime extends UpdateBuiltin(1) {
@@ -2496,11 +2548,11 @@ private[lf] object SBuiltinFun {
   private[this] def extractParties(where: String, v: SValue): TreeSet[Party] =
     v match {
       case SList(vs) =>
-        TreeSet.from(vs.iterator.map {
+        TreeSet.empty(Party.ordering) ++ vs.iterator.map {
           case SParty(p) => p
           case x =>
             throw SErrorCrash(where, s"non-party value in list: $x")
-        })(Party.ordering)
+        }
       case SParty(p) =>
         TreeSet(p)(Party.ordering)
       case _ =>

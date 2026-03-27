@@ -101,7 +101,6 @@ class UpdateServiceRequestValidatorTest
           includeTopologyEvents = None,
         )
       ),
-      descendingOrder = false,
     )
 
   private val txReq = updatesReqBuilder(Some(Seq(templateId)))
@@ -409,7 +408,6 @@ class UpdateServiceRequestValidatorTest
         ) { case Right(req) =>
           req.startExclusive shouldEqual None
           req.endInclusive shouldEqual None
-          req.descendingOrder shouldEqual false
           val filtersByParty =
             req.updateFormat.includeTransactions.map(_.eventFormat.filtersByParty).value
           filtersByParty should have size 1
@@ -535,82 +533,6 @@ class UpdateServiceRequestValidatorTest
           )
         )
       }
-
-      "allow request with missing end_offset when descending_order is false" in {
-        inside(
-          UpdateServiceRequestValidator.validate(
-            txReq.update(_.optionalEndInclusive := None, _.descendingOrder := false),
-            ledgerEnd,
-          )
-        ) { case Right(req) =>
-          req.startExclusive shouldEqual None
-          req.endInclusive shouldEqual None
-          req.descendingOrder shouldEqual false
-          val filtersByParty =
-            req.updateFormat.includeTransactions.map(_.eventFormat.filtersByParty).value
-          filtersByParty should have size 1
-          hasExpectedFilters(req)
-          req.updateFormat.includeTransactions.value.eventFormat.verbose shouldEqual verbose
-        }
-      }
-
-      "return correct error when end_offset is zero and descending_order is false" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
-            txReq.withEndInclusive(0L).withDescendingOrder(false),
-            ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "NON_POSITIVE_OFFSET(8,0): Offset 0 in end_inclusive is not a positive integer: " +
-              "the offset has to be either a positive integer (>0) or not defined at all",
-          metadata = Map.empty,
-        )
-      }
-
-      "allow descending_order true when end_offset is present and positive" in {
-        inside(
-          UpdateServiceRequestValidator.validate(
-            txReq.update(_.descendingOrder := true),
-            ledgerEnd,
-          )
-        ) { case Right(req) =>
-          req.startExclusive shouldBe None
-          req.endInclusive shouldBe offset
-          req.descendingOrder shouldBe true
-          hasExpectedFilters(req)
-        }
-      }
-
-      "return correct error when end_offset is not present and descending_order is true" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
-            txReq
-              .update(_.optionalEndInclusive := None)
-              .update(_.descendingOrder := true),
-            ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "DESCENDING_ORDER_MISSING_END(8,0): end_inclusive is not provided when descending_order is true",
-          metadata = Map.empty,
-        )
-      }
-
-      "return correct error when end_offset is zero and descending_order is true" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
-            txReq.withEndInclusive(0L).update(_.descendingOrder := true),
-            ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "NON_POSITIVE_OFFSET(8,0): Offset 0 in end_inclusive is not a positive integer: " +
-              "the offset has to be a positive integer (>0)",
-          metadata = Map.empty,
-        )
-      }
-
     }
 
     "validating transaction by id requests" should {
