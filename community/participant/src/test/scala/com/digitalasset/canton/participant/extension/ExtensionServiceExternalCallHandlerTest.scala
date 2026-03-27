@@ -8,7 +8,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.participant.config.{EngineExtensionsConfig, ExtensionServiceConfig}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.engine.{ExternalCallError => LfExternalCallError}
 import org.scalatest.wordspec.AsyncWordSpec
 
 class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTest {

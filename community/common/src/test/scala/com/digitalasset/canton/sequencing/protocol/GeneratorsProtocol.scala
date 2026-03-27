@@ -47,7 +47,14 @@ final class GeneratorsProtocol(
   import generatorsMessages.*
 
   implicit val recipientsArb: Arbitrary[Recipients] = {
-    val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
+    val protocolVersionDependentRecipientArb = Arbitrary(
+      Gen.oneOf[Recipient](
+        Arbitrary.arbitrary[Member].map(MemberRecipient(_)),
+        Arbitrary.arbitrary[NonNegativeInt].map(MediatorGroupRecipient(_)),
+        Gen.const(SequencersOfSynchronizer),
+        Gen.const(AllMembersOfSynchronizer),
+      )
+    )
 
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))

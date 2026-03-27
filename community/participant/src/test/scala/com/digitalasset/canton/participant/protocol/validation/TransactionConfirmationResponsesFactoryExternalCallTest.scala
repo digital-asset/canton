@@ -9,6 +9,7 @@ import com.digitalasset.canton.protocol.LocalRejectError
 import com.digitalasset.canton.protocol.messages.{ConfirmationResponse, LocalApprove}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.daml.lf.data.{Bytes => LfBytes}
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Unit tests for external call consistency integration in TransactionConfirmationResponsesFactory.
@@ -29,9 +30,11 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
   private val synchronizerId = DefaultTestIdentities.physicalSynchronizerId
   private val protocolVersion = synchronizerId.protocolVersion
 
+  private def toBytes(s: String): LfBytes = LfBytes.fromStringUtf8(s)
+
   // Helper to create test keys
   private def key(functionId: String): ExternalCallKey =
-    ExternalCallKey("test-ext", functionId, "config", "input")
+    ExternalCallKey("test-ext", functionId, toBytes("config"), toBytes("input"))
 
   "ExternalCallConsistencyResults" when {
 
@@ -40,7 +43,7 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       "identify inconsistent parties correctly" in {
         val results = ExternalCallConsistencyResults(
           Map[LfPartyId, PartyConsistencyResult](
-            alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+            alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0)),
             bob -> Consistent,
             charlie -> Consistent,
           )
@@ -65,8 +68,8 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       "handle multiple inconsistent parties" in {
         val results = ExternalCallConsistencyResults(
           Map[LfPartyId, PartyConsistencyResult](
-            alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
-            bob -> Inconsistent(key("func2"), Set("outA", "outB"), Set(viewPos0)),
+            alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0)),
+            bob -> Inconsistent(key("func2"), Set(toBytes("outA"), toBytes("outB")), Set(viewPos0)),
             charlie -> Consistent,
           )
         )
@@ -106,7 +109,7 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       val allParties = Set(alice, bob, charlie)
       val consistencyResults = ExternalCallConsistencyResults(
         Map[LfPartyId, PartyConsistencyResult](
-          alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+          alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0)),
           bob -> Consistent,
           charlie -> Consistent,
         )
@@ -127,8 +130,8 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       val allParties = Set(alice, bob)
       val consistencyResults = ExternalCallConsistencyResults(
         Map(
-          alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
-          bob -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+          alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0)),
+          bob -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0)),
         )
       )
 
