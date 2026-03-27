@@ -10,7 +10,7 @@ import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErro
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{Future, Promise}
@@ -25,8 +25,8 @@ object SubscriptionCloseReason {
   /** The handler threw an exception */
   final case class HandlerException(exception: Throwable) extends SubscriptionCloseReason[Nothing]
 
-  /** The subscription itself failed. [[transports.SequencerClientTransport]] implementations are
-    * expected to provide their own hierarchy of errors and supply a matching
+  /** The subscription itself failed. [[com.digitalasset.canton.sequencing.SequencerConnectionX]]
+    * implementations are expected to provide their own hierarchy of errors and supply a matching
     * [[SubscriptionErrorRetryPolicy]] to the [[SequencerClient]] for determining which errors are
     * appropriate for attempting to resume a subscription.
     */
@@ -134,4 +134,56 @@ object SequencerSubscriptionError extends SequencerSubscriptionErrorGroup {
       )
     }
   }
+
+  @Explanation(
+    """This warning is logged when a sequencer subscription is interrupted. The system will keep on retrying to reconnect indefinitely."""
+  )
+  @Resolution(
+    "Monitor the situation and contact the server operator if the issue does not resolve itself automatically."
+  )
+  object LostSequencerSubscription
+      extends ErrorCode(
+        "SEQUENCER_SUBSCRIPTION_LOST",
+        ErrorCategory.BackgroundProcessDegradationWarning,
+      ) {
+
+    final case class Warn(sequencer: SequencerId, _logOnCreation: Boolean = true)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Lost subscription to sequencer $sequencer. Will try to recover automatically."
+        ) {
+      override def logOnCreation: Boolean = _logOnCreation
+    }
+  }
+
+  @Explanation(
+    """This error is logged when a sequencer client determined a ledger fork, where a sequencer node
+      |responded with different events for the same timestamp / counter.
+      |
+      |Whenever a client reconnects to a synchronizer, it will start with the last message received and compare
+      |whether that last message matches the one it received previously. If not, it will report with this error.
+      |
+      |A ledger fork should not happen in normal operation. It can happen if the backups have been taken
+      |in a wrong order and e.g. the participant was more advanced than the sequencer.
+      |"""
+  )
+  @Resolution(
+    """You can recover by restoring the system with a correctly ordered backup. Please consult the
+      |respective sections in the manual."""
+  )
+  object ForkHappened
+      extends ErrorCode(
+        "SEQUENCER_FORK_DETECTED",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      )
+
 }
+
+/** Errors that may occur on the creation of a sequencer subscription
+  */
+sealed trait SequencerSubscriptionCreationError extends SubscriptionCloseReason.SubscriptionError
+
+/** When a fatal error occurs on the creation of a sequencer subscription, the subscription will not
+  * retry the subscription creation. Instead, the subscription will fail.
+  */
+final case class Fatal(msg: String) extends SequencerSubscriptionCreationError

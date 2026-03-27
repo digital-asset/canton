@@ -29,7 +29,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission

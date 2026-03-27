@@ -5,14 +5,15 @@ package com.digitalasset.canton.testing.modelbased
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete.Scenario
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
+import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult.*
+import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.{KeyMode, ValidityResult}
 import com.digitalasset.canton.testing.modelbased.syntax.Parser
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 class ValidatorTest extends AnyWordSpec with Matchers {
 
-  private def validScenario(scenario: Scenario): Boolean = {
+  private def validScenario(scenario: Scenario): ValidityResult = {
     val numParties = scenario.topology.flatMap(_.parties).toSet.size
     val maxPackageId =
       scenario.ledger.flatMap(_.commands.flatMap(_.packageId)).maxOption.getOrElse(0)
@@ -36,7 +37,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "validate a transaction that creates two contracts with the same key" in {
@@ -50,7 +51,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "validate a scenario that creates two contracts with the same key in different transactions" in {
@@ -65,7 +66,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "validate a transaction that creates two contracts with the same key then looks up the most recent one" in {
@@ -80,7 +81,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      ExerciseByKey NonConsuming 2 ctl={1} cobs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "reject a transaction that creates two contracts with the same key then looks up the least recent one" in {
@@ -95,7 +96,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe Invalid
     }
 
     "validate a scenario that creates two contracts with the same key then looks up the most recent active one" in {
@@ -112,7 +113,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "validate a scenario that exercices by key a disclosure that is not the most recently created contract with that key" in {
@@ -128,7 +129,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "validate a scenario that prefers local contracts to disclosures in exerciseByKey" in {
@@ -143,7 +144,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
         |      ExerciseByKey NonConsuming 2 ctl={1} cobs={}
         |""".stripMargin)
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "reject a scenario that prefers disclosures to local contracts in exerciseByKey" in {
@@ -158,7 +159,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
         |      ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe Invalid
     }
 
     "validate a scenario that performs an exhaustive query by key with local, disclosed and global contracts" in {
@@ -175,7 +176,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [3,1,2] exhaustive=true
         |""".stripMargin)
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "reject a scenario that performs an exhaustive but ill-ordered query by key with local, disclosed and global contracts" in {
@@ -192,7 +193,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [3,2,1] exhaustive=true
         |""".stripMargin)
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe Invalid
     }
 
     "reject a scenario that declares an exhaustive query by key that isn't exhaustive" in {
@@ -208,7 +209,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [2] exhaustive=true
         |""".stripMargin)
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe Invalid
     }
 
     "validate a scenario that performs a non-exhaustive query by key with local, disclosed and global contracts" in {
@@ -225,7 +226,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [3,1] exhaustive=false
         |""".stripMargin)
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
 
     "reject a scenario that performs a non-exhaustive but ill-ordered query by key with local, disclosed and global contracts" in {
@@ -242,7 +243,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [2,3] exhaustive=false
         |""".stripMargin)
-      validScenario(scenario) shouldBe false
+      validScenario(scenario) shouldBe Invalid
     }
 
     "validate a scenario that declares an non-exhaustive query by key that returns all active contracts" in {
@@ -258,7 +259,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      Exercise NonConsuming 1 ctl={1} cobs={}
         |        QueryByKey [2,1] exhaustive=false
         |""".stripMargin)
-      validScenario(scenario) shouldBe true
+      validScenario(scenario) shouldBe Valid
     }
   }
 }

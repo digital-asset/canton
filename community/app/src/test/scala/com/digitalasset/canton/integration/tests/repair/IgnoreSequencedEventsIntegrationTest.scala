@@ -28,7 +28,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as W
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisconnect
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
 import com.digitalasset.canton.sequencing.protocol.{
   Deliver,
   DeliverError,
@@ -381,7 +381,7 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
           // Feel free to change, if another property is checked first, e.g., "SignatureInvalid".
           { entries =>
             val requiredErrorMessages = Seq(
-              ResilientSequencerSubscription.ForkHappened.id,
+              SequencerSubscriptionError.ForkHappened.id,
               "ForkHappened",
               SyncServiceSynchronizerDisconnect.id,
             )

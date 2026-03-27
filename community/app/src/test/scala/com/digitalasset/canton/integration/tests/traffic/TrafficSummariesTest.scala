@@ -147,7 +147,9 @@ trait TrafficSummariesTest
 
       // Find the corresponding verdicts
       val verdicts =
-        mediator1.inspection.verdicts(createRecordTime.immediatePredecessor, PositiveInt.two)
+        mediator1.inspection
+          .verdicts_until_complete(createRecordTime.immediatePredecessor, PositiveInt.two)
+          .flatMap(_.verdict)
 
       // Correlate traffic data with verdict data
       summaries.zip(verdicts).zip(List(trafficCostCreate, trafficCostExercise)).foreach {

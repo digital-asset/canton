@@ -16,6 +16,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -179,7 +180,7 @@ final class AssignmentProcessingStepsTest
     val logical =
       new InMemoryLogicalSyncPersistentState(
         IndexedSynchronizer.tryCreate(targetPsid.unwrap, 1),
-        enableAdditionalConsistencyChecks = true,
+        ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
         indexedStringStore = indexedStringStore,
         contractStore = contractStore,
         acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
@@ -248,7 +249,11 @@ final class AssignmentProcessingStepsTest
       recipients: Recipients = RecipientsTest.testInstance,
   ): ParsedReassignmentRequest[FullAssignmentTree] = {
     val signature = cryptoSnapshot
-      .sign(view.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+      .sign(
+        view.rootHash.unwrap,
+        SigningKeyUsage.ProtocolOnly,
+        None, // not needed for unit tests; session signing keys disabled
+      )
       .futureValueUS
       .value
 
@@ -298,6 +303,7 @@ final class AssignmentProcessingStepsTest
               targetMediator,
               state,
               cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
             )
             .valueOrFailShutdown("assignment submission")
       } yield succeed
@@ -331,6 +337,7 @@ final class AssignmentProcessingStepsTest
               targetMediator,
               state,
               cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
             )
           )("prepare submission did not return a left")
         } yield {
@@ -377,6 +384,7 @@ final class AssignmentProcessingStepsTest
             targetMediator,
             state,
             cryptoSnapshot,
+            _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
           )
         )("prepare submission did not return a left")
       } yield {
@@ -418,6 +426,7 @@ final class AssignmentProcessingStepsTest
             targetMediator,
             ephemeralState,
             cryptoSnapshot,
+            _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
           )
         )("prepare submission did not return a left")
       } yield {
@@ -454,6 +463,7 @@ final class AssignmentProcessingStepsTest
               targetMediator,
               state,
               cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
             )
             .valueOrFailShutdown("assignment submission")
             .failed
@@ -467,6 +477,7 @@ final class AssignmentProcessingStepsTest
             targetMediator,
             state,
             cryptoSnapshot,
+            _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
           )
           .valueOrFailShutdown("assignment submission")
       } yield succeed
@@ -873,7 +884,11 @@ final class AssignmentProcessingStepsTest
     "succeed when the signature is correct" in {
       for {
         signature <- cryptoSnapshot
-          .sign(assignmentTree.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+          .sign(
+            assignmentTree.rootHash.unwrap,
+            SigningKeyUsage.ProtocolOnly,
+            None, // not needed for unit tests; session signing keys disabled
+          )
           .valueOrFailShutdown("signing failed")
 
         parsed = mkParsedRequest(
@@ -899,7 +914,11 @@ final class AssignmentProcessingStepsTest
     "fail when the signature is incorrect" in {
       for {
         signature <- cryptoSnapshot
-          .sign(TestHash.digest("wrong signature"), SigningKeyUsage.ProtocolOnly, None)
+          .sign(
+            TestHash.digest("wrong signature"),
+            SigningKeyUsage.ProtocolOnly,
+            None, // not needed for unit tests; session signing keys disabled
+          )
           .valueOrFailShutdown("signing failed")
 
         parsed = mkParsedRequest(

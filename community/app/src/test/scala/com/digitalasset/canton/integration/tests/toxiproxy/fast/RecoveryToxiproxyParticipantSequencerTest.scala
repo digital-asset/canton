@@ -28,7 +28,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.lifecycle.HasSynchronizeWithReaders
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.LockedContracts
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import org.slf4j.event.Level
 

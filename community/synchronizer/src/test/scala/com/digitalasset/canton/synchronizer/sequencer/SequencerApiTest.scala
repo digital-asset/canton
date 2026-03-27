@@ -105,8 +105,9 @@ abstract class SequencerApiTest
           cryptoSnapshot.pureCrypto,
           cryptoSnapshot,
           request,
-          Some(cryptoSnapshot.ipsSnapshot.timestamp),
-          Some(clock.now),
+          timestampOfSigningKey = Some(cryptoSnapshot.ipsSnapshot.timestamp),
+          signingTimestampOverrides =
+            None, // not needed for unit tests; session signing keys disabled
           HashPurpose.SubmissionRequestSignature,
           testedProtocolVersion,
         )
@@ -537,9 +538,9 @@ abstract class SequencerApiTest
           )
 
         for {
-          envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _, clock))
+          envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _))
           request1 = mkRequest(p11, messageId1, envs1)
-          envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _, clock))
+          envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
           request2 = mkRequest(p12, messageId2, envs2)
           _ <- sequencer
             .sendAsyncSigned(sign(request1))
@@ -556,7 +557,7 @@ abstract class SequencerApiTest
           )
 
           // participant13 is late to the party and its request is refused
-          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _, clock))
+          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
           request3 = mkRequest(p13, messageId3, envs3)
           _ <- sequencer
             .sendAsyncSigned(sign(request3))
@@ -658,11 +659,11 @@ abstract class SequencerApiTest
           )
 
         for {
-          env1 <- signEnvelope(p14Crypto, envelope, clock)
+          env1 <- signEnvelope(p14Crypto, envelope)
           request1 = mkRequest(p14, messageId1, env1)
-          env2 <- signEnvelope(p14Crypto, envelope, clock)
+          env2 <- signEnvelope(p14Crypto, envelope)
           request2 = mkRequest(p14, messageId2, env2)
-          env3 <- signEnvelope(p15Crypto, envelope, clock)
+          env3 <- signEnvelope(p15Crypto, envelope)
           request3 = mkRequest(p15, messageId3, env3)
           _ <- sequencer
             .sendAsyncSigned(sign(request1))
@@ -1166,11 +1167,14 @@ trait SequencerApiTestUtils
   def signEnvelope(
       crypto: SynchronizerCryptoClient,
       envelope: ClosedUncompressedEnvelope,
-      clock: Clock,
   ): FutureUnlessShutdown[ClosedUncompressedEnvelope] = {
     val hash = crypto.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, envelope.bytes)
     crypto.currentSnapshotApproximation.futureValueUS
-      .sign(hash, SigningKeyUsage.ProtocolOnly, Some(clock.now))
+      .sign(
+        hash,
+        SigningKeyUsage.ProtocolOnly,
+        None,
+      )
       .map(sig => envelope.copy(signatures = Seq(sig)))
       .valueOrFail(s"Failed to sign $envelope")
   }

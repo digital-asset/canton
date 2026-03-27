@@ -15,12 +15,12 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ComparesLfTransactions, LfPackageName}
+import com.digitalasset.daml.lf.transaction.Node
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
   CreateKey,
   CreateSerializationVersion,
 }
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, Node}
 import com.digitalasset.daml.lf.value.Value as LfValue
 import monocle.Monocle.toAppliedFocusOps
 
@@ -38,16 +38,6 @@ trait DamlRollbackTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(
-        Seq(
-          ConfigTransforms.enableNonStandardConfig,
-          ConfigTransforms.updateAllParticipantConfigs_(
-            _.focus(_.parameters.engine.contractStateMode)
-              // NUCK needed for the "Able to roll back create in multi-level rollback at correct level" test case.
-              .replace(ContractStateMachine.Mode.LegacyNUCK)
-          ),
-        )*
-      )
       .updateTestingConfig(
         _.focus(_.enableInMemoryTransactionStoreForParticipants).replace(true)
       )

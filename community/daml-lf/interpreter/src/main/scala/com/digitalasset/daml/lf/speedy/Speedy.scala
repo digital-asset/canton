@@ -11,7 +11,7 @@ import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{CostModel => _, _}
-import com.digitalasset.daml.lf.interpretation.{NeedKeyContinuationToken, Error => IError}
+import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.PackageInterface
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
@@ -22,17 +22,17 @@ import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.speedy.SResult._
 import com.digitalasset.daml.lf.speedy.SValue.{SAnyException, SArithmeticError, SRecord, SText}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
-import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
+  IncompleteTransaction => IncompleteTx,
+  NeedKeyProgression,
+  NextGenContractStateMachine => ContractStateMachine,
   Node,
   NodeId,
   SerializationVersion,
   SubmittedTransaction,
-  IncompleteTransaction => IncompleteTx,
 }
 import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value => V}
@@ -347,19 +347,19 @@ private[lf] object Speedy {
         location: => String,
         key: GlobalKeyWithMaintainers,
         n: Int,
-        continuationToken: Option[NeedKeyContinuationToken],
-    ): ContU[(Vector[FatContractInstance], Option[NeedKeyContinuationToken])] =
+        progress: NeedKeyProgression.CanContinue,
+    ): ContU[(Vector[FatContractInstance], NeedKeyProgression.HasStarted)] =
       cats.data.ContT(
         (k: (
-            (Vector[FatContractInstance], Option[NeedKeyContinuationToken])
+            (Vector[FatContractInstance], NeedKeyProgression.HasStarted)
         ) => Control[Question.Update]) =>
           Control.Question(
             Question.Update.NeedKey(
               key,
               n,
-              continuationToken,
+              progress,
               committers,
-              (result, tokenOpt) => safelyContinue(location, "NeedKey", k((result, tokenOpt))),
+              (result, progress) => safelyContinue(location, "NeedKey", k((result, progress))),
             )
           )
       )
@@ -407,7 +407,7 @@ private[lf] object Speedy {
               // The machine's ptx is updated even if the handler does not catch the exception.
               // This may cause the transaction trace to report the error from the handler's location.
               // Ideally we should embed the trace into the exception directly.
-              ptx.rollbackTry() match {
+              ptx.rollbackTry match {
                 case Left(rollbackErr) =>
                   UnwindResult.Rollback(rollbackErr)
                 case Right(newPtx) => {
@@ -508,10 +508,6 @@ private[lf] object Speedy {
     ): Unit = {
       val pkgId = contract.templateId.packageId
       contractInfoCache_ = contractInfoCache_.updated((coid, pkgId), contract)
-    }
-
-    private[speedy] def isLocalContract(contractId: V.ContractId): Boolean = {
-      ptx.contractState.locallyCreated.contains(contractId)
     }
 
     private[speedy] def ensurePackageIsLoaded(
@@ -625,7 +621,7 @@ private[lf] object Speedy {
         tx,
         ptx.locationInfo(),
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
-        ptx.contractState.globalKeyInputs.transform((_, v) => v.toKeyMapping),
+        ptx.contractState.keyInputs.transform((_, v) => v.queue),
       )
     }
 
@@ -698,7 +694,7 @@ private[lf] object Speedy {
         iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         validating: Boolean = false,
-        contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+        contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoKey,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
         commitLocation: Option[Location] = None,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
@@ -741,7 +737,7 @@ private[lf] object Speedy {
         tx: SubmittedTransaction,
         locationInfo: Map[NodeId, Location],
         seeds: NodeSeeds,
-        globalKeyMapping: Map[GlobalKey, KeyMapping],
+        globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
     )
   }
 
@@ -761,7 +757,7 @@ private[lf] object Speedy {
         initialEnvSize = 512,
         initialKontStackSize = 128,
         metricPlugins = metricPlugins,
-        logger = logger
+        logger = logger,
       ) {
 
     private[speedy] override def asUpdateMachine(location: String)(
@@ -1297,7 +1293,7 @@ private[lf] object Speedy {
         readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-        mode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+        mode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoKey,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
     ): UpdateMachine = {
       UpdateMachine(
@@ -1343,7 +1339,7 @@ private[lf] object Speedy {
     // Construct an off-ledger machine for evaluating an expression that is not an update
     def fromPureExpr(
         compiledPackages: CompiledPackages,
-        expr: Expr
+        expr: Expr,
     )(implicit loggingContext: NamedLoggingContext): PureMachine =
       fromPureSExpr(
         compiledPackages,
@@ -1366,7 +1362,8 @@ private[lf] object Speedy {
         compiledPackages: CompiledPackages,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
     )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
-      fromPureSExpr(compiledPackages, expr, MachineLogger(), iterationsBetweenInterruptions).runPure()
+      fromPureSExpr(compiledPackages, expr, MachineLogger(), iterationsBetweenInterruptions)
+        .runPure()
 
     def tmplId2TxVersion(pkgInterface: PackageInterface, tmplId: TypeConId): SerializationVersion =
       SerializationVersion.assign(pkgInterface.packageLanguageVersion(tmplId.packageId))

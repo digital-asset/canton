@@ -254,7 +254,7 @@ class ConfirmationRequestAndResponseProcessorTest
   protected lazy val decisionTime = requestIdTs.plusSeconds(120)
 
   class Fixture(syncCryptoApi: SynchronizerCryptoClient = synchronizerSyncCryptoApi) {
-    private val sequencerSend: TestSequencerClientSend = new TestSequencerClientSend
+    private val sequencerSend: TestSequencerClientSend = new TestSequencerClientSend(wallClock)
 
     def drainInterceptedBatches(): List[Batch[DefaultOpenEnvelope]] = {
       val result = new util.ArrayList[TestSequencerClientSend.Request]()
@@ -295,6 +295,7 @@ class ConfirmationRequestAndResponseProcessorTest
       loggerFactory,
       timeouts,
       BatchingConfig(),
+      Mediator.GetActiveLsuSuccessor.Never,
     )
   }
 
@@ -371,7 +372,11 @@ class ConfirmationRequestAndResponseProcessorTest
     .forOwnerAndSynchronizer(participant, synchronizerId)
     .awaitSnapshot(CantonTimestamp.Epoch)
     .futureValueUS
-    .sign(tree.tree.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+    .sign(
+      tree.tree.rootHash.unwrap,
+      SigningKeyUsage.ProtocolOnly,
+      None, // not needed for unit tests; session signing keys disabled
+    )
     .failOnShutdown
     .futureValue
 
@@ -947,7 +952,7 @@ class ConfirmationRequestAndResponseProcessorTest
               .map(party =>
                 party -> PartyInfo(
                   PositiveInt.one,
-                  Map(ParticipantId("one") -> ParticipantAttributes(Confirmation)),
+                  Map(participant -> ParticipantAttributes(Confirmation)),
                 )
               )
               .toMap
@@ -1037,8 +1042,9 @@ class ConfirmationRequestAndResponseProcessorTest
           }
           val completedView = ResponseAggregation.ViewState(
             Map(
-              submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                Set(ExampleTransactionFactory.submittingParticipant)
+              submitter -> ConsortiumVotingState.withDefaultValues(
+                hostingParticipants = Set(participant),
+                approvals = Set(ExampleTransactionFactory.submittingParticipant),
               )
             ),
             Seq(Quorum.empty),
@@ -1062,27 +1068,37 @@ class ConfirmationRequestAndResponseProcessorTest
               view1Position ->
                 ResponseAggregation.ViewState(
                   Map(
-                    submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                      Set(ExampleTransactionFactory.submittingParticipant)
+                    submitter -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant),
+                      approvals = Set(ExampleTransactionFactory.submittingParticipant),
                     ),
-                    signatory -> ConsortiumVotingState.withDefaultValues(),
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    ),
                   ),
                   Seq(signatoryQuorum),
                   Nil,
                 ),
               view10Position ->
                 ResponseAggregation.ViewState(
-                  Map(signatory -> ConsortiumVotingState.withDefaultValues()),
+                  Map(
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    )
+                  ),
                   Seq(signatoryQuorum),
                   Nil,
                 ),
               view11Position ->
                 ResponseAggregation.ViewState(
                   Map(
-                    submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                      Set(ExampleTransactionFactory.submittingParticipant)
+                    submitter -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant),
+                      approvals = Set(ExampleTransactionFactory.submittingParticipant),
                     ),
-                    signatory -> ConsortiumVotingState.withDefaultValues(),
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    ),
                   ),
                   Seq(signatoryQuorum),
                   Nil,

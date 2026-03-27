@@ -6,14 +6,20 @@ package transaction
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.ast.Implicits._
-import com.digitalasset.canton.testing.modelbased.checker.{PropertyCheckerResultAssertions, PropertyChecker}
+import com.digitalasset.canton.testing.modelbased.checker.{
+  PropertyCheckerResultAssertions,
+  PropertyChecker,
+}
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.{Parser, Pretty}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{defaultPackageId, toIdentifier}
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
+  defaultPackageId,
+  toIdentifier,
+}
 import com.digitalasset.daml.lf.value.{Value => V}
 import org.scalatest.LoneElement
 import org.scalatest.matchers.should.Matchers
@@ -73,15 +79,17 @@ abstract class NextGenContractStateMachineGenerativeSpec(
         numCommands = Some(2),
       )
 
-      PropertyChecker.checkProperty(
-        generate = () => generator.generate(size = sampleSize, distinctKeyToContractRatio = 0.4),
-        shrink = Shrinker.shrinkScenario.suchThat(_.ledger.size == 2),
-        property = processScenario,
-        maxSamples = maxSamples,
-        timeout = timeout,
-        bufferSize = sampleBufferSize,
-        generatorParallelism = generatorParallelism,
-      ).assertPassed(Pretty.prettyScenario)
+      PropertyChecker
+        .checkProperty(
+          generate = () => generator.generate(size = sampleSize, distinctKeyToContractRatio = 0.4),
+          shrink = Shrinker.shrinkScenario.suchThat(_.ledger.size == 2),
+          property = processScenario,
+          maxSamples = maxSamples,
+          timeout = timeout,
+          bufferSize = sampleBufferSize,
+          generatorParallelism = generatorParallelism,
+        )
+        .assertPassed(Pretty.prettyScenario)
     }
   }
 }
@@ -139,7 +147,9 @@ object NextGenContractStateMachineGenerativeSpec {
         case _ => Map.empty
       }
 
-    scenario.ledger.flatMap(_.actions.map(fromAction)).foldLeft(Map.empty[Concrete.ContractId, Concrete.KeyId])(_ ++ _)
+    scenario.ledger
+      .flatMap(_.actions.map(fromAction))
+      .foldLeft(Map.empty[Concrete.ContractId, Concrete.KeyId])(_ ++ _)
   }
 
   private class TransactionProcessor(keyMap: Map[Concrete.ContractId, Concrete.KeyId]) {
@@ -163,12 +173,15 @@ object NextGenContractStateMachineGenerativeSpec {
           state.visitCreate(
             nid = freshNodeId(),
             contractId = toContractId(contractId),
-            mbKey = None)
+            mbKey = None,
+          )
 
         case Concrete.CreateWithKey(contractId, keyId, _, _, _) =>
           state.visitCreate(
             nid = freshNodeId(),
-            contractId = toContractId(contractId), mbKey = Some(toGlobalKey(keyId)))
+            contractId = toContractId(contractId),
+            mbKey = Some(toGlobalKey(keyId)),
+          )
 
         case Concrete.Exercise(kind, contractId, _, _, subTransaction) =>
           for {
@@ -233,7 +246,9 @@ object NextGenContractStateMachineGenerativeSpec {
 
         case Concrete.Rollback(subTransaction) =>
           val s = state.beginRollback
-          processTransaction(s, subTransaction).flatMap(x => handleViaEmptyEffectfulRollback(x.endRollback))
+          processTransaction(s, subTransaction).flatMap(x =>
+            handleViaEmptyEffectfulRollback(x.endRollback)
+          )
       }
     }
 
@@ -241,7 +256,9 @@ object NextGenContractStateMachineGenerativeSpec {
         state: NextGenContractStateMachine.LLState[Int],
         tx: Concrete.Transaction,
     ): Either[TransactionError, NextGenContractStateMachine.LLState[Int]] =
-      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.LLState[Int]]](Right(state)) {
+      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.LLState[Int]]](
+        Right(state)
+      ) {
         case (Right(s), action) => processAction(s, action)
         case (left, _) => left
       }
@@ -262,7 +279,9 @@ object NextGenContractStateMachineGenerativeSpec {
   }
 
   // TODO(#31454)
-  private def handleViaEmptyEffectfulRollback[A](eOrA: Either[Set[Int], A]): Either[TransactionError, A] =
+  private def handleViaEmptyEffectfulRollback[A](
+      eOrA: Either[Set[Int], A]
+  ): Either[TransactionError, A] =
     eOrA.left.map(_ => TransactionError.EffectfulRollback(Set()))
 
 }

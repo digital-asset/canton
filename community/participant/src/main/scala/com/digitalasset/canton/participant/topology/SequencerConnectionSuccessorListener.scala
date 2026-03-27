@@ -85,10 +85,10 @@ class SequencerConnectionSuccessorListener(
         }.toMap
       configuredSequencerIds = configuredSequencers.keySet
 
-      (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.announcedLsu())
-      SynchronizerSuccessor(successorPsid, upgradeTime) = synchronizerUpgradeOngoing
+      (synchronizerSuccessor, _) <- OptionT(snapshot.announcedLsu())
+      SynchronizerSuccessor(successorPsid, upgradeTime) = synchronizerSuccessor
 
-      logger = Lsu.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
+      logger = Lsu.Logger(loggerFactory, getClass, synchronizerSuccessor.psid)
 
       _ = logger.info(
         s"Checking whether the participant can migrate $alias config from ${activeConfig.configuredPsid} to $successorPsid"

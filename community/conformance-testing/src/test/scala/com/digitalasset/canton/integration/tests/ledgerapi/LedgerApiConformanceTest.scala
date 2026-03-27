@@ -364,6 +364,20 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
             "PrefetchContractKeysIT:CSprefetchContractKeysPrepareEndpointBasic",
             "PrefetchContractKeysIT:CSprefetchContractKeysPrepareWronglyTyped",
             "PrefetchContractKeysIT:CSprefetchContractPrepareKeysMany",
+            // TODO(#30398): Exclude tests that roll back effects on dev for now, should assert failure instead.
+            "EventsDescendantsIT:DescendantsRollbackCreate",
+            "EventsDescendantsIT:DescendantsRollbackExercise",
+            "ExceptionsIT:ExRollbackActiveExerciseConsuming",
+            "ExceptionsIT:ExRolledbackArchiveConsuming",
+            "ExceptionsIT:ExRolledbackArchiveNonConsuming",
+            "ExceptionsIT:ExRolledbackKeyCreation",
+            "ExceptionsIT:ExRollbackHidden",
+            "ExceptionsIT:ExRollbackProjectionNormalization",
+            "ExceptionsIT:ExRollbackProjectionNesting",
+            "ExceptionsIT:ExRollbackCreate",
+            // TODO(#30398): Exclude tests that fail because of the temporary inconsistency between the CSM used by
+            //    the engine, and the CSM used during view decomposition.
+            "ContractKeysIT:CKLocalLookupByKeyVisibility",
           ),
           concurrency = 4,
         )

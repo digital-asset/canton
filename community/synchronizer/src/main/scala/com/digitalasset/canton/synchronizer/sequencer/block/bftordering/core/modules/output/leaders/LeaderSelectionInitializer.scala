@@ -57,7 +57,6 @@ object LeaderSelectionInitializer {
       case blacklistLeaderSelectionPolicyConfig: BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting =>
         new BlacklistLeaderSelectionInitializer(
           thisNode,
-          config,
           blacklistLeaderSelectionPolicyConfig,
           protocolVersion,
           store,

@@ -22,12 +22,14 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   SignedProtocolMessage,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, LoggerUtil}
@@ -41,6 +43,7 @@ abstract class AbstractMessageProcessor(
     ephemeral: SyncEphemeralState,
     crypto: SynchronizerCryptoClient,
     sequencerClient: SequencerClientSend,
+    clock: Clock,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
@@ -69,7 +72,7 @@ abstract class AbstractMessageProcessor(
   protected def isCleanReplay(requestCounter: RequestCounter): Boolean =
     requestCounter < ephemeral.startingPoints.processing.nextRequestCounter
 
-  protected def unlessCleanReplay(requestCounter: RequestCounter)(
+  private def unlessCleanReplay(requestCounter: RequestCounter)(
       f: => FutureUnlessShutdown[?]
   ): FutureUnlessShutdown[Unit] =
     if (isCleanReplay(requestCounter)) FutureUnlessShutdown.unit else f.void
@@ -80,7 +83,11 @@ abstract class AbstractMessageProcessor(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SignedProtocolMessage[ConfirmationResponses]] =
-    SignedProtocolMessage.trySignAndCreate(responses, ips, None)
+    SignedProtocolMessage.trySignAndCreate(
+      responses,
+      ips,
+      None, // `ConfirmationResponses` are always signed with a `fixed` timestamp.
+    )
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(
@@ -113,8 +120,12 @@ abstract class AbstractMessageProcessor(
         sendResult = sequencerClient
           .sendAsync(
             Batch.of(psid.protocolVersion, messages*),
-            topologyTimestamp = Some(requestId.unwrap),
-            maxSequencingTime = maxSequencingTime,
+            timestamps = SendRequestTimestamps(
+              topologyTimestamp = Some(requestId.unwrap),
+              // We use `clock.now` to stay consistent with how other submission requests are signed.
+              approximateTimestampForSigning = clock.now,
+              maxSequencingTime = maxSequencingTime,
+            ),
             messageId = messageId.getOrElse(MessageId.randomMessageId()),
             callback = SendCallback.log(s"Response message for request [$requestId]", logger),
             amplify = true,

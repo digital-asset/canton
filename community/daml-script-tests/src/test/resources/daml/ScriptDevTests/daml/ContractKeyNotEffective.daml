@@ -28,7 +28,7 @@ template FetchTBySelf
         pure ()
 
 fetchByKeyMustFail = script do
-  p <- allocateParty "alice"
+  p <- allocateParty "Alice-ContractKeyNotEffective:fetchByKeyMustFail"
   p `submit` createCmd (T p)
   passTime (- seconds 1)
   p `submit` createAndExerciseCmd (FetchTBySelf p) Call

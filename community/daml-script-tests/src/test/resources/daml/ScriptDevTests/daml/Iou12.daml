@@ -70,11 +70,11 @@ This description contains [a link](http://example.com), some bogus <inline html>
 and words_ with_ underscore, to test damldoc capabilities.
 -}
 main = script do
-  bank <- allocateParty "Acme Bank"
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-  charlie <- allocateParty "Charlie"
-  sec <- allocateParty "Securities Exchange Commission"
+  bank <- allocateParty "Acme Bank-Iou12:main"
+  alice <- allocateParty "Alice-Iou12:main"
+  bob <- allocateParty "Bob-Iou12:main"
+  charlie <- allocateParty "Charlie-Iou12:main"
+  sec <- allocateParty "Securities Exchange Commission-Iou12:main"
 
   -- Bank creates Iou's for Alice and Bob
 

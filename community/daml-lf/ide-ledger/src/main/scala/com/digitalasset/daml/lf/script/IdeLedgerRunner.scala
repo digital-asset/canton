@@ -11,13 +11,12 @@ import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone, Enricher => LfEnricher}
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SResult._
 import com.digitalasset.daml.lf.speedy._
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.digitalasset.daml.lf.transaction._
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, _}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import scala.annotation.tailrec
@@ -69,12 +68,9 @@ private[lf] object IdeLedgerRunner {
     ): Either[Error, Unit]
     def lookupKey(
         gk: GlobalKey,
-        limit: Int,
-        tokenOpt: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        continue: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
-    ): Either[Error, Unit]
+    ): Either[Error, Vector[FatContractInstance]]
     def currentTime: Time.Timestamp
     def commit(
         committers: Set[Party],
@@ -83,6 +79,7 @@ private[lf] object IdeLedgerRunner {
         tx: CommittedTransaction,
         locationInfo: Map[NodeId, Location],
     ): Either[Error, R]
+    def csmMode: ContractStateMachine.Mode
   }
 
   private[lf] case class ScriptLedgerApi(ledger: IdeLedger)
@@ -132,60 +129,45 @@ private[lf] object IdeLedgerRunner {
 
     override def lookupKey(
         gk: GlobalKey,
-        limit: Int,
-        tokenOpt: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
-    ): Either[Error, Unit] =
-      handleUnsafe(lookupKeyUnsafe(gk, limit, tokenOpt, actAs, readAs, callback))
+    ): Either[Error, Vector[FatContractInstance]] =
+      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs))
 
     private def lookupKeyUnsafe(
         gk: GlobalKey,
-        limit: Int,
-        token: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
-    ): Unit = {
-
-      // TODO(#30398) generzlize this implementation to NUCK
-      assert(limit <= 1)
-      assert(token.isEmpty)
+    ): Vector[FatContractInstance] = {
 
       val effectiveAt = ledger.currentTime
       val readers = actAs union readAs
 
-      ledger.ledgerData.activeKeys.get(gk) match {
-        case None =>
-          callback(Vector.empty, None)
-        case Some(acoid) =>
-          ledger.lookupGlobalContract(
-            actAs,
-            readAs,
-            effectiveAt = effectiveAt,
-            acoid,
-          ) match {
-            case IdeLedger.LookupOk(contract) =>
-              if (readers.intersect(contract.stakeholders).nonEmpty)
-                callback(Vector(contract), None)
-              else
-                throw Error.ContractKeyNotVisible(acoid, gk, actAs, readAs, contract.stakeholders)
-            case IdeLedger.LookupContractNotFound(_) =>
-              callback(Vector.empty, None)
-            case IdeLedger.LookupContractNotEffective(_, _, _) =>
-              callback(Vector.empty, None)
-            case IdeLedger.LookupContractNotActive(_, _, _) =>
-              callback(Vector.empty, None)
-            case IdeLedger.LookupContractNotVisible(
-                  coid,
-                  tid @ _,
-                  observers @ _,
-                  stakeholders,
-                ) =>
-              throw Error.ContractKeyNotVisible(coid, gk, actAs, readAs, stakeholders)
-          }
-      }
+      val acoids = ledger.ledgerData.activeKeys.getOrElse(gk, Vector.empty)
+      acoids.collect(Function.unlift{ acoid => 
+        ledger.lookupGlobalContract(
+          actAs,
+          readAs,
+          effectiveAt = effectiveAt,
+          acoid,
+        ) match {
+          case IdeLedger.LookupOk(contract) =>
+            if (readers.intersect(contract.stakeholders).nonEmpty)
+              Some(contract)
+            else
+              throw Error.ContractKeyNotVisible(acoid, gk, actAs, readAs, contract.stakeholders)
+          case IdeLedger.LookupContractNotFound(_) => None
+          case IdeLedger.LookupContractNotEffective(_, _, _) => None
+          case IdeLedger.LookupContractNotActive(_, _, _) => None
+          case IdeLedger.LookupContractNotVisible(
+                coid,
+                tid @ _,
+                observers @ _,
+                stakeholders,
+              ) =>
+            throw Error.ContractKeyNotVisible(coid, gk, actAs, readAs, stakeholders)
+        }
+      })
     }
 
     override def currentTime = ledger.currentTime
@@ -196,8 +178,8 @@ private[lf] object IdeLedgerRunner {
         location: Option[Location],
         tx: CommittedTransaction,
         locationInfo: Map[NodeId, Location],
-    ): Either[Error, IdeLedger.CommitResult] =
-      IdeLedger.commitTransaction(
+    ): Either[Error, IdeLedger.CommitResult] = {
+      val result = IdeLedger.commitTransaction(
         actAs = committers,
         readAs = readAs,
         effectiveAt = ledger.currentTime,
@@ -205,12 +187,11 @@ private[lf] object IdeLedgerRunner {
         tx = tx,
         locationInfo = locationInfo,
         l = ledger,
-      ) match {
-        case Left(fas) =>
-          Left(Error.CommitError(fas))
-        case Right(result) =>
-          Right(result)
-      }
+      )
+      Right(result)
+    }
+
+    override val csmMode = ledger.csmMode
   }
 
   private[this] abstract class Enricher {
@@ -322,10 +303,11 @@ private[lf] object IdeLedgerRunner {
     implicit val traceContext: TraceContext = loggingContext.traceContext
 
     val disclosuresByCoid = disclosures.view.map(fci => fci.contractId -> fci).toMap
-    val disclosuresByKey = disclosures.view.collect {
-      case fci if fci.contractKeyWithMaintainers.isDefined =>
-        fci.contractKeyWithMaintainers.get.globalKey -> fci
-    }.toMap
+
+    val disclosuresByKey =
+      disclosures
+        .filter(_.contractKeyWithMaintainers.isDefined)
+        .groupMapReduce(_.contractKeyWithMaintainers.get.globalKey)(Vector(_))(_++_)
 
     val ledgerMachine = Speedy.UpdateMachine(
       packageResolution = packageResolution,
@@ -337,8 +319,7 @@ private[lf] object IdeLedgerRunner {
       readAs = readAs,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
-      // TODO(i30398): switch mode depending on some criterion, e.g. LF version
-      contractStateMode = ContractStateMachine.Mode.UCKWithRollback,
+      contractStateMode = ledger.csmMode,
       logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter
@@ -348,6 +329,9 @@ private[lf] object IdeLedgerRunner {
     val suffixer = new CidSuffixer(compiledPackages)
 
     def continue = () => go()
+
+    // Wrapper for Vector[FatContractInstance] to avoid type erasure of `FatContractInstance` within the Vector when casting from Any
+    final case class FatContractInstanceVector(getInstances: Vector[FatContractInstance])
 
     @tailrec
     def go(): SubmissionResult[R] = {
@@ -388,25 +372,26 @@ private[lf] object IdeLedgerRunner {
                     case Right(_) => go()
                   }
               }
-            case Question.Update.NeedKey(keyWithMaintainers, _, _, committers, callback) =>
-              disclosuresByKey.get(keyWithMaintainers.globalKey) match {
-                case Some(fcoinst) =>
-                  callback(Vector(fcoinst), None)
+            case Question.Update.NeedKey(keyWithMaintainers, limit, progress, committers, callback) =>
+              val contracts = progress match {
+                case NeedKeyProgression.Unstarted =>
+                  for {
+                    globalInsts <- ledger.lookupKey(
+                      keyWithMaintainers.globalKey,
+                      committers,
+                      readAs,
+                    ).left.map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
+                    disclosedInsts = disclosuresByKey.get(keyWithMaintainers.globalKey).getOrElse(Vector.empty)
+                  } yield disclosedInsts ++ globalInsts // Engine dedups for us (Paul thinks) TODO: verify
+                case NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) => Right(rest)
+                case NeedKeyProgression.InProgress(token) => throw new IllegalStateException(s"unexpected continuation token of type ${token.getClass}")
+              }
+              contracts match {
+                case Left(err) => err
+                case Right(contracts) =>
+                  val (result, rest) = contracts.splitAt(limit)
+                  callback(result, if (rest.nonEmpty) NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) else NeedKeyProgression.Finished)
                   go()
-                case None =>
-                  // TODO(#30398) review this implementation
-                  ledger.lookupKey(
-                    keyWithMaintainers.globalKey,
-                    1,
-                    None,
-                    committers,
-                    readAs,
-                    callback,
-                  ) match {
-                    case Left(err) =>
-                      SubmissionError(err, enrich(ledgerMachine.incompleteTransaction))
-                    case Right(_) => go()
-                  }
               }
             case Question.Update.NeedTime(callback) =>
               callback(ledger.currentTime)

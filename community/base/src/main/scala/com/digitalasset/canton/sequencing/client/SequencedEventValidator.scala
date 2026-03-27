@@ -103,7 +103,7 @@ object SequencedEventValidationError {
   ) extends CantonError.Impl(
         cause =
           "The sequencer responded with a different message for the same sequencing timestamp, which means the sequencer forked."
-      )(ResilientSequencerSubscription.ForkHappened)
+      )(SequencerSubscriptionError.ForkHappened)
       with SequencedEventValidationError[Nothing]
       with PrettyPrinting {
     override protected def pretty: Pretty[ForkHappened] = prettyOfClass(

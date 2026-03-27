@@ -15,6 +15,7 @@ import com.digitalasset.canton.console.{
   LocalInstanceReference,
   SequencerReference,
 }
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -628,9 +629,31 @@ class ParticipantSimulator(
                   commitment = commitment,
                   protocolVersion = pv,
                 )
+                val maxSequencingTime = event.timestamp.plusSeconds(120)
+                val signingTimestampOverrides = Some(
+                  SigningTimestampOverrides(
+                    approximateTimestamp = clock.now,
+                    validityPeriodEnd = Some(maxSequencingTime),
+                  )
+                )
                 val result = for {
                   msg <- SignedProtocolMessage
-                    .trySignAndCreate(payload, syncCrypto, None)
+                    .trySignAndCreate(
+                      payload,
+                      // We create a new crypto that uses the `fixed` timestamp (i.e., end period)
+                      // as the reference timestamp, so signing here mirrors what happens in production.
+                      new FixedSyncCryptoApiForSigning(
+                        // the specific member doesn't actually matter, since all virtual participants
+                        // share the same keys
+                        managingNode.id.member,
+                        managingNode.crypto,
+                        staticSynchronizerParameters,
+                        signingKey,
+                        loggerFactory,
+                        timestampOverride = period.toInclusive.forgetRefinement,
+                      ),
+                      None,
+                    )
                   batch = Batch.closeEnvelopes(Batch.of(pv, (msg, Recipients.cc(sender))))
                   request = SubmissionRequest.tryCreate(
                     sender = counterParticipant,
@@ -648,11 +671,11 @@ class ParticipantSimulator(
                       .create(
                         content = request,
                         timestampOfSigningKey = None,
+                        signingTimestampOverrides = signingTimestampOverrides,
                         protocolVersion = pv,
                         cryptoApi = syncCrypto.pureCrypto.pureCrypto,
                         cryptoPrivateApi = syncCrypto,
                         purpose = HashPurpose.SubmissionRequestSignature,
-                        approximateTimestampOverride = None,
                       )
                       .leftMap(err => new IllegalArgumentException(err.toString))
                   )

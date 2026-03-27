@@ -148,6 +148,10 @@ object RequireTypes {
       r.nextIntOption().map(NonNegativeInt.tryCreate)
     }
 
+    implicit val readNonNegativeLongOption: GetResult[Option[NonNegativeLong]] = GetResult { r =>
+      r.nextLongOption().map(NonNegativeLong.tryCreate)
+    }
+
     implicit def writeNonNegativeNumeric[T](implicit
         f: SetParameter[T]
     ): SetParameter[NonNegativeNumeric[T]] =

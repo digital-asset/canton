@@ -10,7 +10,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 
 trait NodesRestartTest
     extends CommunityIntegrationTest

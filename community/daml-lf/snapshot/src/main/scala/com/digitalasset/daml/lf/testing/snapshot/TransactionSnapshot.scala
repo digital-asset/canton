@@ -15,10 +15,10 @@ import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   CreationTime,
   FatContractInstance,
   GlobalKeyWithMaintainers,
+  NextGenContractStateMachine as ContractStateMachine,
   Node,
   SubmittedTransaction as SubmittedTx,
   TransactionCoder as TxCoder,

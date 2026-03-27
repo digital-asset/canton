@@ -225,7 +225,7 @@ trait OfflinePartyReplicationIntegrationTestBase
       beginOffsetExclusive = beforeActivationOffset,
       exportFilePath = acsSnapshotPath,
     )
-    target.parties.import_party_acsV2(daId, Some(party), acsSnapshotPath, workflowIdPrefix)
+    target.parties.import_party_acs(daId, Some(party), acsSnapshotPath, workflowIdPrefix)
 
     reconnectAndEnsureOnboardingClearance(clock, party, daName)
   }
@@ -313,7 +313,7 @@ final class OfflinePartyReplicationIntegrationTest
     // Assert ACS snapshot is non-empty (no stakeholder filtering happened)
     repair.acs.read_from_file(acsSnapshotPath) should have size 2
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     // Advance time to allow topology transactions to be processed
     clock.advance(Duration.ofSeconds(30))
@@ -589,7 +589,7 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
 
     repair.acs.read_from_file(acsSnapshotPath) should have size expectedAcsSnapshotSize
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 

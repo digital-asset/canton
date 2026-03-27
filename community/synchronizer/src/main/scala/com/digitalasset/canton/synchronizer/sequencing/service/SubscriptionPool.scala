@@ -242,8 +242,6 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
       logger.debug(
         s"Closing all subscriptions in pool with ${subscribersGauge.getValue} subscriptions"
       )
-      // wait for the subscriptions to actually close in case they are already in the process of closing
-      // in which case FlagClosable doesn't wait.
       closeAllSubscriptions()
     }
 

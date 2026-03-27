@@ -53,7 +53,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+    contractStateMode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.NoKey,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {
@@ -282,7 +282,7 @@ class TestEngine(
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       preparationTime: Time.Timestamp = testTimestamp,
       ledgerEffectiveTime: Time.Timestamp = testTimestamp,
-      contractStateMode: ContractStateMachine.Mode,
+      contractStateMode: NextGenContractStateMachine.Mode,
   )(implicit traceContext: TraceContext): TxAndMeta = {
 
     val result = engine.reinterpret(
@@ -304,7 +304,7 @@ class TestEngine(
       meta: Transaction.Metadata,
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       ledgerTime: Time.Timestamp = testTimestamp,
-      contractStateMode: ContractStateMachine.Mode,
+      contractStateMode: NextGenContractStateMachine.Mode,
   )(implicit traceContext: TraceContext): (SubmittedTransaction, Transaction.Metadata) = {
 
     val nodeSeeds = Map.from(meta.nodeSeeds.toList)

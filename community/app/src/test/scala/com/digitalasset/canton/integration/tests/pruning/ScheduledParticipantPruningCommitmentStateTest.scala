@@ -194,7 +194,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
             .trySignAndCreate(
               commitment1,
               srcTopologySnapshot.futureValueUS,
-              Some(environment.clock.now),
+              None, // not needed for unit tests; session signing keys disabled
             )
             .map(_ -> Recipients.cc(recipient))
             .futureValueUS

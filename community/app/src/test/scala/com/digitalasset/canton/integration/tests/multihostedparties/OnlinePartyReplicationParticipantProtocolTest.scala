@@ -7,8 +7,8 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{BatchingConfig, ConsoleCommandTimeout}
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -262,6 +262,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         targetParticipant.underlying.value.sync.participantNodePersistentState,
         connectedSynchronizer,
         AlphaOnlinePartyReplicationConfig(pauseSynchronizerIndexingDuringPartyReplication = true),
+        BatchingConfig(),
         futureSupervisor,
         exitOnFatalFailures = false,
         timeouts,

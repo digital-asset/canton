@@ -41,8 +41,8 @@ template KeyOps
 
 -- @LEDGER run LfStableContractKeyThroughExercises.EXPECTED.ledger
 run = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-LfStableContractKeyThroughExercises:run"
+  bob <- allocateParty "Bob-LfStableContractKeyThroughExercises:run"
 
   let
     salice = S.singleton alice

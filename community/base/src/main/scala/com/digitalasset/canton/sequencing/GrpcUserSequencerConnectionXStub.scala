@@ -240,9 +240,7 @@ class GrpcUserSequencerConnectionXStub(
               Future.successful(
                 Left(
                   SequencerConnectionXStubError
-                    .ConnectionError(
-                      ConnectionXError.TransportError(grpcError)
-                    )
+                    .ConnectionError(ConnectionXError.TransportError(grpcError))
                 )
               )
 

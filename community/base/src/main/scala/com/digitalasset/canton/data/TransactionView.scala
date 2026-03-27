@@ -174,10 +174,10 @@ final case class TransactionView private (
     subviews = Some(subviews.toProtoV30),
   )
 
-  /** The global key inputs that the [[com.digitalasset.daml.lf.transaction.ContractStateMachine]]
-    * computes while interpreting the root action of the view, enriched with the maintainers of the
-    * key and the [[com.digitalasset.canton.protocol.LfLanguageVersion]] to be used for serializing
-    * the key.
+  /** The global key inputs that the
+    * [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine]] computes while
+    * interpreting the root action of the view, enriched with the maintainers of the key and the
+    * [[com.digitalasset.canton.protocol.LfLanguageVersion]] to be used for serializing the key.
     *
     * @throws java.lang.IllegalStateException
     *   if the [[ViewParticipantData]] of this view or any subview is blinded

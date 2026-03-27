@@ -457,7 +457,6 @@ class LedgerApiOtelIT extends LedgerApiOtelITBase {
               beginExclusive = offset,
               endInclusive = None,
               updateFormat = updateFormat(party),
-              descendingOrder = false,
             ),
             _,
           ),

@@ -252,6 +252,8 @@ object Profile {
       implicit val choiceByKeyDefRef: Allowed[ChoiceByKeyDefRef] = allowAll
       implicit val fetchByKeyDefRef: Allowed[FetchByKeyDefRef] = allowAll
       implicit val lookupByKeyDefRef: Allowed[LookupByKeyDefRef] = allowAll
+      implicit val queryNByKeyDefRef: Allowed[QueryNByKeyDefRef] = allowAll
+
       implicit val contractKeyWithMaintainersDefRef: Allowed[ContractKeyWithMaintainersDefRef] =
         allowAll
       implicit val createAndExerciseLabel: Allowed[CreateAndExerciseLabel] = allowAll

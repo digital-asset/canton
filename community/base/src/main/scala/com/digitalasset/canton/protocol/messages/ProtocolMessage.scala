@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import cats.Functor
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{
   HashPurpose,
   Signature,
@@ -14,7 +15,6 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoApi,
   SyncCryptoError,
 }
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
@@ -221,38 +221,34 @@ object SignedProtocolMessage
     NonEmpty(Seq, signature, moreSignatures*),
   )
 
-  /** @param approximateTimestampOverride
-    *   optional timestamp to use for signing. Should only be set when signing submission requests,
-    *   encrypted view messages or any other times when the topology is not yet fixed, i.e., when
-    *   using a topology snapshot approximation. The current local clock reading is often a suitable
-    *   value.
+  /** @param signingTimestampOverrides
+    *   Optional overrides for selecting an approximate signing timestamp and validity end, used to
+    *   select the correct session signing key whenever session signing keys are enabled.
     */
   def signAndCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SignedProtocolMessage[M]] = {
     val typedMessage = TypedSignedProtocolMessageContent(message)
 
-    mkSignature(typedMessage, cryptoApi, approximateTimestampOverride).map { signature =>
+    mkSignature(typedMessage, cryptoApi, signingTimestampOverrides).map { signature =>
       SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature))
     }
   }
 
-  /** @param approximateTimestampOverride
-    *   optional timestamp to use for signing. Should only be set when signing submission requests,
-    *   encrypted view messages or any other times when the topology is not yet fixed, i.e., when
-    *   using a topology snapshot approximation. The current local clock reading is often a suitable
-    *   value.
+  /** @param signingTimestampOverrides
+    *   Optional overrides for selecting an approximate signing timestamp and validity end, used to
+    *   select the correct session signing key whenever session signing keys are enabled.
     */
   @VisibleForTesting
   private[canton] def mkSignature[M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[M],
       cryptoApi: SyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature] = {
@@ -260,18 +256,22 @@ object SignedProtocolMessage
     val serialization = typedMessage.getCryptographicEvidence
 
     val hash = cryptoApi.pureCrypto.digest(hashPurpose, serialization)
-    cryptoApi.sign(hash, SigningKeyUsage.ProtocolOnly, approximateTimestampOverride)
+    cryptoApi.sign(
+      hash,
+      SigningKeyUsage.ProtocolOnly,
+      signingTimestampOverrides,
+    )
   }
 
   def trySignAndCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[SignedProtocolMessage[M]] =
-    signAndCreate(message, cryptoApi, approximateTimestampOverride)
+    signAndCreate(message, cryptoApi, signingTimestampOverrides)
       .valueOr(err =>
         throw new IllegalStateException(s"Failed to create signed protocol message: $err")
       )

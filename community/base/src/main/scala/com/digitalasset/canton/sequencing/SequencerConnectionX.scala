@@ -16,7 +16,9 @@ import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.{
   SequencerSubscription,
+  SequencerSubscriptionPekko,
   SubscriptionErrorRetryPolicy,
+  SubscriptionErrorRetryPolicyPekko,
 }
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
@@ -99,4 +101,29 @@ trait SequencerConnectionX extends FlagCloseable with NamedLogging {
     * subscription
     */
   def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
+}
+
+/** A connection to a sequencer with an alternative `subscribe` method.
+  *
+  * This is only used for the direct connection from a sequencer to itself.
+  */
+trait SequencerConnectionWithPekkoSubscribe extends SequencerConnectionX {
+  type SubscriptionError
+
+  /** Create a single subscription to read events from the Sequencer for this member starting from
+    * the counter defined in the request. The transport is not expected to provide retries of
+    * subscriptions.
+    */
+  def subscribe(request: SubscriptionRequest)(implicit
+      traceContext: TraceContext
+  ): SequencerSubscriptionPekko[SubscriptionError]
+
+  /** The transport can decide which errors will cause the sequencer client to not try to
+    * reestablish a subscription
+    */
+  def subscriptionRetryPolicyPekko: SubscriptionErrorRetryPolicyPekko[SubscriptionError]
+}
+
+object SequencerConnectionWithPekkoSubscribe {
+  type Aux[E] = SequencerConnectionWithPekkoSubscribe { type SubscriptionError = E }
 }

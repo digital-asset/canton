@@ -37,7 +37,7 @@ template ContractKeyWithCid with
     maintainer key._1
 
 createCmdCrashes = script do
-    alice <- allocateParty "Alice"
+    alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:createCmdCrashes"
     cid <- submit alice $ do
       createCmd Contract with party = alice
     submit alice $ do
@@ -46,13 +46,13 @@ createCmdCrashes = script do
         cid = cid
 
 queryCrashes = script do
-    alice <- allocateParty "Alice"
+    alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:queryCrashes"
     cid <- submit alice $ do
           createCmd Contract with party = alice
     queryContractKey @ContractKeyWithCid alice (alice, ContractId' cid)
 
 exerciseCmdCrashes = script do
-    alice <- allocateParty "Alice"
+    alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:exerciseCmdCrashes"
     cid <- submit alice $ do
           createCmd Contract with party = alice
     submit alice $ do exerciseByKeyCmd @ContractKeyWithCid (alice, ContractId' cid) Noop
@@ -91,17 +91,17 @@ template Test
         pure ()
 
 createCrashes = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:createCrashes"
   alice `submit` createAndExerciseCmd (Test alice) CreateCrash
 
 fetchCrashes = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:fetchCrashes"
   alice `submit` createAndExerciseCmd (Test alice) FetchCrash
 
 lookupCrashes = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:lookupCrashes"
   alice `submit` createAndExerciseCmd (Test alice) LookupCrash
 
 exerciseCrashes = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:exerciseCrashes"
   alice `submit` createAndExerciseCmd (Test alice) ExerciseCrash

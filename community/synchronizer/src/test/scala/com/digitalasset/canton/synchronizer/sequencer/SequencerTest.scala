@@ -252,7 +252,7 @@ class SequencerTest
             submission,
             HashPurpose.SubmissionRequestSignature,
             aliceCrypto.currentSnapshotApproximation.futureValueUS,
-            Some(clock.now),
+            None, // not needed for unit tests; session signing keys disabled
           )
           .valueOrFail("sign request")
         _ <- sequencer.sendAsyncSigned(signedSubmission).valueOrFail("send")

@@ -33,7 +33,7 @@ template T
       do (+2) <$> exercise self NoConsume -- Yes, fetching self in a postconsuming choice is ok.
 
 main = script do
-  p <- allocateParty "p"
+  p <- allocateParty "p-ConsumingTests:main"
 
   noConsumeCid <- submit p $ createCmd T with p
   41 <- submit p $ exerciseCmd noConsumeCid NoConsume

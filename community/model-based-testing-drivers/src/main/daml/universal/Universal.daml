@@ -161,11 +161,11 @@ template UniversalWithKey
         assert (this.contractId == expectedContractId)
         interpretTransaction env subTransaction
 
-(!) : (Ord k, Show k) => M.Map k v -> k -> v
+(!) : (Ord k, Show k, Show v) => M.Map k v -> k -> v
 m ! k =
   case M.lookup k m of
     Some v -> v
-    None -> error (show k <> " not found")
+    None -> error (show k <> " not found in " <> show m)
 
 interpretTxAction : Env -> TxAction -> Update Env
 interpretTxAction env action =
@@ -206,7 +206,7 @@ interpretTxAction env action =
       result <- queryNByKey @UniversalWithKey
                   (length expectedContractIds + if exhaustive then 1 else 0)
                   (keyId, maintainers)
-      assert (map (UniversalWithKeyContractId . fst) result == [(env ! cid) | cid <- expectedContractIds])
+      assert (fmap (\(_, contract) -> contract.contractId) result == expectedContractIds)
       return env
     (FetchByKey keyId maintainers expectedContractId) -> do
       (_, result) <- fetchByKey @UniversalWithKey (keyId, maintainers)

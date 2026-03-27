@@ -53,12 +53,13 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.admin.*
-import com.digitalasset.canton.participant.admin.data.{LateLsuRequest, UploadDarData}
-import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.admin.inspection.{
-  JournalGarbageCollectorControl,
-  SyncStateInspection,
+import com.digitalasset.canton.participant.admin.data.{
+  LateLsuRequest,
+  ManualLsuRequest,
+  UploadDarData,
 }
+import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, RepairService}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -490,22 +491,6 @@ class CantonSyncService(
     participantNodePersistentState,
     synchronizerConnectionConfigStore,
     parameters.processingTimeouts,
-    new JournalGarbageCollectorControl {
-      override def disable(
-          synchronizerId: PhysicalSynchronizerId
-      )(implicit traceContext: TraceContext): Future[Unit] =
-        connectedSynchronizersLookup
-          .get(synchronizerId)
-          .map(_.addJournalGarageCollectionLock())
-          .getOrElse(Future.unit)
-
-      override def enable(
-          synchronizerId: PhysicalSynchronizerId
-      )(implicit traceContext: TraceContext): Unit =
-        connectedSynchronizersLookup
-          .get(synchronizerId)
-          .foreach(_.removeJournalGarageCollectionLock())
-    },
     connectedSynchronizersLookup,
     syncCrypto,
     participantId,
@@ -1311,6 +1296,11 @@ class CantonSyncService(
       request: LateLsuRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     connectionsManager.performLateLsu(request)
+
+  def performManualLsu(
+      request: ManualLsuRequest
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    connectionsManager.performManualLsu(request)
 
   def logout(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext

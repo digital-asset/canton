@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, ContractStateMachine, FatContractInstance, Node, SubmittedTransaction, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, SubmittedTransaction, VersionedTransaction}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command._
@@ -52,8 +52,8 @@ class LargeTransactionTest(
         submitter: Party,
         effectiveAt: Time.Timestamp,
         tx: CommittedTransaction,
-    ): VersionedTransaction =
-      IdeLedger
+    ): VersionedTransaction = {
+      val result = IdeLedger
         .commitTransaction(
           actAs = Set(submitter),
           readAs = Set.empty,
@@ -63,13 +63,9 @@ class LargeTransactionTest(
           locationInfo = Map.empty,
           l = ledger,
         )
-        .fold(
-          err => throw new RuntimeException(err.toString),
-          result => {
             ledger = result.newLedger
             result.richTransaction.transaction
-          },
-        )
+    }
 
     def get(
         submitter: Party,

@@ -76,7 +76,6 @@ final class OngoingStreamAuthIT
           beginExclusive = participantBegin,
           endInclusive = None,
           updateFormat = Some(getUpdateFormat(Set(party))),
-          descendingOrder = false,
         )
         val _ = stub(UpdateServiceGrpc.stub(channel), token)
           .getUpdates(request, observer)
@@ -170,7 +169,6 @@ final class OngoingStreamAuthIT
           beginExclusive = participantBegin,
           endInclusive = None,
           updateFormat = Some(getUpdateFormat(Set(party))),
-          descendingOrder = false,
         )
         val _ = stub(UpdateServiceGrpc.stub(channel), token)
           .getUpdates(request, observer)

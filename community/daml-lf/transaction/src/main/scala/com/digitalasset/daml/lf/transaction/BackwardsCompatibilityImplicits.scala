@@ -24,4 +24,14 @@ object BackwardsCompatibilityImplicits {
     }
   }
 
+  implicit class KeyMapVectorOps(val underlying: Map[GlobalKey, Vector[ContractId]]) extends AnyVal {
+    def asCidOptionMap: Map[GlobalKey, Option[ContractId]] =
+      underlying.transform((_, v) => v.asCidOption)
+  }
+
+  implicit class KeyMapOptionOps(val underlying: Map[GlobalKey, Option[ContractId]]) extends AnyVal {
+    def asCidVectorMap: Map[GlobalKey, Vector[ContractId]] =
+      underlying.transform((_, v) => v.asCidVector)
+  }
+
 }

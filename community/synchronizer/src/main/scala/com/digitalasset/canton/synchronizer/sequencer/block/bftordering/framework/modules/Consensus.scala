@@ -338,11 +338,13 @@ object Consensus {
 
     final case class BlockVerified[E <: Env[E]](
         commitCertificate: CommitCertificate,
+        currentEpochInfo: EpochInfo,
         from: BftNodeId,
     ) extends StateTransferMessage
 
     final case class BlockStored[E <: Env[E]](
         commitCertificate: CommitCertificate,
+        currentEpochInfo: EpochInfo,
         from: BftNodeId,
     ) extends StateTransferMessage
   }

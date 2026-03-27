@@ -63,7 +63,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
@@ -95,7 +94,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     node: BftNodeId,
     config: BftBlockOrdererConfig,
     sequencerSubscriptionInitialBlockNumber: BlockNumber,
-    epochLength: EpochLength,
     stores: BftOrderingStores[E],
     orderingTopologyProvider: OrderingTopologyProvider[E],
     blockSubscription: BlockSubscription,
@@ -158,6 +156,11 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         blockNumber <- data.firstBlockNumberInStartEpoch
       } yield (epoch, blockNumber)
     }
+    epochChecker.check(
+      bootstrapTopologyInfo.thisNode,
+      initialEpoch,
+      bootstrapTopologyInfo.currentMembership,
+    )
 
     val onboardingEpochCouldAlterOrderingTopology =
       thisNodeFirstKnownAt
@@ -280,7 +283,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
 
           new PreIssConsensusModule(
             bootstrapTopologyInfo,
-            epochLength,
             stores.epochStore,
             sequencerSnapshotAdditionalInfo,
             clock,

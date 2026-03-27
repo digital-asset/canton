@@ -4,7 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  EpochLength,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.google.common.annotations.VisibleForTesting
 
@@ -35,11 +39,13 @@ object Membership {
       sequencingParameters: SequencingParameters = SequencingParameters.Default,
       leaders: Option[Seq[BftNodeId]] = None,
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
+      epochLength: EpochLength = DefaultEpochLength,
   ): Membership = {
     val orderingTopology = OrderingTopology.forTesting(
       otherNodes + myId,
       sequencingParameters,
       nodesTopologyInfos = nodesTopologyInfos,
+      epochLength = epochLength,
     )
     val nodes = orderingTopology.sortedNodes
     Membership(myId, orderingTopology, leaders.getOrElse(nodes))

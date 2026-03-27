@@ -8,6 +8,7 @@ import cats.syntax.functorFilter.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -500,7 +501,7 @@ trait HasProgrammableSequencer {
   def signModifiedSubmissionRequest(
       request: SubmissionRequest,
       syncCrypto: SynchronizerCryptoClient,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      approximateTimestampForSigning: Option[CantonTimestamp],
   )(implicit executionContext: ExecutionContext): SignedContent[SubmissionRequest] =
     SignedContent
       .create(
@@ -508,7 +509,8 @@ trait HasProgrammableSequencer {
         syncCrypto.currentSnapshotApproximation.futureValueUS,
         request,
         None,
-        approximateTimestampOverride,
+        SigningTimestampOverrides
+          .createOption(approximateTimestampForSigning, Some(request.maxSequencingTime)),
         HashPurpose.SubmissionRequestSignature,
         testedProtocolVersion,
       )

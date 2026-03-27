@@ -765,7 +765,6 @@ private final class LedgerServicesJson(
         endInclusive = req.endInclusive,
         filter = None,
         updateFormat = req.updateFormat,
-        descendingOrder = req.descendingOrder,
       )
 
     override def getUpdateByOffset(

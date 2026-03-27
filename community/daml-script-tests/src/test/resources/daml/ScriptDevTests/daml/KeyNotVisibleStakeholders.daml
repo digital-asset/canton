@@ -59,8 +59,8 @@ template Delegation
         lookupByKey sig
 
 divulgeeFetch = script do
-  sig <- allocateParty "s" -- Signatory
-  divulgee <- allocateParty "d" -- Divulgee
+  sig <- allocateParty "s-KeyNotVisibleStakeholders:divulgeeFetch" -- Signatory
+  divulgee <- allocateParty "d-KeyNotVisibleStakeholders:divulgeeFetch" -- Divulgee
   keyedCid <- submit sig do createCmd Keyed with ..
   divulgercid <- submit divulgee do createCmd Divulger with ..
   submit sig do exerciseCmd divulgercid DivulgeKeyed with ..
@@ -69,8 +69,8 @@ divulgeeFetch = script do
     pure ()
 
 divulgeeLookup = script do
-  sig <- allocateParty "s" -- Signatory
-  divulgee <- allocateParty "d" -- Divulgee
+  sig <- allocateParty "s-KeyNotVisibleStakeholders:divulgeeLookup" -- Signatory
+  divulgee <- allocateParty "d-KeyNotVisibleStakeholders:divulgeeLookup" -- Divulgee
   keyedCid <- submit sig do createCmd Keyed with ..
   divulgercid <- submit divulgee do createCmd Divulger with ..
   submit sig do exerciseCmd divulgercid DivulgeKeyed with ..
@@ -79,9 +79,9 @@ divulgeeLookup = script do
     pure ()
 
 blindFetch = script do
-  sig <- allocateParty "s" -- Signatory
-  divulgee <- allocateParty "d" -- Divulgee
-  blind <- allocateParty "b" -- Blind
+  sig <- allocateParty "s-KeyNotVisibleStakeholders:blindFetch" -- Signatory
+  divulgee <- allocateParty "d-KeyNotVisibleStakeholders:blindFetch" -- Divulgee
+  blind <- allocateParty "b-KeyNotVisibleStakeholders:blindFetch" -- Blind
   keyedCid <- submit sig do createCmd Keyed with ..
   divulgercid <- submit divulgee do createCmd Divulger with ..
   submit sig do exerciseCmd divulgercid DivulgeKeyed with ..
@@ -90,9 +90,9 @@ blindFetch = script do
     pure ()
 
 blindLookup = script do
-  sig <- allocateParty "s" -- Signatory
-  divulgee <- allocateParty "d" -- Divulgee
-  blind <- allocateParty "b" -- Blind
+  sig <- allocateParty "s-KeyNotVisibleStakeholders:blindLookup" -- Signatory
+  divulgee <- allocateParty "d-KeyNotVisibleStakeholders:blindLookup" -- Divulgee
+  blind <- allocateParty "b-KeyNotVisibleStakeholders:blindLookup" -- Blind
   keyedCid <- submit sig do createCmd Keyed with ..
   divulgercid <- submit divulgee do createCmd Divulger with ..
   submit sig do exerciseCmd divulgercid DivulgeKeyed with ..

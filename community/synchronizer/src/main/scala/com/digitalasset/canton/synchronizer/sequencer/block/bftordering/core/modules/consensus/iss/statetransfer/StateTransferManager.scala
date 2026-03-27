@@ -13,11 +13,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
-  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopologyInfo,
@@ -42,7 +42,6 @@ import scala.util.{Failure, Random, Success}
 class StateTransferManager[E <: Env[E]](
     thisNode: BftNodeId,
     dependencies: ConsensusModuleDependencies[E],
-    epochLength: EpochLength, // TODO(#19289) support variable epoch lengths
     epochStore: EpochStore[E],
     random: Random,
     metrics: BftOrderingMetrics,
@@ -63,7 +62,6 @@ class StateTransferManager[E <: Env[E]](
   private val messageSender = new StateTransferMessageSender[E](
     thisNode,
     dependencies,
-    epochLength,
     epochStore,
     loggerFactory,
   )
@@ -144,6 +142,7 @@ class StateTransferManager[E <: Env[E]](
       message: Consensus.StateTransferMessage,
       topologyInfo: OrderingTopologyInfo[E],
       latestCompletedEpoch: EpochStore.Epoch,
+      currentEpochInfo: EpochInfo,
   )(abort: String => Nothing)(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
@@ -157,7 +156,12 @@ class StateTransferManager[E <: Env[E]](
         )
 
       case StateTransferMessage.VerifiedStateTransferMessage(message) =>
-        handleStateTransferNetworkMessage(message, topologyInfo, latestCompletedEpoch)(abort)
+        handleStateTransferNetworkMessage(
+          message,
+          topologyInfo,
+          latestCompletedEpoch,
+          currentEpochInfo,
+        )
 
       case StateTransferMessage.RetryBlockTransferRequest(request) =>
         logger.info(s"Retrying block transfer request for epoch ${request.message.epoch}")
@@ -166,13 +170,14 @@ class StateTransferManager[E <: Env[E]](
 
       case StateTransferMessage.BlockVerified(
             commitCert,
+            currentEpochInfo,
             from,
           ) =>
-        storeBlock(commitCert, from)
+        storeBlock(commitCert, currentEpochInfo, from)
 
-      case StateTransferMessage.BlockStored(commitCert, from) =>
+      case StateTransferMessage.BlockStored(commitCert, currentEpochInfo, from) =>
         if (inStateTransfer) {
-          handleStoredBlock(commitCert)
+          handleStoredBlock(commitCert, currentEpochInfo)
         } else {
           logger.info(
             s"Stored block ${commitCert.prePrepare.message.blockMetadata} from '$from' while not in state transfer"
@@ -192,7 +197,8 @@ class StateTransferManager[E <: Env[E]](
       message: Consensus.StateTransferMessage.StateTransferNetworkMessage,
       orderingTopologyInfo: OrderingTopologyInfo[E],
       latestCompletedEpoch: EpochStore.Epoch,
-  )(abort: String => Nothing)(implicit
+      currentEpochInfo: EpochInfo,
+  )(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): StateTransferMessageResult =
@@ -204,7 +210,7 @@ class StateTransferManager[E <: Env[E]](
           to = from,
           request.epoch,
           latestCompletedEpoch,
-        )(abort)
+        )
         StateTransferMessageResult.Continue
 
       case response: StateTransferMessage.BlockTransferResponse =>
@@ -213,6 +219,7 @@ class StateTransferManager[E <: Env[E]](
           handleBlockTransferResponse(
             response,
             orderingTopologyInfo,
+            currentEpochInfo,
           )
         } else {
           val blockMetadata = response.commitCertificate.map(_.prePrepare.message.blockMetadata)
@@ -260,6 +267,7 @@ class StateTransferManager[E <: Env[E]](
   private def handleBlockTransferResponse(
       response: StateTransferMessage.BlockTransferResponse,
       orderingTopologyInfo: OrderingTopologyInfo[E],
+      currentEpochInfo: EpochInfo,
   )(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
@@ -269,13 +277,19 @@ class StateTransferManager[E <: Env[E]](
       case None =>
         StateTransferMessageResult.NothingToStateTransfer(from)
       case Some(commitCert) =>
-        validator.verifyCommitCertificateSignatures(commitCert, from, orderingTopologyInfo)
+        validator.verifyCommitCertificateSignatures(
+          commitCert,
+          from,
+          orderingTopologyInfo,
+          currentEpochInfo,
+        )
         StateTransferMessageResult.Continue
     }
   }
 
   private def storeBlock(
       commitCert: CommitCertificate,
+      currentEpochInfo: EpochInfo,
       from: BftNodeId,
   )(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -285,7 +299,7 @@ class StateTransferManager[E <: Env[E]](
       epochStore.addOrderedBlockAtomically(commitCert.prePrepare, commitCert.commits.map(Traced(_)))
     ) {
       case Success(_) =>
-        Some(StateTransferMessage.BlockStored(commitCert, from))
+        Some(StateTransferMessage.BlockStored(commitCert, currentEpochInfo, from))
       case Failure(exception) =>
         Some(Consensus.ConsensusMessage.AsyncException(exception))
     }
@@ -293,12 +307,13 @@ class StateTransferManager[E <: Env[E]](
   }
 
   private def handleStoredBlock(
-      commitCert: CommitCertificate
+      commitCert: CommitCertificate,
+      currentEpochInfo: EpochInfo,
   )(implicit traceContext: TraceContext): Unit = {
     val prePrepare = commitCert.prePrepare.message
     val blockMetadata = prePrepare.blockMetadata
-    // TODO(#19289) support variable epoch lengths
-    val blockLastInEpoch = (blockMetadata.blockNumber + 1) % epochLength == 0
+
+    val blockLastInEpoch = blockMetadata.blockNumber == currentEpochInfo.lastBlockNumber
 
     // Blocks within an epoch can be received and stored out of order, but that's fine because the Output module
     //  orders them (has a Peano queue).

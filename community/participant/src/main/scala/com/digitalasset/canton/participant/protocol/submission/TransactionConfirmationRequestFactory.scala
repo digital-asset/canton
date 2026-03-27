@@ -11,6 +11,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.GenTransactionTree.ViewWithWitnessesAndRecipients
 import com.digitalasset.canton.data.ViewType.TransactionViewType
@@ -42,13 +43,13 @@ import com.digitalasset.canton.sequencing.protocol.{
   Recipients,
 }
 import com.digitalasset.canton.store.SessionKeyStore
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractHasher, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import scala.concurrent.ExecutionContext
 
@@ -64,7 +65,6 @@ import scala.concurrent.ExecutionContext
   */
 class TransactionConfirmationRequestFactory(
     submitterNode: ParticipantId,
-    clock: Clock,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
     parallel: Boolean = true,
@@ -89,6 +89,7 @@ class TransactionConfirmationRequestFactory(
       keyResolver: LfKeyResolver,
       mediator: MediatorGroupRecipient,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      approximateTimestampForSigning: CantonTimestamp,
       sessionKeyStore: SessionKeyStore,
       contractInstanceOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
@@ -126,7 +127,7 @@ class TransactionConfirmationRequestFactory(
           transactionUuid,
           cryptoSnapshot.ipsSnapshot,
           contractInstanceOfId,
-          keyResolver,
+          keyResolver.asCidOptionMap,
           maxSequencingTime,
           validatePackageVettings = true,
         )
@@ -143,6 +144,12 @@ class TransactionConfirmationRequestFactory(
       confirmationRequest <- createConfirmationRequest(
         transactionTree,
         cryptoSnapshot,
+        Some(
+          SigningTimestampOverrides(
+            approximateTimestampForSigning,
+            Some(maxSequencingTime),
+          )
+        ),
         sessionKeyStore,
         protocolVersion,
       )
@@ -152,6 +159,7 @@ class TransactionConfirmationRequestFactory(
   def createConfirmationRequest(
       transactionTree: GenTransactionTree,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       sessionKeyStore: SessionKeyStore,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -160,14 +168,12 @@ class TransactionConfirmationRequestFactory(
     FutureUnlessShutdown,
     TransactionConfirmationRequestCreationError,
     TransactionConfirmationRequest,
-  ] = {
-    val approximateTimestampOverride = Some(clock.now)
-
+  ] =
     for {
       transactionViewEnvelopes <- createTransactionViewEnvelopes(
         transactionTree,
         cryptoSnapshot,
-        approximateTimestampOverride,
+        signingTimestampOverrides,
         sessionKeyStore,
         protocolVersion,
       )
@@ -175,7 +181,7 @@ class TransactionConfirmationRequestFactory(
         .sign(
           transactionTree.rootHash.unwrap,
           SigningKeyUsage.ProtocolOnly,
-          approximateTimestampOverride,
+          signingTimestampOverrides,
         )
         .leftMap[TransactionConfirmationRequestCreationError](TransactionSigningError.apply)
     } yield {
@@ -193,7 +199,6 @@ class TransactionConfirmationRequestFactory(
         protocolVersion,
       )
     }
-  }
 
   private def assertNonLocalPartiesCanSubmit(
       submitterInfo: SubmitterInfo,
@@ -278,7 +283,7 @@ class TransactionConfirmationRequestFactory(
   private def createTransactionViewEnvelopes(
       transactionTree: GenTransactionTree,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       sessionKeyStore: SessionKeyStore,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -313,7 +318,7 @@ class TransactionConfirmationRequestFactory(
             lvt,
             (viewKey, viewKeyMap),
             cryptoSnapshot,
-            approximateTimestampOverride,
+            signingTimestampOverrides,
             protocolVersion,
           )
           .leftMap[TransactionConfirmationRequestCreationError](
@@ -374,7 +379,6 @@ object TransactionConfirmationRequestFactory {
   def apply(
       submitterNode: ParticipantId,
       synchronizerId: PhysicalSynchronizerId,
-      clock: Clock,
   )(
       cryptoOps: HashOps & HmacOps,
       hasher: ContractHasher,
@@ -394,7 +398,7 @@ object TransactionConfirmationRequestFactory {
         loggerFactory,
       )
 
-    new TransactionConfirmationRequestFactory(submitterNode, clock, loggingConfig, loggerFactory)(
+    new TransactionConfirmationRequestFactory(submitterNode, loggingConfig, loggerFactory)(
       transactionTreeFactory,
       seedGenerator,
     )

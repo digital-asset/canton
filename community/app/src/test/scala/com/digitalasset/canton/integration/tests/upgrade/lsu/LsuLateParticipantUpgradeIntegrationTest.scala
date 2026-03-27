@@ -242,7 +242,7 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
           acsFile,
         )
 
-        p.repair.import_acsV2(fixture.newPsid.logical, acsFile)
+        p.repair.import_acs(fixture.newPsid.logical, acsFile)
 
         if (!upgradeBeforeACSRepair) {
           manualLsu(p)

@@ -293,6 +293,8 @@ class StreamAuthorizationComponentSpec
       desiredPort = grpcServerPort,
       maxInboundMessageSize = ApiServiceOwner.DefaultMaxInboundMessageSize,
       maxInboundMetadataSize = ServerConfig.defaultMaxInboundMetadataSize.unwrap,
+      maxConcurrentStreamsPerConnection =
+        ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
       sslContext = None,
       interceptors = List(authorizationClaimSetFixtureInterceptor),
       metrics = LedgerApiServerMetrics.ForTesting,
@@ -349,7 +351,6 @@ class StreamAuthorizationComponentSpec
               includeTopologyEvents = None,
             )
           ),
-          descendingOrder = false,
         ),
       )
     }

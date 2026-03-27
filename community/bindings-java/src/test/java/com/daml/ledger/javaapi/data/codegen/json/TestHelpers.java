@@ -12,6 +12,7 @@ import com.daml.ledger.javaapi.data.codegen.ContractCompanion;
 import com.daml.ledger.javaapi.data.codegen.ContractId;
 import com.daml.ledger.javaapi.data.codegen.ContractTypeCompanion;
 import com.daml.ledger.javaapi.data.codegen.DamlEnum;
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -204,6 +205,13 @@ public class TestHelpers {
 
       @Override
       public Tmpl fromCreatedEvent(CreatedEvent event) throws IllegalArgumentException {
+        // Dummy
+        return new Tmpl();
+      }
+
+      @Override
+      public Tmpl fromCreatedEvent(CreatedEvent event, UnknownTrailingFieldPolicy policy)
+          throws IllegalArgumentException {
         // Dummy
         return new Tmpl();
       }

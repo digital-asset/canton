@@ -23,7 +23,7 @@ import java.time.Duration
 /** This test ensures that the repair service can be used at upgrade time. We test an ACS import:
   * replicate Alice from p1 to p2.
   */
-@UnstableTest // TODO(#31077)
+@UnstableTest
 final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-repair-service-upgrade-time"
@@ -124,7 +124,7 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
       val ledgerEndP2 = participant2.ledger_api.state.end()
 
       participant2.synchronizers.disconnect_all()
-      participant2.repair.import_acsV2(daId, aliceAcs.canonicalPath)
+      participant2.repair.import_acs(daId, aliceAcs.canonicalPath)
 
       sequencer2.start()
       transferTraffic()

@@ -15,10 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   EpochStore,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  EpochLength,
-  EpochNumber,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopologyInfo
@@ -40,7 +37,6 @@ import EpochState.Epoch
 
 final class PreIssConsensusModule[E <: Env[E]](
     bootstrapTopologyInfo: OrderingTopologyInfo[E],
-    epochLength: EpochLength,
     epochStore: EpochStore[E],
     sequencerSnapshotAdditionalInfo: Option[SequencerSnapshotAdditionalInfo],
     clock: Clock,
@@ -89,7 +85,6 @@ final class PreIssConsensusModule[E <: Env[E]](
           )
         val consensus =
           new IssConsensusModule(
-            epochLength,
             IssConsensusModule.InitialState(
               bootstrapTopologyInfo,
               epochState,

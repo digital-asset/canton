@@ -166,12 +166,12 @@ ccreate p =
   createCmd Simple with p=p
 
 test_screateAndExercise = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-BasicTests:test_screateAndExercise"
   cid <- submit alice $ ccreate alice
   submit alice $ exerciseCmd cid Hello
 
 test_screateAndExerciseComposit = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-BasicTests:test_screateAndExerciseComposit"
   cid <- submit alice $ createCmd Composite with p1 = alice
   submit alice $ exerciseCmd cid First
 
@@ -230,7 +230,7 @@ template GetTimeHelper
 
 test_getTimeTest : Script Time
 test_getTimeTest = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-BasicTests:test_getTimeTest"
   submit alice $ createAndExerciseCmd (GetTimeHelper alice) GetTimeExe
 
 
@@ -247,7 +247,7 @@ template TypeWithParameters
 
 test_typeWithParameters : Script (ContractId TypeWithParameters)
 test_typeWithParameters = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-BasicTests:test_typeWithParameters"
   submit alice $ createCmd TypeWithParameters with p = alice; v = Some 42
 
 
@@ -275,7 +275,7 @@ template AbsoluteFetchHelper
 
 test_createAndFetch : Script Simple
 test_createAndFetch = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-BasicTests:test_createAndFetch"
   cid <- submit alice $ do
     fst <$> createAndExerciseCmd (RelativeFetchHelper with p=alice) RelativeFetchExe
 
@@ -316,17 +316,17 @@ template CallablePayout
 
 test_payoutTest : Script (ContractId CallablePayout)
 test_payoutTest = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-  clara <- allocateParty "Clara"
+  alice <- allocateParty "Alice-BasicTests:test_payoutTest"
+  bob <- allocateParty "Bob-BasicTests:test_payoutTest"
+  clara <- allocateParty "Clara-BasicTests:test_payoutTest"
   pa <- submit alice $ createCmd CallablePayout with giver=alice;receiver=bob
 -- 'Bob' should see all consequences
   submit bob $ exerciseCmd pa Transfer with newReceiver = clara
 
 test_mustFails : Script ()
 test_mustFails = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-BasicTests:test_mustFails"
+  bob <- allocateParty "Bob-BasicTests:test_mustFails"
   cid <- submit alice $ ccreate alice
   submitMustFail bob $ exerciseCmd cid Hello
 
@@ -410,8 +410,8 @@ template ExerciseByKey
 
 test_failedAuths : Script ()
 test_failedAuths = script do
-  alice <- allocateParty "alice"
-  bob <- allocateParty "bob"
+  alice <- allocateParty "Alice-BasicTests:test_failedAuths"
+  bob <- allocateParty "Bob-BasicTests:test_failedAuths"
   submitMustFail alice $ (createCmd TwoParties with p=alice; p2=bob)
 
 -- Tests for the dynamic computation of fetch actors

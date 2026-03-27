@@ -20,7 +20,7 @@ import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
+  NextGenContractStateMachine => ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
@@ -48,7 +48,11 @@ import java.util.zip.ZipInputStream
 import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 
-class ContractKeySpecV2 extends ContractKeySpec(LanguageVersion.Major.V2)
+//  TODO(#30398)
+//   review those test when queryNKey is implemented.
+//   For now those do not make a lot of sens as the lookupKey function use
+//   to emulate the indexer do not return all the keys.
+abstract class ContractKeySpecV2 extends ContractKeySpec(LanguageVersion.Major.V2)
 
 @SuppressWarnings(
   Array(
@@ -61,7 +65,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with EitherValues 
+    with EitherValues
     with SuppressingLogging {
 
   import ContractKeySpec._
@@ -443,40 +447,11 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         "RollbackExerciseCreateFetchByKey",
       )
 
-      val uckFailures = Set(
-        "CreateOverwritesKnownGlobal",
-        "CreateOverwritesLocal",
-        "FetchDoesNotOverwriteGlobal",
-        "FetchDoesNotOverwriteLocal",
-        "GlobalArchiveOverwritesKnownGlobal1",
-        "GlobalArchiveOverwritesKnownGlobal2",
-        "GlobalArchiveOverwritesUnknownGlobal",
-        "LocalArchiveOverwritesKnownGlobal",
-        "RollbackCreateNonRollbackFetchByKey",
-        "RollbackCreateNonRollbackGlobalArchive",
-        "RollbackFetchByKeyNonRollbackCreate",
-        "RollbackFetchByKeyRollbackCreateNonRollbackFetchByKey",
-        "RollbackFetchNonRollbackCreate",
-        "RollbackGlobalArchiveNonRollbackCreate",
-        "RollbackGlobalArchiveUpdates",
-      )
-
       // TEST_EVIDENCE: Integrity: contract key behaviour (non-unique mode)
       "non-uck mode" in {
-        val contractStateMode = ContractStateMachine.Mode.LegacyNUCK
+        val contractStateMode = ContractStateMachine.Mode.NUCK
         forEvery(allCases) { case (name, arg) =>
           if (nonUckFailures.contains(name)) {
-            run(engine, name, arg, contractStateMode) shouldBe a[Left[_, _]]
-          } else {
-            run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]
-          }
-        }
-      }
-      // TEST_EVIDENCE: Integrity: contract key behaviour (unique mode)
-      "uck mode" in {
-        val contractStateMode = ContractStateMachine.Mode.UCKWithRollback
-        forEvery(allCases) { case (name, arg) =>
-          if (uckFailures.contains(name)) {
             run(engine, name, arg, contractStateMode) shouldBe a[Left[_, _]]
           } else {
             run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]

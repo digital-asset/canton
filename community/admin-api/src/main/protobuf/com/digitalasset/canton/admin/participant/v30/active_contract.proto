@@ -8,22 +8,6 @@ package com.digitalasset.canton.admin.participant.v30;
 import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
-// TODO(#24610) – Remove; replaced by the new ActiveContract that uses LAPI active contract
-// Schema definition for the exported ACS snapshot
-message ActiveContractOld {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  // The ID of the synchronizer where the contract was assigned at the time of the export
-  // Required
-  string synchronizer_id = 1;
-  // The contract and its associated metadata
-  // Required
-  Contract contract = 2;
-  // The number of times the contract has been reassigned at the time of the export
-  // Required
-  int64 reassignment_counter = 3;
-}
-
 message Contract {
   message Metadata {
     repeated string non_maintainer_signatories = 1;

@@ -161,7 +161,7 @@ final class LsuSequencingTestMessageHandlerTest
         request = request,
         hashPurpose = hashPurpose,
         snapshot = syncCryptoApi,
-        approximateTimestampOverride = None,
+        signingTimestampOverrides = None,
       )
       .leftMap { err =>
         val message = s"Error signing submission request $err"

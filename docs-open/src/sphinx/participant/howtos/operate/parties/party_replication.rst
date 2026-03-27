@@ -634,8 +634,8 @@ Run the following command using the original configuration parameters you record
 Import Alice's ACS in the ``target`` participant:
 
 .. snippet:: offline_party_replication
-    .. success:: target.parties.import_party_acs("party_replication.alice.acs.gz")
-    .. hidden:: target.parties.import_party_acs("party_replication.alice_external.acs.gz")
+    .. success:: target.parties.import_party_acs(synchronizerId, Some(alice), importFilePath = "party_replication.alice.acs.gz")
+    .. hidden:: target.parties.import_party_acs(synchronizerId, Some(alice), importFilePath = "party_replication.alice_external.acs.gz")
 
 
 11. Reconnect target participant to synchronizer

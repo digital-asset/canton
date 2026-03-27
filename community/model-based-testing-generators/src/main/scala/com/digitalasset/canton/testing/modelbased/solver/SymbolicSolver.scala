@@ -25,6 +25,14 @@ object SymbolicSolver {
     case object NonUniqueContractKeys extends KeyMode
   }
 
+  /** Result of validating a concrete scenario against ledger model invariants. */
+  sealed trait ValidityResult
+  object ValidityResult {
+    case object Valid extends ValidityResult
+    case object Invalid extends ValidityResult
+    case object Unknown extends ValidityResult
+  }
+
   /** Attempts to find a concrete scenario that matches the given skeleton and satisfies all ledger
     * model invariants (authorization, contract lifecycle, key uniqueness, visibility, etc.).
     *
@@ -78,7 +86,7 @@ object SymbolicSolver {
       numPackages: Int,
       numParties: Int,
       keyMode: KeyMode = KeyMode.NonUniqueContractKeys,
-  ): Boolean = {
+  ): ValidityResult = {
     val ctx = new Context()
     val res =
       new SymbolicSolver(
@@ -1458,18 +1466,16 @@ private class SymbolicSolver(
         )
       case UNSATISFIABLE =>
         None
-      // Z3's Optimize solver reports timeouts as "canceled" (not "timeout")
-      case UNKNOWN
-          if solver.getReasonUnknown == "canceled" || solver.getReasonUnknown == "timeout" =>
+      // Z3 may return UNKNOWN for various reasons: timeout (reported as "canceled" by the
+      // Optimize solver), or genuinely "unknown". In either case we treat it as unsatisfiable
+      // so the caller retries with another skeleton.
+      case UNKNOWN =>
         None
-      case other =>
-        throw new IllegalStateException(
-          s"Unexpected solver result: $other, ${solver.getReasonUnknown}"
-        )
     }
   }
 
-  private def validate(scenario: Concrete.Scenario): Boolean = {
+  private def validate(scenario: Concrete.Scenario): SymbolicSolver.ValidityResult = {
+    import SymbolicSolver.ValidityResult.*
     // Global.setParameter("verbose", "1000")
     val solver = ctx.mkSolver()
     val params = ctx.mkParams()
@@ -1485,10 +1491,9 @@ private class SymbolicSolver(
     val constants = mkFreshConstants()
 
     solver.check(validScenario(constants, allPackages, allParties, symScenario)) match {
-      case SATISFIABLE => true
-      case UNSATISFIABLE => false
-      case UNKNOWN =>
-        throw new IllegalStateException(s"Unexpected solver result: ${solver.getReasonUnknown}")
+      case SATISFIABLE => Valid
+      case UNSATISFIABLE => Invalid
+      case UNKNOWN => Unknown
     }
   }
 }

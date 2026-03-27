@@ -113,23 +113,17 @@ object ConfigTransforms {
           .replace(true)
           .focus(_.topology.useNewClient)
           .replace(true)
-          .focus(_.sequencerClient.useNewConnectionPool)
-          .replace(true)
       ),
       ConfigTransforms.updateAllSequencerConfigs_(
         _.focus(_.topology.useNewProcessor)
           .replace(true)
           .focus(_.topology.useNewClient)
           .replace(true)
-          .focus(_.sequencerClient.useNewConnectionPool)
-          .replace(true)
       ),
       ConfigTransforms.updateAllParticipantConfigs_(
         _.focus(_.topology.useNewProcessor)
           .replace(true)
           .focus(_.topology.useNewClient)
-          .replace(true)
-          .focus(_.sequencerClient.useNewConnectionPool)
           .replace(true)
       ),
     )
@@ -166,7 +160,6 @@ object ConfigTransforms {
       _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
       // disable exit on fatal error in tests
       ConfigTransforms.setExitOnFatalFailures(false),
-      ConfigTransforms.setConnectionPool(true),
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
@@ -913,19 +906,6 @@ object ConfigTransforms {
 
   def setDelayLoggingThreshold(duration: config.NonNegativeFiniteDuration): ConfigTransform =
     _.focus(_.monitoring.logging.delayLoggingThreshold).replace(duration)
-
-  def disableConnectionPool: ConfigTransform = setConnectionPool(false)
-
-  /** Use the new sequencer connection pool if 'value' is true. Otherwise use the former transports.
-    */
-  def setConnectionPool(value: Boolean): ConfigTransform =
-    updateAllSequencerConfigs { case (_name, config) =>
-      config.focus(_.sequencerClient.useNewConnectionPool).replace(value)
-    }.compose(updateAllMediatorConfigs { case (_name, config) =>
-      config.focus(_.sequencerClient.useNewConnectionPool).replace(value)
-    }).compose(updateAllParticipantConfigs { case (_name, config) =>
-      config.focus(_.sequencerClient.useNewConnectionPool).replace(value)
-    })
 
   /** Must be applied before the default config transformers */
   def enableHttpLedgerApi: ConfigTransform = updateAllParticipantConfigs_(

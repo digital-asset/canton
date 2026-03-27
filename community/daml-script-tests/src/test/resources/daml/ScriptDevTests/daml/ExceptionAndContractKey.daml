@@ -45,13 +45,13 @@ template Op
         pure ()
 
 testLookup = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-ExceptionAndContractKey:testLookup"
   cid <- submit alice $ createCmd (K alice)
   op <- submit alice $ createAndExerciseCmd (Op alice) (OpLookup cid)
   pure ()
 
 testCreate = script do
-  alice <- allocateParty "alice"
+  alice <- allocateParty "Alice-ExceptionAndContractKey:testCreate"
   cid <- submit alice $ createCmd (K alice)
   op <- submit alice $ createAndExerciseCmd (Op alice) (OpCreate cid)
   pure ()

@@ -10,6 +10,7 @@ import com.digitalasset.daml.lf.ledger._
 import com.digitalasset.daml.lf.transaction.{
   BlindingInfo,
   CommittedTransaction,
+  NextGenContractStateMachine => ContractStateMachine,
   CreationTime,
   FatContractInstance,
   GlobalKey,
@@ -17,7 +18,6 @@ import com.digitalasset.daml.lf.transaction.{
   NodeId,
   Transaction => Tx,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value
 import Value._
 
@@ -226,13 +226,6 @@ object IdeLedger {
       stakeholders: Set[Party],
   ) extends LookupResult
 
-  sealed abstract class CommitError extends Product with Serializable
-  object CommitError {
-    final case class UniqueKeyViolation(
-        error: IdeLedger.UniqueKeyViolation
-    ) extends CommitError
-  }
-
   /** Updates the ledger to reflect that `committer` committed the
     * transaction `tr` resulting from running the
     * update-expression at time `effectiveAt`.
@@ -245,15 +238,12 @@ object IdeLedger {
       tx: CommittedTransaction,
       locationInfo: Map[NodeId, Location],
       l: IdeLedger,
-  ): Either[CommitError, CommitResult] = {
+  ): CommitResult = {
     // transactionId is small enough (< 20 chars), so we do no exceed the 255
     // chars limit when concatenate in EventId#toLedgerString method.
     val transactionOffset = l.scriptStepId.index.toLong
     val richTr = RichTransaction(actAs, readAs, effectiveAt, transactionOffset, tx)
-    processTransaction(l.scriptStepId, richTr, locationInfo, l.ledgerData) match {
-      case Left(err) => Left(CommitError.UniqueKeyViolation(err))
-      case Right(updatedCache) =>
-        Right(
+    val updatedCache = processTransaction(l.scriptStepId, richTr, locationInfo, l.ledgerData)
           CommitResult(
             l.copy(
               scriptSteps = l.scriptSteps + (l.scriptStepId.index -> Commit(
@@ -267,17 +257,16 @@ object IdeLedger {
             l.scriptStepId,
             richTr,
           )
-        )
-    }
   }
 
   /** The initial ledger */
-  def initialLedger(t0: Time.Timestamp): IdeLedger =
+  def initialLedger(t0: Time.Timestamp, csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK): IdeLedger =
     IdeLedger(
       currentTime = t0,
       scriptStepId = TransactionId(0),
       scriptSteps = immutable.IntMap.empty,
       ledgerData = LedgerData.empty,
+      csmMode = csmMode,
     )
 
   /** Result of committing a transaction is the new ledger,
@@ -342,7 +331,7 @@ object IdeLedger {
   final case class LedgerData(
       activeContracts: Set[ContractId],
       nodeInfos: LedgerNodeInfos,
-      activeKeys: Map[GlobalKey, ContractId],
+      activeKeys: Map[GlobalKey, Vector[ContractId]],
       coidToNodeId: Map[ContractId, EventId],
   ) {
     def updateLedgerNodeInfo(
@@ -364,9 +353,6 @@ object IdeLedger {
       copy(coidToNodeId = coidToNodeId + (coid -> nodeId))
 
   }
-
-  final case class UniqueKeyViolation(gk: GlobalKey)
-
   /** Functions for updating the ledger with new transactional information.
     *
     * @param trId transaction identity
@@ -378,22 +364,6 @@ object IdeLedger {
       richTr: RichTransaction,
       locationInfo: Map[NodeId, Location],
   ) {
-
-    def duplicateKeyCheck(ledgerData: LedgerData): Either[UniqueKeyViolation, Unit] = {
-      val inactiveKeys = richTr.transaction.contractKeyInputs
-        .fold(error => crash(s"$error: inconsistent transaction"), identity)
-        .collect { case (key, _: Tx.KeyInactive) =>
-          key
-        }
-
-      inactiveKeys.find(ledgerData.activeKeys.contains(_)) match {
-        case Some(duplicateKey) =>
-          Left(UniqueKeyViolation(duplicateKey))
-
-        case None =>
-          Right(())
-      }
-    }
 
     def addNewLedgerNodes(historicalLedgerData: LedgerData): LedgerData =
       richTr.transaction.transaction.fold[LedgerData](historicalLedgerData) {
@@ -432,17 +402,13 @@ object IdeLedger {
             )
           )
 
-        case (ledgerData, (nodeId, lookupNode: Node.LookupByKey)) =>
-          lookupNode.result.asCidOption match {
-            case None =>
-              ledgerData
-
-            case Some(referencedCoid) =>
-              ledgerData.updateLedgerNodeInfo(referencedCoid)(ledgerNodeInfo =>
-                ledgerNodeInfo.copy(referencedBy =
-                  ledgerNodeInfo.referencedBy + EventId(trId.index.toLong, nodeId)
-                )
+        case (ledgerData, (nodeId, queryByKeyNode: Node.QueryByKey)) =>
+          queryByKeyNode.result.foldLeft(ledgerData){ case (ledgerData, referencedCoid) =>
+            ledgerData.updateLedgerNodeInfo(referencedCoid)(ledgerNodeInfo =>
+              ledgerNodeInfo.copy(referencedBy =
+                ledgerNodeInfo.referencedBy + EventId(trId.index.toLong, nodeId)
               )
+            )
           }
 
         case (ledgerData, (_, _: Node)) =>
@@ -465,13 +431,15 @@ object IdeLedger {
       ledgerData.copy(
         activeContracts =
           ledgerData.activeContracts ++ richTr.transaction.localContractIds -- richTr.transaction.inactiveContracts,
-        activeKeys = richTr.transaction.updatedContractKeys.foldLeft(ledgerData.activeKeys) {
-          case (activeKeys, (key, Some(cid))) =>
-            activeKeys + (key -> cid)
-
-          case (activeKeys, (key, None)) =>
-            activeKeys - key
-        },
+        activeKeys =
+          richTr.transaction.updatedContractKeys
+            .foldLeft(ledgerData.activeKeys) {
+              case (activeKeys, (key, Tx.ContractKeyUpdate(created, consumed))) =>
+                activeKeys.updatedWith(key){ oCids =>
+                  val newCids = created ++ oCids.fold(Vector.empty[Value.ContractId])(_.filterNot(consumed(_)))
+                  if (newCids.isEmpty) None else Some(newCids)
+                }
+            },
       )
     }
 
@@ -507,29 +475,24 @@ object IdeLedger {
       richTr: RichTransaction,
       locationInfo: Map[NodeId, Location],
       ledgerData: LedgerData,
-  ): Either[UniqueKeyViolation, LedgerData] = {
+  ): LedgerData = {
 
     val processor: TransactionProcessor = new TransactionProcessor(trId, richTr, locationInfo)
 
-    for {
-      _ <- processor.duplicateKeyCheck(ledgerData)
-    } yield {
-      // Update ledger data with new transaction node information *before* performing any other updates
-      var cachedLedgerData: LedgerData = processor.addNewLedgerNodes(ledgerData)
+    // Update ledger data with new transaction node information *before* performing any other updates
+    var cachedLedgerData: LedgerData = processor.addNewLedgerNodes(ledgerData)
 
-      // Update ledger data with any new created in and referenced by information
-      cachedLedgerData = processor.createdInAndReferenceByUpdates(cachedLedgerData)
-      // Update ledger data with any new consumed by information
-      cachedLedgerData = processor.consumedByUpdates(cachedLedgerData)
-      // Update ledger data with any new active contract information
-      cachedLedgerData = processor.activeContractAndKeyUpdates(cachedLedgerData)
-      // Update ledger data with any new disclosure information
-      cachedLedgerData = processor.disclosureUpdates(cachedLedgerData)
-      // Update ledger data with any new divulgence information
-      cachedLedgerData = processor.divulgenceUpdates(cachedLedgerData)
-
-      cachedLedgerData
-    }
+    // Update ledger data with any new created in and referenced by information
+    cachedLedgerData = processor.createdInAndReferenceByUpdates(cachedLedgerData)
+    // Update ledger data with any new consumed by information
+    cachedLedgerData = processor.consumedByUpdates(cachedLedgerData)
+    // Update ledger data with any new active contract information
+    cachedLedgerData = processor.activeContractAndKeyUpdates(cachedLedgerData)
+    // Update ledger data with any new disclosure information
+    cachedLedgerData = processor.disclosureUpdates(cachedLedgerData)
+    // Update ledger data with any new divulgence information
+    cachedLedgerData = processor.divulgenceUpdates(cachedLedgerData)
+    cachedLedgerData
   }
 }
 
@@ -557,6 +520,7 @@ final case class IdeLedger(
     scriptStepId: IdeLedger.TransactionId,
     scriptSteps: immutable.IntMap[IdeLedger.ScriptStep],
     ledgerData: IdeLedger.LedgerData,
+    csmMode: ContractStateMachine.Mode,
 ) {
 
   import IdeLedger._

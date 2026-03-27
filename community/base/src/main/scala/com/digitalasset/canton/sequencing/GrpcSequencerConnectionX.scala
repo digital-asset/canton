@@ -251,8 +251,8 @@ class GrpcSequencerConnectionX(
       result <- stub.downloadTopologyStateForInit(request, timeout).leftMap(_.toString)
       storedTxs = result.topologyTransactions.value
       _ = logger.debug(
-        s"Downloaded topology state for initialization with last change timestamp at " +
-          s"${storedTxs.lastChangeTimestamp}: ${storedTxs.result.size} transactions"
+        s"Downloaded topology state for initialization with last change timestamp at ${storedTxs.lastChangeTimestamp}: " +
+          s"${storedTxs.result.size} transactions"
       )
     } yield result
   }

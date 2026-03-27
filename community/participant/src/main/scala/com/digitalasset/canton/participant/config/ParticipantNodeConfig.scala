@@ -229,6 +229,8 @@ final case class LedgerApiServerConfig(
     ),
     maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     maxInboundMetadataSize: NonNegativeInt = ServerConfig.defaultMaxInboundMetadataSize,
+    maxConcurrentStreamsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentStreamsPerConnection,
     rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
     postgresDataSource: PostgresDataSourceConfig = PostgresDataSourceConfig(),
     databaseConnectionTimeout: config.NonNegativeFiniteDuration =
@@ -418,6 +420,7 @@ final case class ParticipantNodeParameterConfig(
     commitmentMismatchDebugging: Boolean = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt] = None,
     commitmentReduceParallelism: NonNegativeInt = NonNegativeInt.one,
+    commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
     alphaMultiSynchronizerSupport: Boolean = false,
 ) extends LocalNodeParametersConfig

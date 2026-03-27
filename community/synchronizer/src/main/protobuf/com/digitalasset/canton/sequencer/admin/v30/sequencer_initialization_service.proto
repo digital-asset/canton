@@ -45,6 +45,12 @@ message InitializeSequencerFromLsuPredecessorRequest {
   bytes topology_snapshot = 1;
 
   com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters = 2;
+
+  /*
+     If true, it will not be checked that that current physical synchronizer id matches the successor in the topology state.
+     Should be used *only* in disaster recovery scenarios (roll forward).
+  */
+  bool ignore_psid_check = 3;
 }
 
 message InitializeSequencerFromLsuPredecessorResponse {}

@@ -8,7 +8,6 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
 import com.digitalasset.daml.lf.transaction.{TransactionError => TxErr}
 
 import scala.annotation.tailrec
@@ -233,7 +232,7 @@ final case class Transaction(
 
 sealed abstract class HasTxNodes[Tx] {
 
-  import Transaction.{KeyInput, ChildrenRecursion}
+  import Transaction.{ChildrenRecursion, ContractKeyUpdate}
 
   def nodes: Map[NodeId, Node]
 
@@ -500,34 +499,39 @@ sealed abstract class HasTxNodes[Tx] {
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
   )
-  def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyInput]] = {
-    foldInExecutionOrder[Either[TxErr, ContractStateMachine.State[NodeId]]](
-      Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCKWithRollback))
+  def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyMapping]] = {
+    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.LLState[NodeId]]](
+      Right(NextGenContractStateMachine.empty[NodeId](NextGenContractStateMachine.Mode.NUCK))
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
       exerciseEnd = (acc, _, _) =>
         acc,
       rollbackBegin =
-        (acc, _, _) => (acc.map(_.beginRollback()), Transaction.ChildrenRecursion.DoRecurse),
-      rollbackEnd = (acc, _, _) => acc.flatMap(_.endRollback().left.map(TxErr.EffectfulRollback(_))),
+        (acc, _, _) => (acc.map(_.beginRollback), Transaction.ChildrenRecursion.DoRecurse),
+      rollbackEnd = (acc, _, _) =>
+        acc.flatMap(_.endRollback.left.map(TxErr.EffectfulRollback(_))),
       leaf = (acc, nid, leaf) =>
         acc.flatMap(
-          _.handleNode(nid, leaf, Vector.empty)
+          _.handleNode(nid, leaf)
         ), // ok to use None as keyInput, because mode is strict
-    ).map(_.globalKeyInputs)
+    ).map(_.keyInputs)
   }
 
-  /** The contract keys created or updated as part of the transaction.
-    *  This includes updates to transient contracts (by mapping them to None)
-    *  but it does not include any updates under rollback nodes.
+  /** The contract keys created or consumed as part of the transaction.
+    *  For each key, a vector of Contract IDs created and removed is returned
+    *  For a transient key (created and consumed within this TX), the CID will not be present in either vector
     */
-  final def updatedContractKeys: Map[GlobalKey, Option[Value.ContractId]] = {
-    foldInExecutionOrder(Map.empty[GlobalKey, Option[Value.ContractId]])(
+  final def updatedContractKeys: Map[GlobalKey, ContractKeyUpdate] = {
+    foldInExecutionOrder(Map.empty[GlobalKey, ContractKeyUpdate])(
       exerciseBegin = {
         case (acc, _, exec) if exec.consuming =>
           (
-            exec.gkeyOpt.fold(acc)(acc.updated(_, None)),
+            exec.gkeyOpt.fold(acc)(acc.updatedWith(_) {
+              case Some(ContractKeyUpdate(created, consumed)) if created.contains(exec.targetCoid) => Some(ContractKeyUpdate(created.filterNot(_==exec.targetCoid), consumed))
+              case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(created, consumed + exec.targetCoid)) 
+              case None => Some(ContractKeyUpdate(Vector.empty, Set(exec.targetCoid)))
+            }),
             ChildrenRecursion.DoRecurse,
           )
         case (acc, _, _) => (acc, ChildrenRecursion.DoRecurse)
@@ -535,12 +539,15 @@ sealed abstract class HasTxNodes[Tx] {
       rollbackBegin = (acc, _, _) => (acc, ChildrenRecursion.DoNotRecurse),
       leaf = {
         case (acc, _, create: Node.Create) =>
-          create.gkeyOpt.fold(acc)(acc.updated(_, Some(create.coid)))
+          create.gkeyOpt.fold(acc)(acc.updatedWith(_) {
+            case None => Some(ContractKeyUpdate(Vector(create.coid), Set.empty))
+            case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(create.coid +: created, consumed))
+          })
         case (acc, _, _: Node.Fetch | _: Node.LookupByKey) => acc
       },
       exerciseEnd = (acc, _, _) => acc,
       rollbackEnd = (acc, _, _) => acc,
-    )
+    ).filterNot(_._2.isEmpty)
   }
 
   // This method visits to all nodes of the transaction in execution order.
@@ -713,14 +720,14 @@ object Transaction {
   /** The state of a key at the beginning of the transaction.
     */
   sealed trait KeyInput extends Product with Serializable {
-    def toKeyMapping: ContractStateMachine.KeyMapping
+    def toKeyMapping: LegacyContractStateMachine.KeyMapping
     def isActive: Boolean
   }
 
   /** No active contract with the given key.
     */
   sealed trait KeyInactive extends KeyInput {
-    override def toKeyMapping: KeyMapping = ContractStateMachine.KeyInactive()
+    override def toKeyMapping: LegacyContractStateMachine.KeyMapping = None
     override def isActive: Boolean = false
   }
 
@@ -735,7 +742,7 @@ object Transaction {
   /** Key must be mapped to this active contract.
     */
   final case class KeyActive(cid: Value.ContractId) extends KeyInput {
-    override def toKeyMapping: KeyMapping = ContractStateMachine.KeyActive(cid)
+    override def toKeyMapping: LegacyContractStateMachine.KeyMapping = Some(cid)
     override def isActive: Boolean = true
   }
 
@@ -743,5 +750,14 @@ object Transaction {
   object ChildrenRecursion {
     case object DoRecurse extends ChildrenRecursion
     case object DoNotRecurse extends ChildrenRecursion
+  }
+
+  final case class ContractKeyUpdate(
+    // Created Ids are ordered to ensure most recently created keys are returned/exercised first
+    createdContractIds: Vector[Value.ContractId],
+    // Consumed Ids are unordered
+    consumedContractIds: Set[Value.ContractId],
+  ) {
+    def isEmpty: Boolean = createdContractIds.isEmpty && consumedContractIds.isEmpty
   }
 }

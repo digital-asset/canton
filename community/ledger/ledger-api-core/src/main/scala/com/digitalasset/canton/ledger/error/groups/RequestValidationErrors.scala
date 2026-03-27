@@ -488,18 +488,4 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           cause = s"Offset $offsetValue in $fieldName is a negative integer: $message"
         )
   }
-
-  @Explanation("""Descending order is set to true but end_inclusive is not present.""")
-  @Resolution("Ensure the end_inclusive is provided when requesting descending order stream")
-  object DescendingOrderMissingEnd
-      extends ErrorCode(
-        id = "DESCENDING_ORDER_MISSING_END",
-        ErrorCategory.InvalidIndependentOfSystemState,
-      ) {
-    final case class Error()(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends ContextualizedDamlError(
-          cause = s"end_inclusive is not provided when descending_order is true"
-        )
-  }
 }

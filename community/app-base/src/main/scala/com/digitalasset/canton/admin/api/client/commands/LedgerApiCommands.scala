@@ -1285,7 +1285,6 @@ object LedgerApiCommands {
         beginExclusive: Long,
         endInclusive: Option[Long],
         updateFormat: UpdateFormat,
-        descendingOrder: Boolean,
     )(override implicit val loggingContext: ErrorLoggingContext)
         extends BaseCommand[GetUpdatesRequest, AutoCloseable, AutoCloseable]
         with SubscribeBase[GetUpdatesRequest, GetUpdatesResponse, UpdateWrapper] {
@@ -1307,7 +1306,6 @@ object LedgerApiCommands {
           beginExclusive = beginExclusive,
           endInclusive = endInclusive,
           updateFormat = Some(updateFormat),
-          descendingOrder = descendingOrder,
         )
       }
 
@@ -2394,23 +2392,32 @@ object LedgerApiCommands {
     final case class GetEventsByContractId(
         contractId: String,
         requestingParties: Seq[String],
+        includeCreatedEventBlob: Boolean,
     ) extends BaseCommand[
           GetEventsByContractIdRequest,
           GetEventsByContractIdResponse,
         ] {
 
-      override protected def createRequest(): Either[String, GetEventsByContractIdRequest] = Right(
-        GetEventsByContractIdRequest(
-          contractId = contractId,
-          eventFormat = Some(
-            EventFormat(
-              filtersByParty = requestingParties.map(_ -> Filters(Nil)).toMap,
-              filtersForAnyParty = None,
-              verbose = true,
+      override protected def createRequest(): Either[String, GetEventsByContractIdRequest] = {
+        val filters = Filters(
+          Seq(
+            CumulativeFilter(
+              IdentifierFilter.WildcardFilter(WildcardFilter(includeCreatedEventBlob))
             )
-          ),
+          )
         )
-      )
+        val eventFormat = EventFormat(
+          filtersForAnyParty = Option.when(requestingParties.isEmpty)(filters),
+          filtersByParty = requestingParties.map(_ -> filters).toMap,
+          verbose = true,
+        )
+        Right(
+          GetEventsByContractIdRequest(
+            contractId = contractId,
+            eventFormat = Some(eventFormat),
+          )
+        )
+      }
 
       override protected def submitRequest(
           service: EventQueryServiceStub,

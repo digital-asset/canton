@@ -371,6 +371,7 @@ object SequencerAdminCommands {
   final case class InitializeFromLsuPredecessor(
       topologySnapshotStream: InputStream,
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
+      ignorePsidCheck: Boolean,
   ) extends GrpcAdminCommand[
         proto.InitializeSequencerFromLsuPredecessorRequest,
         proto.InitializeSequencerFromLsuPredecessorResponse,
@@ -397,6 +398,7 @@ object SequencerAdminCommands {
               val request = proto.InitializeSequencerFromLsuPredecessorRequest(
                 topologySnapshot = ByteString.copyFrom(bytes),
                 synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+                ignorePsidCheck = ignorePsidCheck,
               )
               Some(Right(request))
           }
@@ -410,6 +412,7 @@ object SequencerAdminCommands {
         proto.InitializeSequencerFromLsuPredecessorRequest(
           topologySnapshot = ByteString.EMPTY,
           synchronizerParameters = None,
+          ignorePsidCheck = ignorePsidCheck,
         )
       )
 

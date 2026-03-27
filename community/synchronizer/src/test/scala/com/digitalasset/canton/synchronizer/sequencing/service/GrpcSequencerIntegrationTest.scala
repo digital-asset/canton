@@ -24,6 +24,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, Nonce, SigningKeyUsage, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -362,7 +363,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
                 request: A,
                 hashPurpose: HashPurpose,
                 snapshot: SyncCryptoApi,
-                approximateTimestampOverride: Option[CantonTimestamp],
+                signingTimestampOverrides: Option[SigningTimestampOverrides],
             )(implicit
                 ec: ExecutionContext,
                 traceContext: TraceContext,
@@ -492,8 +493,7 @@ class GrpcSequencerIntegrationTest
               .of(
                 testedProtocolVersion,
                 (MockProtocolMessage, Recipients.cc(env.anotherParticipant)),
-              ),
-            None,
+              )
           )
           .value
           .onShutdown(fail())

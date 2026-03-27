@@ -56,9 +56,10 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
-import com.digitalasset.canton.time.SynchronizerTimeTracker
+import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{
@@ -110,6 +111,7 @@ abstract class ProtocolProcessor[
     ephemeral: SyncEphemeralState,
     crypto: SynchronizerCryptoClient,
     sequencerClient: SequencerClientSend,
+    clock: Clock,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     promiseFactory: PromiseUnlessShutdownFactory,
@@ -119,6 +121,7 @@ abstract class ProtocolProcessor[
       ephemeral,
       crypto,
       sequencerClient,
+      clock,
     )
     with RequestProcessor[RequestViewType, SequencedEventUpdate] {
 
@@ -169,19 +172,38 @@ abstract class ProtocolProcessor[
     for {
       mediator <- chooseMediator(recentSnapshot.ipsSnapshot, explicitMediatorGroupIndex)
         .leftMap(steps.embedNoMediatorError)
-      submissionPair <- steps.createSubmission(submissionParam, mediator, ephemeral, recentSnapshot)
-      (submission, pendingSubmission) = submissionPair
+      submissionData <- steps.createSubmission(
+        submissionParam,
+        mediator,
+        ephemeral,
+        recentSnapshot,
+        sequencerClient.generateMaxSequencingTime,
+      )
+      (submission, pendingSubmission) =
+        submissionData
       _ = logger.debug(
         s"Topology snapshot timestamp at submission: ${recentSnapshot.ipsSnapshot.timestamp}"
       )
       result <- {
         submission match {
           case untracked: steps.UntrackedSubmission =>
-            submitWithoutTracking(submissionParam, untracked, pendingSubmission).tapLeft(
-              submissionError => logger.warn(s"Failed to submit submission due to $submissionError")
+            submitWithoutTracking(
+              submissionParam,
+              untracked,
+              pendingSubmission,
+              untracked.approximateTimestampForSigning,
+              untracked.maxSequencingTime,
+            ).tapLeft(submissionError =>
+              logger.warn(s"Failed to submit submission due to $submissionError")
             )
           case tracked: steps.TrackedSubmission =>
-            submitWithTracking(submissionParam, tracked, pendingSubmission)
+            submitWithTracking(
+              submissionParam,
+              tracked,
+              pendingSubmission,
+              tracked.approximateTimestampForSigning,
+              tracked.maxSequencingTime,
+            )
         }
       }
     } yield result
@@ -239,19 +261,18 @@ abstract class ProtocolProcessor[
       submissionParam: SubmissionParam,
       untracked: steps.UntrackedSubmission,
       pendingSubmission: steps.PendingSubmissionData,
+      approximateTimestampForSigning: CantonTimestamp,
+      maxSequencingTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SubmissionError, FutureUnlessShutdown[SubmissionResult]] = {
     val result = for {
-
-      maxSequencingTime <- EitherT
-        .right(untracked.maxSequencingTimeO.getOrElse(sequencerClient.generateMaxSequencingTime))
-
       sendResult <- submitInternal(
         submissionParam,
         untracked.pendingSubmissionId,
         MessageId.randomMessageId(),
         untracked.batch,
+        approximateTimestampForSigning,
         maxSequencingTime,
         untracked.embedSubmissionError,
         pendingSubmission,
@@ -279,20 +300,7 @@ abstract class ProtocolProcessor[
       submissionParam: SubmissionParam,
       tracked: steps.TrackedSubmission,
       pendingSubmission: steps.PendingSubmissionData,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SubmissionError, FutureUnlessShutdown[SubmissionResult]] = {
-    val maxSequencingTimeF =
-      tracked.maxSequencingTimeO.getOrElse(sequencerClient.generateMaxSequencingTime)
-    EitherT
-      .right(maxSequencingTimeF)
-      .flatMap(submitWithTracking(submissionParam, tracked, pendingSubmission, _))
-  }
-
-  private def submitWithTracking(
-      submissionParam: SubmissionParam,
-      tracked: steps.TrackedSubmission,
-      pendingSubmission: steps.PendingSubmissionData,
+      approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
@@ -387,6 +395,7 @@ abstract class ProtocolProcessor[
             preparedBatch.pendingSubmissionId,
             messageId,
             preparedBatch.batch,
+            approximateTimestampForSigning,
             maxSequencingTime,
             preparedBatch.embedSequencerRequestError,
             pendingSubmission,
@@ -413,6 +422,7 @@ abstract class ProtocolProcessor[
         val batchF = for {
           batch <- tracked.prepareBatch(
             actualDeduplicationOffset,
+            approximateTimestampForSigning,
             maxSequencingTime,
             ephemeral.sessionKeyStore,
           )
@@ -439,6 +449,7 @@ abstract class ProtocolProcessor[
       submissionId: steps.PendingSubmissionId,
       messageId: MessageId,
       batch: Batch[DefaultOpenEnvelope],
+      approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
       embedSubmissionError: SequencerRequestError => steps.SubmissionSendError,
       pendingSubmission: steps.PendingSubmissionData,
@@ -474,10 +485,14 @@ abstract class ProtocolProcessor[
       _ <- sequencerClient
         .send(
           batch,
-          callback = res => sendResultP.trySuccess(res).discard,
-          maxSequencingTime = maxSequencingTime,
+          timestamps = SendRequestTimestamps(
+            topologyTimestamp = None,
+            approximateTimestampForSigning = approximateTimestampForSigning,
+            maxSequencingTime = maxSequencingTime,
+          ),
           messageId = messageId,
           amplify = true,
+          callback = res => sendResultP.trySuccess(res).discard,
         )
         .leftMap { err =>
           removePendingSubmission()

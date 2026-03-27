@@ -213,7 +213,7 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
           beginOffsetExclusive = offsetBeforePartyUpdate,
           exportFilePath = acsSnapshotFile.path.toString,
         )
-        participant2.parties.import_party_acsV2(
+        participant2.parties.import_party_acs(
           fixture.newPsid,
           Some(alice),
           acsSnapshotFile.path.toString,
@@ -298,7 +298,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
         }
 
         val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
-          participant2.parties.import_party_acsV2(lsid, Some(alice), acsSnapshotFile.path.toString)
+          participant2.parties.import_party_acs(lsid, Some(alice), acsSnapshotFile.path.toString)
           participant2.ledger_api.state.end()
         }
 
@@ -384,7 +384,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
         // TODO(#29427) - Address ongoing synchronizer upgrade "no more topology transaction after freeze"
         // Switch back to import_party_acs(V2) from repair.import_acs
-        participant2.repair.import_acsV2(lsid, acsSnapshotFile.path.toString)
+        participant2.repair.import_acs(lsid, acsSnapshotFile.path.toString)
         participant2.ledger_api.state.end()
       }
 

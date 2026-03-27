@@ -21,7 +21,10 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.FatContractInstance
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  NextGenContractStateMachine as ContractStateMachine,
+}
 
 import java.io.File
 import scala.annotation.tailrec
@@ -38,10 +41,13 @@ object ReferenceInterpreter {
   }
 
   /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath. */
-  def apply(loggerFactory: NamedLoggerFactory): ReferenceInterpreter = {
+  def apply(
+      loggerFactory: NamedLoggerFactory,
+      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK,
+  ): ReferenceInterpreter = {
     val url = getClass.getClassLoader.getResource("universal.dar")
     require(url != null, s"universal.dar not found on the classpath")
-    new ReferenceInterpreter(new File(url.toURI), loggerFactory)
+    new ReferenceInterpreter(new File(url.toURI), csmMode, loggerFactory)
   }
 }
 
@@ -50,8 +56,11 @@ object ReferenceInterpreter {
   * On initialization, loads the universal DAR and compiles it. The main entry point is
   * [[runAndProject]].
   */
-class ReferenceInterpreter(darFile: File, override val loggerFactory: NamedLoggerFactory)
-    extends NamedLogging {
+class ReferenceInterpreter(
+    darFile: File,
+    csmMode: ContractStateMachine.Mode,
+    override val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
   import ReferenceInterpreter.*
 
   // -- DAR loading and compilation --
@@ -68,7 +77,7 @@ class ReferenceInterpreter(darFile: File, override val loggerFactory: NamedLogge
   // -- Ledger state --
 
   private val initialLedgerState: LedgerState = LedgerState(
-    IdeLedger.initialLedger(Time.Timestamp.Epoch),
+    IdeLedger.initialLedger(Time.Timestamp.Epoch, csmMode),
     com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey("ReferenceInterpreter"),
   )
 
@@ -252,6 +261,7 @@ class ReferenceInterpreter(darFile: File, override val loggerFactory: NamedLogge
           }.toMap)
       }
     } catch {
-      case ex: Throwable => Left(s"Unexpected exception during interpretation: ${ex.getMessage}")
+      case ex: Throwable =>
+        Left(s"Unexpected exception during interpretation: ${ex.getMessage} ($ex)")
     }
 }

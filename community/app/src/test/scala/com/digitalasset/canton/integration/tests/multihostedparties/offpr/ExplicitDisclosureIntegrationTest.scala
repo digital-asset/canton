@@ -69,7 +69,7 @@ final class ExplicitDisclosureIntegrationTest extends OfflinePartyReplicationInt
     // Ensure active contract is present (not filtered out accidentally by export party ACS)
     repair.acs.read_from_file(acsSnapshotPath) should have size 1
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 

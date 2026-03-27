@@ -260,7 +260,8 @@ private[lsu] trait LsuBase
     * state.
     */
   protected def migrateSynchronizerNodes(
-      fixture: Fixture
+      fixture: Fixture,
+      ignorePsidCheck: Boolean = false,
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
     val exportDirectory = exportNodesData(
       SynchronizerNodes(
@@ -279,6 +280,7 @@ private[lsu] trait LsuBase
         newSequencers = fixture.newSynchronizerNodes.sequencers,
         exportDirectory = exportDirectory,
         newNodeToOldNodeName = fixture.newOldNodesResolution,
+        ignorePsidCheck = ignorePsidCheck,
       )
     }
   }

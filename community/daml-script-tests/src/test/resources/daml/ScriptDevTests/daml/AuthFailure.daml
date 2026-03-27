@@ -19,8 +19,8 @@ template TheContract1
 -- @ERROR range=20:1-20:30; failed due to a missing authorization from 'Ivy'
 t1_CreateMissingAuthorization : Script ()
 t1_CreateMissingAuthorization = script do
-  mach <- allocateParty "Mach"
-  ivy <- allocateParty "Ivy"
+  mach <- allocateParty "Mach-AuthFailure:t1_CreateMissingAuthorization"
+  ivy <- allocateParty "Ivy-AuthFailure:t1_CreateMissingAuthorization"
   mach `submit` createCmd (TheContract1 with s = ivy)
   abort "t1 finished"
 
@@ -37,8 +37,8 @@ template TheContract2
 -- @ERROR range=38:1-38:37; failed due to that some parties are maintainers but not signatories: 'Bob'
 t2_MaintainersNotSubsetOfSignatories : Script ()
 t2_MaintainersNotSubsetOfSignatories = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthFailure:t2_MaintainersNotSubsetOfSignatories"
+  bob <- allocateParty "Bob-AuthFailure:t2_MaintainersNotSubsetOfSignatories"
   alice `submit` createCmd (TheContract2 with s = alice; m = bob; id = 100)
   abort "t2 finished"
 
@@ -73,8 +73,8 @@ template Test3
 -- @ERROR range=74:1-74:29; failed since none of the stakeholders 'Alice' is in the authorizing set 'Bob'
 t3_FetchMissingAuthorization : Script ()
 t3_FetchMissingAuthorization = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthFailure:t3_FetchMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailure:t3_FetchMissingAuthorization"
   builder <- alice `submit`
     createCmd (TheContractBuilder3 with s = alice; c = bob)
   -- note: we use `builder` so `cid` is visible to bob, although he is not a stakeholder
@@ -109,8 +109,8 @@ template Test4
 -- @ERROR range=109:1-109:35; failed due to a missing authorization from 'Alice'
 t4_LookupByKeyMissingAuthorization : Script ()
 t4_LookupByKeyMissingAuthorization = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthFailure:t4_LookupByKeyMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailure:t4_LookupByKeyMissingAuthorization"
   alice `submit`
     createCmd (TheContract4 with ss = [alice]; ms = [alice]; os = [bob]; id = 100)
   _ <- bob `submit` createAndExerciseCmd (Test4 bob ([alice],100)) Call4
@@ -129,8 +129,8 @@ template TheContract5
 -- @ERROR range=129:1-129:32; failed due to a missing authorization from 'Bob'
 t5_ExerciseMissingAuthorization : Script ()
 t5_ExerciseMissingAuthorization = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthFailure:t5_ExerciseMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailure:t5_ExerciseMissingAuthorization"
   cid <- alice `submit` createCmd (TheContract5 with s = alice)
   alice `submit` exerciseCmd cid TheChoice5 with cs = [bob]
   abort "t5 finished"

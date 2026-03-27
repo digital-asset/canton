@@ -18,9 +18,13 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule
 import com.digitalasset.canton.topology.Member
 import monocle.macros.syntax.lens.*
+import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
+import org.slf4j.event.Level
 
 import java.time.Duration
 
@@ -127,6 +131,40 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
       }
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+
+      clue(
+        "We get an LSU sequencing test message sequenced > upgradeTime to check that sequencer can handle that"
+      ) {
+        loggerFactory.assertEventuallyLogsSeq(
+          SuppressionRule.Level(Level.DEBUG)
+            && SuppressionRule.forLogger[OutputModule[?]] && SuppressionRule.LoggerNameContains(
+              "sequencer=sequencer4"
+            )
+        )(
+          sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero),
+          logs => {
+            sequencer4.setup.test_lsu_sequencing(
+              NonNegativeInt.zero
+            ) // we keep sending test messages until we match below
+
+            if (!this.isInstanceOf[ReferenceLsuSanityCheckSuccessorSynchronizerIntegrationTest]) {
+              forAtLeast(1, logs) { log =>
+                val logPattern =
+                  """Sending block \d+ \(current epoch = \d+, block's BFT time = (.+), block size = (\d+).+""".r
+                inside(log.message) {
+                  case logPattern(ts, blockSize) if blockSize.toInt > 0 =>
+                    CantonTimestamp.fromString(ts).value should be > upgradeTime.immediateSuccessor
+                }
+              }
+            } else {
+              succeed // for reference sequencer it is hard to detect the block timestamps + contents from the logs
+            }
+          },
+          timeUntilSuccess = 60.seconds,
+          maxPollInterval = 1.second,
+        )
+      }
+
       transferTraffic()
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
@@ -139,8 +177,8 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
       // Check it also works after upgrade time
       sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
       eventually() {
-        getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value shouldBe 4
-        getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value shouldBe 4
+        getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value should be >= 5L
+        getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value should be >= 5L
       }
     }
   }

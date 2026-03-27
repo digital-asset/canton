@@ -51,8 +51,8 @@ import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.*
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.UnsequencedSubmissionMap
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.*
-import com.digitalasset.canton.participant.store.{SyncPersistentState, *}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.{SyncEphemeralState, SynchronizerConnectionsManager}
 import com.digitalasset.canton.participant.{
@@ -65,6 +65,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.sequencing.client.SendResult.Success
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
@@ -155,8 +156,7 @@ class ProtocolProcessorTest
   when(
     mockSequencerClient.send(
       any[Batch[DefaultOpenEnvelope]],
-      any[Option[CantonTimestamp]],
-      any[CantonTimestamp],
+      any[SendRequestTimestamps],
       any[MessageId],
       any[Option[AggregationRule]],
       any[SendCallback],
@@ -167,8 +167,7 @@ class ProtocolProcessorTest
     .thenAnswer {
       (
           batch: Batch[DefaultOpenEnvelope],
-          _: Option[CantonTimestamp],
-          _: CantonTimestamp,
+          _: SendRequestTimestamps,
           messageId: MessageId,
           _: Option[AggregationRule],
           callback: SendCallback,
@@ -255,6 +254,7 @@ class ProtocolProcessorTest
       ParticipantNodeEphemeralState,
   ) = {
     val clock = new WallClock(timeouts, loggerFactory)
+    val testParameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion)
 
     val nodePersistentState = timeouts.default.await("creating node persistent state")(
       ParticipantNodePersistentState
@@ -262,7 +262,7 @@ class ProtocolProcessorTest
           new MemoryStorage(loggerFactory, timeouts),
           StorageConfig.Memory(),
           None,
-          ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
+          testParameters,
           testedReleaseProtocolVersion,
           ParticipantTestMetrics,
           participant.toLf,
@@ -277,7 +277,7 @@ class ProtocolProcessorTest
 
     val logical = new InMemoryLogicalSyncPersistentState(
       IndexedSynchronizer.tryCreate(psid.logical, 1),
-      enableAdditionalConsistencyChecks = true,
+      testParameters,
       new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1), // only one synchronizer needed
       contractStore,
       nodePersistentState.acsCounterParticipantConfigStore,
@@ -385,6 +385,7 @@ class ProtocolProcessorTest
         ephemeralState.get(),
         crypto,
         sequencerClient,
+        clock,
         loggerFactory,
         FutureSupervisor.Noop,
         FlagCloseable.withCloseContext(logger, timeouts),
@@ -484,8 +485,7 @@ class ProtocolProcessorTest
       when(
         failingSequencerClient.send(
           any[Batch[DefaultOpenEnvelope]],
-          any[Option[CantonTimestamp]],
-          any[CantonTimestamp],
+          any[SendRequestTimestamps],
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],

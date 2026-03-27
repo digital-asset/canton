@@ -16,10 +16,10 @@ checkSome p (Some a) = p a
 
 testFilterA: Script ()
 testFilterA = script do
-  bank <- allocateParty "Acme Bank"
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-  charlie <- allocateParty "Charlie"
+  bank <- allocateParty "Acme Bank-ActionTest:testFilterA"
+  alice <- allocateParty "Alice-ActionTest:testFilterA"
+  bob <- allocateParty "Bob-ActionTest:testFilterA"
+  charlie <- allocateParty "Charlie-ActionTest:testFilterA"
   let
     aliceIou = Iou bank alice "USD" 1.23 []
     bobIou = Iou bank bob "GBP" 2.34 []

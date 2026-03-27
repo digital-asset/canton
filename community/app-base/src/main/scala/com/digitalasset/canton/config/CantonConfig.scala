@@ -108,7 +108,7 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficCo
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
   Config,
@@ -495,6 +495,8 @@ final case class CantonConfig(
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
         commitmentReduceParallelism = participantParameters.commitmentReduceParallelism,
+        commitmentUseDbSnapshotForParticipantLookup =
+          participantParameters.commitmentUseDbSnapshotForParticipantLookup,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
         alphaMultiSynchronizerSupport = participantParameters.alphaMultiSynchronizerSupport,
       )
@@ -1372,9 +1374,9 @@ object CantonConfig {
           )
         }
 
-      implicit val modeConfigReader: ConfigReader[ContractStateMachine.Mode] =
-        ConfigReader.fromString[ContractStateMachine.Mode] { str =>
-          ContractStateMachine.Mode
+      implicit val modeConfigReader: ConfigReader[NextGenContractStateMachine.Mode] =
+        ConfigReader.fromString[NextGenContractStateMachine.Mode] { str =>
+          NextGenContractStateMachine.Mode
             .fromString(str)
             .toRight(CannotConvert(str, "Mode", "Not a valid contract state machine mode"))
         }
@@ -1429,8 +1431,22 @@ object CantonConfig {
     lazy implicit val authTokenManagerExponentialBackoffJitterFullConfigReader
         : ConfigReader[AuthenticationTokenManagerExponentialBackoffJitterConfig.Full.type] =
       deriveReader[AuthenticationTokenManagerExponentialBackoffJitterConfig.Full.type]
-    lazy implicit final val sequencerClientConfigReader: ConfigReader[SequencerClientConfig] =
-      deriveReader[SequencerClientConfig]
+    lazy implicit final val sequencerClientConfigReader: ConfigReader[SequencerClientConfig] = {
+
+      implicit val deprecatedFields: DeprecatedFieldsFor[SequencerClientConfig] =
+        new DeprecatedFieldsFor[SequencerClientConfig] {
+
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath[Boolean](
+                "use-new-connection-pool",
+                since = "3.5.0",
+              )
+            )
+        }
+
+      deriveReader[SequencerClientConfig].applyDeprecations
+    }
 
     lazy implicit final val cantonParametersReader: ConfigReader[CantonParameters] = {
       implicit val ammoniteConfigReader: ConfigReader[AmmoniteConsoleConfig] =
@@ -2056,8 +2072,8 @@ object CantonConfig {
 
     lazy implicit final val participantNodeParameterConfigWriter
         : ConfigWriter[ParticipantNodeParameterConfig] = {
-      implicit val modeConfigWriter: ConfigWriter[ContractStateMachine.Mode] =
-        ConfigWriter.fromFunction[ContractStateMachine.Mode](mode =>
+      implicit val modeConfigWriter: ConfigWriter[NextGenContractStateMachine.Mode] =
+        ConfigWriter.fromFunction[NextGenContractStateMachine.Mode](mode =>
           ConfigWriter[String].to(mode.toString)
         )
       implicit val cantonEngineConfigWriter: ConfigWriter[CantonEngineConfig] = {

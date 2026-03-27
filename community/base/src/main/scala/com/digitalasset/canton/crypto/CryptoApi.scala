@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.kms.gcp.GcpKms
 import com.digitalasset.canton.crypto.kms.{Kms, KmsFactory}
 import com.digitalasset.canton.crypto.provider.jce.{JceCrypto, JcePureCrypto}
 import com.digitalasset.canton.crypto.provider.kms.KmsPrivateCrypto
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
@@ -274,17 +275,14 @@ trait SyncCryptoApi {
     *   the hash to sign
     * @param usage
     *   restricts signing to private keys that have at least one matching usage
-    * @param approximateTimestampOverride
-    *   optional timestamp to use for signing. Should only be set for signatures that end up, for
-    *   example, in submission requests, or of encrypted view messages, where the topology is not
-    *   yet fixed, i.e., when using a topology snapshot approximation. The current local clock
-    *   reading is often a suitable value. This timestamp will be used to pick a session signing key
-    *   with a suitable validity period, if needed.
+    * @param signingTimestampOverrides
+    *   Optional overrides for selecting an approximate signing timestamp and validity end, used to
+    *   select the correct session signing key whenever session signing keys are enabled.
     */
   def sign(
       hash: Hash,
       usage: NonEmpty[Set[SigningKeyUsage]],
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature]

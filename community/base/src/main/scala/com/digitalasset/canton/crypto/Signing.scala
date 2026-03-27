@@ -415,9 +415,9 @@ final case class SignatureDelegationValidityPeriod(
     */
   def computeCutOffTimestamp(
       cutOffDuration: Duration,
-      approximateTimestamp: Boolean,
+      isUsingAnApproximateTimestamp: Boolean,
   ): (CantonTimestamp, CantonTimestamp) =
-    if (approximateTimestamp)
+    if (isUsingAnApproximateTimestamp)
       (this.fromInclusive.add(cutOffDuration), this.toExclusive.minus(cutOffDuration))
     else (this.fromInclusive, this.toExclusive)
 }

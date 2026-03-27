@@ -303,7 +303,7 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
     // Ensure active contracts are present (not filtered out)
     repair.acs.read_from_file(acsSnapshotPath) should have size 2
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 

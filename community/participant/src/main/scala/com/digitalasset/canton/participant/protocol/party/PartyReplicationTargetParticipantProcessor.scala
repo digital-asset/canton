@@ -8,8 +8,8 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPe
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
   ParticipantNodePersistentState,
+  PartyReplicationIndexingStore,
 }
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -46,6 +47,8 @@ import scala.concurrent.ExecutionContext
   *   - requests contracts in a strictly increasing contract ordinal order,
   *   - and sends only deserializable payloads.
   *
+  * @param partyId
+  *   The party that is being replicated.
   * @param requestId
   *   The "add party" request id that this replication is associated with.
   * @param psid
@@ -58,10 +61,18 @@ import scala.concurrent.ExecutionContext
   *   Callback notification that the target participant has encountered an error.
   * @param onDisconnect
   *   Callback notification that the target participant has disconnected.
+  * @param persistsContracts
+  *   Interface to persist imported contracts to the ContractStore.
+  * @param requestTracker
+  *   Canton protocol request tracker used to persist to the ActiveContractStore and update the
+  *   in-memory request state in a consistent way.
+  * @param indexingStore
+  *   indexing store to add imported contract information to for subsequent Ledger API indexing
   * @param testOnlyInterceptor
   *   Test interceptor only alters behavior in integration tests.
   */
 class PartyReplicationTargetParticipantProcessor(
+    partyId: PartyId,
     requestId: AddPartyRequestId,
     protected val psid: PhysicalSynchronizerId,
     partyOnboardingAt: EffectiveTime,
@@ -71,6 +82,7 @@ class PartyReplicationTargetParticipantProcessor(
     persistsContracts: TargetParticipantAcsPersistence.PersistsContracts,
     requestTracker: RequestTracker,
     indexingWorkflow: PartyReplicationIndexingWorkflow,
+    indexingStore: PartyReplicationIndexingStore,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
     protected val timeouts: ProcessingTimeout,
@@ -78,12 +90,14 @@ class PartyReplicationTargetParticipantProcessor(
     protected val testOnlyInterceptor: PartyReplicationTestInterceptor,
 )(implicit override val executionContext: ExecutionContext)
     extends TargetParticipantAcsPersistence(
+      partyId,
       requestId,
       psid,
       partyOnboardingAt,
       replicationProgressState,
       persistsContracts,
       requestTracker,
+      indexingStore,
     )
     with PartyReplicationProcessor {
 
@@ -146,8 +160,8 @@ class PartyReplicationTargetParticipantProcessor(
               replicatedContractCount.unwrap + contracts.size <= processorStore.requestedContractsCount.unwrap,
               s"Received too many contracts from SP: processed ${replicatedContractCount.unwrap} + received ${contracts.size} > requested ${processorStore.requestedContractsCount.unwrap}",
             )
-            importedContracts <- importContracts(contracts)
-            _ = processorStore.addImportedContracts(importedContracts)
+            updatedProcessedContractsCount <- importContracts(contracts)
+            _ = processorStore.setProcessedContractsCount(updatedProcessedContractsCount)
           } yield ()
         case PartyReplicationSourceParticipantMessage.EndOfACS =>
           logger.info(
@@ -197,16 +211,13 @@ class PartyReplicationTargetParticipantProcessor(
     replicatedContractCount = replicationProgress.processedContractCount
     _ <-
       if (replicationProgress.fullyProcessedAcs) {
-        val contractsToIndex = processorStore.contractsToIndex
-        EitherT(
-          FutureUnlessShutdown
-            .lift(indexingWorkflow.indexAllContractBatches(contractsToIndex))
-            .flatMap(_ =>
-              sendCompleted(
-                "completing in response to source participant notification of end of data"
-              ).value
+        indexingWorkflow
+          .indexAllContractBatches()
+          .flatMap(_ =>
+            sendCompleted(
+              "completing in response to source participant notification of end of data"
             )
-        )
+          )
       } else if (processorStore.initialContractOrdinalInclusiveO.isEmpty) {
         val initialContractOrdinalInclusive = replicatedContractCount
         logger.info(
@@ -281,6 +292,7 @@ object PartyReplicationTargetParticipantProcessor {
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
       config: AlphaOnlinePartyReplicationConfig,
+      batchingConfig: BatchingConfig,
       futureSupervisor: FutureSupervisor,
       exitOnFatalFailures: Boolean,
       timeouts: ProcessingTimeout,
@@ -288,11 +300,15 @@ object PartyReplicationTargetParticipantProcessor {
       testInterceptor: PartyReplicationTestInterceptor =
         PartyReplicationTestInterceptor.AlwaysProceed,
   )(implicit executionContext: ExecutionContext): PartyReplicationTargetParticipantProcessor = {
+    val partyReplicationIndexingStore =
+      connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+        .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
     val requestSpecificLoggerFactory = loggerFactory
       .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
       .append("partyId", partyId.toProtoPrimitive)
       .append("requestId", requestId.toHexString)
     new PartyReplicationTargetParticipantProcessor(
+      partyId,
       requestId,
       connectedSynchronizer.psid,
       partyOnboardingAt,
@@ -302,13 +318,17 @@ object PartyReplicationTargetParticipantProcessor {
       new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
       connectedSynchronizer.ephemeral.requestTracker,
       new PartyReplicationIndexingWorkflow(
-        requestId,
+        partyId,
         connectedSynchronizer.psid,
+        partyReplicationIndexingStore,
+        participantNodePersistentState.map(_.contractStore),
         connectedSynchronizer.ephemeral.recordOrderPublisher,
         connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
         config.pauseSynchronizerIndexingDuringPartyReplication,
+        batchingConfig,
         requestSpecificLoggerFactory,
       ),
+      partyReplicationIndexingStore,
       futureSupervisor,
       exitOnFatalFailures,
       timeouts,

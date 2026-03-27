@@ -14,6 +14,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.{Integrity, Pri
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides.createTimestampsOverrideWithDefaultOffset
 import com.digitalasset.canton.crypto.{CryptoPureApi, SecureRandomness}
 import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
@@ -696,7 +697,9 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               newLtvt,
               (viewKey, message.viewEncryptionKeyRandomness),
               crypto,
-              Some(environment.now),
+              createTimestampsOverrideWithDefaultOffset(
+                clock
+              ), // re-sign with new timestamps; does not affect the test
               testedProtocolVersion,
             )
             .valueOrFail("create new envelope")

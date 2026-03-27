@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -165,9 +166,13 @@ private[mediator] class DefaultVerdictSender(
         sequencerSend
           .send(
             batch,
-            Some(requestId.unwrap),
+            timestamps = SendRequestTimestamps(
+              topologyTimestamp = Some(requestId.unwrap),
+              // We use `clock.now` to stay consistent with how other submission requests are signed.
+              approximateTimestampForSigning = sequencerSend.clock.now,
+              maxSequencingTime = decisionTime,
+            ),
             callback = callback,
-            maxSequencingTime = decisionTime,
             aggregationRule = aggregationRule,
             amplify = true,
           )
@@ -227,7 +232,13 @@ private[mediator] class DefaultVerdictSender(
             )
 
         SignedProtocolMessage
-          .signAndCreate(result, snapshot, None)
+          .signAndCreate(
+            result,
+            snapshot,
+            // `ConfirmationResultMessage`s are signed and verified with a `fixed` timestamp,
+            // so no approximate timestamp is needed.
+            None,
+          )
           .map(signedResult => List(OpenEnvelope(signedResult, recipients)(protocolVersion)))
       }
 
@@ -342,7 +353,13 @@ private[mediator] class DefaultVerdictSender(
           val recipients = Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
 
           SignedProtocolMessage
-            .trySignAndCreate(rejection, snapshot, None)
+            .trySignAndCreate(
+              rejection,
+              snapshot,
+              // `ConfirmationResultMessage`s are signed and verified with a `fixed` timestamp,
+              // so no approximate timestamp is needed.
+              None,
+            )
             .map(_ -> recipients)
         }
         batches = envs.map(Batch.of(protocolVersion, _))

@@ -334,7 +334,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
     )
 
-    val sequencerClient = new TestSequencerClientSend
+    val sequencerClient = new TestSequencerClientSend(wallClock)
 
     val changeTimes =
       (timeProofs
@@ -371,6 +371,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       localId,
       sequencerClient,
       synchronizerCrypto,
+      None,
       sortedReconciliationIntervalsProvider,
       store,
       _ => (),
@@ -904,7 +905,11 @@ class AcsCommitmentProcessorTest
 
     snapshotF.flatMap { snapshot =>
       SignedProtocolMessage
-        .trySignAndCreate(payload, snapshot, None)
+        .trySignAndCreate(
+          payload,
+          snapshot,
+          None, // not needed for unit tests; session signing keys disabled
+        )
     }
   }
 
@@ -946,6 +951,7 @@ class AcsCommitmentProcessorTest
           localId,
           byStkhSet,
           crypto,
+          None,
           at,
           None,
           parallelism,
@@ -1214,6 +1220,7 @@ class AcsCommitmentProcessorTest
             localId,
             snapshot1,
             crypto,
+            None,
             ts(0),
             None,
             parallelism,
@@ -1226,6 +1233,7 @@ class AcsCommitmentProcessorTest
             localId,
             snapshot2,
             crypto,
+            None,
             ts(0),
             None,
             parallelism,
@@ -1238,6 +1246,7 @@ class AcsCommitmentProcessorTest
             localId,
             snapshot3,
             crypto,
+            None,
             ts(0),
             None,
             parallelism,
@@ -4112,6 +4121,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(2),
               parallelism,
             )
@@ -4146,6 +4156,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(4),
               parallelism,
             )
@@ -4207,6 +4218,7 @@ class AcsCommitmentProcessorTest
               localId,
               rc.snapshot().active,
               crypto,
+              None,
               ts(2),
               None,
               parallelism,
@@ -4219,6 +4231,7 @@ class AcsCommitmentProcessorTest
               localId,
               rc.snapshot().active,
               crypto,
+              None,
               ts(2),
               None,
               parallelism,
@@ -4232,6 +4245,7 @@ class AcsCommitmentProcessorTest
               localId,
               rc.snapshot().active,
               crypto,
+              None,
               ts(4),
               None,
               parallelism,
@@ -4244,6 +4258,7 @@ class AcsCommitmentProcessorTest
               localId,
               rc.snapshot().active,
               crypto,
+              None,
               ts(4),
               None,
               parallelism,
@@ -4286,6 +4301,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(2),
               parallelism,
             )
@@ -4314,6 +4330,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(2),
               parallelism,
             )
@@ -4372,6 +4389,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(2),
               parallelism,
             )
@@ -4400,6 +4418,7 @@ class AcsCommitmentProcessorTest
                 key.map(mockStringInterning.party.externalize) -> value
               },
               crypto,
+              None,
               ts(2),
               parallelism,
             )

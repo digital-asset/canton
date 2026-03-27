@@ -416,10 +416,16 @@ final class BftBlockOrderer(
       )
     val topologyProvider =
       config.standalone.fold[OrderingTopologyProvider[PekkoEnv]](
-        new CantonOrderingTopologyProvider(cryptoApi, loggerFactory, metrics)
+        new CantonOrderingTopologyProvider(
+          cryptoApi,
+          EpochLength(config.epochLength), // TODO(#24184) make this dynamic sequencing parameter
+          loggerFactory,
+          metrics,
+        )
       ) { standaloneConfig =>
         new FixedFileBasedOrderingTopologyProvider(
           standaloneConfig,
+          EpochLength(config.epochLength),
           cryptoApi.pureCrypto,
           metrics,
         )
@@ -429,9 +435,6 @@ final class BftBlockOrderer(
       thisNode,
       config,
       BlockNumber(sequencerSubscriptionInitialHeight),
-      // TODO(#18910) test with multiple epoch lengths >= 1 (incl. 1)
-      // TODO(#19289) support dynamically configurable epoch length
-      EpochLength(config.epochLength),
       stores,
       topologyProvider,
       blockSubscription,

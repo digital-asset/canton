@@ -81,13 +81,13 @@ template Asset
         pure ()
 
 template Helper
-  with 
+  with
     p : Party
-  where 
+  where
     signatory p
     choice TestInterface : ()
       controller p
-      do 
+      do
         cidAsset1 <- create Asset with
           issuer = p
           owner = p
@@ -117,13 +117,13 @@ template Helper
           None -> abort "expected Asset"
           Some Asset {amount} ->
             amount === 25
-            
+
         pure ()
 
 main: Script ()
 main = script do
-  p <- allocateParty "Alice"
-  submitMustFail p do 
+  p <- allocateParty "Alice-Interface:main"
+  submitMustFail p do
     createCmd Asset with
       issuer = p
       owner = p

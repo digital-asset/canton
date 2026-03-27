@@ -98,10 +98,10 @@ lookupTest : Script ()
 lookupTest = script do
 
   -- Put four parties in the four possible relationships with a `Keyed`
-  sig <- allocateParty "s" -- Signatory
-  obs <- allocateParty "o" -- Observer
-  divulgee <- allocateParty "d" -- Divulgee
-  blind <- allocateParty "b" -- Blind
+  sig <- allocateParty "s-LFContractKeys:lookupTest" -- Signatory
+  obs <- allocateParty "o-LFContractKeys:lookupTest" -- Observer
+  divulgee <- allocateParty "d-LFContractKeys:lookupTest" -- Divulgee
+  blind <- allocateParty "b-LFContractKeys:lookupTest" -- Blind
 
   keyedCid <- submit sig do createCmd Keyed with ..
   divulgercid <- submit divulgee do createCmd Divulger with ..

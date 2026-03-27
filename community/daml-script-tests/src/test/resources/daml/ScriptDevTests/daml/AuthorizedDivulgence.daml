@@ -33,8 +33,8 @@ template SecretFetchHelper with
 
 test_authorizedFetch : Script ()
 test_authorizedFetch = script do
-  me <- allocateParty "Me"
-  spy <- allocateParty "Spy"
+  me <- allocateParty "Me-AuthorizedDivulgence:test_authorizedFetch"
+  spy <- allocateParty "Spy-AuthorizedDivulgence:test_authorizedFetch"
   secretCid <- submit me (createCmd Secret {p = me, mySecret = "Password for my Swiss bank account is 874321"})
   submit spy (createCmd RevealYourSecret {p = spy, secretCid = secretCid})
   submitMustFail spy do
@@ -97,8 +97,8 @@ template Swap2 with
 -- This scenario should fail because the cidIouAlice is not divulged to Bob.
 test_noDivulgenceOfCreateArguments : Script ()
 test_noDivulgenceOfCreateArguments = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthorizedDivulgence:test_noDivulgenceOfCreateArguments"
+  bob <- allocateParty "Bob-AuthorizedDivulgence:test_noDivulgenceOfCreateArguments"
   cidIouAlice <- submit alice $ createCmd $ Iou {owner = alice, obligor = alice}
   cidIouBob <- submit bob $ createCmd $ Iou {owner = bob, obligor = bob}
   cidSwap1 <- submit alice $ createCmd $ (Swap1 alice bob)
@@ -110,8 +110,8 @@ test_noDivulgenceOfCreateArguments = script do
 -- @WARN range=119:3-119:13; Use of divulged contracts is deprecated
 test_noDivulgenceForFetch : Script ()
 test_noDivulgenceForFetch = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
+  alice <- allocateParty "Alice-AuthorizedDivulgence:test_noDivulgenceForFetch"
+  bob <- allocateParty "Bob-AuthorizedDivulgence:test_noDivulgenceForFetch"
   cidIouAlice <- submit alice $ createCmd $ Iou {owner = alice, obligor = alice}
   cidIouBob <- submit bob $ createCmd $ Iou {owner = bob, obligor = bob}
   cidSwap1 <- submit alice $ createCmd $ (Swap1 alice bob)
@@ -175,8 +175,8 @@ template EFetchHelper with
 -- We test that target contract id's of choices are divulged to parties.
 test_divulgeChoiceTargetContractId : Script E
 test_divulgeChoiceTargetContractId = script do
-  alice <- allocateParty "alice"
-  bob <- allocateParty "bob"
+  alice <- allocateParty "alice-AuthorizedDivulgence:test_divulgeChoiceTargetContractId"
+  bob <- allocateParty "bob-AuthorizedDivulgence:test_divulgeChoiceTargetContractId"
   cidC <- submit alice $ createCmd $ C alice bob
   cidD <- submit bob $ exerciseCmd cidC Delegate
   cidE <- submit alice $ exerciseCmd cidD GoD

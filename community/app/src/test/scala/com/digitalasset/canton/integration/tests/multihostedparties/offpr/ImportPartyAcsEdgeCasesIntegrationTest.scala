@@ -51,7 +51,7 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
     // Ensure the party ACS import aborts if the topology store lacks the PTP onboarding mapping.
     loggerFactory.assertThrowsAndLogs[CommandFailure](
-      target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath),
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
       _.errorMessage should include(
         s"Refuse to import ACS for party ${alice.partyId}: No topology transaction found onboarding this party on participant ${target.id}."
       ),
@@ -82,7 +82,7 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
       // Ensure import aborts if the target is still connected to a synchronizer
       loggerFactory.assertThrowsAndLogs[CommandFailure](
-        target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath),
+        target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
         _.errorMessage should include(
           "There are still synchronizers connected. Please disconnect all synchronizers."
         ),
@@ -139,12 +139,12 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
       runIfPv34(
         loggerFactory.assertEventuallyLogsSeq(NoSuppression)(
-          target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath),
+          target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
           logs => logs shouldBe empty,
         ),
         otherwise = {
           loggerFactory.assertLogs(
-            target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath),
+            target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
             _.warningMessage should include(
               s"Found an already effective party-to-participant mapping with the onboarding flag set for ${alice.partyId} on synchronizer ${daId.logical}"
             ),
@@ -204,11 +204,11 @@ final class OfflinePartyReplicationCrashRecoveryIntegrationTest
 
       // Simulate a crash. using repair ACS import endpoint which imports the contracts
       // but bypasses the insertion of the pending OnboardingClearanceOperation.
-      target.repair.import_acsV2(daId, acsSnapshotPath)
+      target.repair.import_acs(daId, acsSnapshotPath)
 
       // Test: "Retry" the party ACS import endpoint post-crash:
       // It should idempotently import contracts again and persist the missing pending operation.
-      target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
       reconnectAndEnsureOnboardingClearance(clock, alice, daName)
       assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 3)
@@ -255,7 +255,7 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
     )
 
     // Import the same ACS snapshot multiple times (assert idempotency)
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     // Let's do a clean node shutdown and start – which should not affect the party ACS import
     target.stop()
@@ -269,7 +269,7 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
       )
     )(
       within = {
-        target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+        target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
       },
       logs =>
         forAtLeast(1, logs)(m =>
@@ -277,7 +277,7 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
         ),
     )
 
-    target.parties.import_party_acsV2(daId, Some(alice), acsSnapshotPath)
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     reconnectAndEnsureOnboardingClearance(clock, alice, daName)
     assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 2)

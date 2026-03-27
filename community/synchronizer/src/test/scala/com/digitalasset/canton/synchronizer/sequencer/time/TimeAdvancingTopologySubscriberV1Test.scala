@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   TopologyTransactionsBroadcast,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
@@ -46,6 +47,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
@@ -98,8 +100,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
       when(
         sequencerClient.send(
           batch = any[Batch[DefaultOpenEnvelope]],
-          topologyTimestamp = any[Option[CantonTimestamp]],
-          maxSequencingTime = any[CantonTimestamp],
+          timestamps = any[SendRequestTimestamps],
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = eqTo(SendCallback.empty),
@@ -161,19 +162,25 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         .discard
       clock.advance(staticSynchronizerParameters.topologyChangeDelay.duration)
 
+      val timestampsCapture = ArgumentCaptor.forClass(classOf[SendRequestTimestamps])
+
       // then
       verify(sequencerClient)
         .send(
           batch = eqTo(expectedBatch),
-          topologyTimestamp = eqTo(None),
-          maxSequencingTime =
-            eqTo(ts2.plus(TimeAdvancingTopologyConfig.defaultMaxSequencingTimeWindow.asJava)),
+          timestamps = timestampsCapture.capture(),
           messageId = any[MessageId],
           aggregationRule = eqTo(expectedAggregationRule),
           callback = eqTo(SendCallback.empty),
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
+
+      val ts = timestampsCapture.getValue
+      ts.topologyTimestamp shouldBe None
+      ts.maxSequencingTime shouldBe ts2.plus(
+        TimeAdvancingTopologyConfig.defaultMaxSequencingTimeWindow.asJava
+      )
     }
 
     "not schedule a time-advancing message if it's not an active sequencer" in {
@@ -247,8 +254,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
       when(
         mockSequencerClient.send(
           any[Batch[DefaultOpenEnvelope]],
-          any[Option[CantonTimestamp]],
-          any[CantonTimestamp],
+          any[SendRequestTimestamps],
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
@@ -309,8 +315,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
       // then
       verify(sequencerClient, never).send(
         any[Batch[DefaultOpenEnvelope]],
-        any[Option[CantonTimestamp]],
-        any[CantonTimestamp],
+        any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],

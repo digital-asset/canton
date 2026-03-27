@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
@@ -68,6 +68,7 @@ final class PartyReplicator(
     syncService: CantonSyncService,
     clock: Clock,
     config: AlphaOnlinePartyReplicationConfig,
+    batchingConfig: BatchingConfig,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
@@ -299,6 +300,7 @@ final class PartyReplicator(
             connectedSynchronizer,
             acsReader,
             config,
+            batchingConfig,
             testInterceptorO,
             loggerFactory,
           )
@@ -858,6 +860,7 @@ final class PartyReplicator(
                     syncService.participantNodePersistentState,
                     connectedSynchronizer,
                     config,
+                    batchingConfig,
                     futureSupervisor,
                     exitOnFatalFailures,
                     timeouts,

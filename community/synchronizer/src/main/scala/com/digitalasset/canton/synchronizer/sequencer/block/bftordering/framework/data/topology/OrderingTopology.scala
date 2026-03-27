@@ -6,10 +6,12 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
+  EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.util.MaxBytesToDecompress
@@ -36,6 +38,7 @@ import OrderingTopology.{
 final case class OrderingTopology(
     // NOTE: make sure to change `toString` when adding useful information
     nodesTopologyInfo: Map[BftNodeId, NodeTopologyInfo],
+    epochLength: EpochLength,
     sequencingParameters: SequencingParameters,
     maxBytesToDecompress: MaxBytesToDecompress,
     activationTime: TopologyActivationTime,
@@ -107,6 +110,7 @@ object OrderingTopology {
       activationTime: TopologyActivationTime = TestBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges: Option[Boolean] = Some(false),
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
+      epochLength: EpochLength = DefaultEpochLength,
   ): OrderingTopology =
     OrderingTopology(
       nodes.view.map { node =>
@@ -117,6 +121,7 @@ object OrderingTopology {
           ),
         )
       }.toMap,
+      epochLength,
       sequencingParameters,
       // TODO(i10428) Move this method under BftSequencerBaseTest so we can reuse defaultMaxBytesToDecompress
       MaxBytesToDecompress.MaxValueUnsafe,

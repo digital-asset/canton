@@ -460,7 +460,7 @@ sealed trait PackageVettingIntegrationTest
           ) {
             trackingLedgerEvents(Seq(participant2), Seq.empty) {
               TraceContext.withNewTraceContext("attack")(implicit traceContext =>
-                maliciousP2.submitUnassignmentRequest(unassignmentTree, None).futureValueUS
+                maliciousP2.submitUnassignmentRequest(unassignmentTree).futureValueUS
               )
             }
           },

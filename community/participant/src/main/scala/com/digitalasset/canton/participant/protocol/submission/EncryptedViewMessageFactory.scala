@@ -9,7 +9,8 @@ import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
+import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ViewHash
@@ -43,7 +44,7 @@ object EncryptedViewMessageFactory {
       viewTree: viewType.View,
       viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      approximateTimestampOverride: Option[CantonTimestamp],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
@@ -53,7 +54,11 @@ object EncryptedViewMessageFactory {
       signature <- viewTree.toBeSigned
         .parTraverse(rootHash =>
           cryptoSnapshot
-            .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, approximateTimestampOverride)
+            .sign(
+              rootHash.unwrap,
+              SigningKeyUsage.ProtocolOnly,
+              signingTimestampOverrides,
+            )
             .leftMap(err => FailedToSignViewMessage(err))
         )
       (sessionKey, sessionKeyRandomnessMap) = viewKeyData

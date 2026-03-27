@@ -51,8 +51,8 @@ template Bar
 
 main = script do
 
-  p <- allocateParty "p"
-  q <- allocateParty "q"
+  p <- allocateParty "p-Conjunction:main"
+  q <- allocateParty "q-Conjunction:main"
 
   fooCid <- submit p $ createCmd Foo with p; q; ps = [p, q]
   barCid <- submit p $ createCmd Bar with p; q

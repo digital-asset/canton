@@ -23,7 +23,7 @@ import io.scalaland.chimney.dsl.*
 
 import java.net.URI
 
-final case class SequencerConnections private (
+final case class SequencerConnections(
     aliasToConnection: NonEmpty[Map[SequencerAlias, SequencerConnection]],
     sequencerTrustThreshold: PositiveInt,
     sequencerLivenessMargin: NonNegativeInt,

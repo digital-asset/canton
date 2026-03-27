@@ -8,6 +8,7 @@ package com.digitalasset.canton.admin.participant.v30;
 import "com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto";
 import "com/digitalasset/canton/admin/time/v30/time_tracker_config.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 
 /**
  * Synchronizer connectivity service for adding and connecting to synchronizers
@@ -45,6 +46,12 @@ service SynchronizerConnectivityService {
   // Get the physical synchronizer id of the given synchronizer alias
   // Fail if there is more than one active synchronizer connection for the alias
   rpc GetSynchronizerId(GetSynchronizerIdRequest) returns (GetSynchronizerIdResponse);
+
+  /**
+     Perform a manual logical synchronizer upgrade
+     This endpoint should ONLY be used when the current synchronizer was declared irrevocably broken.
+  */
+  rpc PerformManualLsu(PerformManualLsuRequest) returns (PerformManualLsuResponse);
 }
 
 message SynchronizerConnectionConfig {
@@ -186,3 +193,33 @@ message LogoutRequest {
 }
 
 message LogoutResponse {}
+
+message PerformManualLsuRequest {
+  message SequencerConnection {
+    // connection information to sequencer (http[s]://<host>:<port>")
+    // all endpoints must agree on using HTTPS or HTTP
+    repeated string endpoints = 1;
+    optional bytes custom_trust_certificates = 2;
+  }
+
+  // the current physical synchronizer_id
+  string physical_synchronizer_id = 1;
+
+  string successor_physical_synchronizer_id = 2;
+
+  /*
+     Upgrade time that will be used.
+     If defined:
+     - MUST be higher than any message received by the participant on the logical synchronizer id
+     - Upgrade will not start until all events up to upgrade_time have been processed
+
+     If empty:
+     - Clean synchronizer index from ledger api server will be used.
+  */
+  optional google.protobuf.Timestamp upgrade_time = 3;
+
+  // SHOULD contain one entry for each sequencer currently registered by the participant
+  map<string, SequencerConnection> sequencer_successors = 4;
+}
+
+message PerformManualLsuResponse {}

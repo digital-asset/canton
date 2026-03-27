@@ -37,7 +37,7 @@ import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.{
   InactiveContracts,
   LockedContracts,
 }
-import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import org.scalatest.Assertion
 import org.scalatest.matchers.Matcher
 

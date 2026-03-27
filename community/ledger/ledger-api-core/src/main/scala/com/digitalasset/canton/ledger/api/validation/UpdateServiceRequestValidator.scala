@@ -12,7 +12,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.update
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
-import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.UpdateId
 import io.grpc.StatusRuntimeException
@@ -25,7 +24,6 @@ object UpdateServiceRequestValidator {
   final case class PartialValidation(
       begin: Option[Offset],
       end: Option[Offset],
-      descendingOrder: Boolean,
   )
 
   private def commonValidations(
@@ -34,21 +32,11 @@ object UpdateServiceRequestValidator {
     for {
       begin <- ParticipantOffsetValidator
         .validateNonNegative(req.beginExclusive, "begin_exclusive")
-      endAndDescendingOrder <-
-        if (req.descendingOrder) {
-          (req.endInclusive match {
-            case Some(value) => ParticipantOffsetValidator.validatePositive(value, "end_inclusive")
-            case None => Left(RequestValidationErrors.DescendingOrderMissingEnd.Error().asGrpcError)
-          }).map(offset => (Option(offset), true))
-        } else {
-          ParticipantOffsetValidator
-            .validateOptionalPositive(req.endInclusive, "end_inclusive")
-            .map((_, false))
-        }
+      end <- ParticipantOffsetValidator
+        .validateOptionalPositive(req.endInclusive, "end_inclusive")
     } yield PartialValidation(
       begin,
-      endAndDescendingOrder._1,
-      endAndDescendingOrder._2,
+      end,
     )
 
   def validate(
@@ -76,7 +64,6 @@ object UpdateServiceRequestValidator {
         partial.begin,
         partial.end,
         updateFormat,
-        partial.descendingOrder,
       )
     }
 

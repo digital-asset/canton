@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.reassignment
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
@@ -389,9 +389,9 @@ private[reassignment] trait ReassignmentProcessingSteps[
   case class ReassignmentsSubmission(
       override val batch: Batch[DefaultOpenEnvelope],
       override val pendingSubmissionId: PendingSubmissionId,
+      override val approximateTimestampForSigning: CantonTimestamp,
+      override val maxSequencingTime: CantonTimestamp,
   ) extends UntrackedSubmission {
-
-    override def maxSequencingTimeO: OptionT[FutureUnlessShutdown, CantonTimestamp] = OptionT.none
 
     override def embedSubmissionError(
         err: ProtocolProcessor.SubmissionProcessingError

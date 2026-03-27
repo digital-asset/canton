@@ -35,8 +35,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
-import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyInactive
+import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyActive,
   KeyCreate,
@@ -44,10 +43,9 @@ import com.digitalasset.daml.lf.transaction.Transaction.{
   NegativeKeyLookup,
 }
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   CreationTime,
-  TransactionContractError,
-  TransactionError,
+  LegacyContractKeyUniquenessMode as ContractKeyUniquenessMode,
+  LegacyContractStateMachine as ContractStateMachine,
 }
 import io.scalaland.chimney.dsl.*
 
@@ -91,7 +89,7 @@ class TransactionTreeFactoryImpl(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      keyResolver: LfKeyResolver,
+      keyResolver: ContractStateMachine.KeyResolver,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -201,7 +199,7 @@ class TransactionTreeFactoryImpl(
       mediator: MediatorGroupRecipient,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
-      keyResolver: LfKeyResolver,
+      keyResolver: ContractStateMachine.KeyResolver,
   ): State = {
     val salts = LazyList
       .from(0)
@@ -307,38 +305,34 @@ class TransactionTreeFactoryImpl(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, TransactionView] = {
+    state.signalRollbackScope(view.rbContext.rollbackScope)
+
+    // reset to a fresh state with projected resolver before visiting the subtree
+    val previousCsmState = state.csmState
+    val previousResolver = state.currentResolver
+    state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
+    state.csmState = initialCsmState
+
+    // Process core nodes and subviews
+    val coreCreatedBuilder =
+      List.newBuilder[(LfNodeCreate, RollbackScope)] // contract IDs have already been suffixed
+    val coreOtherBuilder = // contract IDs have not yet been suffixed
+      List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
+    val childViewsBuilder = Seq.newBuilder[TransactionView]
+    val subViewKeyResolutions =
+      mutable.Map.empty[LfGlobalKey, LfVersioned[SerializableKeyResolution]]
+
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var createIndex = 0
 
+    val nbSubViews = view.allNodes.count {
+      case _: TransactionViewDecomposition.NewView => true
+      case _ => false
+    }
+    val subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
+    val createdInView = mutable.Set.empty[LfContractId]
+
     for {
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        state.signalRollbackScope(view.rbContext.rollbackScope)
-      )
-
-      // reset to a fresh state with projected resolver before visiting the subtree
-      previousCsmState = state.csmState
-      previousResolver = state.currentResolver
-      _ = {
-        state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
-        state.csmState = initialCsmState
-      }
-
-      // Process core nodes and subviews
-      coreCreatedBuilder =
-        List.newBuilder[(LfNodeCreate, RollbackScope)] // contract IDs have already been suffixed
-      coreOtherBuilder = // contract IDs have not yet been suffixed
-        List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
-      childViewsBuilder = Seq.newBuilder[TransactionView]
-      subViewKeyResolutions =
-        mutable.Map.empty[LfGlobalKey, LfVersioned[SerializableKeyResolution]]
-
-      nbSubViews = view.allNodes.count {
-        case _: TransactionViewDecomposition.NewView => true
-        case _ => false
-      }
-      subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
-      createdInView = mutable.Set.empty[LfContractId]
-
       // Compute salts
       viewCommonDataSalt <- EitherT.fromEither[FutureUnlessShutdown](state.nextSalt())
       viewParticipantDataSalt <- EitherT.fromEither[FutureUnlessShutdown](state.nextSalt())
@@ -395,23 +389,20 @@ class TransactionTreeFactoryImpl(
               state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
             }
 
-            _ <- EitherT.fromEither[FutureUnlessShutdown](state.signalRollbackScope(rbScope))
+            _ = state.signalRollbackScope(rbScope)
 
             _ <- EitherT.fromEither[FutureUnlessShutdown]({
               for {
                 resolutionForModeOff <- suffixedNode match {
                   case lookupByKey: LfNodeLookupByKey
-                      if state.csmState.mode == ContractStateMachine.Mode.LegacyNUCK =>
+                      if state.csmState.mode == ContractKeyUniquenessMode.Off =>
                     val gkey = lookupByKey.key.globalKey
                     state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
-                  case _ => Right(KeyInactive()) // dummy value, as resolution is not used
+                  case _ => Right(KeyInactive) // dummy value, as resolution is not used
                 }
                 nextState <- state.csmState
                   .handleNode((), suffixedNode, resolutionForModeOff)
-                  .leftMap {
-                    case e: TransactionContractError => ContractKeyResolutionError(e)
-                    case _: TransactionError.EffectfulRollback => EffectfulRollback
-                  }
+                  .leftMap(ContractKeyResolutionError.apply)
               } yield {
                 state.csmState = nextState
               }
@@ -419,9 +410,7 @@ class TransactionTreeFactoryImpl(
           } yield ()
         }
       }
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        state.signalRollbackScope(view.rbContext.rollbackScope)
-      )
+      _ = state.signalRollbackScope(view.rbContext.rollbackScope)
 
       coreCreatedNodes = coreCreatedBuilder.result()
       // Translate contract ids in untranslated core nodes
@@ -474,14 +463,11 @@ class TransactionTreeFactoryImpl(
         previousCsmState
           .advance(
             // advance ignores the resolver in mode Strict
-            if (state.csmState.mode == ContractStateMachine.Mode.UCKWithRollback) Map.empty
+            if (state.csmState.mode == ContractKeyUniquenessMode.Strict) Map.empty
             else previousResolver,
             state.csmState,
           )
-          .leftMap {
-            case e: TransactionContractError => ContractKeyResolutionError(e)
-            case _: TransactionError.EffectfulRollback => EffectfulRollback
-          }
+          .leftMap(ContractKeyResolutionError(_): TransactionTreeConversionError)
       )
     } yield {
       // Compute the result
@@ -673,14 +659,13 @@ class TransactionTreeFactoryImpl(
     *
     * All resolved contract IDs in the map difference are core input contracts by the following
     * argument: Suppose that the map difference resolves a key `k` to a contract ID `cid`.
-    *   - In mode
-    *     [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCKWithRollback]], the
+    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]], the
     *     first node (in execution order) involving the key `k` determines the key's resolution for
     *     the view. So the first node `n` in execution order involving `k` is an Exercise, Fetch, or
     *     positive LookupByKey node.
-    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.LegacyNUCK]], the
-    *     first by-key node (in execution order, including Creates) determines the global key input
-    *     of the view. So the first by-key node `n` is an ExerciseByKey, FetchByKey, or positive
+    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Off]], the first
+    *     by-key node (in execution order, including Creates) determines the global key input of the
+    *     view. So the first by-key node `n` is an ExerciseByKey, FetchByKey, or positive
     *     LookupByKey node. In particular, `n` cannot be a Create node because then the resolution
     *     for the view would be
     *     [[com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyInactive]]. If this node
@@ -829,7 +814,7 @@ class TransactionTreeFactoryImpl(
       transactionView: TransactionView,
       viewPosition: ViewPosition,
   )(implicit traceContext: TraceContext): Unit = {
-    val viewGki = transactionView.globalKeyInputs.fmap(_.unversioned.resolution.asCidVector)
+    val viewGki = transactionView.globalKeyInputs.fmap(_.unversioned.resolution)
     val stateGki = csmState.globalKeyInputs.fmap(_.toKeyMapping)
     ErrorUtil.requireState(
       viewGki == stateGki,
@@ -840,7 +825,7 @@ class TransactionTreeFactoryImpl(
     val viewLocallyCreated = transactionView.createdContracts.keySet
     val stateLocallyCreated = csmState.locallyCreated
     ErrorUtil.requireState(
-      viewLocallyCreated == stateLocallyCreated.keySet,
+      viewLocallyCreated == stateLocallyCreated,
       show"Failed to reconstruct created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreated\n  Expected: $stateLocallyCreated",
     )
     val viewInputContractIds = transactionView.inputContracts.keySet
@@ -862,7 +847,7 @@ class TransactionTreeFactoryImpl(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      keyResolver: LfKeyResolver,
+      keyResolver: ContractStateMachine.KeyResolver,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -940,7 +925,7 @@ class TransactionTreeFactoryImpl(
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
       salts: Iterable[Salt],
-      keyResolver: LfKeyResolver,
+      keyResolver: ContractStateMachine.KeyResolver,
   ): State = new State(mediator, transactionUUID, ledgerTime, salts.iterator, keyResolver)
 
   override def saltsFromView(view: TransactionView): Iterable[Salt] = {
@@ -991,14 +976,14 @@ object TransactionTreeFactoryImpl {
     )
 
   private val initialCsmState: ContractStateMachine.State[Unit] =
-    ContractStateMachine.initial[Unit](ContractStateMachine.Mode.LegacyNUCK)
+    ContractStateMachine.initial[Unit](ContractKeyUniquenessMode.Off)
 
   private class State(
       val mediator: MediatorGroupRecipient,
       val transactionUUID: UUID,
       val ledgerTime: CantonTimestamp,
       val salts: Iterator[Salt],
-      initialResolver: LfKeyResolver,
+      initialResolver: ContractStateMachine.KeyResolver,
   ) {
 
     def nextSalt(): Either[TransactionTreeFactory.TooFewSalts, Salt] =
@@ -1079,29 +1064,16 @@ object TransactionTreeFactoryImpl {
       * [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.handleLookupWith]].
       */
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    var currentResolver: LfKeyResolver = initialResolver
+    var currentResolver: ContractStateMachine.KeyResolver = initialResolver
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     private var rollbackScope: RollbackScope = RollbackScope.empty
 
-    def signalRollbackScope(
-        target: RollbackScope
-    ): Either[TransactionTreeConversionError, Unit] = {
+    def signalRollbackScope(target: RollbackScope): Unit = {
       val (pops, pushes) = RollbackScope.popsAndPushes(rollbackScope, target)
-      MonadUtil
-        .sequentialTraverse(1 to pops) { _ =>
-          csmState.endRollback() match {
-            case Left(rollbackErr) =>
-              Left(EffectfulRollback)
-            case Right(popState) =>
-              csmState = popState
-              Right(())
-          }
-        }
-        .map { _ =>
-          for (_ <- 1 to pushes) { csmState = csmState.beginRollback() }
-          rollbackScope = target
-        }
+      for (_ <- 1 to pops) { csmState = csmState.endRollback() }
+      for (_ <- 1 to pushes) { csmState = csmState.beginRollback() }
+      rollbackScope = target
     }
   }
 }

@@ -132,6 +132,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       sequencerLivenessMargin: NonNegativeInt = NonNegativeInt.zero,
       exportDirectory: File,
       newNodeToOldNodeName: Map[String, String],
+      ignorePsidCheck: Boolean = false,
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit =
     migratedNode match {
       case newSequencer: SequencerReference =>
@@ -140,6 +141,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
           newStaticSynchronizerParameters,
           exportDirectory,
           newNodeToOldNodeName.get(migratedNode.name).value,
+          ignorePsidCheck = ignorePsidCheck,
         )
 
       case newMediator: MediatorReference =>
@@ -171,6 +173,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       newStaticSynchronizerParameters: StaticSynchronizerParameters,
       exportDirectory: File,
       oldNodeName: String,
+      ignorePsidCheck: Boolean = false,
   ): Unit = {
     migrateNodeGeneric(migratedSequencer, exportDirectory, oldNodeName)
 
@@ -179,6 +182,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       migratedSequencer,
       files.genesisStateFile.pathAsString,
       newStaticSynchronizerParameters,
+      ignorePsidCheck = ignorePsidCheck,
     )
   }
 
@@ -242,11 +246,13 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       migrated: SequencerReference,
       genesisStateFile: String,
       staticSynchronizerParameters: StaticSynchronizerParameters,
+      ignorePsidCheck: Boolean,
   ): Unit = {
     migrated.health.wait_for_ready_for_initialization()
     migrated.setup.initialize_from_lsu_predecessor(
       inputFile = genesisStateFile,
       synchronizerParameters = staticSynchronizerParameters,
+      ignorePsidCheck = ignorePsidCheck,
     )
   }
 }

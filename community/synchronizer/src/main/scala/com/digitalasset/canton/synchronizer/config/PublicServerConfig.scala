@@ -53,6 +53,8 @@ final case class PublicServerConfig(
       PublicServerConfig.defaultNonceExpirationInterval,
     maxTokenExpirationInterval: NonNegativeFiniteDuration =
       PublicServerConfig.defaultMaxTokenExpirationInterval,
+    override val maxConcurrentStreamsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentStreamsPerConnection,
     maxAuthTokensPerMember: PositiveInt = PublicServerConfig.defaultMaxAuthTokensPerMember,
     useExponentialRandomTokenExpiration: Boolean = false,
     overrideMaxRequestSize: Option[NonNegativeInt] = None,
@@ -79,7 +81,7 @@ final case class PublicServerConfig(
 
   override def serverCertChainFile: Option[PemFileOrString] = tls.map(_.certChainFile)
 
-  /** This setting has no effect. Therfore hardcoding it to 0.
+  /** This setting has no effect. Therefore hardcoding it to 0.
     */
   override final def maxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(0)
   def connection: String = {

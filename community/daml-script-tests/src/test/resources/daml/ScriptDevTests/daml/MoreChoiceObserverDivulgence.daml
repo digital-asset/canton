@@ -35,8 +35,8 @@ template Divulger with
 -- @WARN range=49:15-49:70; Use of divulged contracts is deprecated
 test : Script ()
 test = script do
-    alice <- allocateParty "Alice"
-    bob <- allocateParty "Bob"
+    alice <- allocateParty "Alice-MoreChoiceObserverDivulgence:test"
+    bob <- allocateParty "Bob-MoreChoiceObserverDivulgence:test"
     -- (1) Alice creates a secret
     id <- submit alice do createCmd Secret with owner = alice; text = "s3cr3t"
     -- (2) Bob cannot see the secret

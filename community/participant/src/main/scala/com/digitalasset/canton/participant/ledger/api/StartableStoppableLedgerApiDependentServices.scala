@@ -101,12 +101,13 @@ class StartableStoppableLedgerApiDependentServices(
           logger.debug("Starting Ledger API-dependent canton services")
 
           val partyReplicatorO =
-            config.parameters.alphaOnlinePartyReplicationSupport.map(config =>
+            config.parameters.alphaOnlinePartyReplicationSupport.map(
               new PartyReplicator(
                 participantId,
                 syncService,
                 clock,
-                config,
+                _,
+                config.parameters.batching,
                 storage,
                 futureSupervisor,
                 parameters.exitOnFatalFailures,

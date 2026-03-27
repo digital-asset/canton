@@ -16,7 +16,7 @@ import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.{AstRewriter, ParserParameters}
-import com.digitalasset.daml.lf.transaction.*
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine as ContractStateMachine, *}
 import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.Assertion
@@ -153,12 +153,12 @@ trait UpgradesMatrix[Err, Res, AdditionalSetup] {
 object UpgradesMatrixCasesV2Dev
     extends UpgradesMatrixCases(
       LanguageVersion.v2_dev,
-      ContractStateMachine.Mode.UCKWithRollback,
+      ContractStateMachine.Mode.NUCK,
     )
 object UpgradesMatrixCasesV2MaxStable
     extends UpgradesMatrixCases(
       LanguageVersion.latestStableLfVersion,
-      ContractStateMachine.Mode.UCKWithRollback,
+      ContractStateMachine.Mode.NUCK,
     )
 
 /** Pairs of v1/v2 templates are called [[TestCase]]s and are listed in [[testCases]]. A test case

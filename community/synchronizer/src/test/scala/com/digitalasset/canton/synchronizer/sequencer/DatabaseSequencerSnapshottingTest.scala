@@ -102,7 +102,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
               request,
               HashPurpose.SubmissionRequestSignature,
               crypto.currentSnapshotApproximation.futureValueUS,
-              Some(clock.now),
+              None, // not needed for unit tests; session signing keys disabled
             )
             .failOnShutdown
         )(s"Sign request")
@@ -179,7 +179,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
             request2,
             HashPurpose.SubmissionRequestSignature,
             crypto.currentSnapshotApproximation.futureValueUS,
-            Some(clock.now),
+            None, // not needed for unit tests; session signing keys disabled
           )
         )(s"Sign request")
         _ <- {

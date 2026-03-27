@@ -25,6 +25,7 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -32,7 +33,7 @@ import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.health.HealthQuasiComponent
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
-import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, TrafficConsumptionMetrics}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
@@ -71,10 +72,6 @@ import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
   HandlerError,
   HandlerException,
 }
-import com.digitalasset.canton.sequencing.client.transports.{
-  SequencerClientTransport,
-  SequencerClientTransportPekko,
-}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.{
   EventCostCalculator,
@@ -102,11 +99,7 @@ import com.digitalasset.canton.time.{
   SynchronizerTimeTracker,
 }
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.DefaultTestIdentities.{
-  daSequencerId,
-  mediatorId,
-  participant1,
-}
+import com.digitalasset.canton.topology.DefaultTestIdentities.{mediatorId, participant1}
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.Mutex
@@ -215,22 +208,15 @@ final class SequencerClientTest
         env.subscribeAfter().futureValueUS
 
         val assertions: Seq[LogEntry => scalatest.Assertion] =
-          if (env.useNewConnectionPool) {
-            Seq(
-              _.errorMessage shouldBe "An internal error has occurred.",
-              { logEntry =>
-                logEntry.errorMessage shouldBe "Sequencer subscription failed"
-                logEntry.throwable.value.getMessage should include(
-                  "Post aggregation handler already exists"
-                )
-              },
-            )
-          } else {
-            Seq(
-              _.warningMessage shouldBe "Cannot create additional subscriptions to the sequencer from the same client",
-              _.errorMessage should include("Sequencer subscription failed"),
-            )
-          }
+          Seq(
+            _.errorMessage shouldBe "An internal error has occurred.",
+            { logEntry =>
+              logEntry.errorMessage shouldBe "Sequencer subscription failed"
+              logEntry.throwable.value.getMessage should (include(
+                "Post aggregation handler already exists"
+              ) or include("sequencer client already has a running subscription"))
+            },
+          )
         loggerFactory.assertLogs(
           env
             .subscribeAfter(CantonTimestamp.MinValue, alwaysSuccessfulHandler)
@@ -1269,121 +1255,116 @@ final class SequencerClientTest
       }
     }
 
-    "changeTransport" should {
-      "create second subscription from the same counter as the previous one when there are no events" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create()
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
-          _ <- env.subscribeAfter()
+    // TODO(i27260): Decide whether these tests should be ported for the new pool or removed altogether
+//    "changeTransport" should {
+//      "create second subscription from the same counter as the previous one when there are no events" ignore {
+//        val env = RichEnvFactory.create()
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
+//          _ <- env.subscribeAfter()
 //          _ <- env.changeTransport(secondTransport, None)
-        } yield {
-          val originalSubscriber = env.transport.subscriber.value
-          originalSubscriber.request.timestamp shouldBe None
-          originalSubscriber.subscription.isClosing shouldBe true // old subscription gets closed
-          env.transport.isClosing shouldBe true
-
-          val newSubscriber = secondTransport.subscriber.value
-          newSubscriber.request.timestamp shouldBe None
-          newSubscriber.subscription.isClosing shouldBe false
-          secondTransport.isClosing shouldBe false
-
-          env.client.completion.isCompleted shouldBe false
-        }
-
-        testF.futureValueUS
-        env.client.close()
-      }
-
-      "create second subscription from the same counter as the previous one when there are events" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create(initializeCounterAllocatorTo = Some(SequencerCounter(41)))
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
-          _ <- env.subscribeAfter()
-
-          _ <- env.transport.subscriber.value.sendToHandler(deliver)
-          _ <- env.transport.subscriber.value.sendToHandler(nextDeliver)
-          _ <- env.client.flushClean()
-
+//        } yield {
+//          val originalSubscriber = env.transport.subscriber.value
+//          originalSubscriber.request.timestamp shouldBe None
+//          originalSubscriber.subscription.isClosing shouldBe true // old subscription gets closed
+//          env.transport.isClosing shouldBe true
+//
+//          val newSubscriber = secondTransport.subscriber.value
+//          newSubscriber.request.timestamp shouldBe None
+//          newSubscriber.subscription.isClosing shouldBe false
+//          secondTransport.isClosing shouldBe false
+//
+//          env.client.completion.isCompleted shouldBe false
+//        }
+//
+//        testF.futureValueUS
+//        env.client.close()
+//      }
+//
+//      "create second subscription from the same counter as the previous one when there are events" ignore {
+//        val env = RichEnvFactory.create(initializeCounterAllocatorTo = Some(SequencerCounter(41)))
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
+//          _ <- env.subscribeAfter()
+//
+//          _ <- env.transport.subscriber.value.sendToHandler(deliver)
+//          _ <- env.transport.subscriber.value.sendToHandler(nextDeliver)
+//          _ <- env.client.flushClean()
+//
 //          _ <- env.changeTransport(secondTransport, None)
-        } yield {
-          val originalSubscriber = env.transport.subscriber.value
-          originalSubscriber.request.timestamp shouldBe None
-
-          val newSubscriber = secondTransport.subscriber.value
-          newSubscriber.request.timestamp shouldBe Some(nextDeliver.timestamp)
-
-          env.client.completion.isCompleted shouldBe false
-        }
-
-        testF.futureValueUS
-      }
-
-      "have new transport be used for sends" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create()
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
+//        } yield {
+//          val originalSubscriber = env.transport.subscriber.value
+//          originalSubscriber.request.timestamp shouldBe None
+//
+//          val newSubscriber = secondTransport.subscriber.value
+//          newSubscriber.request.timestamp shouldBe Some(nextDeliver.timestamp)
+//
+//          env.client.completion.isCompleted shouldBe false
+//        }
+//
+//        testF.futureValueUS
+//      }
+//
+//      "have new transport be used for sends" ignore {
+//        val env = RichEnvFactory.create()
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
 //          _ <- env.changeTransport(secondTransport, None)
-          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
-        } yield {
-          env.transport.lastSend.get() shouldBe None
-          secondTransport.lastSend.get() should not be None
-
-          env.transport.isClosing shouldBe true
-          secondTransport.isClosing shouldBe false
-        }
-
-        testF.futureValueUS
-        env.client.close()
-      }
-
-      "have new transport be used for logout" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create()
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
+//          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
+//        } yield {
+//          env.transport.lastSend.get() shouldBe None
+//          secondTransport.lastSend.get() should not be None
+//
+//          env.transport.isClosing shouldBe true
+//          secondTransport.isClosing shouldBe false
+//        }
+//
+//        testF.futureValueUS
+//        env.client.close()
+//      }
+//
+//      "have new transport be used for logout" ignore {
+//        val env = RichEnvFactory.create()
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
 //          _ <- env.changeTransport(secondTransport, None)
-          _ <- env.logout().value
-        } yield {
-          env.transport.logoutCalled shouldBe false
-          secondTransport.logoutCalled shouldBe true
-        }
-
-        testF.futureValueUS
-        env.client.close()
-      }
-
-      "have new transport be used for sends when there is subscription" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create()
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
-          _ <- env.subscribeAfter()
+//          _ <- env.logout().value
+//        } yield {
+//          env.transport.logoutCalled shouldBe false
+//          secondTransport.logoutCalled shouldBe true
+//        }
+//
+//        testF.futureValueUS
+//        env.client.close()
+//      }
+//
+//      "have new transport be used for sends when there is subscription" ignore {
+//        val env = RichEnvFactory.create()
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
+//          _ <- env.subscribeAfter()
 //          _ <- env.changeTransport(secondTransport, None)
-          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
-        } yield {
-          env.transport.lastSend.get() shouldBe None
-          secondTransport.lastSend.get() should not be None
-        }
-
-        testF.futureValueUS
-        env.client.close()
-      }
-
-      "have new transport be used with same sequencerId but different sequencer alias" ignore {
-        // TODO(i26481): Enable new connection pool (test uses changeTransport())
-        val env = RichEnvFactory.create()
-        val secondTransport = MockTransport(env.clock)
-
-        val testF = for {
-          _ <- env.subscribeAfter()
+//          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
+//        } yield {
+//          env.transport.lastSend.get() shouldBe None
+//          secondTransport.lastSend.get() should not be None
+//        }
+//
+//        testF.futureValueUS
+//        env.client.close()
+//      }
+//
+//      "have new transport be used with same sequencerId but different sequencer alias" ignore {
+//        val env = RichEnvFactory.create()
+//        val secondTransport = MockTransport(env.clock)
+//
+//        val testF = for {
+//          _ <- env.subscribeAfter()
 //          _ <- env.changeTransport(
 //            SequencerTransports.single(
 //              SequencerAlias.tryCreate("somethingElse"),
@@ -1392,16 +1373,16 @@ final class SequencerClientTest
 //            ),
 //            None,
 //          )
-          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
-        } yield {
-          env.transport.lastSend.get() shouldBe None
-          secondTransport.lastSend.get() should not be None
-        }
-
-        testF.futureValueUS
-        env.client.close()
-      }
-    }
+//          _ <- env.sendAsync(Batch.empty(testedProtocolVersion)).value
+//        } yield {
+//          env.transport.lastSend.get() shouldBe None
+//          secondTransport.lastSend.get() should not be None
+//        }
+//
+//        testF.futureValueUS
+//        env.client.close()
+//      }
+//    }
   }
 
   "RichSequencerClientImpl" should {
@@ -1461,17 +1442,15 @@ final class SequencerClientTest
 
   private case class Env[+Client <: SequencerClient](
       client: Client,
-      transport: MockTransport,
       pool: MockPool,
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
       sequencedEventStore: SequencedEventStore,
       timeTracker: SynchronizerTimeTracker,
       trafficStateController: TrafficStateController,
       clock: SimClock,
-      useNewConnectionPool: Boolean,
   ) {
     def subscriber: Option[Subscriber[?]] =
-      if (useNewConnectionPool) pool.connection.subscriber else transport.subscriber
+      pool.connection.subscriber
 
     def subscribeAfter(
         priorTimestamp: CantonTimestamp = CantonTimestamp.MinValue,
@@ -1486,16 +1465,15 @@ final class SequencerClientTest
       )
 
     def changeTransport(
-        newTransport: SequencerClientTransport & SequencerClientTransportPekko,
-        newConnectionPoolConfig: SequencerConnectionXPoolConfig,
+        newConnectionPoolConfig: SequencerConnectionXPoolConfig
     )(implicit ev: Client <:< RichSequencerClient): FutureUnlessShutdown[Unit] =
       changeTransport(
-        SequencerTransports.default(daSequencerId, newTransport),
+        SequencerTransports.default,
         newConnectionPoolConfig,
       )
 
     def changeTransport(
-        sequencerTransports: SequencerTransports[?],
+        sequencerTransports: SequencerTransports,
         newConnectionPoolConfig: SequencerConnectionXPoolConfig,
     )(implicit
         ev: Client <:< RichSequencerClient
@@ -1547,186 +1525,16 @@ final class SequencerClientTest
       this.closeReasonPromise.success(HandlerException(error))
   }
 
-  /** A sendAsync resonse: either a sync error, or an action before returning Unit.
+  /** A sendAsync response: either a sync error, or an action before returning Unit.
     */
   type SendAsyncResponse = Either[SendAsyncClientResponseError, SimClock => Unit]
-
-  private class MockTransport(
-      clock: SimClock,
-      firstSendAsyncResponseO: Option[SendAsyncResponse],
-  ) extends SequencerClientTransport
-      with SequencerClientTransportPekko
-      with NamedLogging {
-
-    private val logoutCalledRef = new AtomicReference[Boolean](false)
-    val acknowledgedTimestamps: AtomicReference[Set[CantonTimestamp]] = new AtomicReference(
-      Set.empty
-    )
-
-    private val sendAsyncResponseRef =
-      new AtomicReference[Option[SendAsyncResponse]](firstSendAsyncResponseO)
-
-    override def getTime(timeout: Duration)(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]] =
-      EitherT.rightT(None)
-
-    override def logout()(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, Status, Unit] = {
-      logoutCalledRef.set(true)
-      EitherT.pure(())
-    }
-
-    def logoutCalled: Boolean = logoutCalledRef.get()
-
-    override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
-
-    private val subscriberRef = new AtomicReference[Option[Subscriber[?]]](None)
-
-    // When using a parallel execution context, the order of asynchronous operations within the SequencerClient
-    // is not deterministic which can delay the subscription. This is why we add some retry policy to avoid flaky tests
-    def subscriber: Option[Subscriber[?]] = {
-      @tailrec def subscriber(retry: Int): Option[Subscriber[?]] =
-        subscriberRef.get() match {
-          case Some(value) => Some(value)
-          case None if retry >= 0 =>
-            logger.debug(
-              s"Subscriber reference is not defined, will retry after sleeping. Retry: $retry"
-            )
-            Threading.sleep(5)
-            subscriber(retry - 1)
-          case None => None
-        }
-
-      subscriber(retry = 100)
-    }
-
-    val lastSend = new AtomicReference[Option[SentSubmission]](None)
-    def lastSubmissionTime: Option[CantonTimestamp] = lastSend.get.map(_.submissionTime)
-
-    override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, Boolean] = {
-      acknowledgedTimestamps.getAndUpdate(_ + request.content.timestamp)
-
-      EitherT.rightT(true)
-    }
-
-    override def getTrafficStateForMember(request: GetTrafficStateForMemberRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, GetTrafficStateForMemberResponse] =
-      EitherT.pure(
-        GetTrafficStateForMemberResponse(
-          Some(
-            TrafficState(
-              extraTrafficPurchased = NonNegativeLong.zero,
-              // Use the timestamp as the traffic consumed
-              // This allows us to assert how the state returned by this function is used by the state controller to
-              // refresh its own traffic state
-              extraTrafficConsumed =
-                NonNegativeLong.tryCreate(Math.abs(request.timestamp.toProtoPrimitive)),
-              baseTrafficRemainder = NonNegativeLong.zero,
-              lastConsumedCost = NonNegativeLong.zero,
-              timestamp = request.timestamp,
-              serial = None,
-            )
-          ),
-          testedProtocolVersion,
-        )
-      )
-
-    private def sendAsync(
-        request: SubmissionRequest
-    ): EitherT[Future, SendAsyncClientResponseError, Unit] = {
-      lastSend.set(Some(SentSubmission(clock.now, request)))
-
-      val responseE = sendAsyncResponseRef.getAndSet(None) match {
-        case None => Right(())
-        case Some(Left(error)) => Left(error)
-        case Some(Right(action)) => Right(action.apply(clock))
-      }
-      responseE.toEitherT
-    }
-
-    override def sendAsyncSigned(
-        request: SignedContent[SubmissionRequest],
-        timeout: Duration,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SendAsyncClientResponseError, Unit] =
-      sendAsync(request.content).mapK(FutureUnlessShutdown.outcomeK)
-
-    override def subscribe[E](request: SubscriptionRequest, handler: SequencedEventHandler[E])(
-        implicit traceContext: TraceContext
-    ): SequencerSubscription[E] = {
-      val subscription = new MockSubscription[E]
-
-      if (
-        !subscriberRef.compareAndSet(None, Some(OldStyleSubscriber(request, handler, subscription)))
-      ) {
-        fail("subscribe has already been called by this client")
-      }
-
-      subscription
-    }
-
-    override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
-      SubscriptionErrorRetryPolicy.never
-
-    override protected def loggerFactory: NamedLoggerFactory =
-      SequencerClientTest.this.loggerFactory
-
-    override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, String, TopologyStateForInitResponse] = ???
-
-    override type SubscriptionError = Uninhabited
-
-    override def subscribe(request: SubscriptionRequest)(implicit
-        traceContext: TraceContext
-    ): SequencerSubscriptionPekko[SubscriptionError] = {
-      // Choose a sufficiently large queue size so that we can test throttling
-      val (queue, sourceQueue) =
-        Source.queue[SequencedSerializedEvent](200).preMaterialize()(materializer)
-
-      val subscriber = SubscriberPekko(request, queue, new MockSubscription[Uninhabited]())
-      subscriberRef.set(Some(subscriber))
-
-      val source = sourceQueue
-        .map(Either.right)
-        .withUniqueKillSwitchMat()(Keep.right)
-        .watchTermination()(Keep.both)
-
-      SequencerSubscriptionPekko(
-        source,
-        new AlwaysHealthyComponent("sequencer-client-test-source", logger),
-      )
-    }
-
-    override def subscriptionRetryPolicyPekko
-        : SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
-      SubscriptionErrorRetryPolicyPekko.never
-
-    override def downloadTopologyStateForInitHash(request: TopologyStateForInitRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitHashResponse] = ???
-  }
-
-  private object MockTransport {
-    def apply(
-        clock: SimClock,
-        firstSendAsyncResponseO: Option[SendAsyncResponse] = None,
-    ): MockTransport & SequencerClientTransportPekko.Aux[Uninhabited] =
-      new MockTransport(clock, firstSendAsyncResponseO)
-  }
 
   private class MockConnection(
       override val name: String,
       ack: CantonTimestamp => Unit,
       clock: SimClock,
       firstSendAsyncResponseO: Option[SendAsyncResponse],
-  ) extends SequencerConnectionX {
+  ) extends SequencerConnectionWithPekkoSubscribe {
     override val health: SequencerConnectionXHealth =
       new SequencerConnectionXHealth.AlwaysValidated(s"$name-health", logger)
 
@@ -1851,6 +1659,34 @@ final class SequencerClientTest
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitHashResponse] = ???
+
+    override type SubscriptionError = Uninhabited
+
+    override def subscribe(request: SubscriptionRequest)(implicit
+        traceContext: TraceContext
+    ): SequencerSubscriptionPekko[SubscriptionError] = {
+      // Choose a sufficiently large queue size so that we can test throttling
+      val (queue, sourceQueue) =
+        Source.queue[SequencedSerializedEvent](200).preMaterialize()(materializer)
+
+      val subscriber = SubscriberPekko(request, queue, new MockSubscription[Uninhabited]())
+      subscriberRef.set(Some(subscriber))
+
+      val source = sourceQueue
+        .map(Either.right)
+        .withUniqueKillSwitchMat()(Keep.right)
+        .watchTermination()(Keep.both)
+
+      SequencerSubscriptionPekko(
+        source,
+        new AlwaysHealthyComponent("sequencer-client-test-source", logger),
+      )
+    }
+
+    override def subscriptionRetryPolicyPekko
+        : SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
+      SubscriptionErrorRetryPolicyPekko.never
+
   }
 
   private class MockPool(clock: SimClock, firstSendAsyncResponseO: Option[SendAsyncResponse])
@@ -2053,7 +1889,7 @@ final class SequencerClientTest
         request: A,
         hashPurpose: HashPurpose,
         snapshot: SyncCryptoApi,
-        approximateTimestampOverride: Option[CantonTimestamp],
+        signingTimestampOverrides: Option[SigningTimestampOverrides],
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
@@ -2114,7 +1950,6 @@ final class SequencerClientTest
     )(implicit closeContext: CloseContext): Env[RichSequencerClient] = {
       val clock = new SimClock(loggerFactory = loggerFactory)
       val timeouts = DefaultProcessingTimeouts.testing
-      val transport = MockTransport(clock, firstSendAsyncResponseO)
       val sendTrackerStore = new InMemorySendTrackerStore()
       val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
       val sequencerCounterTrackerStore =
@@ -2163,7 +1998,6 @@ final class SequencerClientTest
           submissionRequestAmplification = amplificationConfig,
           sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
         )
-        .value
 
       val client = new RichSequencerClientImpl(
         psid,
@@ -2210,14 +2044,12 @@ final class SequencerClientTest
 
       Env(
         client,
-        transport,
         connectionPool,
         sequencerCounterTrackerStore,
         sequencedEventStore,
         timeTracker,
         trafficStateController,
         clock,
-        useNewConnectionPool = true,
       )
     }
   }
@@ -2238,7 +2070,6 @@ final class SequencerClientTest
     )(implicit closeContext: CloseContext): Env[SequencerClient] = {
       val clock = new SimClock(loggerFactory = loggerFactory)
       val timeouts = DefaultProcessingTimeouts.testing
-      val transport = MockTransport(clock)
       val sendTrackerStore = new InMemorySendTrackerStore()
       val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
       val sequencerCounterTrackerStore =
@@ -2278,14 +2109,13 @@ final class SequencerClientTest
 
       val connectionPool = MockPool(clock)
 
-      // TODO(i26481): adjust when the new connection pool is stable
-      // The subscription pool does not support the Pekko sequencer client
       val client = new SequencerClientImplPekko(
         DefaultTestIdentities.physicalSynchronizerId,
         participant1,
-        SequencerTransports.default(DefaultTestIdentities.daSequencerId, transport),
+        SequencerClient.wrapConnection(connectionPool.connection),
+        SequencerTransports.default,
         connectionPool = connectionPool,
-        options.copy(useNewConnectionPool = false),
+        options,
         maxRequestSizeLookup,
         timeouts,
         eventValidatorFactory,
@@ -2314,14 +2144,12 @@ final class SequencerClientTest
 
       Env(
         client,
-        transport,
         connectionPool,
         sequencerCounterTrackerStore,
         sequencedEventStore,
         timeTracker,
         trafficStateController,
         clock,
-        useNewConnectionPool = false,
       )
     }
   }

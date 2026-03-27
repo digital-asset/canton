@@ -352,6 +352,8 @@ object BftBlockOrdererConfig {
       tls: Option[TlsServerConfig] = None,
       override val maxInboundMessageSize: NonNegativeInt =
         ServerConfig.defaultMaxInboundMessageSize,
+      override val maxConcurrentStreamsPerConnection: NonNegativeInt =
+        ServerConfig.defaultMaxConcurrentStreamsPerConnection,
       override val limits: Option[ActiveRequestLimitsConfig] = None,
   ) extends ServerConfig {
     override val name: String = "peer-to-peer"

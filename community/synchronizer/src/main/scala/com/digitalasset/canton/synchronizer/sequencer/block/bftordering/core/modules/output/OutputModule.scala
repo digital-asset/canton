@@ -850,7 +850,7 @@ class OutputModule[E <: Env[E]](
       metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
       logger.debug(
         s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
-          "to a consensus behavior"
+          s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
       )
 
       consensus.asyncSend(newEpochTopologyMessage)

@@ -10,6 +10,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -19,6 +20,7 @@ import com.digitalasset.canton.protocol.messages.{
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
@@ -43,10 +45,6 @@ class TrafficPurchasedSubmissionHandler(
   /** Send a signed traffic purchased entry request.
     * @param member
     *   recipient of the new balance
-    * @param psid
-    *   synchronizerId of the synchronizer where the top up is being sent to
-    * @param protocolVersion
-    *   protocol version used
     * @param serial
     *   monotonically increasing serial number for the request
     * @param totalTrafficPurchased
@@ -68,11 +66,11 @@ class TrafficPurchasedSubmissionHandler(
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, TrafficControlError, Unit] = {
     val now = clock.now
-    val approximateTimestampOverride = Some(now)
 
     val protocolVersion: ProtocolVersion = cryptoApi.psid.protocolVersion
 
     def send(
+        approximateTimestampForSigning: CantonTimestamp,
         maxSequencingTimes: NonEmpty[Seq[CantonTimestamp]],
         batch: Batch[OpenEnvelope[SignedProtocolMessage[SetTrafficPurchasedMessage]]],
         aggregationRule: AggregationRule,
@@ -91,6 +89,7 @@ class TrafficPurchasedSubmissionHandler(
             synchronizerTimeTracker,
             batch,
             aggregationRule,
+            approximateTimestampForSigning,
             maxSequencingTime,
           ).value
         }
@@ -148,12 +147,21 @@ class TrafficPurchasedSubmissionHandler(
         totalTrafficPurchased,
         cryptoApi.psid,
       )
+      maxSequencingTimes = computeMaxSequencingTimes(trafficParams, now)
+      // Depending on the window size and the current timestamp, we may need to sign and send two traffic
+      // purchase messages. Each has its own max sequencing time, but we use the maximum of these times
+      // for signing (i.e., to select the appropriate session signing key).
       signedTrafficPurchasedMessage <- EitherT
         .liftF(
           SignedProtocolMessage.trySignAndCreate(
             setTrafficPurchasedMessage,
             topology,
-            approximateTimestampOverride,
+            Some(
+              SigningTimestampOverrides(
+                approximateTimestamp = now,
+                validityPeriodEnd = maxSequencingTimes.maxOption,
+              )
+            ),
           )
         )
       batch = Batch.of(
@@ -176,9 +184,7 @@ class TrafficPurchasedSubmissionHandler(
           )
         ),
       )
-      // TODO(#29515): fix potential blow-up when using session signing keys with short validity periods
-      maxSequencingTimes = computeMaxSequencingTimes(trafficParams, now)
-      _ <- send(maxSequencingTimes, batch, aggregationRule)
+      _ <- send(now, maxSequencingTimes, batch, aggregationRule)
     } yield ()
   }
 
@@ -187,6 +193,7 @@ class TrafficPurchasedSubmissionHandler(
       synchronizerTimeTracker: SynchronizerTimeTracker,
       batch: Batch[DefaultOpenEnvelope],
       aggregationRule: AggregationRule,
+      approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
       ec: ExecutionContext,
@@ -199,7 +206,11 @@ class TrafficPurchasedSubmissionHandler(
         .send(
           batch,
           aggregationRule = Some(aggregationRule),
-          maxSequencingTime = maxSequencingTime,
+          timestamps = SendRequestTimestamps(
+            topologyTimestamp = None,
+            approximateTimestampForSigning = approximateTimestampForSigning,
+            maxSequencingTime = maxSequencingTime,
+          ),
           callback = callback,
         )
         .leftMap(err =>

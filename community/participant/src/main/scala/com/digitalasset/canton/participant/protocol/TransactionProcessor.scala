@@ -49,6 +49,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -73,6 +74,7 @@ class TransactionProcessor(
     ephemeral: SyncEphemeralState,
     commandProgressTracker: CommandProgressTracker,
     metrics: TransactionProcessingMetrics,
+    clock: Clock,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -108,6 +110,7 @@ class TransactionProcessor(
         staticSynchronizerParameters,
         crypto,
         metrics,
+        clock,
         damle.enrichTransaction,
         damle.enrichContract,
         new AuthorizationValidator(participantId),
@@ -124,6 +127,7 @@ class TransactionProcessor(
       ephemeral,
       crypto,
       sequencerClient,
+      clock,
       loggerFactory,
       futureSupervisor,
       promiseFactory,
@@ -217,7 +221,12 @@ object TransactionProcessor {
 
       // TODO(i5990) properly set `definiteAnswer` where appropriate when sub-categories are created
       final case class Error(message: String, reason: TransactionConfirmationRequestCreationError)
-          extends TransactionErrorImpl(cause = "Malformed request")
+          extends TransactionErrorImpl(cause = "Malformed request") {
+//        remy.log("")
+//        remy.log(message)
+//        remy.log(reason)
+//        remy.log(reason.show)
+      }
     }
 
     @Explanation(

@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
@@ -109,6 +110,7 @@ private[reassignment] class AssignmentProcessingSteps(
       mediator: MediatorGroupRecipient,
       ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -116,8 +118,6 @@ private[reassignment] class AssignmentProcessingSteps(
     ReassignmentProcessorError,
     (Submission, PendingSubmissionData),
   ] = {
-    val approximateTimestampOverride = Some(clock.now)
-
     val SubmissionParam(
       submitterMetadata,
       reassignmentId,
@@ -192,8 +192,22 @@ private[reassignment] class AssignmentProcessingSteps(
       )
 
       rootHash = fullTree.rootHash
+
+      // For a `ReassignmentsSubmission`, we use `clock.now` + `defaultMaxSequencingTimeOffset`
+      // to generate the max sequencing time and determine a valid session signing key to use.
+      now = clock.now
+      maxSequencingTime = generateMaxSequencingTime(now)
+      signingTimestampOverrides = SigningTimestampOverrides(
+        approximateTimestamp = now,
+        validityPeriodEnd = Some(maxSequencingTime),
+      )
+
       submittingParticipantSignature <- recentSnapshot
-        .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, approximateTimestampOverride)
+        .sign(
+          rootHash.unwrap,
+          SigningKeyUsage.ProtocolOnly,
+          Some(signingTimestampOverrides),
+        )
         .leftMap(ReassignmentSigningError.apply)
       mediatorMessage = fullTree.mediatorMessage(
         submittingParticipantSignature,
@@ -225,7 +239,7 @@ private[reassignment] class AssignmentProcessingSteps(
           fullTree,
           (viewKey, viewKeyMap),
           recentSnapshot,
-          approximateTimestampOverride,
+          Some(signingTimestampOverrides),
           protocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](
@@ -264,7 +278,12 @@ private[reassignment] class AssignmentProcessingSteps(
           _ => reassignmentId,
         )
     } yield (
-      ReassignmentsSubmission(Batch.of(protocolVersion.unwrap, messages*), rootHash),
+      ReassignmentsSubmission(
+        Batch.of(protocolVersion.unwrap, messages*),
+        rootHash,
+        now,
+        maxSequencingTime,
+      ),
       Some(pendingSubmission),
     )
   }

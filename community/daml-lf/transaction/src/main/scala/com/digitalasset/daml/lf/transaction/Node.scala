@@ -291,7 +291,7 @@ object Node {
       key: GlobalKeyWithMaintainers,
       result: Option[ContractId],
       version: SerializationVersion
-    ): LookupByKey = QueryByKey(packageName, templateId, true, key, result.asCidVector, version)
+    ): LookupByKey = QueryByKey(packageName, templateId, result.isEmpty, key, result.asCidVector, version)
 
     def unapply(n: QueryByKey): Some[(
       PackageName,

@@ -30,7 +30,10 @@ import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance}
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  NextGenContractStateMachine as ContractStateMachine,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
 import java.nio.file.Path

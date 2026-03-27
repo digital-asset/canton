@@ -197,7 +197,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
           resultFilter: UpdateWrapper => Boolean = _ => true,
           synchronizerFilter: Option[SynchronizerId] = None,
-          descendingOrder: Boolean = false,
       ): Seq[UpdateWrapper] = {
 
         val resultFilterWithSynchronizer = synchronizerFilter match {
@@ -216,7 +215,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             updateFormat,
             beginOffsetExclusive,
             endOffsetInclusive,
-            descendingOrder,
           ),
           "getUpdates",
           observer,
@@ -524,8 +522,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |the pruning offset, this command fails with a `NOT_FOUND` error.
           |If the beginOffset is zero then the participant begin is taken as beginning offset.
           |If the endOffset is None then a continuous stream is returned.
-          |If the descendingOrder is true, then the updates are streamed from the most recent
-          |(endOffsetInclusive) to the oldest. In such case endOffsetInclusive must be defined.
           """
       )
       def subscribe_updates(
@@ -533,7 +529,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           updateFormat: UpdateFormat,
           beginOffsetExclusive: Long = 0L,
           endOffsetInclusive: Option[Long] = None,
-          descendingOrder: Boolean = false,
       ): AutoCloseable =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -542,7 +537,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               beginExclusive = beginOffsetExclusive,
               endInclusive = endOffsetInclusive,
               updateFormat = updateFormat,
-              descendingOrder = descendingOrder,
             )
           )
         }
@@ -2802,15 +2796,24 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
     object event_query extends Helpful {
 
       @Help.Summary("Get events by contract Id")
-      @Help.Description("""Return events associated with the given contract ID.""")
+      @Help.Description(
+        """Return events associated with the given contract ID.
+          |If `requestingParties` is empty, events are fetched for all parties.
+          |Otherwise the query is restricted to the provided reader parties."""
+      )
       def by_contract_id(
           contractId: String,
           requestingParties: Seq[Party],
+          includeCreatedEventBlob: Boolean = false,
       ): GetEventsByContractIdResponse =
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.QueryService
-              .GetEventsByContractId(contractId, requestingParties.map(_.toLf))
+              .GetEventsByContractId(
+                contractId,
+                requestingParties.map(_.toLf),
+                includeCreatedEventBlob,
+              )
           )
         }
     }
@@ -3352,13 +3355,19 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               |You can refine your search using the `filter` function argument.
               |You can restrict search to a synchronizer by specifying the optional synchronizer ID.
               |The command will wait until the contract appears or throw an exception once it times out.
+              |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
+              |trailing fields in the contract payload are handled during decoding.
               """
           )
           def await[
               TC <: javab.data.codegen.Contract[TCid, T],
               TCid <: javab.data.codegen.ContractId[T],
               T <: javab.data.Template,
-          ](companion: javab.data.codegen.ContractCompanion[TC, TCid, T])(
+          ](
+              companion: javab.data.codegen.ContractCompanion[TC, TCid, T],
+              unknownTrailingFieldPolicy: javab.data.codegen.UnknownTrailingFieldPolicy =
+                javab.data.codegen.UnknownTrailingFieldPolicy.STRICT,
+          )(
               partyId: Party,
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
@@ -3366,7 +3375,12 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           ): TC = {
             val result = new AtomicReference[Option[TC]](None)
             ConsoleMacros.utils.retry_until_true(timeout) {
-              val tmp = filter(companion)(partyId, predicate, synchronizerFilter)
+              val tmp =
+                filter(companion, unknownTrailingFieldPolicy)(
+                  partyId,
+                  predicate,
+                  synchronizerFilter,
+                )
               result.set(tmp.headOption)
               tmp.nonEmpty
             }
@@ -3386,13 +3400,19 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             """To use this function, ensure a code-generated Java model for the target template exists.
               |You can refine your search using the `predicate` function argument.
               |You can restrict search to a synchronizer by specifying the optional synchronizer ID.
+              |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
+              |trailing fields in the contract payload are handled during decoding.
               """
           )
           def filter[
               TC <: javab.data.codegen.Contract[TCid, T],
               TCid <: javab.data.codegen.ContractId[T],
               T <: javab.data.Template,
-          ](templateCompanion: javab.data.codegen.ContractCompanion[TC, TCid, T])(
+          ](
+              templateCompanion: javab.data.codegen.ContractCompanion[TC, TCid, T],
+              unknownTrailingFieldPolicy: javab.data.codegen.UnknownTrailingFieldPolicy =
+                javab.data.codegen.UnknownTrailingFieldPolicy.STRICT,
+          )(
               partyId: Party,
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
@@ -3410,7 +3430,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               .collect { case entry if synchronizerPredicate(entry) => entry.event }
               .flatMap { ev =>
                 JavaDecodeUtil
-                  .decodeCreated(templateCompanion)(
+                  .decodeCreated(templateCompanion, unknownTrailingFieldPolicy)(
                     javab.data.CreatedEvent.fromProto(CreatedEvent.toJavaProto(ev))
                   )
                   .toList
@@ -3425,13 +3445,18 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       object event_query extends Helpful {
 
         @Help.Summary("Get events in Java codegen by contract ID")
-        @Help.Description("Return events associated with the given contract ID.")
+        @Help.Description(
+          """Return events associated with the given contract ID.
+            |If `requestingParties` is empty, events are fetched for all parties.
+            |Otherwise the query is restricted to the provided reader parties."""
+        )
         def by_contract_id(
             contractId: String,
             requestingParties: Seq[Party],
+            includeCreatedEventBlob: Boolean = false,
         ): com.daml.ledger.api.v2.EventQueryServiceOuterClass.GetEventsByContractIdResponse =
           ledger_api.event_query
-            .by_contract_id(contractId, requestingParties)
+            .by_contract_id(contractId, requestingParties, includeCreatedEventBlob)
             .pipe(GetEventsByContractIdResponse.toJavaProto)
       }
     }

@@ -68,6 +68,7 @@ class UnassignmentProcessor(
       ephemeral,
       synchronizerCrypto,
       sequencerClient,
+      clock,
       loggerFactory,
       futureSupervisor,
       promiseFactory,

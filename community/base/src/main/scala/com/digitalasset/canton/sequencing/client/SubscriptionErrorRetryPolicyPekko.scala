@@ -5,8 +5,9 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
-/** Policy for what errors are considered retryable. Each [[transports.SequencerClientTransport]] is
-  * expected to supply their own policy which can consider error types they have defined.
+/** Policy for what errors are considered retryable. Each
+  * [[com.digitalasset.canton.sequencing.SequencerConnectionWithPekkoSubscribe]] is expected to
+  * supply their own policy which can consider error types they have defined.
   */
 trait SubscriptionErrorRetryPolicyPekko[-E] {
   def retryOnError(subscriptionError: E, receivedItems: Boolean)(implicit

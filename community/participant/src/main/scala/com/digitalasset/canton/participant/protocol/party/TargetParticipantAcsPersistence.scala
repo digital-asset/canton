@@ -8,12 +8,12 @@ import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingWorkflow.ContractToIndex
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
@@ -21,19 +21,21 @@ import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPe
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
   ParticipantNodePersistentState,
+  PartyReplicationIndexingStore,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, ReassignmentTag}
-import com.digitalasset.canton.{RepairCounter, checked}
+import com.digitalasset.canton.util.ReassignmentTag
 
 import scala.concurrent.ExecutionContext
 
 /** Target participant ACS persistence functionality shared between the OnPR sequencer channel
   * target processor and the file-based ACS importer.
+  * @param partyId
+  *   The party that is being replicated
   * @param requestId
   *   the online party replication, party add request identifier
   * @param partyOnboardingAt
@@ -44,14 +46,18 @@ import scala.concurrent.ExecutionContext
   *   interface to persist a batch of contracts to the contract store
   * @param requestTracker
   *   request tracker to update the active contract store journal along with in-memory state
+  * @param indexingStore
+  *   indexing store to add imported contract information to for subsequent Ledger API indexing
   */
 abstract class TargetParticipantAcsPersistence(
+    partyId: PartyId,
     requestId: AddPartyRequestId,
     psid: PhysicalSynchronizerId,
     partyOnboardingAt: EffectiveTime,
     replicationProgressState: AcsReplicationProgress,
     persistsContracts: PersistsContracts,
     requestTracker: RequestTracker,
+    indexingStore: PartyReplicationIndexingStore,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
@@ -65,18 +71,13 @@ abstract class TargetParticipantAcsPersistence(
     * @param contracts
     *   the contracts to import
     * @return
-    *   the updated total count of contracts imported thus far and the contracts to index after all
-    *   contracts have been imported.
+    *   the updated total count of contracts imported thus far
     */
   def importContracts(
       contracts: NonEmpty[Seq[ActiveContract]]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    String,
-    (NonNegativeInt, NonEmpty[Seq[ContractToIndex]]),
-  ] =
+  ): EitherT[FutureUnlessShutdown, String, NonNegativeInt] =
     for {
       replicationProgress <- EitherT.fromEither[FutureUnlessShutdown](
         replicationProgressState
@@ -84,7 +85,7 @@ abstract class TargetParticipantAcsPersistence(
           .toRight(s"Party replication $requestId not found in progress state")
       )
       validatedActivations <- validateContracts(contracts)
-      internalContractIdsForActiveContracts <- persistsContracts
+      _ <- persistsContracts
         .persistContracts(validatedActivations.map(_.contract))
         .leftMap(err => s"Failed to persist contracts: $err")
       repairCounter = replicationProgress.nextPersistenceCounter
@@ -102,11 +103,9 @@ abstract class TargetParticipantAcsPersistence(
       _ <- requestTracker
         .addReplicatedContracts(requestId, partyOnboardingAt.value, replicatedContracts)
         .leftMap(e => s"Failed to add contracts $replicatedContracts to ActiveContractStore: $e")
-      validatedActivationsWithInternalContractIds = checked(
-        tryAddInternalContractIds(
-          validatedActivations,
-          internalContractIdsForActiveContracts,
-        )
+
+      _ <- EitherT.right[String](
+        indexingStore.addImportedContractActivations(partyId, toc, validatedActivations)
       )
       updatedProcessedContractsCount =
         replicationProgress.processedContractCount + NonNegativeInt.size(contracts)
@@ -114,7 +113,7 @@ abstract class TargetParticipantAcsPersistence(
         requestId,
         newProgress(updatedProcessedContractsCount, repairCounter),
       )
-    } yield (updatedProcessedContractsCount, validatedActivationsWithInternalContractIds)
+    } yield updatedProcessedContractsCount
 
   /** The new progress depends on ephemeral state depending on the derived class.
     */
@@ -122,27 +121,6 @@ abstract class TargetParticipantAcsPersistence(
       updatedProcessedContractsCount: NonNegativeInt,
       usedRepairCounter: RepairCounter,
   ): PartyReplicationStatus.AcsReplicationProgress
-
-  // This function requires that all contracts are already present in the contract store and
-  // therefore their internal contract ids can be looked up.
-  private def tryAddInternalContractIds(
-      contractReassignments: NonEmpty[Seq[ContractReassignment]],
-      internalContractIds: Map[LfContractId, Long],
-  )(implicit
-      traceContext: TraceContext
-  ): NonEmpty[Seq[ContractToIndex]] =
-    contractReassignments.map { contractReassignment =>
-      val contractId = contractReassignment.contract.contractId
-      val internalContractId =
-        internalContractIds.getOrElse(
-          contractId,
-          ErrorUtil
-            .invalidState(
-              s"Not found internal contract id for contract $contractId"
-            ),
-        )
-      (contractReassignment, internalContractId)
-    }
 
   private def validateContracts(
       contracts: NonEmpty[Seq[ActiveContract]]

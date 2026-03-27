@@ -17,6 +17,7 @@ import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKeyWithMaintainers,
+  NeedKeyProgression,
   SubmittedTransaction,
 }
 import com.digitalasset.daml.lf.validation.{Validation, ValidationError}
@@ -78,16 +79,21 @@ private[speedy] object SpeedyTestLib {
           case None =>
             throw UnknownPackage(pkg)
         }
-      case Question.Update.NeedKey(key, n, mbToken, _, callback) =>
-        val cids = mbToken match {
-          case Some(ContinuationToken(rest)) =>
+      case Question.Update.NeedKey(key, n, canContinueProgress, _, callback) =>
+        val cids = canContinueProgress match {
+          case NeedKeyProgression.InProgress(ContinuationToken(rest)) =>
             rest
-          case None =>
+          case NeedKeyProgression.Unstarted =>
             getKeys.lift(key).getOrElse(Vector.empty)
         }
         val (returned, kept) = cids.splitAt(n)
+        val startedProgress = if (kept.nonEmpty) {
+          NeedKeyProgression.InProgress(ContinuationToken(kept))
+        } else {
+          NeedKeyProgression.Finished
+        }
         discard(
-          callback(returned, Option.when(kept.nonEmpty)(ContinuationToken(kept)))
+          callback(returned, startedProgress)
         )
     }
     runTxQ(onQuestion, machine) match {

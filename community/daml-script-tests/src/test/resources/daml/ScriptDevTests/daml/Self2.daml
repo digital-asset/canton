@@ -25,7 +25,7 @@ template Self2
       do exercise self Bar
 
 main = script do
-  alice <- allocateParty "Alice"
+  alice <- allocateParty "Alice-Self2:main"
 
   -- Attempt to exerciseCmd a contract that was consumed in same transaction.
   alice `submitMustFail` createAndExerciseCmd (Self2 alice) Baz

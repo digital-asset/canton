@@ -102,7 +102,16 @@ final case class SequencerNodeConfig(
       }
       .focus(_.replication)
       // Even though the block sequencer does not support replicas, want to turn on replication
-      // to take care of cases when
-      .modify(replication => ReplicationConfig.withDefaultO(storage, replication))
+      // to take care of cases when more than one instance of the sequencer is started with the same
+      // database setup and identity (typical in Kubernetes setups) and allow simultaneous startup of one instance
+      // while another is shutting down. The exception is the reference sequencer, which relies on multiple nodes
+      // using the same database for ordering blocks and handles that on a different level of the code.
+      .modify(replication =>
+        sequencer match {
+          // TODO(#29603): remove this logic once reference sequencer is gone. The reference sequencer does not
+          case SequencerConfig.External(sequencerType, _, _) if sequencerType == "reference" => None
+          case _ => ReplicationConfig.withDefaultO(storage, replication)
+        }
+      )
 
 }

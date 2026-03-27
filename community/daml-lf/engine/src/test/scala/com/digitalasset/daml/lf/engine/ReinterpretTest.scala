@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command.ReplayCommand
 import com.digitalasset.daml.lf.language.LanguageVersion

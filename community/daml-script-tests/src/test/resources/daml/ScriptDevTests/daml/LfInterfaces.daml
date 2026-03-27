@@ -99,5 +99,5 @@ template Helper
 
 -- @LEDGER run LfInterfaces.EXPECTED.ledger
 run = script do
-  p <- allocateParty "alice"
+  p <- allocateParty "Alice-LfInterfaces:run"
   p `submit` createAndExerciseCmd (Helper p) Exe

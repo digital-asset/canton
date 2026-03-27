@@ -853,7 +853,6 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         beginExclusive = ledger.begin,
         endInclusive = Some(end),
         updateFormat = Some(formatByPartyAndTemplate(owner, DummyFlexibleController.TEMPLATE_ID)),
-        descendingOrder = false,
       )
     )
     tx = assertSingleton("Owners' transactions", witnessTxs)

@@ -496,134 +496,10 @@ class GrpcPartyManagementService(
     throw new IllegalStateException(s"Unable to parse topology data from LAPI: ${error.message}")
   )
 
-  /*
- Note that `responseObserver` originates from `GrpcStreamingUtils.streamToServer` which is
- a wrapper that turns the responses into a promise/future. This is not a true bidirectional stream.
-   */
-  override def importPartyAcs(
-      responseObserver: StreamObserver[ImportPartyAcsResponse]
-  ): StreamObserver[ImportPartyAcsRequest] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-
-    val outputStream = new ByteArrayOutputStream()
-
-    // TODO(#24610): Deduplicate ImportArgs setting with logic from `ParticipantRepairService.ImportAcs`
-    // (ContractImportMode, representativePackageIdOverride)
-    type ImportArgs = (String, ContractImportMode, RepresentativePackageIdOverride)
-
-    val args = new AtomicReference[Option[ImportArgs]](None)
-
-    def recordedArgs: Either[String, ImportArgs] =
-      args
-        .get()
-        .toRight("The import ACS request fields are not set")
-
-    def setOrCheck(
-        workflowIdPrefix: String,
-        contractImportMode: ContractImportMode,
-        representativePackageIdOverride: RepresentativePackageIdOverride,
-    ): Either[String, Unit] = {
-      val newOrMatchingValue = Some(
-        (workflowIdPrefix, contractImportMode, representativePackageIdOverride)
-      )
-      if (args.compareAndSet(None, newOrMatchingValue)) {
-        Right(()) // This was the first message, success, set.
-      } else {
-        recordedArgs.flatMap {
-          case (oldWorkflowIdPrefix, _, _) if oldWorkflowIdPrefix != workflowIdPrefix =>
-            Left(
-              s"Workflow ID prefix cannot be changed from $oldWorkflowIdPrefix to $workflowIdPrefix"
-            )
-          case (_, oldContractImportMode, _) if oldContractImportMode != contractImportMode =>
-            Left(
-              s"Contract authentication import mode cannot be changed from $oldContractImportMode to $contractImportMode"
-            )
-          case (_, _, oldRepresentativePackageIdOverride)
-              if oldRepresentativePackageIdOverride != representativePackageIdOverride =>
-            Left(
-              s"Representative package ID override cannot be changed from $oldRepresentativePackageIdOverride to $representativePackageIdOverride"
-            )
-
-          case _ => Right(()) // All arguments matched successfully
-        }
-      }
-    }
-
-    new StreamObserver[ImportPartyAcsRequest] {
-
-      override def onNext(request: ImportPartyAcsRequest): Unit = {
-        val processRequest: Either[String, Unit] = for {
-          contractImportMode <- ContractImportMode
-            .fromProtoV30(request.contractImportMode)
-            .leftMap(_.message)
-          representativePackageIdOverrideO <- request.representativePackageIdOverride
-            .traverse(RepresentativePackageIdOverride.fromProtoV30)
-            .leftMap(_.message)
-          _ <- setOrCheck(
-            request.workflowIdPrefix,
-            contractImportMode,
-            representativePackageIdOverrideO.getOrElse(RepresentativePackageIdOverride.NoOverride),
-          )
-        } yield ()
-
-        processRequest.fold(
-          // On failure: Signal the error, that is throw an exception.
-          // Observer's top-level onError will handle cleanup.
-          errorMessage => responseObserver.onError(new IllegalArgumentException(errorMessage)),
-          _ => outputStream.write(request.acsSnapshot.toByteArray),
-        )
-      }
-
-      override def onError(t: Throwable): Unit =
-        try {
-          outputStream.close()
-        } finally {
-          responseObserver.onError(t)
-        }
-
-      override def onCompleted(): Unit = {
-        // Synchronously try to get the snapshot and start the import
-        val result: EitherT[Future, Throwable, Unit] = for {
-
-          argsTuple <- EitherT.fromEither[Future](
-            recordedArgs.leftMap(new IllegalStateException(_))
-          )
-          (workflowIdPrefix, contractImportMode, representativePackageIdOverride) = argsTuple
-          acsSnapshot <- EitherT.fromEither[Future](
-            Try(ByteString.copyFrom(outputStream.toByteArray)).toEither
-          )
-          _ <- EitherT.liftF[Future, Throwable, Unit](
-            ParticipantCommon.importAcsNewSnapshot(
-              acsSnapshot = acsSnapshot,
-              batching = parameters.batchingConfig,
-              contractImportMode = contractImportMode,
-              excludedStakeholders = Set.empty,
-              representativePackageIdOverride = representativePackageIdOverride,
-              sync = sync,
-              workflowIdPrefix = workflowIdPrefix,
-              alphaMultiSynchronizerSupport = parameters.alphaMultiSynchronizerSupport,
-            )
-          )
-        } yield ()
-
-        result
-          .thereafter(_ => outputStream.close())
-          .value
-          .onComplete {
-            case Failure(exception) =>
-              responseObserver.onError(exception)
-            case Success(_) =>
-              responseObserver.onNext(ImportPartyAcsResponse())
-              responseObserver.onCompleted()
-          }
-      }
-    }
-  }
-
   /** Parse the global parameters that can be set only in the first message of the stream.
     */
   private def parseImportPartyAcsStreamingRequestGlobal(
-      request: ImportPartyAcsV2Request
+      request: ImportPartyAcsRequest
   ): ParsingResult[
     (
         SynchronizerId,
@@ -664,9 +540,9 @@ class GrpcPartyManagementService(
       representativePackageIdOverride,
     )
 
-  override def importPartyAcsV2(
-      responseObserver: StreamObserver[ImportPartyAcsV2Response]
-  ): StreamObserver[ImportPartyAcsV2Request] = {
+  override def importPartyAcs(
+      responseObserver: StreamObserver[ImportPartyAcsResponse]
+  ): StreamObserver[ImportPartyAcsRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     type ImportContext =
@@ -679,13 +555,13 @@ class GrpcPartyManagementService(
       )
 
     GrpcStreamingUtils.streamGzippedChunksFromClient[
-      ImportPartyAcsV2Request,
-      ImportPartyAcsV2Response,
+      ImportPartyAcsRequest,
+      ImportPartyAcsResponse,
       ImportContext,
       ActiveContract,
     ](
       responseObserver,
-      Success(ImportPartyAcsV2Response()),
+      Success(ImportPartyAcsResponse()),
       getGzippedBytes = _.acsSnapshot,
       parseMessage = ActiveContract.parseDelimitedFromTrusted,
     )(contextFromFirstRequest =
@@ -874,7 +750,7 @@ class GrpcPartyManagementService(
               EitherT.rightT[FutureUnlessShutdown, StatusRuntimeException](())
           }
 
-        } yield ImportPartyAcsV2Response()
+        } yield ImportPartyAcsResponse()
 
         EitherTUtil.toFutureUnlessShutdown(resultET)
     }

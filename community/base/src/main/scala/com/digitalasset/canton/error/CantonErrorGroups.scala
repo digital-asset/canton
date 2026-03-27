@@ -36,6 +36,7 @@ object CantonErrorGroups {
     abstract class PruningServiceErrorGroup extends ErrorGroup()
     abstract class ParticipantInspectionServiceErrorGroup extends ErrorGroup()
     abstract class RepairServiceErrorGroup extends ErrorGroup()
+    abstract class LsuErrorGroup extends ErrorGroup()
     abstract class PartyManagementServiceErrorGroup extends ErrorGroup()
 
     object TransactionErrorGroup extends ErrorGroup() {

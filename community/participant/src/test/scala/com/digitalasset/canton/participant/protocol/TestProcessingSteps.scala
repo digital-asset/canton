@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
@@ -122,18 +122,29 @@ class TestProcessingSteps(
       mediator: MediatorGroupRecipient,
       ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TestProcessingError, (Submission, PendingSubmissionData)] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    TestProcessingError,
+    (Submission, PendingSubmissionData),
+  ] = {
     pendingSubmissionMap.put(submissionParam, ())
 
     val envelope: ProtocolMessage = mock[ProtocolMessage]
     val recipient: Member = ParticipantId("participant1")
+
+    val now = wallClock.now
+    generateMaxSequencingTime(now)
+
     val submission = new UntrackedSubmission {
       override def batch: Batch[DefaultOpenEnvelope] =
         Batch.of(testedProtocolVersion, (envelope, Recipients.cc(recipient)))
       override def pendingSubmissionId: Int = submissionParam
-      override def maxSequencingTimeO: OptionT[FutureUnlessShutdown, CantonTimestamp] = OptionT.none
+
+      override val approximateTimestampForSigning: CantonTimestamp = now
+      override val maxSequencingTime: CantonTimestamp = generateMaxSequencingTime(now)
 
       override def embedSubmissionError(
           err: ProtocolProcessor.SubmissionProcessingError

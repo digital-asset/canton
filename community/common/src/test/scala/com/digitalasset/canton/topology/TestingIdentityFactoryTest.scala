@@ -61,7 +61,12 @@ class TestingIdentityFactoryTest
         Await
           .result(
             p1.currentSnapshotApproximation.futureValueUS
-              .sign(hash, SigningKeyUsage.ProtocolOnly, None)
+              .sign(
+                hash,
+                SigningKeyUsage.ProtocolOnly,
+                signingTimestampOverrides =
+                  None, // not needed for unit tests; session signing keys disabled
+              )
               .value,
             10.seconds,
           )
@@ -125,7 +130,12 @@ class TestingIdentityFactoryTest
         Await
           .result(
             p2.currentSnapshotApproximation.futureValueUS
-              .sign(hash, SigningKeyUsage.ProtocolOnly, None)
+              .sign(
+                hash,
+                SigningKeyUsage.ProtocolOnly,
+                signingTimestampOverrides =
+                  None, // not needed for unit tests; session signing keys disabled
+              )
               .value,
             10.seconds,
           )
@@ -238,7 +248,12 @@ class TestingIdentityFactoryTest
         Await
           .result(
             p2.currentSnapshotApproximation.futureValueUS
-              .sign(hash, SigningKeyUsage.ProtocolOnly, None)
+              .sign(
+                hash,
+                SigningKeyUsage.ProtocolOnly,
+                signingTimestampOverrides =
+                  None, // not needed for unit tests; session signing keys disabled
+              )
               .value,
             10.seconds,
           )

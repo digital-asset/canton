@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.transaction.ContractStateMachine
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.matchers.should.Matchers

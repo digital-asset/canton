@@ -86,10 +86,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.inspection.{
-  JournalGarbageCollectorControl,
-  SyncStateInspection,
-}
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal.ping.Ping
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
@@ -547,7 +544,6 @@ abstract class ParticipantRestartTest
       Eval.now(participantNodePersistentState),
       mock[SynchronizerConnectionConfigStore],
       timeouts,
-      JournalGarbageCollectorControl.NoOp,
       mock[ConnectedSynchronizersLookup],
       mock[SyncCryptoApiParticipantProvider],
       participant.id,

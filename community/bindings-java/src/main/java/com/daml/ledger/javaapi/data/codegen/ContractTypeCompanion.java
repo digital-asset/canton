@@ -107,6 +107,22 @@ public abstract class ContractTypeCompanion<Ct, Id, ContractType, Data> {
   public abstract Ct fromCreatedEvent(CreatedEvent event) throws IllegalArgumentException;
 
   /**
+   * Like {@link #fromCreatedEvent(CreatedEvent)}, but applies the given {@link
+   * UnknownTrailingFieldPolicy} when decoding the payload from the event. This is useful when
+   * decoding events whose payload was created from a newer template version that may contain extra
+   * trailing fields.
+   *
+   * @param event the event to try to parse a contract from
+   * @param policy the policy for handling unknown trailing fields during decoding
+   * @throws IllegalArgumentException when the {@link CreatedEvent} payload cannot be parsed as
+   *     {@code Data}, or the {@link CreatedEvent#getContractKey} cannot be parsed as a contract
+   *     key.
+   * @return The parsed contract, with payload and metadata, if present.
+   */
+  public abstract Ct fromCreatedEvent(CreatedEvent event, UnknownTrailingFieldPolicy policy)
+      throws IllegalArgumentException;
+
+  /**
    * Convert from a generic {@link ContractId} to the specific contract ID subclass generated as
    * part of this companion's template or interface. Most applications should not need this
    * function, but if your Daml data types include types like {@code ContractId t} where {@code t}

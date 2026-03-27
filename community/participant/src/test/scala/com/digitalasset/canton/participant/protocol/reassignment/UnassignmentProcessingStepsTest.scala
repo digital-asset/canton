@@ -24,6 +24,7 @@ import com.digitalasset.canton.data.ViewType.UnassignmentViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -176,7 +177,7 @@ final class UnassignmentProcessingStepsTest
   private lazy val logicalPersistentState =
     new InMemoryLogicalSyncPersistentState(
       IndexedSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
-      enableAdditionalConsistencyChecks = true,
+      ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
       indexedStringStore = indexedStringStore,
       contractStore = contractStore,
       acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
@@ -754,6 +755,7 @@ final class UnassignmentProcessingStepsTest
               sourceMediator,
               state,
               cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
             )
             .valueOrFail("prepare submission failed")
       } yield succeed
@@ -778,6 +780,7 @@ final class UnassignmentProcessingStepsTest
             sourceMediator,
             state,
             cryptoSnapshot,
+            _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
           )
         )("prepare submission succeeded unexpectedly")
       } yield {
@@ -825,6 +828,7 @@ final class UnassignmentProcessingStepsTest
               sourceMediator,
               state,
               cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue, // max sequencing time is irrelevant for this test
             )
         )("prepare submission succeeded unexpectedly")
       } yield {
@@ -918,7 +922,11 @@ final class UnassignmentProcessingStepsTest
         .futureValue
 
       val signature = cryptoSnapshot
-        .sign(fullUnassignmentTree.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+        .sign(
+          fullUnassignmentTree.rootHash.unwrap,
+          SigningKeyUsage.ProtocolOnly,
+          None, // not needed for unit tests; session signing keys disabled
+        )
         .value
         .onShutdown(fail("unexpected shutdown during a test"))
         .futureValue
@@ -1141,7 +1149,11 @@ final class UnassignmentProcessingStepsTest
     "succeed when the signature is correct" in {
       for {
         signature <- cryptoSnapshot
-          .sign(fullUnassignmentTree.rootHash.unwrap, SigningKeyUsage.ProtocolOnly, None)
+          .sign(
+            fullUnassignmentTree.rootHash.unwrap,
+            SigningKeyUsage.ProtocolOnly,
+            None, // not needed for unit tests; session signing keys disabled
+          )
           .failOnShutdown
 
         parsed = mkParsedRequest(
@@ -1175,7 +1187,11 @@ final class UnassignmentProcessingStepsTest
     "fail when the signature is incorrect" in {
       for {
         signature <- cryptoSnapshot
-          .sign(TestHash.digest("wrong signature"), SigningKeyUsage.ProtocolOnly, None)
+          .sign(
+            TestHash.digest("wrong signature"),
+            SigningKeyUsage.ProtocolOnly,
+            None, // not needed for unit tests; session signing keys disabled
+          )
           .valueOrFailShutdown("signing failed")
 
         parsed = mkParsedRequest(

@@ -21,7 +21,7 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
+  NextGenContractStateMachine => ContractStateMachine,
   FatContractInstance,
   GlobalKeyWithMaintainers,
   SerializationVersion,
@@ -102,7 +102,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         committers = Set(alice),
         // we test only with contract key mode,
         // the state machine should no have any impact for this test.
-        mode = ContractStateMachine.Mode.UCKWithRollback,
+        mode = ContractStateMachine.Mode.NUCK,
         logger = MachineLogger(),
       )
     SpeedyTestLib

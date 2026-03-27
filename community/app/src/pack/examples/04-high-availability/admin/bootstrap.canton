@@ -7,7 +7,9 @@ import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionCo
 // Make sure remote nodes are running
 println("Checking remote nodes are running")
 nodes.remote.foreach { node =>
+  println(s"Waiting for node [${node.name}] to be running...")
   node.health.wait_for_running()
+  println(s"Node [${node.name}] is running")
 }
 
 println("Bootstrapping synchronizer")

@@ -100,6 +100,8 @@ class ActiveRequestCounterInterceptor(
         }
       // reject if over limit
       case Some((false, limit)) =>
+        // Note: ip may contain a leading '/' if extracted from a direct gRPC connection,
+        // because of the behaviour of java.net.INetSocketAddress.toString
         val ip = GrpcAddressHelper.extractClientIP(call, headers)
         val error = errorFactory(fullMethodName, ip)(
           TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
@@ -112,8 +114,12 @@ class ActiveRequestCounterInterceptor(
 
   }
 
-  private val logFrequency = new AtomicReference[(Double, Long)]((0.0, 0))
+  // System.nanoTime() uses a fixed but arbitrary origin time, possibly in the future, so values may be negative.
+  // So, it is critical to initialize properly so that the difference reflects the time elapsed.
+  private val logFrequency = new AtomicReference[(Double, Long)]((0.0, System.nanoTime()))
   private val logSuspended = new AtomicBoolean(false)
+
+  // Implements a Leaky Bucket algorithm for log suppression.
   private def errorFactory(methodName: FullMethodName, ip: String)(implicit
       traceContext: TraceContext
   ): RpcError = {
@@ -121,11 +127,24 @@ class ActiveRequestCounterInterceptor(
       .TooManyConcurrentRequests(methodName, ip)
     val (count, _) = logFrequency.updateAndGet { case (count, lastLogged) =>
       val newLastLogged = System.nanoTime()
-      val newCount =
-        Math.max(
-          0.0,
-          1 + count - (maxLoggingRatePerSecond.value / 1e9) * (newLastLogged - lastLogged),
-        )
+
+      // Set a max cap for the count to ensure that logs are not silenced for more than 5 minutes
+      // (the minimum recovery time after a log count of C_T is given by
+      // (1 + C_T - maxLoggingRatePerSecond)/maxLoggingRatePerSecond).
+      // For maxLoggingRatePerSecond = 10, countCap= 3009
+      val countCap =
+        (5.0 * 60.0 * maxLoggingRatePerSecond.value.toDouble) + maxLoggingRatePerSecond.value.toDouble - 1.0
+
+      // number of "leaked" or "drained" logs in the elapsed time
+      val drainAmount = (maxLoggingRatePerSecond.value / 1e9) * (newLastLogged - lastLogged)
+
+      // remaining level (capped at 0)
+      val levelAfterDrain = Math.max(0.0, count - drainAmount)
+
+      // add 1 to the count corresponding to the present request
+      // and cap the count value at countCap
+      val newCount = Math.min(1.0 + levelAfterDrain, countCap)
+
       (newCount, newLastLogged)
     }
     val suspendLogs = count > maxLoggingRatePerSecond.value
@@ -134,7 +153,7 @@ class ActiveRequestCounterInterceptor(
       logger.warn(
         s"Suspending detailed overload logging for excessive rejections until rate drops below $maxLoggingRatePerSecond"
       )
-    } else if (count < maxLoggingRatePerSecond.value) {
+    } else if (count <= maxLoggingRatePerSecond.value) {
       logSuspended.set(false)
       err.log()
     }
@@ -165,13 +184,15 @@ class ActiveRequestCounterInterceptor(
             methodName
           )
         ) {
-          val msg = s"No upper active stream limit configured for $methodName"
-          val tc = TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
-          if (warnOnUnconfiguredLimits)
-            logger.warn(msg)(tc)
-          else
-            logger.info(msg)(tc)
-          notified.updateAndGet(_ + methodName).discard
+          val setBeforeUpdate = notified.getAndUpdate(_ + methodName)
+          if (!setBeforeUpdate.contains(methodName)) {
+            val msg = s"No upper active stream limit configured for $methodName"
+            val tc = TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
+            if (warnOnUnconfiguredLimits)
+              logger.warn(msg)(tc)
+            else
+              logger.info(msg)(tc)
+          }
         }
         None
     }
@@ -214,6 +235,8 @@ object ActiveRequestCounterInterceptor {
   ) {
     def enforcedLimit: Int = limitGauge.getValue
     def adjust(delta: Int): Int = {
+      // Note: a race condition between threads executing the below two actions can lead to
+      // small and temporary inaccuracies in the monitoring dashboard.
       val newActive = active.updateAndGet(_ + delta)
       activeGauge.updateValue(newActive)
       newActive

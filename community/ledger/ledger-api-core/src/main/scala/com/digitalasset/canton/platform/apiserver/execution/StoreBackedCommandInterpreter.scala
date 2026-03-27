@@ -37,8 +37,8 @@ import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.transaction.{
-  ContractStateMachine,
   GlobalKeyWithMaintainers,
+  NextGenContractStateMachine,
   Node,
   SubmittedTransaction,
   Transaction,
@@ -69,7 +69,7 @@ private[apiserver] trait CommandInterpreter {
   */
 final class StoreBackedCommandInterpreter(
     engine: Engine,
-    contractStateMode: ContractStateMachine.Mode,
+    contractStateMode: NextGenContractStateMachine.Mode,
     participant: Ref.ParticipantId,
     packageResolver: PackageResolver,
     contractStore: ContractStore,
