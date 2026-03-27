@@ -8,48 +8,50 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
 import com.digitalasset.canton.tracing.TraceContext
 
-import java.net.URI
-import java.nio.file.Files
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.time.Duration
-import javax.net.ssl.{SSLContext, TrustManager, X509TrustManager}
 import scala.concurrent.{ExecutionContext, Future, blocking}
-import scala.util.Try
 
 /** HTTP client implementation for extension services with retry logic,
   * JWT authentication, and TLS support.
   *
   * @param extensionId The extension identifier (key from config map)
   * @param config Configuration for this extension service
-  * @param transport HTTP transport for this extension service
+  * @param resourcesFactory HTTP resource factory for this extension service
   * @param runtime Runtime side effects used by retry and request generation
+  * @param requestBuilder Request construction helper
+  * @param responseMapper Response and exception mapping helper
   * @param loggerFactory Logger factory
   */
-class HttpExtensionServiceClient(
+class HttpExtensionServiceClient private[extension] (
     override val extensionId: String,
     config: ExtensionServiceConfig,
-    transport: HttpExtensionClientTransport,
+    resourcesFactory: HttpExtensionClientResourcesFactory,
     runtime: HttpExtensionClientRuntime,
+    requestBuilder: HttpExtensionRequestBuilder,
+    responseMapper: HttpExtensionResponseMapper,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ExtensionServiceClient
     with NamedLogging {
 
-  // Construct the endpoint URL
-  private val scheme = if (config.useTls) "https" else "http"
-  private val endpoint: URI = URI.create(s"$scheme://${config.host}:${config.port}/api/v1/external-call")
+  def this(
+      extensionId: String,
+      config: ExtensionServiceConfig,
+      resourcesFactory: HttpExtensionClientResourcesFactory,
+      runtime: HttpExtensionClientRuntime,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext) =
+    this(
+      extensionId = extensionId,
+      config = config,
+      resourcesFactory = resourcesFactory,
+      runtime = runtime,
+      requestBuilder = new HttpExtensionRequestBuilder(config),
+      responseMapper = new HttpExtensionResponseMapper,
+      loggerFactory = loggerFactory,
+    )
 
-  // Load JWT token from config or file
-  private lazy val jwtToken: Option[String] = {
-    config.jwt.orElse {
-      config.jwtFile.flatMap { path =>
-        Try {
-          new String(Files.readAllBytes(path)).trim
-        }.toOption
-      }
-    }
-  }
+  private lazy val resources = resourcesFactory.create(config)
 
   // Declared function config hashes for validation
   private val declaredConfigHashes: Map[String, String] =
@@ -81,17 +83,13 @@ class HttpExtensionServiceClient(
           // For now, we just verify we can establish a connection
           try {
             val requestId = runtime.newRequestId()
-            val request = buildRequest(
-              functionId = "_health",
-              configHash = "",
-              input = "",
-              mode = "validation",
+            val request = requestBuilder.buildValidationRequest(
               timeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
               requestId = requestId,
             )
 
             // We don't really care about the response, just that we can connect
-            val resp = transport.send(request)
+            val resp = resources.resourceTransport.send(request)
 
             // Any response (even 4xx) means the service is reachable
             if (resp.statusCode >= 200 && resp.statusCode < 600) {
@@ -189,7 +187,7 @@ class HttpExtensionServiceClient(
     val requestId = runtime.newRequestId()
 
     try {
-      val request = buildRequest(
+      val request = requestBuilder.buildCallRequest(
         functionId = functionId,
         configHash = configHash,
         input = input,
@@ -202,94 +200,33 @@ class HttpExtensionServiceClient(
         s"Making external call to extension '$extensionId': functionId=$functionId, mode=$mode, requestId=$requestId"
       )
 
-      val resp = transport.send(request)
+      val resp = resources.resourceTransport.send(request)
 
-      resp.statusCode match {
-        case 200 =>
+      responseMapper.mapResponse(resp, requestId) match {
+        case Right(response) =>
           logger.debug(s"External call to extension '$extensionId' succeeded: requestId=$requestId")
-          Right(resp.body)
+          Right(response)
 
-        case 400 =>
-          Left(parseErrorResponse(resp, requestId, "Bad Request"))
-
-        case 401 =>
-          Left(parseErrorResponse(resp, requestId, "Unauthorized - check JWT token"))
-
-        case 403 =>
-          Left(parseErrorResponse(resp, requestId, "Forbidden - insufficient permissions"))
-
-        case 404 =>
-          Left(parseErrorResponse(resp, requestId, "Function not found"))
-
-        case 408 =>
-          Left(parseErrorResponse(resp, requestId, "Request timeout"))
-
-        case 429 =>
-          Left(parseErrorResponseWithRetry(resp, requestId, "Rate limit exceeded"))
-
-        case 500 =>
-          Left(parseErrorResponse(resp, requestId, "Internal server error"))
-
-        case 502 =>
-          Left(parseErrorResponse(resp, requestId, "Bad gateway"))
-
-        case 503 =>
-          Left(parseErrorResponseWithRetry(resp, requestId, "Service unavailable"))
-
-        case 504 =>
-          Left(parseErrorResponse(resp, requestId, "Gateway timeout"))
-
-        case code =>
-          Left(parseErrorResponse(resp, requestId, s"HTTP $code"))
+        case Left(error) =>
+          Left(error)
       }
     } catch {
       case e: java.net.http.HttpTimeoutException =>
         logger.warn(s"External call to extension '$extensionId' timed out: requestId=$requestId")
-        Left(ExtensionCallError(408, s"Request timeout: ${e.getMessage}", Some(requestId)))
+        Left(responseMapper.mapException(e, requestId))
 
       case e: java.net.ConnectException =>
         logger.error(s"External call to extension '$extensionId' connection failed: requestId=$requestId, error=${e.getMessage}")
-        Left(ExtensionCallError(503, s"Connection failed: ${e.getMessage}", Some(requestId)))
+        Left(responseMapper.mapException(e, requestId))
 
       case e: java.io.IOException =>
         logger.error(s"External call to extension '$extensionId' I/O error: requestId=$requestId, error=${e.getMessage}")
-        Left(ExtensionCallError(503, s"I/O error: ${e.getMessage}", Some(requestId)))
+        Left(responseMapper.mapException(e, requestId))
 
       case e: Exception =>
         logger.error(s"External call to extension '$extensionId' unexpected error: requestId=$requestId, error=${e.getMessage}")
-        Left(ExtensionCallError(500, s"Unexpected error: ${e.getMessage}", Some(requestId)))
+        Left(responseMapper.mapException(e, requestId))
     }
-  }
-
-  private def parseErrorResponse(
-      resp: HttpExtensionClientResponse,
-      requestId: String,
-      defaultMessage: String,
-  ): ExtensionCallError = {
-    val body = resp.body
-    val message = if (body != null && body.nonEmpty && body.length < 500) {
-      s"$defaultMessage: $body"
-    } else {
-      defaultMessage
-    }
-    ExtensionCallError(resp.statusCode, message, Some(requestId))
-  }
-
-  private def parseErrorResponseWithRetry(
-      resp: HttpExtensionClientResponse,
-      requestId: String,
-      defaultMessage: String,
-  ): ExtensionCallErrorWithRetry = {
-    val retryAfter = firstHeaderValue(resp, "Retry-After").flatMap(s => Try(s.toInt).toOption)
-
-    val body = resp.body
-    val message = if (body != null && body.nonEmpty && body.length < 500) {
-      s"$defaultMessage: $body"
-    } else {
-      defaultMessage
-    }
-
-    ExtensionCallErrorWithRetry(resp.statusCode, message, Some(requestId), retryAfter)
   }
 
   private def shouldRetry(error: ExtensionCallError): Boolean = {
@@ -320,60 +257,7 @@ class HttpExtensionServiceClient(
     baseDelay
   }
 
-  private def buildRequest(
-      functionId: String,
-      configHash: String,
-      input: String,
-      mode: String,
-      timeout: Duration,
-      requestId: String,
-  ): HttpExtensionClientRequest = {
-    val baseHeaders = Seq(
-      "Content-Type" -> "application/octet-stream",
-      "X-Daml-External-Function-Id" -> functionId,
-      "X-Daml-External-Config-Hash" -> configHash,
-      "X-Daml-External-Mode" -> mode,
-      config.requestIdHeader -> requestId,
-    )
-    val authHeaders = jwtToken.toList.map(token => "Authorization" -> s"Bearer $token")
-
-    HttpExtensionClientRequest(
-      uri = endpoint,
-      timeout = timeout,
-      headers = baseHeaders ++ authHeaders,
-      body = input,
-    )
-  }
-
-  private def firstHeaderValue(
-      response: HttpExtensionClientResponse,
-      headerName: String,
-  ): Option[String] =
-    response.headers.iterator.collectFirst {
-      case (name, values) if name.equalsIgnoreCase(headerName) => values.headOption
-    }.flatten
-
   private implicit class ExtensionCallErrorOps(error: ExtensionCallError) {
-    def retryAfter: Option[Int] = error match {
-      case e: ExtensionCallErrorWithRetry => e.retryAfterSeconds
-      case _ => None
-    }
-  }
-}
-
-object HttpExtensionServiceClient {
-
-  /** Create an insecure SSL context for development (trusts all certificates) */
-  @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def createInsecureSSLContext(): SSLContext = {
-    val trustAllCerts = Array[TrustManager](new X509TrustManager {
-      def checkClientTrusted(chain: Array[X509Certificate], authType: String): Unit = {}
-      def checkServerTrusted(chain: Array[X509Certificate], authType: String): Unit = {}
-      def getAcceptedIssuers(): Array[X509Certificate] = Array.empty
-    })
-
-    val sslContext = SSLContext.getInstance("TLS")
-    sslContext.init(null, trustAllCerts, new SecureRandom())
-    sslContext
+    def retryAfter: Option[Int] = responseMapper.retryAfter(error)
   }
 }

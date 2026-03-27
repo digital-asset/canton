@@ -9,54 +9,46 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.{EngineExtensionsConfig, ExtensionServiceConfig}
 import com.digitalasset.canton.tracing.TraceContext
 
-import java.net.http.HttpClient
-import java.time.Duration
 import scala.concurrent.ExecutionContext
 
-/** Manages extension service connections with pooled HTTP clients.
+/** Manages extension service connections with one client per configured extension.
   *
   * This manager is responsible for:
-  * - Creating and managing HTTP clients with connection pooling
+  * - Creating and managing extension clients
   * - Dispatching external call requests to the appropriate extension service
   * - Validating extension configurations on startup
   *
   * @param extensionConfigs Map of extension ID to configuration
   * @param engineExtensionsConfig Engine extensions configuration
+  * @param resourcesFactory HTTP resource factory for extension clients
+  * @param runtime Runtime side effects used by extension clients
   * @param loggerFactory Logger factory
   * @param ec Execution context
   */
-class ExtensionServiceManager(
+class ExtensionServiceManager private[extension] (
     extensionConfigs: Map[String, ExtensionServiceConfig],
     engineExtensionsConfig: EngineExtensionsConfig,
+    resourcesFactory: HttpExtensionClientResourcesFactory,
+    runtime: HttpExtensionClientRuntime,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
 
+  def this(
+      extensionConfigs: Map[String, ExtensionServiceConfig],
+      engineExtensionsConfig: EngineExtensionsConfig,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext) =
+    this(
+      extensionConfigs = extensionConfigs,
+      engineExtensionsConfig = engineExtensionsConfig,
+      resourcesFactory = new JdkHttpExtensionClientResourcesFactory(loggerFactory),
+      runtime = HttpExtensionClientRuntime.system,
+      loggerFactory = loggerFactory,
+    )
+
   override val timeouts: ProcessingTimeout = ProcessingTimeout()
-
-  // Shared HTTP client with connection pooling
-  // Using HTTP/1.1 for compatibility, but could be upgraded to HTTP/2 if needed
-  private val httpClient: HttpClient = {
-    val builder = HttpClient
-      .newBuilder()
-      .version(HttpClient.Version.HTTP_1_1)
-      .connectTimeout(Duration.ofSeconds(30)) // Global connect timeout, individual requests can override
-
-    // Check if any extension requires insecure TLS
-    val anyInsecure = extensionConfigs.values.exists(_.tlsInsecure)
-    if (anyInsecure) {
-      logger.warn(
-        "WARNING: At least one extension service is configured with TLS insecure mode. " +
-          "This should only be used in development!"
-      )(TraceContext.empty)
-      builder.sslContext(HttpExtensionServiceClient.createInsecureSSLContext())
-    }
-
-    builder.build()
-  }
-
-  private val runtime: HttpExtensionClientRuntime = HttpExtensionClientRuntime.system
 
   // Extension clients by ID
   private val clients: Map[String, ExtensionServiceClient] = {
@@ -70,7 +62,7 @@ class ExtensionServiceManager(
         id -> new HttpExtensionServiceClient(
           id,
           config,
-          new JdkHttpExtensionClientTransport(httpClient),
+          resourcesFactory,
           runtime,
           loggerFactory,
         )
@@ -149,8 +141,6 @@ class ExtensionServiceManager(
   def extensionIds: Set[String] = clients.keySet
 
   override def onClosed(): Unit = {
-    // HttpClient in Java 11+ doesn't need explicit closing
-    // but we could add cleanup logic here if needed
     logger.debug("ExtensionServiceManager closed")(TraceContext.empty)
   }
 }

@@ -40,14 +40,14 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
     )
 
   private def makeClient(
-      transport: HttpExtensionClientTransport,
+      resourcesFactory: HttpExtensionClientResourcesFactory,
       runtime: HttpExtensionClientRuntime,
       config: ExtensionServiceConfig = makeConfig(),
   ): HttpExtensionServiceClient =
     new HttpExtensionServiceClient(
       extensionId = config.name,
       config = config,
-      transport = transport,
+      resourcesFactory = resourcesFactory,
       runtime = runtime,
       loggerFactory = loggerFactory,
     )
@@ -105,6 +105,16 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
     }
   }
 
+  private final class FakeResourcesFactory(transport: FakeTransport)
+      extends HttpExtensionClientResourcesFactory {
+    val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
+
+    override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+      createCalls += config
+      HttpExtensionClientResources(resourceTransport = transport)
+    }
+  }
+
   "HttpExtensionServiceClient" should {
 
     "return the response body for a 200 response" in {
@@ -112,7 +122,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(200, "response-body")))
       )
-      val client = makeClient(transport, runtime)
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -127,8 +138,9 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(200, "ok")))
       )
+      val resourcesFactory = new FakeResourcesFactory(transport)
       val client = makeClient(
-        transport = transport,
+        resourcesFactory = resourcesFactory,
         runtime = runtime,
         config = makeConfig(jwt = Some("static-token")),
       )
@@ -160,7 +172,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(400, "bad-request")))
       )
-      val client = makeClient(transport, runtime)
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -179,7 +192,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(401, "unauthorized")))
       )
-      val client = makeClient(transport, runtime)
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -198,7 +212,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(503, "service-down")))
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 0))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -221,7 +236,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
           Right(response(200, "ok")),
         )
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 1))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 1))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -246,7 +262,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
           Right(response(200, "ok")),
         )
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 1))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 1))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -262,7 +279,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Left(new HttpTimeoutException("timed-out")))
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 0))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -281,7 +299,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Left(new java.net.ConnectException("connection-refused")))
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 0))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -300,7 +319,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Left(new java.io.IOException("broken-pipe")))
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 0))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -319,7 +339,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Left(new RuntimeException("boom")))
       )
-      val client = makeClient(transport, runtime, config = makeConfig(maxRetries = 0))
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
 
       client
         .call("echo", "00000000", "deadbeef", "submission")
@@ -338,7 +359,8 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
       val transport = new FakeTransport(
         Seq(Right(response(503, "service-down")))
       )
-      val client = makeClient(transport, runtime)
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
 
       client.validateConfiguration().failOnShutdown.map { result =>
         result shouldBe ExtensionValidationResult.Valid
@@ -355,6 +377,27 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
           "X-Request-Id" -> "req-1",
         )
         request.body shouldBe ""
+      }
+    }
+
+    "create resource transport only once per client instance" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2", "req-3"))
+      val transport = new FakeTransport(
+        Seq(
+          Right(response(200, "first-response")),
+          Right(response(200, "second-response")),
+        )
+      )
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      for {
+        result1 <- client.call("echo", "00000000", "deadbeef", "submission").failOnShutdown
+        result2 <- client.call("echo", "00000000", "cafebabe", "submission").failOnShutdown
+      } yield {
+        result1 shouldBe Right("first-response")
+        result2 shouldBe Right("second-response")
+        resourcesFactory.createCalls should have size 1
       }
     }
   }

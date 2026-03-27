@@ -4,11 +4,17 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.config.ExtensionServiceConfig
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.UUID
+import javax.net.ssl.{SSLContext, TrustManager, X509TrustManager}
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
@@ -43,6 +49,69 @@ private[extension] final case class HttpExtensionClientResponse(
 
 private[extension] trait HttpExtensionClientTransport {
   def send(request: HttpExtensionClientRequest): HttpExtensionClientResponse
+}
+
+private[extension] final case class HttpExtensionClientResources(
+    resourceTransport: HttpExtensionClientTransport
+)
+
+private[extension] trait HttpExtensionClientResourcesFactory {
+  def create(config: ExtensionServiceConfig): HttpExtensionClientResources
+}
+
+private[extension] final case class JdkHttpExtensionClientSettings(
+    version: HttpClient.Version,
+    connectTimeout: Duration,
+    insecureTls: Boolean,
+)
+
+private[extension] object JdkHttpExtensionClientResourcesFactory {
+
+  def settingsFor(config: ExtensionServiceConfig): JdkHttpExtensionClientSettings =
+    JdkHttpExtensionClientSettings(
+      version = HttpClient.Version.HTTP_1_1,
+      connectTimeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
+      insecureTls = config.useTls && config.tlsInsecure,
+    )
+
+  /** Create an insecure SSL context for development (trusts all certificates) */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  def createInsecureSSLContext(): SSLContext = {
+    val trustAllCerts = Array[TrustManager](new X509TrustManager {
+      def checkClientTrusted(chain: Array[X509Certificate], authType: String): Unit = {}
+      def checkServerTrusted(chain: Array[X509Certificate], authType: String): Unit = {}
+      def getAcceptedIssuers(): Array[X509Certificate] = Array.empty
+    })
+
+    val sslContext = SSLContext.getInstance("TLS")
+    sslContext.init(null, trustAllCerts, new SecureRandom())
+    sslContext
+  }
+}
+
+private[extension] final class JdkHttpExtensionClientResourcesFactory(
+    override protected val loggerFactory: NamedLoggerFactory
+) extends HttpExtensionClientResourcesFactory
+    with NamedLogging {
+
+  override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+    val settings = JdkHttpExtensionClientResourcesFactory.settingsFor(config)
+    val builder = HttpClient
+      .newBuilder()
+      .version(settings.version)
+      .connectTimeout(settings.connectTimeout)
+
+    if (settings.insecureTls) {
+      logger.warn(
+        s"WARNING: Extension service '${config.name}' is configured with TLS insecure mode. This should only be used in development!"
+      )(TraceContext.empty)
+      builder.sslContext(JdkHttpExtensionClientResourcesFactory.createInsecureSSLContext())
+    }
+
+    HttpExtensionClientResources(
+      resourceTransport = new JdkHttpExtensionClientTransport(builder.build())
+    )
+  }
 }
 
 private[extension] final class JdkHttpExtensionClientTransport(httpClient: HttpClient)

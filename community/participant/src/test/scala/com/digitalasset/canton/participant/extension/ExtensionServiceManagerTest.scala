@@ -10,6 +10,7 @@ import com.digitalasset.canton.participant.config.{EngineExtensionsConfig, Exten
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
+import scala.collection.mutable
 import scala.concurrent.Future
 
 class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
@@ -30,6 +31,32 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
     echoMode = true,
     validateExtensionsOnStartup = true,
   )
+
+  private object StubRuntime extends HttpExtensionClientRuntime {
+    override def nowMillis(): Long = 1000L
+    override def sleepMillis(ms: Long): Unit = ()
+    override def newRequestId(): String = "req-1"
+    override def nextRetryJitterDouble(): Double = 0.0
+  }
+
+  private final class OkTransport(body: String = "ok") extends HttpExtensionClientTransport {
+    override def send(request: HttpExtensionClientRequest): HttpExtensionClientResponse =
+      HttpExtensionClientResponse(statusCode = 200, body = body, headers = Map.empty)
+  }
+
+  private final class RecordingResourcesFactory extends HttpExtensionClientResourcesFactory {
+    val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
+    val createdResourceIds: mutable.ArrayBuffer[Int] = mutable.ArrayBuffer.empty
+
+    override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+      createCalls += config
+      val resourceId = createCalls.size
+      createdResourceIds += resourceId
+      HttpExtensionClientResources(
+        resourceTransport = new OkTransport(s"response-for-${config.name}")
+      )
+    }
+  }
 
   "ExtensionServiceManager" should {
 
@@ -135,6 +162,46 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       manager.validateAllExtensions().failOnShutdown.map { results =>
         results.keySet should contain("test-ext")
         results("test-ext") shouldBe ExtensionValidationResult.Valid
+      }
+    }
+
+    "create exactly one client resources bundle per configured extension in non-echo mode" in {
+      val resourcesFactory = new RecordingResourcesFactory
+      val manager = new ExtensionServiceManager(
+        Map("test-ext" -> makeConfig("test-ext")),
+        EngineExtensionsConfig.default,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      for {
+        validationResults <- manager.validateAllExtensions().failOnShutdown
+        callResult <- manager
+          .handleExternalCall("test-ext", "echo", "00000000", "deadbeef", "submission")
+          .failOnShutdown
+      } yield {
+        validationResults("test-ext") shouldBe ExtensionValidationResult.Valid
+        callResult shouldBe Right("response-for-test-ext")
+        resourcesFactory.createCalls should have size 1
+      }
+    }
+
+    "create distinct resources for each configured extension in non-echo mode" in {
+      val resourcesFactory = new RecordingResourcesFactory
+      val manager = new ExtensionServiceManager(
+        Map("ext1" -> makeConfig("ext1", 8080), "ext2" -> makeConfig("ext2", 8081)),
+        EngineExtensionsConfig.default,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      manager.validateAllExtensions().failOnShutdown.map { results =>
+        results.keySet shouldBe Set("ext1", "ext2")
+        resourcesFactory.createCalls.map(_.name).toSeq should contain theSameElementsAs Seq("ext1", "ext2")
+        resourcesFactory.createCalls should have size 2
+        resourcesFactory.createdResourceIds.distinct should have size 2
       }
     }
 
