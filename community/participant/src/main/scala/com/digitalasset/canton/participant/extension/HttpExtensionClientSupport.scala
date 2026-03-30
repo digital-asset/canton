@@ -52,7 +52,8 @@ private[extension] trait HttpExtensionClientTransport {
 }
 
 private[extension] final case class HttpExtensionClientResources(
-    resourceTransport: HttpExtensionClientTransport
+    resourceTransport: HttpExtensionClientTransport,
+    tokenTransport: Option[HttpExtensionClientTransport] = None,
 )
 
 private[extension] trait HttpExtensionClientResourcesFactory {
