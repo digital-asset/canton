@@ -536,6 +536,10 @@ The suite MUST include security-relevant coverage required by this specification
 
 The suite MUST NOT add coverage for capabilities explicitly excluded from OAuth v1.
 
+The living implementation checklist for this test strategy is
+`community/participant/EXTERNAL_CALL_OAUTH_TEST_PLAN.md`, and the coding agent MUST keep that
+document updated during implementation.
+
 The implementation MUST reuse the existing external-call integration harness:
 
 - `community/app/src/test/scala/com/digitalasset/canton/integration/tests/externalcall/ExternalCallIntegrationTestBase.scala`
