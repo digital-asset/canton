@@ -46,6 +46,7 @@ from the agreed OAuth v1 contract.
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionRequestBuilderOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenRequestBuilderTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthClientAssertionFactoryTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenResponseParserTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerOAuthTest.scala`
@@ -139,16 +140,16 @@ Do not add checklist items for:
 
 ### 5. Token Response Parsing And Acquisition
 
-- [ ] Accept a valid token response containing `access_token`, `token_type`, and `expires_in`.
-- [ ] Accept `token_type = Bearer` case-insensitively.
-- [ ] Reject token responses missing `access_token`.
-- [ ] Reject token responses missing `token_type`.
-- [ ] Reject token responses missing `expires_in`.
-- [ ] Reject malformed `expires_in`.
-- [ ] Reject non-Bearer `token_type`.
-- [ ] Treat malformed token responses as `502`.
-- [ ] Compute local token expiry from `expires_in`.
-- [ ] Treat access tokens as opaque bearer tokens without local claim parsing or verification.
+- [x] Accept a valid token response containing `access_token`, `token_type`, and `expires_in`.
+- [x] Accept `token_type = Bearer` case-insensitively.
+- [x] Reject token responses missing `access_token`.
+- [x] Reject token responses missing `token_type`.
+- [x] Reject token responses missing `expires_in`.
+- [x] Reject malformed `expires_in`.
+- [x] Reject non-Bearer `token_type`.
+- [x] Treat malformed token responses as `502`.
+- [x] Compute local token expiry from `expires_in`.
+- [x] Treat access tokens as opaque bearer tokens without local claim parsing or verification.
 
 ### 6. Token Cache Behavior
 
@@ -279,5 +280,6 @@ Do not add checklist items for:
 - 2026-03-30: `HttpExtensionRequestBuilderOAuthTest` covers the implemented resource-request construction items in section 2, including auth-none omission and explicit bearer header injection.
 - 2026-03-30: `HttpExtensionOAuthTokenRequestBuilderTest` covers the implemented token-request construction items in section 3 except the explicit HTTP `POST` observable, which remains open for a later slice. The same targeted command was used for the explicit red-green cycle: `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest'` first failed with `not found: type HttpExtensionOAuthTokenRequestBuilder`, then passed after adding the builder.
 - 2026-03-30: `HttpExtensionOAuthClientAssertionFactoryTest` covers the implemented client-assertion construction items in section 4 and, together with `HttpExtensionOAuthTokenRequestBuilderTest`, closes the shared section 3 item requiring the token-endpoint URI to be used both as the HTTP target and as the client-assertion `aud`. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthClientAssertionFactoryTest'`, which first failed with `not found: type HttpExtensionOAuthClientAssertionFactory`, then passed after adding the factory.
+- 2026-03-30: `HttpExtensionOAuthTokenResponseParserTest` covers the implemented token-response parsing items in section 5, including malformed-response `502` mapping and opaque-token handling. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenResponseParserTest'`, which first failed with `not found: type HttpExtensionOAuthTokenResponseParser`, then exposed one intermediate red case where the parser was still too permissive for `expires_in`, and finally passed after tightening field-shape validation.
 - 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
 - 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.
