@@ -50,6 +50,14 @@ class ExtensionServiceManager private[extension] (
 
   override val timeouts: ProcessingTimeout = ProcessingTimeout()
 
+  extensionConfigs.values.foreach { config =>
+    if (config.useTls && config.tlsInsecure) {
+      logger.warn(
+        s"WARNING: Extension service '${config.name}' is configured with TLS insecure mode. This should only be used in development!"
+      )(TraceContext.empty)
+    }
+  }
+
   // Extension clients by ID
   private val clients: Map[String, ExtensionServiceClient] = {
     if (engineExtensionsConfig.echoMode) {

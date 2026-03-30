@@ -17,12 +17,18 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
 
   implicit val tc: TraceContext = TraceContext.empty
 
-  private def makeConfig(name: String, port: Int = 8080): ExtensionServiceConfig =
+  private def makeConfig(
+      name: String,
+      port: Int = 8080,
+      useTls: Boolean = false,
+      tlsInsecure: Boolean = false,
+  ): ExtensionServiceConfig =
     ExtensionServiceConfig(
       name = name,
       host = "localhost",
       port = Port.tryCreate(port),
-      useTls = false,
+      useTls = useTls,
+      tlsInsecure = tlsInsecure,
       requestTimeout = NonNegativeFiniteDuration.ofSeconds(10),
       maxRetries = NonNegativeInt.tryCreate(2),
     )
@@ -163,6 +169,33 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
         results.keySet should contain("test-ext")
         results("test-ext") shouldBe ExtensionValidationResult.Valid
       }
+    }
+
+    "log insecure TLS warnings eagerly even when startup validation is disabled" in {
+      val config = EngineExtensionsConfig(
+        echoMode = false,
+        validateExtensionsOnStartup = false,
+      )
+
+      val manager = loggerFactory.assertLogs(
+        new ExtensionServiceManager(
+          Map(
+            "test-ext" -> makeConfig(
+              "test-ext",
+              useTls = true,
+              tlsInsecure = true,
+            )
+          ),
+          config,
+          loggerFactory,
+        ),
+        _.warningMessage should include(
+          "WARNING: Extension service 'test-ext' is configured with TLS insecure mode. This should only be used in development!"
+        ),
+      )
+
+      manager.close()
+      succeed
     }
 
     "create exactly one client resources bundle per configured extension in non-echo mode" in {

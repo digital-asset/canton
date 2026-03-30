@@ -4,9 +4,8 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
-import com.digitalasset.canton.tracing.TraceContext
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
@@ -15,6 +14,7 @@ import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.UUID
 import javax.net.ssl.{SSLContext, TrustManager, X509TrustManager}
+import scala.annotation.unused
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
@@ -90,9 +90,8 @@ private[extension] object JdkHttpExtensionClientResourcesFactory {
 }
 
 private[extension] final class JdkHttpExtensionClientResourcesFactory(
-    override protected val loggerFactory: NamedLoggerFactory
-) extends HttpExtensionClientResourcesFactory
-    with NamedLogging {
+    @unused _loggerFactory: NamedLoggerFactory
+) extends HttpExtensionClientResourcesFactory {
 
   override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
     val settings = JdkHttpExtensionClientResourcesFactory.settingsFor(config)
@@ -102,9 +101,6 @@ private[extension] final class JdkHttpExtensionClientResourcesFactory(
       .connectTimeout(settings.connectTimeout)
 
     if (settings.insecureTls) {
-      logger.warn(
-        s"WARNING: Extension service '${config.name}' is configured with TLS insecure mode. This should only be used in development!"
-      )(TraceContext.empty)
       builder.sslContext(JdkHttpExtensionClientResourcesFactory.createInsecureSSLContext())
     }
 
