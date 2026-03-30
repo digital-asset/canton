@@ -44,6 +44,7 @@ from the agreed OAuth v1 contract.
 
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/config/ExtensionServiceConfigOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionRequestBuilderOAuthTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenRequestBuilderTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerOAuthTest.scala`
@@ -109,16 +110,16 @@ Do not add checklist items for:
 
 ### 3. Token Request Construction
 
-- [ ] Send token acquisition to the configured token-endpoint URI.
+- [x] Send token acquisition to the configured token-endpoint URI.
 - [ ] Use HTTP `POST` for token acquisition.
-- [ ] Use `Content-Type: application/x-www-form-urlencoded`.
-- [ ] Attach a participant-generated request ID using the configured request ID header.
-- [ ] Include `grant_type = client_credentials`.
-- [ ] Include `client_assertion_type = urn:ietf:params:oauth:client-assertion-type:jwt-bearer`.
-- [ ] Include `client_assertion = <signed JWT>`.
-- [ ] Include `scope` when configured.
-- [ ] Omit `scope` when not configured.
-- [ ] Omit token-request `audience`.
+- [x] Use `Content-Type: application/x-www-form-urlencoded`.
+- [x] Attach a participant-generated request ID using the configured request ID header.
+- [x] Include `grant_type = client_credentials`.
+- [x] Include `client_assertion_type = urn:ietf:params:oauth:client-assertion-type:jwt-bearer`.
+- [x] Include `client_assertion = <signed JWT>`.
+- [x] Include `scope` when configured.
+- [x] Omit `scope` when not configured.
+- [x] Omit token-request `audience`.
 - [ ] Use the token-endpoint URI both as the HTTP target and as the client-assertion `aud`.
 
 ### 4. Client Assertion Construction
@@ -275,5 +276,6 @@ Do not add checklist items for:
 - Do not remove historical notes without replacing them with an updated note.
 - 2026-03-30: `ExtensionServiceConfigOAuthTest` covers the implemented config parsing and validation items in sections 1 and the parameterized invalid-field and invalid-path cases.
 - 2026-03-30: `HttpExtensionRequestBuilderOAuthTest` covers the implemented resource-request construction items in section 2, including auth-none omission and explicit bearer header injection.
+- 2026-03-30: `HttpExtensionOAuthTokenRequestBuilderTest` covers the implemented token-request construction items in section 3 except HTTP `POST` and client-assertion `aud`, which remain open for later slices. The same targeted command was used for the explicit red-green cycle: `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest'` first failed with `not found: type HttpExtensionOAuthTokenRequestBuilder`, then passed after adding the builder.
 - 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
 - 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.
