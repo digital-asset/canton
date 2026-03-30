@@ -47,6 +47,7 @@ from the agreed OAuth v1 contract.
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenRequestBuilderTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthClientAssertionFactoryTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenResponseParserTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenClientTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerOAuthTest.scala`
@@ -200,17 +201,17 @@ Do not add checklist items for:
 
 - [x] With `auth.type = none`, map resource `401` to terminal `401` with auth-neutral message `Unauthorized`.
 - [x] With `auth.type = none`, do not trigger OAuth replay behavior on resource `401`.
-- [ ] Preserve exact HTTP status codes for token-endpoint HTTP failures.
-- [ ] Map token-endpoint request timeout to `408`.
-- [ ] Map token-endpoint connect failure to `503`.
-- [ ] Map token-endpoint I/O failure to `503`.
-- [ ] Map token-endpoint unexpected local exception to `500`.
-- [ ] Map local signing failure to `500`.
-- [ ] Map local key-loading failure to `500`.
+- [x] Preserve exact HTTP status codes for token-endpoint HTTP failures.
+- [x] Map token-endpoint request timeout to `408`.
+- [x] Map token-endpoint connect failure to `503`.
+- [x] Map token-endpoint I/O failure to `503`.
+- [x] Map token-endpoint unexpected local exception to `500`.
+- [x] Map local signing failure to `500`.
+- [x] Map local key-loading failure to `500`.
 - [ ] Map local auth-material failure to `500`.
 - [ ] After replay exhaustion, map resource token rejection to `401` with message `Unauthorized - OAuth token rejected by resource server`.
-- [ ] Return the outbound request ID of the interaction that produced the final error.
-- [ ] Return `requestId = None` when failure occurs before any outbound HTTP interaction is sent.
+- [x] Return the outbound request ID of the interaction that produced the final error.
+- [x] Return `requestId = None` when failure occurs before any outbound HTTP interaction is sent.
 - [ ] Preserve the existing `ExtensionServiceExternalCallHandler` boundary of `statusCode`, `message`, and `requestId` only.
 
 ### 10. HTTP Client Ownership, TLS, And Material Initialization
@@ -281,5 +282,6 @@ Do not add checklist items for:
 - 2026-03-30: `HttpExtensionOAuthTokenRequestBuilderTest` covers the implemented token-request construction items in section 3 except the explicit HTTP `POST` observable, which remains open for a later slice. The same targeted command was used for the explicit red-green cycle: `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest'` first failed with `not found: type HttpExtensionOAuthTokenRequestBuilder`, then passed after adding the builder.
 - 2026-03-30: `HttpExtensionOAuthClientAssertionFactoryTest` covers the implemented client-assertion construction items in section 4 and, together with `HttpExtensionOAuthTokenRequestBuilderTest`, closes the shared section 3 item requiring the token-endpoint URI to be used both as the HTTP target and as the client-assertion `aud`. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthClientAssertionFactoryTest'`, which first failed with `not found: type HttpExtensionOAuthClientAssertionFactory`, then passed after adding the factory.
 - 2026-03-30: `HttpExtensionOAuthTokenResponseParserTest` covers the implemented token-response parsing items in section 5, including malformed-response `502` mapping and opaque-token handling. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenResponseParserTest'`, which first failed with `not found: type HttpExtensionOAuthTokenResponseParser`, then exposed one intermediate red case where the parser was still too permissive for `expires_in`, and finally passed after tightening field-shape validation.
+- 2026-03-30: `HttpExtensionOAuthTokenClientTest` covers the implemented acquisition helper behavior and section 9 token-endpoint error mapping items for preserved HTTP status codes, transport exception mapping, local signing/key-loading failures, and `requestId` presence or absence depending on whether any outbound HTTP interaction occurred. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenClientTest'`, which first failed with `not found: type HttpExtensionOAuthTokenClient`, then passed after adding the client.
 - 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
 - 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.
