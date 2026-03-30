@@ -45,6 +45,7 @@ from the agreed OAuth v1 contract.
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/config/ExtensionServiceConfigOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionRequestBuilderOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenRequestBuilderTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthClientAssertionFactoryTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryOAuthTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerOAuthTest.scala`
@@ -120,21 +121,21 @@ Do not add checklist items for:
 - [x] Include `scope` when configured.
 - [x] Omit `scope` when not configured.
 - [x] Omit token-request `audience`.
-- [ ] Use the token-endpoint URI both as the HTTP target and as the client-assertion `aud`.
+- [x] Use the token-endpoint URI both as the HTTP target and as the client-assertion `aud`.
 
 ### 4. Client Assertion Construction
 
-- [ ] Use signing algorithm `RS256`.
-- [ ] Set `iss = client-id`.
-- [ ] Set `sub = client-id`.
-- [ ] Set `aud = <token-endpoint URI>`.
-- [ ] Set `iat = now`.
-- [ ] Set `exp = now + 30s`.
-- [ ] Set `jti` to a fresh random identifier.
-- [ ] Include `kid` when `key-id` is configured.
-- [ ] Omit `kid` when `key-id` is not configured.
-- [ ] Produce one-use-only assertions across successive acquisitions.
-- [ ] Accept RSA DER / PKCS#8 key material for signing.
+- [x] Use signing algorithm `RS256`.
+- [x] Set `iss = client-id`.
+- [x] Set `sub = client-id`.
+- [x] Set `aud = <token-endpoint URI>`.
+- [x] Set `iat = now`.
+- [x] Set `exp = now + 30s`.
+- [x] Set `jti` to a fresh random identifier.
+- [x] Include `kid` when `key-id` is configured.
+- [x] Omit `kid` when `key-id` is not configured.
+- [x] Produce one-use-only assertions across successive acquisitions.
+- [x] Accept RSA DER / PKCS#8 key material for signing.
 
 ### 5. Token Response Parsing And Acquisition
 
@@ -276,6 +277,7 @@ Do not add checklist items for:
 - Do not remove historical notes without replacing them with an updated note.
 - 2026-03-30: `ExtensionServiceConfigOAuthTest` covers the implemented config parsing and validation items in sections 1 and the parameterized invalid-field and invalid-path cases.
 - 2026-03-30: `HttpExtensionRequestBuilderOAuthTest` covers the implemented resource-request construction items in section 2, including auth-none omission and explicit bearer header injection.
-- 2026-03-30: `HttpExtensionOAuthTokenRequestBuilderTest` covers the implemented token-request construction items in section 3 except HTTP `POST` and client-assertion `aud`, which remain open for later slices. The same targeted command was used for the explicit red-green cycle: `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest'` first failed with `not found: type HttpExtensionOAuthTokenRequestBuilder`, then passed after adding the builder.
+- 2026-03-30: `HttpExtensionOAuthTokenRequestBuilderTest` covers the implemented token-request construction items in section 3 except the explicit HTTP `POST` observable, which remains open for a later slice. The same targeted command was used for the explicit red-green cycle: `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest'` first failed with `not found: type HttpExtensionOAuthTokenRequestBuilder`, then passed after adding the builder.
+- 2026-03-30: `HttpExtensionOAuthClientAssertionFactoryTest` covers the implemented client-assertion construction items in section 4 and, together with `HttpExtensionOAuthTokenRequestBuilderTest`, closes the shared section 3 item requiring the token-endpoint URI to be used both as the HTTP target and as the client-assertion `aud`. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthClientAssertionFactoryTest'`, which first failed with `not found: type HttpExtensionOAuthClientAssertionFactory`, then passed after adding the factory.
 - 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
 - 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.
