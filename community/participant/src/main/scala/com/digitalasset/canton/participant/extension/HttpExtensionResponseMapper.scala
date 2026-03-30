@@ -77,7 +77,7 @@ private[extension] final class HttpExtensionResponseMapper {
       defaultMessage: String,
   ): ExtensionCallError = {
     val body = response.body
-    val message = if (body != null && body.nonEmpty && body.length < 500) {
+    val message = if (body.nonEmpty && body.length < 500) {
       s"$defaultMessage: $body"
     } else {
       defaultMessage
@@ -93,7 +93,7 @@ private[extension] final class HttpExtensionResponseMapper {
     val retryAfter = firstHeaderValue(response, "Retry-After").flatMap(s => Try(s.toInt).toOption)
 
     val body = response.body
-    val message = if (body != null && body.nonEmpty && body.length < 500) {
+    val message = if (body.nonEmpty && body.length < 500) {
       s"$defaultMessage: $body"
     } else {
       defaultMessage

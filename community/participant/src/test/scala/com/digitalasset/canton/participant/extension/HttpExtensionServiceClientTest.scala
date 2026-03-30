@@ -207,6 +207,26 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
         }
     }
 
+    "preserve default terminal error message when the response body is empty" in {
+      val runtime = new FakeRuntime()
+      val transport = new FakeTransport(
+        Seq(Right(response(400, "")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      client
+        .call("echo", "00000000", "deadbeef", "submission")
+        .failOnShutdown
+        .map { result =>
+          result.isLeft shouldBe true
+          val error = result.swap.getOrElse(fail("Expected a 400 error"))
+          error.statusCode shouldBe 400
+          error.message shouldBe "Bad Request"
+          error.requestId shouldBe Some("req-1")
+        }
+    }
+
     "preserve 503 retryable error mapping when retries are disabled" in {
       val runtime = new FakeRuntime()
       val transport = new FakeTransport(
@@ -225,6 +245,26 @@ class HttpExtensionServiceClientTest extends AsyncWordSpec with BaseTest {
           error.message shouldBe "Service unavailable: service-down"
           error.requestId shouldBe Some("req-1")
           transport.requests should have size 1
+        }
+    }
+
+    "preserve default retryable error message when the response body is oversized" in {
+      val runtime = new FakeRuntime()
+      val transport = new FakeTransport(
+        Seq(Right(response(503, "x" * 500)))
+      )
+      val resourcesFactory = new FakeResourcesFactory(transport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
+
+      client
+        .call("echo", "00000000", "deadbeef", "submission")
+        .failOnShutdown
+        .map { result =>
+          result.isLeft shouldBe true
+          val error = result.swap.getOrElse(fail("Expected a 503 error"))
+          error.statusCode shouldBe 503
+          error.message shouldBe "Service unavailable"
+          error.requestId shouldBe Some("req-1")
         }
     }
 
