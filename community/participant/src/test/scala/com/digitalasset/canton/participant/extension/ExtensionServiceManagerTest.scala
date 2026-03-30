@@ -52,15 +52,15 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
 
   private final class RecordingResourcesFactory extends HttpExtensionClientResourcesFactory {
     val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
-    val createdResourceIds: mutable.ArrayBuffer[Int] = mutable.ArrayBuffer.empty
+    val createdResources: mutable.ArrayBuffer[HttpExtensionClientResources] = mutable.ArrayBuffer.empty
 
     override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
       createCalls += config
-      val resourceId = createCalls.size
-      createdResourceIds += resourceId
-      HttpExtensionClientResources(
+      val resources = HttpExtensionClientResources(
         resourceTransport = new OkTransport(s"response-for-${config.name}")
       )
+      createdResources += resources
+      resources
     }
   }
 
@@ -234,7 +234,7 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
         results.keySet shouldBe Set("ext1", "ext2")
         resourcesFactory.createCalls.map(_.name).toSeq should contain theSameElementsAs Seq("ext1", "ext2")
         resourcesFactory.createCalls should have size 2
-        resourcesFactory.createdResourceIds.distinct should have size 2
+        resourcesFactory.createdResources.map(_.resourceTransport).distinct should have size 2
       }
     }
 
