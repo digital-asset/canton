@@ -12,12 +12,19 @@ from the agreed OAuth v1 contract.
 
 - Update this file in the same change whenever OAuth-related tests are added, removed, renamed,
   split, deferred, or expanded.
+- Execute each implemented behavior slice as an explicit TDD cycle:
+  write or update the test first, run the most specific relevant suite to observe the expected
+  failure, implement the minimum production change, rerun the same suite to green, then update this
+  file.
 - Add a new checkbox item for every regression or bug discovered during implementation before, or at
   the same time as, the fix.
 - Mark an item `[x]` only when an automated test exists in the repository and the most specific
   relevant suite has been run successfully.
 - If a test exists but is blocked, flaky, or not yet run in the relevant suite, leave the item
   unchecked and record the blocker in `Implementation Notes`.
+- Do not leave intentionally failing tests in the repository as a resting state. The repository may
+  go red during an active local TDD cycle, but it must be green again before pausing or handing
+  work off.
 - Keep each checkbox scoped to one observable behavior. If one parameterized test covers multiple
   checklist items, keep all covered items and note the shared test name in `Implementation Notes`.
 - Do not silently delete or collapse checklist items. If scope changes, replace the old item with
@@ -25,6 +32,8 @@ from the agreed OAuth v1 contract.
 - Keep candidate test-file paths in this document current as the implementation evolves.
 - Keep this document focused on OAuth v1. Do not add checklist items for behavior explicitly
   excluded by the tech spec.
+- Record the concrete failing and passing test command for each completed implementation slice in
+  `Implementation Notes`, unless the existing note for that slice is still accurate.
 
 ## Status Legend
 
@@ -60,42 +69,42 @@ Do not add checklist items for:
 
 ### 1. Config Model And Parsing
 
-- [ ] Parse `auth.type = none` with existing top-level resource-server fields unchanged.
-- [ ] Parse `auth.type = oauth` with all required OAuth fields present.
-- [ ] Reject missing `auth.type`.
-- [ ] Reject unknown `auth.type`.
-- [ ] Reject `auth.type = oauth` when `client-id` is missing.
-- [ ] Reject `auth.type = oauth` when `private-key-file` is missing.
-- [ ] Reject `auth.type = oauth` when `token-endpoint.host` is missing.
-- [ ] Reject `auth.type = oauth` when `token-endpoint.port` is missing.
-- [ ] Reject `auth.type = oauth` when `token-endpoint.path` is missing.
-- [ ] Reject token-endpoint paths that do not start with `/`.
-- [ ] Reject token-endpoint paths that contain a query string.
-- [ ] Reject token-endpoint paths that contain a fragment.
-- [ ] Reject `auth.type = oauth` when the resource server is not configured for TLS.
-- [ ] Construct the OAuth token-endpoint URI as `https://<host>:<port><path>` with no configurable non-TLS scheme.
-- [ ] Parse optional `key-id` when present.
-- [ ] Parse optional `scope` when present.
-- [ ] Omit optional `scope` when absent.
-- [ ] Parse token-endpoint `tls-insecure` when present for test scaffolding.
-- [ ] Parse resource-server `trust-collection-file` independently from token-endpoint `trust-collection-file`.
-- [ ] Preserve `declared-functions` support and its empty-default behavior.
-- [ ] Preserve existing non-auth top-level fields without introducing an `endpoint` wrapper.
+- [x] Parse `auth.type = none` with existing top-level resource-server fields unchanged.
+- [x] Parse `auth.type = oauth` with all required OAuth fields present.
+- [x] Reject missing `auth.type`.
+- [x] Reject unknown `auth.type`.
+- [x] Reject `auth.type = oauth` when `client-id` is missing.
+- [x] Reject `auth.type = oauth` when `private-key-file` is missing.
+- [x] Reject `auth.type = oauth` when `token-endpoint.host` is missing.
+- [x] Reject `auth.type = oauth` when `token-endpoint.port` is missing.
+- [x] Reject `auth.type = oauth` when `token-endpoint.path` is missing.
+- [x] Reject token-endpoint paths that do not start with `/`.
+- [x] Reject token-endpoint paths that contain a query string.
+- [x] Reject token-endpoint paths that contain a fragment.
+- [x] Reject `auth.type = oauth` when the resource server is not configured for TLS.
+- [x] Construct the OAuth token-endpoint URI as `https://<host>:<port><path>` with no configurable non-TLS scheme.
+- [x] Parse optional `key-id` when present.
+- [x] Parse optional `scope` when present.
+- [x] Omit optional `scope` when absent.
+- [x] Parse token-endpoint `tls-insecure` when present for test scaffolding.
+- [x] Parse resource-server `trust-collection-file` independently from token-endpoint `trust-collection-file`.
+- [x] Preserve `declared-functions` support and its empty-default behavior.
+- [x] Preserve existing non-auth top-level fields without introducing an `endpoint` wrapper.
 
 ### 2. Resource Request Construction
 
-- [ ] Preserve `POST /api/v1/external-call`.
-- [ ] Preserve `Content-Type: application/octet-stream`.
-- [ ] Preserve `X-Daml-External-Function-Id`.
-- [ ] Preserve `X-Daml-External-Config-Hash`.
-- [ ] Preserve `X-Daml-External-Mode`.
-- [ ] Preserve the configured request ID header on resource requests.
-- [ ] Preserve the business request body format unchanged.
-- [ ] Preserve the successful business response body format unchanged.
-- [ ] With `auth.type = none`, omit the `Authorization` header.
-- [ ] With `auth.type = oauth`, add `Authorization: Bearer <token>`.
-- [ ] Forward `mode = submission` unchanged.
-- [ ] Forward `mode = validation` unchanged.
+- [x] Preserve `POST /api/v1/external-call`.
+- [x] Preserve `Content-Type: application/octet-stream`.
+- [x] Preserve `X-Daml-External-Function-Id`.
+- [x] Preserve `X-Daml-External-Config-Hash`.
+- [x] Preserve `X-Daml-External-Mode`.
+- [x] Preserve the configured request ID header on resource requests.
+- [x] Preserve the business request body format unchanged.
+- [x] Preserve the successful business response body format unchanged.
+- [x] With `auth.type = none`, omit the `Authorization` header.
+- [x] With `auth.type = oauth`, add `Authorization: Bearer <token>`.
+- [x] Forward `mode = submission` unchanged.
+- [x] Forward `mode = validation` unchanged.
 - [ ] Clamp the resource request timeout to `min(configured request-timeout, remaining budget)`.
 
 ### 3. Token Request Construction
@@ -172,7 +181,7 @@ Do not add checklist items for:
 - [ ] Refuse to start a resource request when the remaining budget is non-positive.
 - [ ] Count only outer retries against `maxRetries`.
 - [ ] Do not charge the auth-local replay against `maxRetries`.
-- [ ] Continue to classify resource `400`, `401`, `403`, and `404` as terminal.
+- [x] Continue to classify resource `400`, `401`, `403`, and `404` as terminal.
 - [ ] Continue to classify resource `408`, `429`, `500`, `502`, `503`, and `504` as retryable.
 - [ ] Retry token-endpoint `408`, `429`, `500`, `502`, `503`, and `504` through the same outer retry loop.
 - [ ] Treat token-endpoint `400`, `401`, `403`, and `404` as terminal through the same outer retry loop.
@@ -186,8 +195,8 @@ Do not add checklist items for:
 
 ### 9. Error Mapping And Error Boundary
 
-- [ ] With `auth.type = none`, map resource `401` to terminal `401` with auth-neutral message `Unauthorized`.
-- [ ] With `auth.type = none`, do not trigger OAuth replay behavior on resource `401`.
+- [x] With `auth.type = none`, map resource `401` to terminal `401` with auth-neutral message `Unauthorized`.
+- [x] With `auth.type = none`, do not trigger OAuth replay behavior on resource `401`.
 - [ ] Preserve exact HTTP status codes for token-endpoint HTTP failures.
 - [ ] Map token-endpoint request timeout to `408`.
 - [ ] Map token-endpoint connect failure to `503`.
@@ -264,3 +273,7 @@ Do not add checklist items for:
 
 - Add dated notes here for blockers, scope changes, shared parameterized tests, or renamed test files.
 - Do not remove historical notes without replacing them with an updated note.
+- 2026-03-30: `ExtensionServiceConfigOAuthTest` covers the implemented config parsing and validation items in sections 1 and the parameterized invalid-field and invalid-path cases.
+- 2026-03-30: `HttpExtensionRequestBuilderOAuthTest` covers the implemented resource-request construction items in section 2, including auth-none omission and explicit bearer header injection.
+- 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
+- 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.

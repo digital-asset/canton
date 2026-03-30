@@ -5,7 +5,12 @@ package com.digitalasset.canton.participant.config
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import pureconfig.{ConfigReader, ConfigWriter}
+import pureconfig.error.CannotConvert
+import pureconfig.generic.FieldCoproductHint
+import pureconfig.generic.semiauto.*
 
+import java.net.URI
 import java.nio.file.Path
 
 /** Configuration for a single engine extension service.
@@ -18,9 +23,9 @@ import java.nio.file.Path
   * @param host Hostname of the extension service
   * @param port Port of the extension service
   * @param useTls Whether to use TLS for the connection
+  * @param trustCollectionFile Optional trust collection for the resource endpoint
   * @param tlsInsecure If true, skip TLS certificate validation (dev only)
-  * @param jwt JWT token for authentication
-  * @param jwtFile Path to file containing JWT token
+  * @param auth Authentication configuration
   * @param connectTimeout Connection timeout
   * @param requestTimeout Request timeout for individual HTTP requests
   * @param maxTotalTimeout Maximum total time for the entire operation including retries
@@ -35,9 +40,9 @@ final case class ExtensionServiceConfig(
     host: String,
     port: Port,
     useTls: Boolean = true,
+    trustCollectionFile: Option[Path] = None,
     tlsInsecure: Boolean = false,
-    jwt: Option[String] = None,
-    jwtFile: Option[Path] = None,
+    auth: ExtensionServiceAuthConfig = ExtensionServiceAuthConfig.NoAuth,
     connectTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(500),
     requestTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(8),
     maxTotalTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(25),
@@ -47,6 +52,21 @@ final case class ExtensionServiceConfig(
     requestIdHeader: String = "X-Request-Id",
     declaredFunctions: Seq[ExtensionFunctionDeclaration] = Seq.empty,
 )
+
+object ExtensionServiceConfig {
+  implicit val reader: ConfigReader[ExtensionServiceConfig] =
+    deriveReader[ExtensionServiceConfig].emap { config =>
+      config.auth match {
+        case _: ExtensionServiceAuthConfig.OAuth if !config.useTls =>
+          Left(CannotConvert(config.useTls.toString, "ExtensionServiceConfig", "OAuth requires the resource server to use TLS."))
+        case _ =>
+          Right(config)
+      }
+    }
+
+  implicit val writer: ConfigWriter[ExtensionServiceConfig] =
+    deriveWriter[ExtensionServiceConfig]
+}
 
 /** Declaration of a function provided by an extension service.
   *
@@ -59,6 +79,87 @@ final case class ExtensionFunctionDeclaration(
     functionId: String,
     configHash: String,
 )
+
+object ExtensionFunctionDeclaration {
+  implicit val reader: ConfigReader[ExtensionFunctionDeclaration] =
+    deriveReader[ExtensionFunctionDeclaration]
+
+  implicit val writer: ConfigWriter[ExtensionFunctionDeclaration] =
+    deriveWriter[ExtensionFunctionDeclaration]
+}
+
+final case class ExtensionServiceTokenEndpointConfig(
+    host: String,
+    port: Port,
+    path: String,
+    trustCollectionFile: Option[Path] = None,
+    tlsInsecure: Boolean = false,
+) {
+  def uri: URI = URI.create(s"https://$host:$port$path")
+}
+
+object ExtensionServiceTokenEndpointConfig {
+  implicit val reader: ConfigReader[ExtensionServiceTokenEndpointConfig] =
+    deriveReader[ExtensionServiceTokenEndpointConfig].emap { config =>
+      if (!config.path.startsWith("/")) {
+        Left(CannotConvert(config.path, "token-endpoint.path", "Token endpoint path must start with '/'."))
+      } else {
+        val uri = URI.create(s"https://example.invalid${config.path}")
+        if (uri.getQuery != null) {
+          Left(CannotConvert(config.path, "token-endpoint.path", "Token endpoint path must not contain a query string."))
+        } else if (uri.getFragment != null) {
+          Left(CannotConvert(config.path, "token-endpoint.path", "Token endpoint path must not contain a fragment."))
+        } else {
+          Right(config)
+        }
+      }
+    }
+
+  implicit val writer: ConfigWriter[ExtensionServiceTokenEndpointConfig] =
+    deriveWriter[ExtensionServiceTokenEndpointConfig]
+}
+
+sealed trait ExtensionServiceAuthConfig extends Product with Serializable
+
+object ExtensionServiceAuthConfig {
+  case object NoAuth extends ExtensionServiceAuthConfig
+
+  final case class OAuth(
+      tokenEndpoint: ExtensionServiceTokenEndpointConfig,
+      clientId: String,
+      privateKeyFile: Path,
+      keyId: Option[String] = None,
+      scope: Option[String] = None,
+  ) extends ExtensionServiceAuthConfig
+
+  implicit val typeHint: FieldCoproductHint[ExtensionServiceAuthConfig] =
+    new FieldCoproductHint[ExtensionServiceAuthConfig]("type") {
+      override def fieldValue(name: String): String =
+        name match {
+          case "NoAuth" => "none"
+          case "OAuth" => "oauth"
+          case other => other.toLowerCase
+        }
+    }
+
+  implicit val noAuthReader: ConfigReader[NoAuth.type] =
+    deriveReader[NoAuth.type]
+
+  implicit val oauthReader: ConfigReader[OAuth] =
+    deriveReader[OAuth]
+
+  implicit val reader: ConfigReader[ExtensionServiceAuthConfig] =
+    deriveReader[ExtensionServiceAuthConfig]
+
+  implicit val noAuthWriter: ConfigWriter[NoAuth.type] =
+    deriveWriter[NoAuth.type]
+
+  implicit val oauthWriter: ConfigWriter[OAuth] =
+    deriveWriter[OAuth]
+
+  implicit val writer: ConfigWriter[ExtensionServiceAuthConfig] =
+    deriveWriter[ExtensionServiceAuthConfig]
+}
 
 /** Configuration for engine extensions in the participant.
   *
@@ -74,4 +175,10 @@ final case class EngineExtensionsConfig(
 
 object EngineExtensionsConfig {
   val default: EngineExtensionsConfig = EngineExtensionsConfig()
+
+  implicit val reader: ConfigReader[EngineExtensionsConfig] =
+    deriveReader[EngineExtensionsConfig]
+
+  implicit val writer: ConfigWriter[EngineExtensionsConfig] =
+    deriveWriter[EngineExtensionsConfig]
 }

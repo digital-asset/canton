@@ -11,7 +11,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransform,
   EnvironmentSetup,
 }
-import com.digitalasset.canton.participant.config.ExtensionServiceConfig
+import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
 import com.digitalasset.canton.topology.PartyId
 import monocle.macros.syntax.lens.*
 
@@ -66,6 +66,7 @@ trait ExternalCallIntegrationTestBase {
       host = "localhost",
       port = Port.tryCreate(port),
       useTls = false,
+      auth = ExtensionServiceAuthConfig.NoAuth,
       requestTimeout = NonNegativeFiniteDuration.ofSeconds(10),
       maxRetries = com.digitalasset.canton.config.RequireTypes.NonNegativeInt.tryCreate(2),
     )
@@ -84,6 +85,7 @@ trait ExternalCallIntegrationTestBase {
       host = "localhost",
       port = Port.tryCreate(port),
       useTls = false,
+      auth = ExtensionServiceAuthConfig.NoAuth,
       requestTimeout = NonNegativeFiniteDuration.ofSeconds(10),
       maxRetries = com.digitalasset.canton.config.RequireTypes.NonNegativeInt.tryCreate(2),
     )

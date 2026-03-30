@@ -21,7 +21,7 @@ private[extension] final class HttpExtensionResponseMapper {
         Left(parseErrorResponse(response, requestId, "Bad Request"))
 
       case 401 =>
-        Left(parseErrorResponse(response, requestId, "Unauthorized - check JWT token"))
+        Left(parseErrorResponse(response, requestId, "Unauthorized"))
 
       case 403 =>
         Left(parseErrorResponse(response, requestId, "Forbidden - insufficient permissions"))

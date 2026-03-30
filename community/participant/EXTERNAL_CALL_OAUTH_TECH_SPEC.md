@@ -525,6 +525,17 @@ failure permutation already covered by unit tests.
 Tests MUST assert observable contract behavior and MUST NOT depend on incidental implementation
 details such as the exact compact JWT serialization beyond the required claims and headers.
 
+Implementation work MUST proceed in explicit TDD red-green cycles for each test slice:
+
+- first add or update the most specific targeted test coverage for the next behavior slice
+- then run the most specific relevant suite and observe the expected failing result
+- then implement the minimum production change needed for that slice
+- then rerun the same relevant suite to confirm the slice is green
+- then update the living checklist to reflect the new coverage state
+
+The repository MAY be red during an active local red-green cycle, but it MUST be returned to a
+green state before pausing, handing off, or reporting a completed slice.
+
 The suite MUST include security-relevant coverage required by this specification, including:
 
 - TLS-related constraints that OAuth requires

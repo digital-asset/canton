@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.participant.config.{EngineExtensionsConfig, ExtensionServiceConfig}
+import com.digitalasset.canton.participant.config.{
+  EngineExtensionsConfig,
+  ExtensionServiceAuthConfig,
+  ExtensionServiceConfig,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -27,6 +31,7 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
       host = "localhost",
       port = Port.tryCreate(port),
       useTls = false,
+      auth = ExtensionServiceAuthConfig.NoAuth,
       requestTimeout = NonNegativeFiniteDuration.ofSeconds(10),
       maxRetries = NonNegativeInt.tryCreate(2),
     )

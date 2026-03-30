@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.participant.config.ExtensionServiceConfig
+import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.net.http.HttpClient
@@ -27,6 +27,7 @@ class JdkHttpExtensionClientResourcesFactoryTest extends AnyWordSpec with BaseTe
       port = Port.tryCreate(port),
       useTls = useTls,
       tlsInsecure = tlsInsecure,
+      auth = ExtensionServiceAuthConfig.NoAuth,
       connectTimeout = NonNegativeFiniteDuration.ofMillis(connectTimeoutMs),
     )
 
