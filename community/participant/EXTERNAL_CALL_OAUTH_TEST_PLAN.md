@@ -73,7 +73,7 @@ Do not add checklist items for:
 - [ ] Reject token-endpoint paths that contain a query string.
 - [ ] Reject token-endpoint paths that contain a fragment.
 - [ ] Reject `auth.type = oauth` when the resource server is not configured for TLS.
-- [ ] Ensure the token endpoint is represented as TLS-only in the OAuth config model.
+- [ ] Construct the OAuth token-endpoint URI as `https://<host>:<port><path>` with no configurable non-TLS scheme.
 - [ ] Parse optional `key-id` when present.
 - [ ] Parse optional `scope` when present.
 - [ ] Omit optional `scope` when absent.
@@ -206,6 +206,8 @@ Do not add checklist items for:
 - [ ] With `auth.type = none`, create exactly one internal HTTP client/transport for resource requests.
 - [ ] With `auth.type = oauth`, create separate internal HTTP clients/transports for resource and token requests.
 - [ ] Keep HTTP client ownership per extension with no required cross-extension sharing.
+- [ ] Do not load signing key, trust material, or OAuth-specific HTTP client state during `HttpExtensionServiceClient` construction.
+- [ ] Do not fail client construction solely because OAuth key or trust material is invalid before the first OAuth use.
 - [ ] Load signing key, trust material, and OAuth-specific HTTP client state on demand rather than at construction time.
 - [ ] Reuse successfully initialized signing key material for the lifetime of the `HttpExtensionServiceClient`.
 - [ ] Reuse successfully initialized trust material for the lifetime of the `HttpExtensionServiceClient`.
@@ -246,6 +248,9 @@ Do not add checklist items for:
 - [ ] Cover malformed token response surfacing `502`.
 - [ ] Cover local key-loading failure before outbound HTTP with `requestId = None`.
 - [ ] Cover local trust-material failure before outbound HTTP with `requestId = None`.
+- [ ] Preserve participant startup with OAuth configured even when OAuth key or trust material is invalid until the first OAuth call path is exercised.
+- [ ] Do not send token-endpoint HTTP interactions during participant startup or extension-manager construction.
+- [ ] Preserve existing startup validation semantics without introducing OAuth-specific startup gating.
 - [ ] Cover test-only insecure TLS scaffolding when the integration harness relies on it.
 - [ ] Cover explicit trust-material configuration when the integration harness relies on custom test trust roots.
 - [ ] Preserve `echoMode` short-circuit behavior without token or resource HTTP calls.
