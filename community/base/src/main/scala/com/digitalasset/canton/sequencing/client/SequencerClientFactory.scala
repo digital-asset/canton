@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
@@ -220,17 +219,45 @@ object SequencerClientFactory {
             sequencedEventStore.reinitializeFromDbOrSetLowerBound()
           )
           // Find the timestamp of the last known sequenced event, we'll use that timestamp to initialize
-          // the traffic state
-          latestSequencedTimestampO <- EitherT.right(
+          // the traffic state.
+          // If there's no timestamp, in most cases the participant will have no traffic state as it probably is connecting
+          // to the synchronizer for the first time. However it's technically possible (for example if the node
+          // was onboarded entirely by another node and traffic was purchased for it before it even connected for the first time).
+          // In that case, we fallback to clock.now() which is the next best timestamp we can use
+          latestSequencedTimestamp <- EitherT.right(
             sequencedEventStore
               .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))
               .toOption
               .value
-              .map(_.map(_.timestamp))
+              .map(_.map(_.timestamp).getOrElse(clock.now))
+          )
+
+          // Use the current snapshot approximation to determine if traffic control is enabled on the synchronizer
+          // at this time
+          trafficControlEnabled <- EitherT[FutureUnlessShutdown, String, Boolean](
+            syncCryptoApi.currentSnapshotApproximation
+              .flatMap(
+                _.ipsSnapshot.findDynamicSynchronizerParameters().map {
+                  case Left(failure) =>
+                    // This happens the first time a node connects to a synchronizer and has not synced its topology yet
+                    // In that case assume traffic control is enabled, so that we initialize our traffic state in case it is in fact enabled
+                    logger.info(
+                      s"Failed to retrieve dynamic synchronizer parameters during sequencer client initialization. Assuming traffic control is enabled. $failure"
+                    )
+                    Right(true)
+                  case Right(value) =>
+                    Right(value.parameters.trafficControl.isDefined)
+                }
+              )
           )
 
           getTrafficStateFromSynchronizerFn =
-            if (config.useNewConnectionPool) getTrafficStateWithConnectionPool _
+            // If traffic control is not enabled, there's no need to even ask the sequencers to initialize the traffic state
+            // If it gets enabled later, the node will become aware by receiving the topology change
+            // and start receiving traffic receipts from the sequencer for messages it sends
+            if (!trafficControlEnabled) { (_: CantonTimestamp) =>
+              EitherT.pure[FutureUnlessShutdown, String](None)
+            } else if (config.useNewConnectionPool) getTrafficStateWithConnectionPool _
             else getTrafficStateWithTransports _
 
           getTrafficStateFromSynchronizerWithRetryFn = { (ts: CantonTimestamp) =>
@@ -255,9 +282,7 @@ object SequencerClientFactory {
 
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
-          trafficStateO <- latestSequencedTimestampO
-            .traverse(getTrafficStateFromSynchronizerWithRetryFn)
-            .map(_.flatten)
+          trafficStateO <- getTrafficStateFromSynchronizerWithRetryFn(latestSequencedTimestamp)
 
           // fetch the initial set of pending sends to initialize the client with.
           // as it owns the client that should be writing to this store it should not be racy.

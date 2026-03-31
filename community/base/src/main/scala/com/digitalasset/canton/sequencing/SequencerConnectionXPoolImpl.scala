@@ -149,7 +149,11 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       logger.debug(s"Starting connection pool")
       setupInitializationTimeout()
 
-      updateTrackedConnections(toBeAdded = config.connections, toBeRemoved = Set.empty)
+      updateTrackedConnections(
+        toBeAdded = config.connections,
+        toBeRemoved = Set.empty,
+        isInitialUpdate = true,
+      )
     }
 
     EitherT(initializedP.futureUS)
@@ -210,6 +214,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
   private def updateTrackedConnections(
       toBeAdded: immutable.Iterable[ConnectionXConfig],
       toBeRemoved: Set[ConnectionXConfig],
+      isInitialUpdate: Boolean,
   )(implicit traceContext: TraceContext): Unit =
     lock.exclusive {
       val removedConnections =
@@ -233,6 +238,12 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       removedConnections.foreach { connection =>
         connection.fatal("removed from config")
       }
+      if (isInitialUpdate) {
+        metrics.removeMetricsForAllConnections()
+      } else {
+        metrics.removeMetricsForConnection(toBeRemoved.map(_.name))
+      }
+
       // If start() or updateConfig() is called after the pool has been closed, we don't want to start new connections
       if (!isClosing) {
         newConnections.map(new ConnectionHandler(_)).foreach(_.startConnection())
@@ -433,6 +444,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
         updateTrackedConnections(
           toBeAdded = changedConnections.added,
           toBeRemoved = changedConnections.removed,
+          isInitialUpdate = false,
         )
       }
     }

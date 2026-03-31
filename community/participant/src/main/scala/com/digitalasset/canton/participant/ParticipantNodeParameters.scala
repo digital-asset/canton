@@ -39,6 +39,7 @@ final case class ParticipantNodeParameters(
     commitmentMismatchDebugging: Boolean,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt],
     commitmentReduceParallelism: NonNegativeInt,
+    commitmentUseDbSnapshotForParticipantLookup: Boolean,
     autoSyncProtocolFeatureFlags: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
@@ -101,6 +102,7 @@ object ParticipantNodeParameters {
     commitmentMismatchDebugging = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp = None,
     commitmentReduceParallelism = NonNegativeInt.zero,
+    commitmentUseDbSnapshotForParticipantLookup = false,
     autoSyncProtocolFeatureFlags = true,
   )
 }

@@ -197,10 +197,10 @@ object TrafficConsumed {
 
   /** TrafficConsumed object for members the first time they submit a submission request
     */
-  def init(member: Member): TrafficConsumed =
+  def init(member: Member, timestamp: CantonTimestamp = CantonTimestamp.MinValue): TrafficConsumed =
     TrafficConsumed(
       member,
-      CantonTimestamp.MinValue,
+      timestamp,
       NonNegativeLong.zero,
       NonNegativeLong.zero,
       NonNegativeLong.zero,

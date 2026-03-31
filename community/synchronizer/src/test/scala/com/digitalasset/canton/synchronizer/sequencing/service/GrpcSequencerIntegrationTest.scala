@@ -67,7 +67,6 @@ import com.digitalasset.canton.sequencing.authentication.{
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
@@ -101,7 +100,11 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.*
 
-class Env(override val loggerFactory: SuppressingLogger)(implicit
+class Env(
+    override val loggerFactory: SuppressingLogger,
+    protocolVersion: ProtocolVersion,
+    enableTrafficControl: Boolean,
+)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
@@ -121,6 +124,14 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   private val cryptoApi =
     TestingTopology()
       .withSimpleParticipants(participant, anotherParticipant)
+      .withDynamicSynchronizerParameters(
+        DynamicSynchronizerParameters
+          .defaultValues(protocolVersion)
+          .tryUpdate(trafficControlParameters =
+            Option.when(enableTrafficControl)(TrafficControlParameters())
+          ),
+        validFrom = CantonTimestamp.MinValue,
+      )
       .build()
       .forOwnerAndSynchronizer(participant, synchronizerId)
   val clock = new SimClock(loggerFactory = loggerFactory)
@@ -458,7 +469,7 @@ class GrpcSequencerIntegrationTest
   override type FixtureParam = Env
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new Env(loggerFactory)
+    val env = new Env(loggerFactory, testedProtocolVersion, enableTrafficControl = true)
     try super.withFixture(test.toNoArgTest(env))
     finally env.close()
   }
@@ -564,20 +575,6 @@ class GrpcSequencerIntegrationTest
 
       env.spinUpSequencer(service2, sequencer2ConnectService, port2)
 
-      // We need an event in the event store otherwise the factory will skip the traffic state call
-      val now = clock.now
-      val dummyEvent = SequencedEventWithTraceContext(
-        SignedContent(
-          SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
-          SymbolicCrypto.emptySignature,
-          None,
-          testedProtocolVersion,
-        )
-      )(
-        TraceContext.empty
-      )
-      sequencedEventStore.store(Seq(dummyEvent))(traceContext, closeContext).futureValueUS
-
       env.loggerFactory.assertLogs(
         SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerClientFactory]
       )(
@@ -623,11 +620,14 @@ class GrpcSequencerIntegrationTest
   }
 }
 
-final class EnvWithFailingTokenRefresh(override val loggerFactory: SuppressingLogger)(implicit
+final class EnvWithFailingTokenRefresh(
+    override val loggerFactory: SuppressingLogger,
+    protocolVersion: ProtocolVersion,
+)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
-) extends Env(loggerFactory) {
+) extends Env(loggerFactory, protocolVersion, enableTrafficControl = false) {
   override lazy val authConfig =
     AuthenticationTokenManagerConfig(minRetryInterval =
       config.NonNegativeFiniteDuration.ofMillis(10)
@@ -658,7 +658,7 @@ class GrpcSequencerIntegrationWithFailingTokenRefreshTest
   override type FixtureParam = EnvWithFailingTokenRefresh
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new EnvWithFailingTokenRefresh(loggerFactory)
+    val env = new EnvWithFailingTokenRefresh(loggerFactory, testedProtocolVersion)
     try super.withFixture(test.toNoArgTest(env))
     finally env.close()
   }

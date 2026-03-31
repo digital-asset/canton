@@ -85,6 +85,7 @@ import com.digitalasset.canton.sequencing.traffic.{TrafficControlProcessor, Traf
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
+import com.digitalasset.canton.topology.client.StoreBasedSynchronizerTopologyClient.NoPackageDependencies
 import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
   TopologySnapshot,
@@ -1232,6 +1233,10 @@ object ConnectedSynchronizer {
           participantId,
           synchronizerHandle.sequencerClient,
           synchronizerCrypto,
+          Option.when(parameters.commitmentUseDbSnapshotForParticipantLookup)(
+            synchronizerHandle.topologyFactory
+              .createTopologySnapshot(_, NoPackageDependencies, preferCaching = false)
+          ),
           sortedReconciliationIntervalsProvider,
           persistentState.acsCommitmentStore,
           journalGarbageCollector.observer,

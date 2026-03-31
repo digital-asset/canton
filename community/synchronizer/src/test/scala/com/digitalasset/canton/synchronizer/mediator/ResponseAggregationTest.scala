@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
+import com.daml.metrics.api.MetricHandle.Meter
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -15,6 +17,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
+import com.digitalasset.canton.synchronizer.mediator.MediatorVerdict.MediatorApprove
+import com.digitalasset.canton.synchronizer.mediator.ResponseAggregation.{
+  ConsortiumVotingState,
+  ViewState,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
@@ -24,15 +31,14 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confir
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, CommandId, LfPartyId, UserId}
+import org.mockito.ArgumentCaptor
 import org.scalatest.funspec.PathAnyFunSpec
 
 import java.time.Duration
 import java.util.UUID
 import scala.concurrent.ExecutionContext
+import scala.jdk.CollectionConverters.ListHasAsScala
 import scala.language.existentials
-
-import MediatorVerdict.MediatorApprove
-import ResponseAggregation.{ConsortiumVotingState, ViewState}
 
 class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
@@ -60,6 +66,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val one = ParticipantId("one")
     val two = ParticipantId("two")
     val three = ParticipantId("three")
+    val four = ParticipantId("four")
+    val five = ParticipantId("five")
+    val six = ParticipantId("six")
+    val partyAlice = "alice"
+    val partyBob = "bob"
 
     val emptySubviews = TransactionSubviews.empty(testedProtocolVersion, hashOps)
 
@@ -179,7 +190,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               .map(x =>
                 x -> PartyInfo(
                   PositiveInt.one,
-                  Map(ParticipantId("one") -> ParticipantAttributes(Confirmation)),
+                  Map(one -> ParticipantAttributes(Confirmation)),
                 )
               )
               .toMap
@@ -202,14 +213,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           Map(
             view1Position -> ViewState(
               Map(
-                alice -> ConsortiumVotingState.withDefaultValues(),
-                bob -> ConsortiumVotingState.withDefaultValues(),
+                alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
               ),
               Seq(Quorum(aliceCp ++ bobCp, NonNegativeInt.three)),
               Nil,
             ),
             view2Position -> ViewState(
-              Map(bob -> ConsortiumVotingState.withDefaultValues()),
+              Map(bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one))),
               Seq(Quorum(bobCp, NonNegativeInt.two)),
               Nil,
             ),
@@ -295,16 +306,21 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 Map(
                   view1Position -> ViewState(
                     Map(
-                      alice -> ConsortiumVotingState.withDefaultValues(),
-                      bob -> ConsortiumVotingState.withDefaultValues(rejections =
-                        List(solo -> testReject())
+                      alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants =
+                        Set(one)
+                      ),
+                      bob -> ConsortiumVotingState.withDefaultValues(
+                        hostingParticipants = Set(one),
+                        rejections = List(solo -> testReject()),
                       ),
                     ),
                     Seq(Quorum(aliceCp, NonNegativeInt.three)),
                     List((Set(bob), solo, testReject())),
                   ),
                   view2Position -> ViewState(
-                    Map(bob -> ConsortiumVotingState.withDefaultValues()),
+                    Map(
+                      bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one))
+                    ),
                     Seq(Quorum(bobCp, NonNegativeInt.two)),
                     Nil,
                   ),
@@ -391,14 +407,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               Map(
                 view1Position -> ViewState(
                   Map(
-                    alice -> ConsortiumVotingState.withDefaultValues(),
-                    bob -> ConsortiumVotingState.withDefaultValues(approvals = Set(solo)),
+                    alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants =
+                      Set(one)
+                    ),
+                    bob -> ConsortiumVotingState
+                      .withDefaultValues(hostingParticipants = Set(one), approvals = Set(solo)),
                   ),
                   Seq(Quorum(aliceCp, NonNegativeInt.one)),
                   Nil,
                 ),
                 view2Position -> ViewState(
-                  Map(bob -> ConsortiumVotingState.withDefaultValues()),
+                  Map(
+                    bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one))
+                  ),
                   Seq(Quorum(bobCp, NonNegativeInt.two)),
                   Nil,
                 ),
@@ -493,14 +514,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             Map(
               view1Position -> ViewState(
                 Map(
-                  alice -> ConsortiumVotingState.withDefaultValues(),
-                  bob -> ConsortiumVotingState.withDefaultValues(abstains = Set(solo)),
+                  alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                  bob -> ConsortiumVotingState
+                    .withDefaultValues(hostingParticipants = Set(one), abstains = Set(solo)),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
                 List((Set(bob), solo, localAbstain)),
               ),
               view2Position -> ViewState(
-                Map(bob -> ConsortiumVotingState.withDefaultValues()),
+                Map(bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one))),
                 Seq(Quorum(bobCp, NonNegativeInt.two)),
                 Nil,
               ),
@@ -592,7 +614,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               .map(x =>
                 x -> PartyInfo(
                   PositiveInt.one,
-                  Map(ParticipantId("one") -> ParticipantAttributes(Confirmation)),
+                  Map(one -> ParticipantAttributes(Confirmation)),
                 )
               )
               .toMap
@@ -658,9 +680,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           result.state.value shouldBe Map(
             view1Position -> ViewState(
               Map(
-                alice -> ConsortiumVotingState.withDefaultValues(),
-                bob -> ConsortiumVotingState.withDefaultValues(rejections =
-                  List(solo -> testReject("malformed view"))
+                alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                bob -> ConsortiumVotingState.withDefaultValues(
+                  hostingParticipants = Set(one),
+                  rejections = List(solo -> testReject("malformed view")),
                 ),
               ),
               Seq(Quorum(aliceCp, NonNegativeInt.three)),
@@ -668,9 +691,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             ),
             view2Position -> ViewState(
               Map(
-                alice -> ConsortiumVotingState.withDefaultValues(),
-                bob -> ConsortiumVotingState.withDefaultValues(),
-                dave -> ConsortiumVotingState.withDefaultValues(),
+                alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                bob -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                dave -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
               ),
               Seq(Quorum(aliceCp ++ bobCp ++ daveCp, NonNegativeInt.three)),
               Nil,
@@ -704,9 +727,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             Map(
               view1Position -> ViewState(
                 Map(
-                  alice -> ConsortiumVotingState.withDefaultValues(),
-                  bob -> ConsortiumVotingState.withDefaultValues(rejections =
-                    List(solo -> testReject(rejectMsg))
+                  alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                  bob -> ConsortiumVotingState.withDefaultValues(
+                    hostingParticipants = Set(one),
+                    rejections = List(solo -> testReject(rejectMsg)),
                   ),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
@@ -714,12 +738,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               ),
               view2Position -> ViewState(
                 Map(
-                  alice -> ConsortiumVotingState.withDefaultValues(),
-                  bob -> ConsortiumVotingState.withDefaultValues(rejections =
-                    List(solo -> testReject(rejectMsg))
+                  alice -> ConsortiumVotingState.withDefaultValues(hostingParticipants = Set(one)),
+                  bob -> ConsortiumVotingState.withDefaultValues(
+                    hostingParticipants = Set(one),
+                    rejections = List(solo -> testReject(rejectMsg)),
                   ),
-                  dave -> ConsortiumVotingState.withDefaultValues(rejections =
-                    List(solo -> testReject(rejectMsg))
+                  dave -> ConsortiumVotingState.withDefaultValues(
+                    hostingParticipants = Set(one),
+                    rejections = List(solo -> testReject(rejectMsg)),
                   ),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
@@ -736,32 +762,52 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .Reject("reason")
         .toLocalReject(testedProtocolVersion)
       it("should work for threshold = 1") {
-        ConsortiumVotingState.withDefaultValues(approvals = Set(solo)).isApproved shouldBe true
-        ConsortiumVotingState.withDefaultValues(approvals = Set(solo)).isRejected shouldBe false
         ConsortiumVotingState
-          .withDefaultValues(rejections = List(solo -> reject))
+          .withDefaultValues(hostingParticipants = Set(solo), approvals = Set(solo))
+          .isApproved shouldBe true
+        ConsortiumVotingState
+          .withDefaultValues(hostingParticipants = Set(solo), approvals = Set(solo))
+          .isRejected shouldBe false
+        ConsortiumVotingState
+          .withDefaultValues(hostingParticipants = Set(solo), rejections = List(solo -> reject))
           .isApproved shouldBe false
         ConsortiumVotingState
-          .withDefaultValues(rejections = List(solo -> reject))
+          .withDefaultValues(hostingParticipants = Set(solo), rejections = List(solo -> reject))
           .isRejected shouldBe true
-        ConsortiumVotingState.withDefaultValues(abstains = Set(solo)).isApproved shouldBe false
-        ConsortiumVotingState.withDefaultValues(abstains = Set(solo)).isRejected shouldBe true
+        ConsortiumVotingState
+          .withDefaultValues(hostingParticipants = Set(solo), abstains = Set(solo))
+          .isApproved shouldBe false
+        ConsortiumVotingState
+          .withDefaultValues(hostingParticipants = Set(solo), abstains = Set(solo))
+          .isRejected shouldBe true
       }
 
       it("should work for threshold >= 2") {
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.two, approvals = Set(one))
+          .withDefaultValues(
+            PositiveInt.two,
+            hostingParticipants = Set(one, two),
+            approvals = Set(one),
+          )
           .isApproved shouldBe false
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.two, approvals = Set(one))
+          .withDefaultValues(
+            PositiveInt.two,
+            hostingParticipants = Set(one, two),
+            approvals = Set(one),
+          )
           .isRejected shouldBe false
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.two, approvals = Set(one, two))
+          .withDefaultValues(
+            PositiveInt.two,
+            hostingParticipants = Set(one, two),
+            approvals = Set(one, two),
+          )
           .isApproved shouldBe true
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one, two),
             rejections = List(three -> reject),
           )
@@ -769,13 +815,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.tryCreate(4),
-            Some(PositiveInt.tryCreate(5)),
+            hostingParticipants = Set(one, two, three, four, five),
             rejections = List(one -> reject, two -> reject),
           )
           .isRejected shouldBe true
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one),
             rejections = List(two -> reject, three -> reject),
           )
@@ -783,7 +830,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one),
             rejections = List(two -> reject, three -> reject),
           )
@@ -791,6 +838,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one),
             rejections = List(two -> reject, three -> reject),
           )
@@ -798,19 +846,29 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one),
             rejections = List(two -> reject, three -> reject),
           )
           .isRejected shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, approvals = Set(one, two, three))
+          .withDefaultValues(
+            PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
+            approvals = Set(one, two, three),
+          )
           .isApproved shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, rejections = List(one -> reject))
+          .withDefaultValues(
+            PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
+            rejections = List(one -> reject),
+          )
           .isRejected shouldBe true
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
             rejections = List(one -> reject, two -> reject, three -> reject),
           )
           .isRejected shouldBe true
@@ -818,14 +876,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            numberOfHostingParticipants = Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             abstains = Set(one),
           )
           .isRejected shouldBe false
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            numberOfHostingParticipants = Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             abstains = Set(one),
           )
           .isApproved shouldBe false
@@ -833,7 +891,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            numberOfHostingParticipants = Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             approvals = Set(one, two),
             abstains = Set(three),
           )
@@ -842,7 +900,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            numberOfHostingParticipants = Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             rejections = List(one -> reject, two -> reject),
             abstains = Set(three),
           )
@@ -851,14 +909,18 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
-            numberOfHostingParticipants = Some(PositiveInt.three),
+            hostingParticipants = Set(one, two, three),
             rejections = List(one -> reject),
             abstains = Set(three),
           )
           .isRejected shouldBe true
 
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, abstains = Set(one))
+          .withDefaultValues(
+            PositiveInt.three,
+            hostingParticipants = Set(one, two, three),
+            abstains = Set(one),
+          )
           .isRejected shouldBe true
       }
       it("should not allow a participant to respond with different verdicts") {
@@ -872,7 +934,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
         val state = ConsortiumVotingState.withDefaultValues(
           PositiveInt.two,
-          numberOfHostingParticipants = Some(PositiveInt.three),
+          hostingParticipants = Set(one, two, three),
           approvals = Set(one),
           rejections = List(two -> localReject),
           abstains = Set(three),
@@ -923,19 +985,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               alice -> PartyInfo(
                 PositiveInt.two,
                 Map(
-                  ParticipantId("one") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("two") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("tree") -> ParticipantAttributes(Confirmation),
+                  one -> ParticipantAttributes(Confirmation),
+                  two -> ParticipantAttributes(Confirmation),
+                  three -> ParticipantAttributes(Confirmation),
                 ),
               ),
               bob -> PartyInfo(
                 PositiveInt.three,
                 Map(
-                  ParticipantId("one") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("two") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("three") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("four") -> ParticipantAttributes(Confirmation),
-                  ParticipantId("five") -> ParticipantAttributes(Confirmation),
+                  one -> ParticipantAttributes(Confirmation),
+                  two -> ParticipantAttributes(Confirmation),
+                  three -> ParticipantAttributes(Confirmation),
+                  four -> ParticipantAttributes(Confirmation),
+                  five -> ParticipantAttributes(Confirmation),
                 ),
               ),
             ).view.filterKeys(parties.contains).toMap
@@ -959,9 +1021,21 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             view1Position -> ViewState(
               Map(
                 alice -> ConsortiumVotingState
-                  .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                  .withDefaultValues(
+                    PositiveInt.two,
+                    hostingParticipants = Set(one, two, three),
+                  ),
                 bob -> ConsortiumVotingState
-                  .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5))),
+                  .withDefaultValues(
+                    PositiveInt.three,
+                    hostingParticipants = Set(
+                      one,
+                      two,
+                      three,
+                      four,
+                      five,
+                    ),
+                  ),
               ),
               Seq(Quorum(aliceCp ++ bobCp, NonNegativeInt.three)),
               Nil,
@@ -969,7 +1043,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             view2Position -> ViewState(
               Map(
                 bob -> ConsortiumVotingState
-                  .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                  .withDefaultValues(
+                    PositiveInt.three,
+                    hostingParticipants = Set(
+                      one,
+                      two,
+                      three,
+                      four,
+                      five,
+                    ),
+                  )
               ),
               Seq(Quorum(bobCp, NonNegativeInt.two)),
               Nil,
@@ -1031,10 +1114,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view1Position -> ViewState(
                     Map(
                       alice -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                        .withDefaultValues(
+                          PositiveInt.two,
+                          hostingParticipants = Set(one, two, three),
+                        ),
                       bob -> ConsortiumVotingState.withDefaultValues(
                         PositiveInt.three,
-                        Some(PositiveInt.tryCreate(5)),
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
                         rejections = List(one -> testReject),
                       ),
                     ),
@@ -1044,7 +1136,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view2Position -> ViewState(
                     Map(
                       bob -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                        .withDefaultValues(
+                          PositiveInt.three,
+                          hostingParticipants = Set(
+                            one,
+                            two,
+                            three,
+                            four,
+                            five,
+                          ),
+                        )
                     ),
                     Seq(Quorum(bobCp, NonNegativeInt.two)),
                     Nil,
@@ -1094,10 +1195,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view1Position -> ViewState(
                     Map(
                       alice -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                        .withDefaultValues(
+                          PositiveInt.two,
+                          hostingParticipants = Set(one, two, three),
+                        ),
                       bob -> ConsortiumVotingState.withDefaultValues(
                         PositiveInt.three,
-                        Some(PositiveInt.tryCreate(5)),
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
                         approvals = Set(one),
                       ),
                     ),
@@ -1107,7 +1217,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view2Position -> ViewState(
                     Map(
                       bob -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                        .withDefaultValues(
+                          PositiveInt.three,
+                          hostingParticipants = Set(
+                            one,
+                            two,
+                            three,
+                            four,
+                            five,
+                          ),
+                        )
                     ),
                     Seq(Quorum(bobCp, NonNegativeInt.two)),
                     Nil,
@@ -1155,11 +1274,20 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   Map(
                     alice -> ConsortiumVotingState.withDefaultValues(
                       PositiveInt.two,
-                      Some(PositiveInt.tryCreate(3)),
+                      hostingParticipants = Set(one, two, three),
                       rejections = List(one -> testReject),
                     ),
                     bob -> ConsortiumVotingState
-                      .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5))),
+                      .withDefaultValues(
+                        PositiveInt.three,
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
+                      ),
                   ),
                   Seq(Quorum(aliceCp ++ bobCp, NonNegativeInt.three)),
                   Nil,
@@ -1167,7 +1295,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 view2Position -> ViewState(
                   Map(
                     bob -> ConsortiumVotingState
-                      .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                      .withDefaultValues(
+                        PositiveInt.three,
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
+                      )
                   ),
                   Seq(Quorum(bobCp, NonNegativeInt.two)),
                   Nil,
@@ -1228,10 +1365,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view1Position -> ViewState(
                     Map(
                       alice -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                        .withDefaultValues(
+                          PositiveInt.two,
+                          hostingParticipants = Set(one, two, three),
+                        ),
                       bob -> ConsortiumVotingState.withDefaultValues(
                         PositiveInt.three,
-                        Some(PositiveInt.tryCreate(5)),
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
                         rejections = List(three -> testReject, two -> testReject, one -> testReject),
                       ),
                     ),
@@ -1241,7 +1387,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view2Position -> ViewState(
                     Map(
                       bob -> ConsortiumVotingState
-                        .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                        .withDefaultValues(
+                          PositiveInt.three,
+                          hostingParticipants = Set(
+                            one,
+                            two,
+                            three,
+                            four,
+                            five,
+                          ),
+                        )
                     ),
                     Seq(Quorum(bobCp, NonNegativeInt.two)),
                     Nil,
@@ -1366,10 +1521,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               view1Position -> ViewState(
                 Map(
                   alice -> ConsortiumVotingState
-                    .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                    .withDefaultValues(
+                      PositiveInt.two,
+                      hostingParticipants = Set(one, two, three),
+                    ),
                   bob -> ConsortiumVotingState.withDefaultValues(
                     PositiveInt.three,
-                    Some(PositiveInt.tryCreate(5)),
+                    hostingParticipants = Set(
+                      one,
+                      two,
+                      three,
+                      four,
+                      five,
+                    ),
                     rejections = List(two -> reject2, one -> reject1),
                     abstains = Set(three),
                   ),
@@ -1381,7 +1545,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               view2Position -> ViewState(
                 Map(
                   bob -> ConsortiumVotingState
-                    .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                    .withDefaultValues(
+                      PositiveInt.three,
+                      hostingParticipants = Set(
+                        one,
+                        two,
+                        three,
+                        four,
+                        five,
+                      ),
+                    )
                 ),
                 Seq(Quorum(bobCp, NonNegativeInt.two)),
                 Nil,
@@ -1535,10 +1708,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 view1Position -> ViewState(
                   Map(
                     alice -> ConsortiumVotingState
-                      .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                      .withDefaultValues(
+                        PositiveInt.two,
+                        hostingParticipants = Set(one, two, three),
+                      ),
                     bob -> ConsortiumVotingState.withDefaultValues(
                       PositiveInt.three,
-                      Some(PositiveInt.tryCreate(5)),
+                      hostingParticipants = Set(
+                        one,
+                        two,
+                        three,
+                        four,
+                        five,
+                      ),
                       approvals = Set(one, two, three),
                     ),
                   ),
@@ -1548,7 +1730,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 view2Position -> ViewState(
                   Map(
                     bob -> ConsortiumVotingState
-                      .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                      .withDefaultValues(
+                        PositiveInt.three,
+                        hostingParticipants = Set(
+                          one,
+                          two,
+                          three,
+                          four,
+                          five,
+                        ),
+                      )
                   ),
                   Seq(Quorum(bobCp, NonNegativeInt.two)),
                   Nil,
@@ -1653,6 +1844,304 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             }
           }
         }
+      }
+    }
+
+    describe("metric about unresponsive parties") {
+      val fullInformeeTree =
+        FullInformeeTree.tryCreate(
+          GenTransactionTree.tryCreate(hashOps)(
+            submitterMetadata,
+            commonMetadata,
+            b(2),
+            MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(view1 :: Nil),
+          ),
+          testedProtocolVersion,
+        )
+      val requestId = RequestId(CantonTimestamp.Epoch)
+      val informeeMessage =
+        InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+
+      val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
+      when(
+        topologySnapshot.activeParticipantsOfPartiesWithInfo(any[Seq[LfPartyId]])(anyTraceContext)
+      )
+        .thenAnswer { (parties: Seq[LfPartyId]) =>
+          FutureUnlessShutdown.pure(
+            Map(
+              alice -> PartyInfo(
+                PositiveInt.two,
+                Map(
+                  one -> ParticipantAttributes(Confirmation),
+                  two -> ParticipantAttributes(Confirmation),
+                  three -> ParticipantAttributes(Confirmation),
+                ),
+              ),
+              bob -> PartyInfo(
+                PositiveInt.three,
+                Map(
+                  three -> ParticipantAttributes(Confirmation),
+                  four -> ParticipantAttributes(Confirmation),
+                  five -> ParticipantAttributes(Confirmation),
+                  six -> ParticipantAttributes(Confirmation),
+                ),
+              ),
+            ).view.filterKeys(parties.contains).toMap
+          )
+        }
+
+      val sut = ResponseAggregation
+        .fromRequest(
+          requestId,
+          informeeMessage,
+          requestId.unwrap.plusSeconds(300),
+          requestId.unwrap.plusSeconds(600),
+          topologySnapshot,
+          participantResponseDeadlineTick = None,
+        )
+        .futureValueUS
+
+      def countPartyParticipantPairs(
+          contexts: List[MetricsContext]
+      ): Map[(String, String), Int] =
+        contexts
+          .groupBy { ctx =>
+            val labels = ctx.labels
+            (labels("party"), labels("participant"))
+          }
+          .view
+          .mapValues(_.size)
+          .toMap
+
+      def countParticipants(contexts: List[MetricsContext]): Map[String, Int] =
+        contexts
+          .groupBy { ctx =>
+            ctx.labels("participant")
+          }
+          .view
+          .mapValues(_.size)
+          .toMap
+
+      it("should increment metric for non-responsive participants when timeout is called") {
+        // Create mock meter
+        val mockMeter = mock[Meter]
+
+        // Call timeout - this should increment the metric for each non-responsive participant
+        sut.timeout(mockMeter)
+
+        // Verify the metric was incremented
+        // The transaction has 2 views:
+        // - view1: alice (3 participants: one, two, three) + bob (4 participants: three, four, five, six)
+        // - view2: bob (4 participants: three, four, five, six)
+        // Note: participant "three" hosts both alice and bob
+        // Each (party, participant) pair is counted only once across all views to avoid
+        // distortion by transaction shape (participants typically respond for all views in one envelope)
+        // Total expected calls: 3 (alice) + 4 (bob) = 7
+
+        // Capture the MetricsContext arguments
+        val contextCaptor: ArgumentCaptor[MetricsContext] =
+          ArgumentCaptor.forClass(classOf[MetricsContext])
+        verify(mockMeter, times(7)).mark()(contextCaptor.capture())
+
+        // Verify the correct party-participant pairs were tracked
+        val capturedContexts = contextCaptor.getAllValues.asScala.toList
+
+        // Count occurrences of each (party, participant) pair
+        val pairCounts = countPartyParticipantPairs(capturedContexts)
+
+        // Alice appears only in view1 (3 participants: one, two, three) - each counted once
+        pairCounts((partyAlice, one.toLf)) shouldBe 1
+        pairCounts((partyAlice, two.toLf)) shouldBe 1
+        pairCounts((partyAlice, three.toLf)) shouldBe 1
+
+        // Bob appears in both view1 and view2 (4 participants: three, four, five, six)
+        // but each is counted only once due to deduplication
+        pairCounts((partyBob, three.toLf)) shouldBe 1
+        pairCounts((partyBob, four.toLf)) shouldBe 1
+        pairCounts((partyBob, five.toLf)) shouldBe 1
+        pairCounts((partyBob, six.toLf)) shouldBe 1
+      }
+
+      it(
+        "should only track non-responsive participants for parties that haven't reached threshold"
+      ) {
+        // First, let alice reach its threshold by having 2 participants approve
+        val responses = Seq(one, two).map(participant =>
+          ConfirmationResponses.tryCreate(
+            requestId,
+            informeeMessage.rootHash,
+            synchronizerId,
+            participant,
+            NonEmpty.mk(
+              Seq,
+              ConfirmationResponse.tryCreate(
+                Some(view1Position),
+                LocalApprove(testedProtocolVersion),
+                Set(alice),
+              ),
+            ),
+            testedProtocolVersion,
+          )
+        )
+
+        when(
+          topologySnapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(
+            anyTraceContext
+          )
+        )
+          .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+            FutureUnlessShutdown.pure(parties)
+          }
+
+        val afterResponse2 = responses.zipWithIndex
+          .foldLeft(sut) { case (aggregation, (response, idx)) =>
+            aggregation
+              .validateAndProgress(
+                requestId.unwrap.plusSeconds((idx + 1).toLong),
+                response,
+                topologySnapshot,
+              )
+              .futureValueUS
+              .value
+          }
+
+        // Create mock meter
+        val mockMeter = mock[Meter]
+
+        // Call timeout
+        afterResponse2.timeout(mockMeter)
+
+        // Verify the metric was only incremented for bob's non-responsive participants
+        // Alice reached threshold in view1 (2 approvals), so no metric for alice in view1
+        // Bob has threshold=3 in both views, hosted by three, four, five, six - all non-responsive
+        // Each (party, participant) pair is counted only once across all views
+        // Total expected calls: 0 (alice satisfied) + 4 (bob) = 4
+
+        val contextCaptor: ArgumentCaptor[MetricsContext] =
+          ArgumentCaptor.forClass(classOf[MetricsContext])
+        verify(mockMeter, times(4)).mark()(contextCaptor.capture())
+
+        val capturedContexts = contextCaptor.getAllValues.asScala.toList
+        val actualParties = capturedContexts.map { ctx =>
+          ctx.labels("party")
+        }.toSet
+
+        // All captured contexts should be for bob only (alice reached threshold in view1)
+        actualParties shouldBe Set(partyBob)
+
+        // Bob's participants should each appear exactly once (deduplicated across views)
+        val bobParticipantCounts = countParticipants(capturedContexts)
+
+        bobParticipantCounts(three.toLf) shouldBe 1
+        bobParticipantCounts(four.toLf) shouldBe 1
+        bobParticipantCounts(five.toLf) shouldBe 1
+        bobParticipantCounts(six.toLf) shouldBe 1
+      }
+
+      it(
+        "should not mark participants as unresponsive when they send rejections or abstains"
+      ) {
+        // Have participant "three" reject for bob, and participant "one" abstain for alice
+        // This tests that participants who send rejections or abstains are not marked as unresponsive
+        val testReject = LocalRejectError.ConsistencyRejections.LockedContracts
+          .Reject(Seq())
+          .toLocalReject(testedProtocolVersion)
+        val rejectResponse = ConfirmationResponses.tryCreate(
+          requestId,
+          informeeMessage.rootHash,
+          synchronizerId,
+          three,
+          NonEmpty.mk(
+            Seq,
+            // Send rejection for both view1 and view2
+            ConfirmationResponse.tryCreate(
+              Some(view1Position),
+              testReject,
+              Set(bob),
+            ),
+            ConfirmationResponse.tryCreate(
+              Some(view2Position),
+              testReject,
+              Set(bob),
+            ),
+          ),
+          testedProtocolVersion,
+        )
+        val abstainResponse = ConfirmationResponses.tryCreate(
+          requestId,
+          informeeMessage.rootHash,
+          synchronizerId,
+          one,
+          NonEmpty.mk(
+            Seq,
+            ConfirmationResponse.tryCreate(
+              Some(view1Position),
+              LocalAbstain(com.google.rpc.status.Status(), testedProtocolVersion),
+              Set(alice),
+            ),
+          ),
+          testedProtocolVersion,
+        )
+        val responses = Seq(rejectResponse, abstainResponse)
+
+        when(
+          topologySnapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(
+            anyTraceContext
+          )
+        )
+          .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+            FutureUnlessShutdown.pure(parties)
+          }
+
+        val afterResponses = responses.zipWithIndex
+          .foldLeft(sut) { case (aggregation, (response, idx)) =>
+            aggregation
+              .validateAndProgress(
+                requestId.unwrap.plusSeconds((idx + 1).toLong),
+                response,
+                topologySnapshot,
+              )
+              .futureValueUS
+              .value
+          }
+
+        // Create mock meter
+        val mockMeter = mock[Meter]
+
+        // Call timeout
+        afterResponses.timeout(mockMeter)
+
+        // Verify the metric was incremented
+        // The transaction has view1 (alice + bob) with subview view2 (bob only)
+        // Participant "one" sent abstain for alice in view1
+        // Participant "three" sent rejection for bob in BOTH view1 and view2
+        // Alice in view1: one sent abstain (responsive), two and three (unresponsive) = 2
+        // Bob in view1: three sent rejection (responsive), four, five, six (unresponsive) = 3
+        // Bob in view2: three sent rejection (responsive), four, five, six (unresponsive) = 3
+        // With deduplication: (alice,two), (alice,three), (bob,four), (bob,five), (bob,six)
+        // Total expected calls: 2 (alice) + 3 (bob) = 5
+        val contextCaptor: ArgumentCaptor[MetricsContext] =
+          ArgumentCaptor.forClass(classOf[MetricsContext])
+        verify(mockMeter, atLeast(1)).mark()(contextCaptor.capture())
+
+        // Analyze what was actually captured
+        val capturedContexts = contextCaptor.getAllValues.asScala.toList
+        capturedContexts.size shouldBe 5
+
+        val pairCounts = countPartyParticipantPairs(capturedContexts)
+
+        // Alice: only participants "two" and "three" should be counted (one sent abstain)
+        // This demonstrates that participants who send abstains are not marked as unresponsive
+        pairCounts.get((partyAlice, one.toLf)) shouldBe None
+        pairCounts((partyAlice, two.toLf)) shouldBe 1
+        pairCounts((partyAlice, three.toLf)) shouldBe 1
+
+        // Bob: participant "three" sent rejections for both views, so should NOT be counted
+        // This demonstrates that participants who send rejections are not marked as unresponsive
+        pairCounts.get((partyBob, three.toLf)) shouldBe None
+        pairCounts((partyBob, four.toLf)) shouldBe 1
+        pairCounts((partyBob, five.toLf)) shouldBe 1
+        pairCounts((partyBob, six.toLf)) shouldBe 1
       }
     }
   }

@@ -119,10 +119,11 @@ trait ConnectionPoolTestHelpers {
       index: Int,
       endpointIndexO: Option[Int] = None,
       expectedSequencerIdO: Option[SequencerId] = None,
+      namePrefix: String = "test",
   ): ConnectionXConfig = {
     val endpoint = Endpoint(s"does-not-exist-${endpointIndexO.getOrElse(index)}", Port.tryCreate(0))
     ConnectionXConfig(
-      name = s"test-$index",
+      name = s"$namePrefix-$index",
       endpoint = endpoint,
       transportSecurity = false,
       customTrustCertificates = None,
@@ -183,9 +184,14 @@ trait ConnectionPoolTestHelpers {
       trustThreshold: PositiveInt,
       expectedSynchronizerIdO: Option[PhysicalSynchronizerId] = None,
       poolDelays: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+      namePrefix: String = "test",
   ): SequencerConnectionXPoolConfig = {
     val configs =
-      NonEmpty.from((0 until nbConnections.unwrap).map(mkDummyConnectionConfig(_))).value
+      NonEmpty
+        .from(
+          (0 until nbConnections.unwrap).map(mkDummyConnectionConfig(_, namePrefix = namePrefix))
+        )
+        .value
 
     SequencerConnectionXPoolConfig(
       connections = configs,
@@ -206,6 +212,8 @@ trait ConnectionPoolTestHelpers {
       testTimeouts: ProcessingTimeout = timeouts,
       poolDelays: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       blockValidation: Int => Boolean = _ => false,
+      metrics: SequencerConnectionPoolMetrics = CommonMockMetrics.sequencerClient.connectionPool,
+      namePrefix: String = "test",
   )(
       f: (
           SequencerConnectionXPool,
@@ -219,6 +227,7 @@ trait ConnectionPoolTestHelpers {
       trustThreshold,
       expectedSynchronizerIdO,
       poolDelays,
+      namePrefix,
     )
 
     val validationBlocker = new TestValidationBlocker(blockValidation)
@@ -232,7 +241,7 @@ trait ConnectionPoolTestHelpers {
       wallClock,
       testCrypto.crypto,
       Some(seedForRandomness),
-      metrics = CommonMockMetrics.sequencerClient.connectionPool,
+      metrics = metrics,
       futureSupervisor,
       testTimeouts,
       loggerFactory,
@@ -447,6 +456,7 @@ protected object ConnectionPoolTestHelpers {
       attributesForConnection,
       responsesForConnection,
       validationBlocker,
+      metrics,
       futureSupervisor,
       timeouts,
       loggerFactory,
@@ -498,6 +508,7 @@ protected object ConnectionPoolTestHelpers {
       attributesForConnection: Int => ConnectionAttributes,
       responsesForConnection: PartialFunction[Int, TestResponses],
       validationBlocker: TestValidationBlocker,
+      metrics: SequencerConnectionPoolMetrics,
       futureSupervisor: FutureSupervisor,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -509,7 +520,8 @@ protected object ConnectionPoolTestHelpers {
         esf: ExecutionSequencerFactory,
         materializer: Materializer,
     ): InternalSequencerConnectionX = {
-      val s"test-$indexStr" = config.name: @unchecked
+      val nameRegex = raw".*-(\d+)".r
+      val nameRegex(indexStr) = config.name: @unchecked
       val index = indexStr.toInt
 
       val attributes = attributesForConnection(index)
@@ -541,7 +553,7 @@ protected object ConnectionPoolTestHelpers {
         minimumProtocolVersion = minimumProtocolVersion,
         keepAliveClientConfigO = None,
         stubFactory = stubFactory,
-        metrics = CommonMockMetrics.sequencerClient.connectionPool,
+        metrics = metrics,
         metricsContext = MetricsContext.Empty,
         futureSupervisor = futureSupervisor,
         timeouts = timeouts,

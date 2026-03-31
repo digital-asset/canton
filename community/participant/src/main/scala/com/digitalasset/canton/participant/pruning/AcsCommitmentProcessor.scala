@@ -92,6 +92,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -215,6 +216,7 @@ class AcsCommitmentProcessor private (
     participantId: ParticipantId,
     sequencerClient: SequencerClientSend,
     synchronizerCrypto: SyncCryptoClient[SyncCryptoApi],
+    topologySnapshotUnsynchronized: Option[CantonTimestamp => TopologySnapshot],
     sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     store: AcsCommitmentStore,
     pruningObserver: TraceContext => Unit,
@@ -2002,6 +2004,7 @@ class AcsCommitmentProcessor private (
           participantId,
           commitmentSnapshot,
           synchronizerCrypto,
+          topologySnapshotUnsynchronized,
           period.toInclusive,
           Some(metrics),
           threadCount,
@@ -2371,6 +2374,7 @@ class AcsCommitmentProcessor private (
               participantId,
               snapshot,
               synchronizerCrypto,
+              topologySnapshotUnsynchronized,
               period.toInclusive,
               Some(metrics),
               threadCount,
@@ -2771,6 +2775,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       participantId: ParticipantId,
       sequencerClient: SequencerClientSend,
       synchronizerCrypto: SyncCryptoClient[SyncCryptoApi],
+      topologySnapshotUnsynchronized: Option[CantonTimestamp => TopologySnapshot],
       sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
       store: AcsCommitmentStore,
       pruningObserver: TraceContext => Unit,
@@ -2835,6 +2840,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         participantId,
         sequencerClient,
         synchronizerCrypto,
+        topologySnapshotUnsynchronized,
         sortedReconciliationIntervalsProvider,
         store,
         pruningObserver,
@@ -2935,6 +2941,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       participantId: ParticipantId,
       runningCommitments: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
       synchronizerCrypto: SyncCryptoClient[SyncCryptoApi],
+      topologySnapshotUnsynchronized: Option[CantonTimestamp => TopologySnapshot],
       timestamp: CantonTimestampSecond,
       pruningMetrics: Option[CommitmentMetrics],
       parallelism: PositiveNumeric[Int],
@@ -2962,6 +2969,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         participantId,
         externalizedRunningCommitments,
         synchronizerCrypto,
+        topologySnapshotUnsynchronized,
         timestamp,
         parallelism,
       )
@@ -3014,6 +3022,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       participantId: ParticipantId,
       runningCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
       synchronizerCrypto: SyncCryptoClient[SyncCryptoApi],
+      topologySnapshotUnsynchronized: Option[CantonTimestamp => TopologySnapshot],
       timestamp: CantonTimestampSecond,
       parallelism: PositiveNumeric[Int],
   )(implicit
@@ -3029,10 +3038,16 @@ object AcsCommitmentProcessor extends HasLoggerName {
       isActiveParticipant <-
         ipsSnapshot.isParticipantActive(participantId)
 
+      snapshotForPartyLookup = topologySnapshotUnsynchronized
+        // It is permissible to construct a DB snapshot for the given timestamp directly,
+        // because we awaited for the snapshot at `timestamp` to become available with `awaitIpsSnapshot` before.
+        .map(_.apply(timestamp.forgetRefinement))
+        .getOrElse(ipsSnapshot)
+
       byParticipant <-
         if (isActiveParticipant) {
           val allParties = runningCommitments.keySet.flatten
-          ipsSnapshot
+          snapshotForPartyLookup
             .activeParticipantsOfParties(allParties.toSeq)
             .flatMap { participantsOf =>
               FutureUnlessShutdown.outcomeF(

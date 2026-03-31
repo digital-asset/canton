@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DbStorage.DbAction.{All, ReadTransactional}
 import com.digitalasset.canton.resource.DbStorageMulti.passiveInstanceHealthState
@@ -45,8 +45,8 @@ final class DbStorageMulti private (
     generalDb: Database,
     private[resource] val writeConnectionPool: DbLockedConnectionPool,
     val dbConfig: DbConfig,
-    onActive: () => FutureUnlessShutdown[Unit],
-    onPassive: () => FutureUnlessShutdown[Option[CloseContext]],
+    onActive: TracedLogger => FutureUnlessShutdown[Unit],
+    onPassive: TracedLogger => FutureUnlessShutdown[Option[CloseContext]],
     checkPeriod: PositiveFiniteDuration,
     clock: Clock,
     closeClock: Boolean,
@@ -86,10 +86,10 @@ final class DbStorageMulti private (
           // We have a transition of the activeness
           val transitionReplicaState =
             if (connectionPoolActive)
-              onActive()
+              onActive(logger)
                 .thereafter(_ => reportHealthState(ComponentHealthState.Ok()))
             else
-              onPassive()
+              onPassive(logger)
                 .map(sessionCloseContext.set)
                 .thereafter(_ => reportHealthState(passiveInstanceHealthState))
 
@@ -226,8 +226,9 @@ object DbStorageMulti {
       writePoolSize: PositiveInt,
       mainLockCounter: DbLockCounter,
       poolLockCounter: DbLockCounter,
-      onActive: () => FutureUnlessShutdown[Unit],
-      onPassive: () => FutureUnlessShutdown[Option[CloseContext]],
+      onActive: TracedLogger => FutureUnlessShutdown[Unit],
+      onPassive: TracedLogger => FutureUnlessShutdown[Option[CloseContext]],
+      mustStayActive: Boolean,
       metrics: DbStorageMetrics,
       logQueryCost: Option[QueryCostMonitoringConfig],
       customClock: Option[Clock],
@@ -247,7 +248,9 @@ object DbStorageMulti {
     // By default, ensure that storage runs with wallclock for its health checks
     val clock: Clock = customClock.getOrElse(new WallClock(timeouts, loggerFactory))
 
-    logger.info(s"Creating storage, num-reads: $readPoolSize, num-writes: $writePoolSize")
+    logger.info(
+      s"Creating storage, num-reads: $readPoolSize, num-writes: $writePoolSize, must-stay-active: $mustStayActive"
+    )
     for {
       generalDb <- DbStorage
         .createDatabase(
@@ -297,6 +300,7 @@ object DbStorageMulti {
           futureSupervisor,
           loggerFactory,
           writeExecutor,
+          mustStayActive,
         )
         .leftMap(err => s"Failed to create write connection pool: $err")
         .toEitherT[UnlessShutdown]

@@ -442,6 +442,19 @@ class MediatorMetrics(
     )(
       MetricsContext.Empty
     )
+
+  val timeoutNonResponsiveParticipants: Meter = openTelemetryMetricsFactory.meter(
+    MetricInfo(
+      prefix :+ "timeout-non-responsive-participants",
+      summary = "Count of participants that failed to respond for parties before timeout",
+      description =
+        """This metric tracks participant non-responsiveness during confirmation request timeouts.
+          |When a mediator times out a transaction, it increments this counter once for each party
+          |that the participant hosts (with confirmation rights) but did not respond for.
+          |The metric includes labels for both the party and the participant to enable detailed analysis.""",
+      qualification = MetricQualification.Debug,
+    )
+  )
 }
 
 object MediatorMetrics {

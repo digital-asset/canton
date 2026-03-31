@@ -6,6 +6,7 @@ package com.digitalasset.canton.metrics
 import cats.Eval
 import com.daml.metrics.api.*
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory}
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 
@@ -81,7 +82,9 @@ class SequencerConnectionPoolMetrics(
 
   // TODO(i28571): Factor this pattern into a helper class
   // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
-  private val connectionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] = TrieMap.empty
+  @VisibleForTesting
+  private[canton] val connectionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] =
+    TrieMap.empty
   def connectionHealth(mc: MetricsContext): Gauge[Int] = {
     def createConnectionHealthGauge: Gauge[Int] = metricsFactory.gauge(
       MetricInfo(
@@ -100,6 +103,26 @@ class SequencerConnectionPoolMetrics(
     // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
     // until the getOrElseUpdate call has finished.
     connectionHealthMetrics.getOrElseUpdate(mc, Eval.later(createConnectionHealthGauge)).value
+  }
+
+  def removeMetricsForAllConnections(): Unit = {
+    connectionHealthMetrics.values.foreach(_.value.close)
+    connectionHealthMetrics.clear()
+
+    subscriptionHealthMetrics.values.foreach(_.value.close)
+    subscriptionHealthMetrics.clear()
+  }
+
+  def removeMetricsForConnection(toRemove: Set[String]): Unit = {
+    // remove from map
+    val connsToRemove = connectionHealthMetrics.keys
+      .filter(_.labels.get("connection").exists(toRemove(_)))
+    connsToRemove.foreach(mc => connectionHealthMetrics.remove(mc).foreach(_.value.close()))
+
+    val subsToRemove = subscriptionHealthMetrics.keys
+      .filter(_.labels.get("connection").exists(toRemove(_)))
+    subsToRemove
+      .foreach(mc => subscriptionHealthMetrics.remove(mc).foreach(_.value.close))
   }
 
   // Gauges don't support metrics context per update. So instead create a map with a gauge per context.

@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.{DbConfig, DbLockedConnectionPoolConfig, P
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -353,6 +354,7 @@ object DbLockedConnectionPool {
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
       writeExecutor: AsyncExecutorWithShutdown,
+      mustStayActive: Boolean = false,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -418,8 +420,46 @@ object DbLockedConnectionPool {
         mainExecutor,
       )
 
-      // Wait until main connection is either active or passive before returning the connection pool
-      _ = DbLockedConnection.awaitInitialized(mainConnection, 50, 200, tracedLogger)
+      waitInMs = 200L
+
+      _ = if (!mustStayActive) {
+        val maxRetries = {
+          val retries = config.initialLockedConnectionTimeout.asJava.toMillis / waitInMs
+          Math.min(retries, Int.MaxValue).toInt
+        }
+        // Wait until main connection is either active or passive before returning the connection pool
+        DbLockedConnection.awaitInitialized(mainConnection, maxRetries, waitInMs, tracedLogger)
+      } else ()
+
+      _ <-
+        if (mustStayActive) {
+          val maxRetries = {
+            val retries = config.initialMustRemainActiveConnectionTimeout.asJava.toMillis / waitInMs
+            Math.min(retries, Int.MaxValue).toInt
+          }
+          // Wait until main connection is active before returning the connection pool. otherwise crash.
+          // Important that if lock is not acquired, error is propagated to shut down the node.
+          DbLockedConnection
+            .awaitActive(mainConnection, maxRetries, waitInMs, tracedLogger)
+            .value match {
+            case Outcome(result) =>
+              result.leftMap {
+                case DbLockedConnectionError.DbLockNotAcquired =>
+                  DbLockedConnectionPoolError.FailedToAllocateLockId(
+                    DbLockError.FailedToAcquireLock(mainLockId, "failed to acquire lock")
+                  )
+                case DbLockedConnectionError.DbConnectionNotAvailable(_) =>
+                  DbLockedConnectionPoolError.FailedToCreateDataSource(
+                    "db connection not available"
+                  )
+              }
+            case AbortedDueToShutdown =>
+              Left(
+                DbLockedConnectionPoolError.FailedToCreateDataSource("aborted due to shutdown")
+              )
+          }
+        } else Right(())
+
     } yield {
       new DbLockedConnectionPool(
         ds,

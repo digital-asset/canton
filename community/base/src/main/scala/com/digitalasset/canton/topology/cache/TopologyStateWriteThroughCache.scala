@@ -225,18 +225,19 @@ trait TopologyStateLookup extends TopologyStateLookupByNamespace {
   def lookupForUids(
       asOf: EffectiveTime,
       asOfInclusive: Boolean,
-      uid: NonEmpty[Seq[UniqueIdentifier]],
+      uids: NonEmpty[Seq[UniqueIdentifier]],
       transactionTypes: Set[Code],
       op: TopologyChangeOp = TopologyChangeOp.Replace,
       warnIfUncached: Boolean = false,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Map[UniqueIdentifier, Seq[GenericStoredTopologyTransaction]]] = MonadUtil
-    .sequentialTraverse(uid)(
-      lookupForUid(asOf, asOfInclusive, _, transactionTypes, op, warnIfUncached)
-    )
-    .map(seq => uid.toSeq.zip(seq).toMap)
+  ): FutureUnlessShutdown[Map[UniqueIdentifier, Seq[GenericStoredTopologyTransaction]]] =
+    uids.forgetNE
+      .parTraverse(uid =>
+        lookupForUid(asOf, asOfInclusive, uid, transactionTypes, op, warnIfUncached).map(uid -> _)
+      )
+      .map(_.toMap)
 
 }
 
@@ -952,11 +953,11 @@ class TopologyStateWriteThroughCache(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[Map[Namespace, Seq[GenericStoredTopologyTransaction]]] =
-    MonadUtil
-      .sequentialTraverse(ns)(
-        lookupForNamespace(asOf, asOfInclusive, _, transactionTypes, op, warnIfUncached)
+    ns.forgetNE
+      .parTraverse(n =>
+        lookupForNamespace(asOf, asOfInclusive, n, transactionTypes, op, warnIfUncached).map(n -> _)
       )
-      .map(seq => ns.toSeq.zip(seq).toMap)
+      .map(_.toMap)
 
   /** Find the current transaction active for the given unique key
     *

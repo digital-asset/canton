@@ -100,7 +100,7 @@ private[service] class GrpcManagedSubscription[T](
   private val handler: SequencedEventOrErrorHandler[SequencedEventError] = {
     case Right(event) =>
       implicit val traceContext: TraceContext = event.traceContext
-      synchronizeWithClosing("grpc-managed-subscription-handler")(
+      unlessClosing(
         grpcObserverHandle.onNext(toSubscriptionResponse(event)).map(Right(_))
       )
         .recover { case NonFatal(e) =>

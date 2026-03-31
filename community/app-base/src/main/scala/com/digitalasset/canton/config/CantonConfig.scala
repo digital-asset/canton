@@ -502,6 +502,8 @@ final case class CantonConfig(
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
         commitmentReduceParallelism = participantParameters.commitmentReduceParallelism,
+        commitmentUseDbSnapshotForParticipantLookup =
+          participantParameters.commitmentUseDbSnapshotForParticipantLookup,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
       )
     }

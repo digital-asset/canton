@@ -548,8 +548,76 @@ paths:
       - apiKeyAuth: []
   /v2/package-vetting:
     get:
-      description: List vetted packages
+      description: |-
+        Lists which participant node vetted what packages on which synchronizer.
+        This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.
       operationId: getV2Package-vetting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListVettedPackagesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListVettedPackagesResponse'
+        '400':
+          description: 'Invalid value for: body, Invalid value for: headers'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+    post:
+      description: |-
+        Update the vetted packages of this participant
+        This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.
+      operationId: postV2Package-vetting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVettedPackagesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateVettedPackagesResponse'
+        '400':
+          description: 'Invalid value for: body, Invalid value for: headers'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/package-vetting/list:
+    post:
+      operationId: postV2Package-vettingList
       requestBody:
         content:
           application/json:
@@ -578,9 +646,10 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/package-vetting/update:
     post:
       description: Update vetted packages
-      operationId: postV2Package-vetting
+      operationId: postV2Package-vettingUpdate
       requestBody:
         content:
           application/json:

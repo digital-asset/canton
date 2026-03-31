@@ -395,7 +395,9 @@ class SequencerNodeBootstrap(
         logger.info(
           "Received a request to initialize an already initialized sequencer. Skipping initialization!"
         )
-        EitherT.pure(InitializeSequencerResponse(replicated = config.sequencer.supportsReplicas))
+        EitherT.pure(
+          InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
+        )
       } else {
         completeWithExternalUS {
           logger.info(
@@ -426,7 +428,7 @@ class SequencerNodeBootstrap(
             Some(request.topologySnapshot -> request.sequencerSnapshot),
           )
         }.map { _ =>
-          InitializeSequencerResponse(replicated = config.sequencer.supportsReplicas)
+          InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
         }
       }
 

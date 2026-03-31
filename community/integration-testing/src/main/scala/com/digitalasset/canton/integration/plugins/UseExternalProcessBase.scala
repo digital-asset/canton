@@ -71,6 +71,7 @@ trait UseExternalProcessBase[Config] extends EnvironmentSetupPlugin with NamedLo
   def kill(instanceName: String, force: Boolean = true): Unit = handler.tryKill(instanceName, force)
   def stop(instanceName: String): Unit = handler.stopAndRemove(instanceName)
   def isRunning(instanceName: String): Boolean = handler.tryIsRunning(instanceName)
+  def processHasCrashed(instanceName: String): Boolean = handler.processHasCrashed(instanceName)
   def restart(instanceName: String): Unit = handler.tryRestart(instanceName)
   def config(instanceName: String): Config = handler.tryInfo(instanceName)
 }
