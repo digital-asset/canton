@@ -9,6 +9,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.AcsInspection
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -55,7 +56,10 @@ class InvalidUnassignmentRequestIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
-      .addConfigTransforms(ProgrammableSequencer.configOverride(getClass.toString, loggerFactory))
+      .addConfigTransforms(
+        ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+      )
       .withSetup { implicit env =>
         import env.*
 

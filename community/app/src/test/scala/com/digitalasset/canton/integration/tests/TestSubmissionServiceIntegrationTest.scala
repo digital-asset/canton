@@ -9,9 +9,8 @@ import com.daml.ledger.api.v2.transaction.Transaction.toJavaProto
 import com.daml.ledger.api.v2.value.Value
 import com.daml.ledger.api.v2.value.Value.Sum
 import com.daml.ledger.javaapi.data.Transaction
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.console.LocalParticipantReference
-import com.digitalasset.canton.damltestsdev.java.basickeys.{BasicKey, KeyOps}
+import com.digitalasset.canton.damltestslf23.java.basickeys.{BasicKey, KeyOps}
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -124,11 +123,11 @@ abstract sealed class TestSubmissionServiceIntegrationTestStableLf
   }
 }
 
-abstract sealed class TestSubmissionServiceIntegrationTestDevLf
+abstract sealed class TestSubmissionServiceIntegrationTestLF23
     extends TestSubmissionServiceIntegrationTest {
-  override def cantonTestsPath: String = CantonTestsDevPath
+  override def cantonTestsPath: String = CantonTestsLF23Path
 
-  "Create, fetch and lookup by key" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+  "Create, fetch and lookup by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
     implicit env =>
       import env.*
 
@@ -294,8 +293,6 @@ class ReferenceTestSubmissionServiceIntegrationTestPostgresStableLf
     extends TestSubmissionServiceIntegrationTestStableLf
     with TestSubmissionServiceReferenceSequencerPostgresTest
 
-@NuckTest
-@RollbackTest
-class ReferenceTestSubmissionServiceIntegrationTestPostgresDevLf
-    extends TestSubmissionServiceIntegrationTestDevLf
+class ReferenceTestSubmissionServiceIntegrationTestPostgresLF23
+    extends TestSubmissionServiceIntegrationTestLF23
     with TestSubmissionServiceReferenceSequencerPostgresTest

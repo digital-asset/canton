@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DbLockedConnectionPoolConfig,
@@ -34,10 +33,11 @@ import com.digitalasset.canton.integration.{
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.macros.syntax.lens.*
 
+import scala.concurrent.duration.*
+
 /** Two simultaneous block-based sequencers must not write to the database. The one that does not
   * acquire the lock (passive) should get killed.
   */
-@UnstableTest // TODO(#31490)
 class SimultaneousSequencerNodesIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
@@ -163,9 +163,13 @@ class SimultaneousSequencerNodesIntegrationTest
       loggerFactory.suppressWarningsAndErrors {
         externalPlugin.start(remoteSequencer1.name)
         remoteSequencer1.health.wait_for_initialized()
+        // make sure sequencer1 is functional again
+        mediator1.sequencer_connection.set(
+          SequencerConnections.single(remoteSequencer1.sequencerConnection)
+        )
+        participant1.health.ping(participant1)
       }
-
-      eventually() {
+      eventually(30.seconds) {
         remoteSequencer2.health.is_running() shouldBe false
         externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
       }
@@ -173,16 +177,7 @@ class SimultaneousSequencerNodesIntegrationTest
       externalPlugin.isRunning(remoteSequencer2.name) shouldBe true
       externalPlugin.kill(remoteSequencer2.name)
       externalPlugin.isRunning(remoteSequencer2.name) shouldBe false
-
       toxic.remove()
-
-      loggerFactory.suppressWarningsAndErrors {
-        // make sure sequencer1 is functional again
-        mediator1.sequencer_connection.set(
-          SequencerConnections.single(remoteSequencer1.sequencerConnection)
-        )
-        participant1.health.ping(participant1)
-      }
     }
   }
 

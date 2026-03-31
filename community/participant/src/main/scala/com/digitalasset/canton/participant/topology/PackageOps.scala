@@ -351,7 +351,10 @@ class PackageOpsImpl(
           topologyStore
             .findPositiveTransactions(
               asOf = asOf,
-              asOfInclusive = true,
+              // The approximate timestamp is actually
+              // the successor of the last effective snapshot's approximate timestamp,
+              // so the asOf query must be exclusive.
+              asOfInclusive = false,
               isProposal = false,
               types = Seq(VettedPackages.code),
               filterUid = participantsFilter.map(_.toSeq.map(_.uid)),

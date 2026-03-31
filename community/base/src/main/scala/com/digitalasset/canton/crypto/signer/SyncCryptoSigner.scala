@@ -24,6 +24,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.KmsMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.Clock
@@ -106,6 +107,7 @@ object SyncCryptoSigner {
       member: Member,
       crypto: SynchronizerCrypto,
       cryptoConfig: CryptoConfig,
+      kmsMetrics: Option[KmsMetrics],
       publicKeyConversionCacheConfig: CacheConfig,
       futureSupervisor: FutureSupervisor,
       timeouts: ProcessingTimeout,
@@ -117,6 +119,7 @@ object SyncCryptoSigner {
         staticSynchronizerParameters,
         member,
         crypto.privateCrypto,
+        kmsMetrics,
         crypto.cryptoPrivateStore,
         cryptoConfig.sessionSigningKeys,
         publicKeyConversionCacheConfig,
@@ -143,6 +146,9 @@ object SyncCryptoSigner {
     *   Optional timestamp defining the end of the validity period — the latest time at which a
     *   signature verification is expected to succeed. The chosen session signing key may be valid
     *   for longer.
+    *
+    * A validity period end of `CantonTimestamp.MaxValue` indicates that a session signing key is
+    * not expected to be used, so any fallback to the long-term key is not recorded.
     */
   final case class SigningTimestampOverrides(
       approximateTimestamp: CantonTimestamp,

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submission
 
 import com.daml.ledger.javaapi.data.Party
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
@@ -25,8 +24,6 @@ import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class PruningITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -49,7 +46,7 @@ class PruningITSpec
   }
 
   "benchtool" should {
-    "benchmark pruning" onlyRunWithOrGreaterThan ProtocolVersion.dev in { env =>
+    "benchmark pruning" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
       import env.*
 
       val reconciliationInterval: java.time.Duration = participant1.topology.synchronizer_parameters

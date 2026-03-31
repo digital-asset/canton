@@ -133,8 +133,6 @@ final class ProtobufCompatibilityReaderTest
   val acceptedBreakingChanges = Seq(
     // Contract id recomputation had to be removed
     """com/digitalasset/canton/admin/participant/v30/acs_import.proto:Previously present enum value "3" on enum "ContractImportMode" was deleted.""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present field "3" with name "allow_contract_id_suffix_recomputation" on message "ImportAcsOldRequest" was deleted.""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present field "1" with name "contract_id_mapping" on message "ImportAcsOldResponse" was deleted.""",
     """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present field "1" with name "contract_id_mappings" on message "ImportAcsResponse" was deleted.""",
     // Internal classes that should have been marked as alpha/unsable
     """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "3" with name "message_id" on message "OrderingRequest" changed type from "bytes" to "string".""",

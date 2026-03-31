@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.logging.pretty
 
-import com.digitalasset.canton.util.{ErrorUtil, ShowUtil}
+import com.digitalasset.canton.util.{ShowUtil, ThrowableUtil}
 import pprint.{PPrinter, Tree}
 
 /** Type class indicating that pretty printing is enabled for type `T`.
@@ -64,7 +64,7 @@ object Pretty extends ShowUtil with PrettyUtil with PrettyInstances {
           if (crashOnPrettyPrintingErrors) {
             throw err
           } else {
-            ErrorUtil.messageWithStacktrace(err)
+            ThrowableUtil.messageWithStacktrace(err)
           }
       }
 

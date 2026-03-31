@@ -160,12 +160,23 @@ private[reassignment] class AssignmentValidation(
         parsedRequest
       )
 
+      multiSynchronizerCheckResult <-
+        ReassignmentValidation
+          .checkMultiSynchronizerEnabled(
+            topologySnapshot = parsedRequest.snapshot.ipsSnapshot,
+            stakeholders = parsedRequest.fullViewTree.stakeholders,
+            psid = targetPsid.unwrap,
+          )
+          .value
+          .map(_.swap.toOption)
+
     } yield AssignmentValidationResult.CommonValidationResult(
       activenessResult = activenessResult,
       participantSignatureVerificationResult = participantSignatureVerificationResult,
       contractAuthenticationResultF = contractAuthenticationResultF,
       submitterCheckResult = submitterCheckResult,
       reassignmentIdResult = reassignmentIdResult,
+      multiSynchronizerFeatureFlagCheckResult = multiSynchronizerCheckResult,
     )
   }
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -17,8 +16,6 @@ import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class NonTransientContractsITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -30,7 +27,7 @@ class NonTransientContractsITSpec
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "benchtool" should {
-    "submit non-transient contracts" onlyRunWithOrGreaterThan ProtocolVersion.dev in { env =>
+    "submit non-transient contracts" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
       import env.*
 
       val totalContractsCount = 100

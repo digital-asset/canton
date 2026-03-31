@@ -30,17 +30,17 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.KmsMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.canton.util.{EitherTUtil, Mutex}
 import com.github.benmanes.caffeine.cache.Scheduler
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -64,6 +64,7 @@ class SyncCryptoSignerWithSessionKeys(
     staticSynchronizerParameters: StaticSynchronizerParameters,
     member: Member,
     signPrivateApiWithLongTermKeys: SigningPrivateOps,
+    kmsMetrics: Option[KmsMetrics],
     override protected val cryptoPrivateStore: CryptoPrivateStore,
     sessionSigningKeysConfig: SessionSigningKeysConfig,
     publicKeyConversionCacheConfig: CacheConfig,
@@ -211,14 +212,15 @@ class SyncCryptoSignerWithSessionKeys(
         .toEitherT[FutureUnlessShutdown]
     } yield signatureDelegation
 
+  /** Checks whether a session signing key's validity period fully covers the required interval (or
+    * point).
+    */
   private def isUsableDelegation(
-      timestamp: CantonTimestamp,
-      approximateTimestamp: Boolean,
       validityPeriod: SignatureDelegationValidityPeriod,
+      validityIntervalToCover: (CantonTimestamp, Option[CantonTimestamp]),
   ): Boolean = {
-    val (start, end) =
-      validityPeriod.computeCutOffTimestamp(cutOffDuration.asJava, approximateTimestamp)
-    timestamp > start && timestamp < end
+    val (start, endO) = validityIntervalToCover
+    validityPeriod.covers(start) && endO.forall(end => validityPeriod.covers(end))
   }
 
   private def generateNewSessionKey(
@@ -253,23 +255,57 @@ class SyncCryptoSignerWithSessionKeys(
         )
     } yield sessionKeyAndDelegation
 
+  /** @param validityIntervalToCover
+    *   the interval that must be covered by the session signing key. The end is optional; if
+    *   `None`, only the start timestamp must be covered.
+    * @param signingTs
+    *   the timestamp used during signing to determine the validity period for a new session signing
+    *   key.
+    * @param generateFromTimestampOnly
+    *   indicates that only a single timestamp (exact or approximate) is used to compute the
+    *   validity interval to cover (i.e., there is no information about the validity period end).
+    */
+  private case class SigningInfo(
+      validityIntervalToCover: (CantonTimestamp, Option[CantonTimestamp]),
+      signingTs: CantonTimestamp,
+      generateFromTimestampOnly: Boolean,
+  )
+
+  /** Determines the validity period for a new session signing key.
+    *
+    * The validity window of the new key may be shifted backwards to reduce the number of keys
+    * created for closely spaced signing requests:
+    *   - If centered around a SINGLE exact or approximate ts, the window is shifted by
+    *     `toleranceShiftDuration`, leaving a gap behind. This avoids creating a new key for every
+    *     slightly earlier timestamp in sequences such as ts, ts-1µs, ts-2µs, ..., ts-n. In that
+    *     case, instead of creating n keys, we only create roughly n / (2 * tolerance) keys.
+    *     Although this is not perfectly optimal, it reduces key creation compared to simply setting
+    *     the validity from ts to ts+l for each request, depending on transaction ordering.
+    *   - If we are aware of the full validity interval we need to cover, we do not shift by
+    *     `toleranceShiftDuration`. Instead, we generate a new validity window as [ts - cutOff, (ts
+    *     - cutOff) + keyValidityDuration]. For this to work, the known validity interval (after
+    *       accounting for the cutoff) must be < to `keyValidityDuration`.
+    */
   private def determineValidityPeriod(
-      timestamp: CantonTimestamp
+      signingInfo: SigningInfo
   ): SignatureDelegationValidityPeriod = {
-    /* If the session signing key created for a signing request at timestamp ts is valid from
-     * ts-tolerance to ts+l-tolerance, then if there is a sequence of
-     * signature request timestamps in the following order ts, ts-1us , ts-2us, ts-3us, ... ts-n, we do not
-     * create n session keys, but rather n / (2*tolerance).
-     * Although not optimal, depending on how transactions are ordered, this a better approach than
-     * setting the validity period from ts to ts+l in terms of number of keys created.
-     */
-    val validityStart =
-      Either
-        .catchOnly[IllegalArgumentException](
-          timestamp
-            .minus(toleranceShiftDuration.asJava)
-        )
-        .getOrElse(CantonTimestamp.MinValue)
+    val (validityIntervalToCoverStart, validityIntervalToCoverEndO) =
+      signingInfo.validityIntervalToCover
+
+    val validityStart = validityIntervalToCoverEndO match {
+      // we know the "full" validity interval
+      case Some(_) if !signingInfo.generateFromTimestampOnly =>
+        // Use `validityIntervalToCoverStart` as the starting point without any shift.
+        // This timestamp already includes the `cutOff`, giving some margin in the past,
+        // and by not shifting further, we extend the key's future margin, increasing
+        // the likelihood that the key can be reused more often.
+        validityIntervalToCoverStart
+      // we are either using a SINGLE exact or approximate timestamp
+      // (i.e., the validity period end is unknown).
+      case _ =>
+        signingInfo.signingTs.minus(toleranceShiftDuration.asJava)
+    }
+
     SignatureDelegationValidityPeriod(
       validityStart,
       sessionKeyValidityDuration,
@@ -281,28 +317,25 @@ class SyncCryptoSignerWithSessionKeys(
     * another is already being created.
     */
   private def getSessionKey(
-      timestamp: CantonTimestamp,
-      approximateTimestamp: Boolean,
+      signingInfo: SigningInfo,
       activeLongTermKey: SigningPublicKey,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SessionKeyAndDelegation] = {
 
-    val sessionKeyOrGenerationData = (lock.exclusive {
+    val sessionKeyOrGenerationData = lock.exclusive {
       // get hold of all existing or pending session keys
       val pendingSessionKeys = pendingRequests.toMap
       val keysInCache = sessionKeysSigningCache.asMap().values.toSeq
 
       // check if there is a session key in the cache that is valid and can be used. Since
       // we only use a session key if the authorizing long-term key is still active,
-      // even though the validity period is defined as [ts−tolerance, ts+l-tolerance],
       // the actual usable interval may be shorter if the active long-term key has been
       // replaced in the meantime.
       val validUsableSessionKeysInCache = keysInCache.filter { skD =>
         isUsableDelegation(
-          timestamp,
-          approximateTimestamp,
           skD.signatureDelegation.validityPeriod,
+          signingInfo.validityIntervalToCover,
         ) &&
         activeLongTermKey.id == skD.signatureDelegation.delegatingKeyId
       }
@@ -312,11 +345,14 @@ class SyncCryptoSignerWithSessionKeys(
           // find if there is a pending session key that is valid and can be used
           val validUsablePendingRequests =
             pendingSessionKeys.view.filterKeys { case (validityPeriod, signedBy) =>
-              isUsableDelegation(timestamp, approximateTimestamp, validityPeriod) &&
+              isUsableDelegation(
+                validityPeriod,
+                signingInfo.validityIntervalToCover,
+              ) &&
               activeLongTermKey.id == signedBy
             }.toMap
 
-          val validityPeriod = determineValidityPeriod(timestamp)
+          val validityPeriod = determineValidityPeriod(signingInfo)
 
           // if there are no pending keys valid and usable, we add a promise to the [[pendingRequests]] map
           // and store this information in the [[PendingValidSessionKeysAndMetadata]].
@@ -346,7 +382,7 @@ class SyncCryptoSignerWithSessionKeys(
             skD.signatureDelegation.validityPeriod.fromInclusive
           })
       }
-    })
+    }
 
     // based on result of synchronized block, either return cached key or wait/generate
     sessionKeyOrGenerationData match {
@@ -378,11 +414,83 @@ class SyncCryptoSignerWithSessionKeys(
             EitherT(first.transformWith {
               case Success(UnlessShutdown.Outcome(Some(sessionKeyAndDelegation))) =>
                 FutureUnlessShutdown.pure(Right(sessionKeyAndDelegation))
-              case _ => getSessionKey(timestamp, approximateTimestamp, activeLongTermKey).value
+              case _ =>
+                getSessionKey(
+                  signingInfo,
+                  activeLongTermKey,
+                ).value
             })
         }
       case Right(sessionKeyAndDelegation) =>
         EitherT.pure[FutureUnlessShutdown, SyncCryptoError](sessionKeyAndDelegation)
+    }
+  }
+
+  /** Computes the signing timestamp and the validity interval that must be covered when selecting a
+    * session signing key.
+    *
+    * @param topologyTimestamp
+    *   the timestamp associated with the topology snapshot used for signing. If an approximate
+    *   timestamp is provided via `signingTimestampOverrides`, it is overridden by this timestamp.
+    *
+    * @return
+    *   an optional [[SigningInfo]] describing:
+    *   - the signing timestamp used to select the session signing key, and
+    *   - the validity interval that the selected key must cover.
+    *
+    * @return
+    *   `None` if the required validity interval cannot be covered by a session signing key, in
+    *   which case a long-term key is used for signing instead.
+    */
+  private def computeSigningInfo(
+      topologyTimestamp: CantonTimestamp,
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
+  ): Option[SigningInfo] = {
+
+    def isCovered(start: CantonTimestamp, end: CantonTimestamp): Boolean = (end - start)
+      .compareTo(sessionKeyValidityDuration.asJava) < 0
+
+    signingTimestampOverrides match {
+      // if the end period is not defined, and we are using an approximate timestamp (`ts`), then we must choose
+      // a session signing key with a validity duration that covers [ts - cutoff, ts + cutoff].
+      case Some(SigningTimestampOverrides(ts, None)) =>
+        val (start, end) = (
+          ts.minus(cutOffDuration.asJava),
+          ts.plus(cutOffDuration.asJava),
+        )
+        // this interval is covered because we enforce that keyValidityDuration > 2 * cutOffDuration
+        Some(
+          SigningInfo(
+            validityIntervalToCover = (start, Some(end)),
+            signingTs = ts,
+            generateFromTimestampOnly = true,
+          )
+        )
+      // if the end period is defined, and we are using an approximate timestamp (`ts`), then we must choose a
+      // session signing key with a validity duration that covers [ts - cutoff, max(ts, validityIntervalToCoverEnd)]
+      case Some(SigningTimestampOverrides(ts, Some(periodEnd))) =>
+        val (start, end) =
+          (ts.minus(cutOffDuration.asJava), ts.max(periodEnd))
+
+        // if any of the validity intervals to cover exceeds the key validity duration
+        // for session signing keys, we return `None`, and a long-term key is used for signing instead
+        Option.when(isCovered(start, end))(
+          SigningInfo(
+            validityIntervalToCover = (start, Some(end)),
+            signingTs = ts,
+            generateFromTimestampOnly = false,
+          )
+        )
+      // if the end period is not defined, and we are using an exact timestamp, then a session signing key
+      // is selected whose validity period covers that timestamp.
+      case None =>
+        Some(
+          SigningInfo(
+            validityIntervalToCover = (topologyTimestamp, None),
+            signingTs = topologyTimestamp,
+            generateFromTimestampOnly = true,
+          )
+        )
     }
   }
 
@@ -395,41 +503,51 @@ class SyncCryptoSignerWithSessionKeys(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature] =
     for {
-      _ <- EitherT.cond[FutureUnlessShutdown](
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         usage == SigningKeyUsage.ProtocolOnly,
-        (),
         SyncCryptoError.UnsupportedDelegationSignatureError(
           s"Session signing keys are not supposed to be used for non-protocol messages. Requested usage: $usage"
         ),
       )
+
       activeLongTermKey <- findSigningKey(member, topologySnapshot, usage)
-      approximateTimestampForSigning = signingTimestampOverrides.map(_.approximateTimestamp)
-      timestamp = approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp)
       // The only exception where we cannot use a session signing key is for the sequencer initialization request,
       // where the timestamp has not yet been assigned and is set with `CantonTimestamp.MinValue` as the reference time
       // (e.g. 0001-01-01T00:00:00.000002Z).
       // If a session signing key was used, its validity would be measured around this reference time,
       // but the verification of that message would be performed using the present time as reference (i.e. now()).
-      veryOldTimestampThreshold = CantonTimestamp.MinValue.add(Duration.ofDays(365))
+      veryOldTimestampThreshold = CantonTimestamp.MinValue.add(java.time.Duration.ofDays(365))
+
       signature <-
         if (topologySnapshot.timestamp <= veryOldTimestampThreshold)
           signPrivateApiWithLongTermKeys
             .sign(hash, activeLongTermKey.id, usage)
             .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)
         else
-          for {
-            sessionKeyAndDelegation <- getSessionKey(
-              timestamp,
-              approximateTimestampForSigning.isDefined, // if an approximate timestamp is used for signing
-              // (e.g., the current local time), a `cutOff` is applied to both ends of the validity period.
-              activeLongTermKey,
-            )
-            SessionKeyAndDelegation(sessionKey, delegation) = sessionKeyAndDelegation
-            signature <- signPublicApiSoftwareBased
-              .sign(hash, sessionKey, usage)
-              .toEitherT[FutureUnlessShutdown]
-              .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)
-          } yield signature.addSignatureDelegation(delegation)
+          computeSigningInfo(topologySnapshot.timestamp, signingTimestampOverrides) match {
+            case Some(signingInfo) =>
+              for {
+                sessionKeyAndDelegation <- getSessionKey(signingInfo, activeLongTermKey)
+                SessionKeyAndDelegation(sessionKey, delegation) = sessionKeyAndDelegation
+                signature <- signPublicApiSoftwareBased
+                  .sign(hash, sessionKey, usage)
+                  .toEitherT[FutureUnlessShutdown]
+                  .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)
+              } yield signature.addSignatureDelegation(delegation)
+            case None =>
+              // a validity period end of `CantonTimestamp.MaxValue` indicates that we
+              // never expected a session signing key to be used, so no need to record it
+              if (
+                !signingTimestampOverrides.exists(
+                  _.validityPeriodEnd.contains(CantonTimestamp.MaxValue)
+                )
+              )
+                kmsMetrics.foreach(_.sessionSigningKeysFallback.inc())
+              signPrivateApiWithLongTermKeys
+                .sign(hash, activeLongTermKey.id, usage)
+                .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)
+
+          }
     } yield signature
 
 }

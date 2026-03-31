@@ -151,6 +151,7 @@ trait MessageDispatcherTest {
             any[SequencerCounter],
             any[RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[VT]]]],
             any[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]],
+            any[NonNegativeLong],
           )(anyTraceContext)
         )
           .thenReturn(processingRequestHandlerF)
@@ -511,6 +512,7 @@ trait MessageDispatcherTest {
         isEq(sc),
         any[RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[VT]]]],
         any[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]],
+        any[NonNegativeLong],
       )(anyTraceContext)
       succeed
     }
@@ -524,6 +526,7 @@ trait MessageDispatcherTest {
         any[SequencerCounter],
         any[RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[VT]]]],
         any[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]],
+        any[NonNegativeLong],
       )(anyTraceContext)
       succeed
     }
@@ -1213,6 +1216,12 @@ trait MessageDispatcherTest {
           testedProtocolVersion,
           MalformedMediatorConfirmationRequestResult -> Recipients.cc(participantId),
         )
+        val consumedCost = NonNegativeLong.tryCreate(12453)
+        val trafficReceipt = TrafficReceipt(
+          consumedCost = consumedCost,
+          extraTrafficConsumed = NonNegativeLong.zero,
+          baseTrafficRemainder = NonNegativeLong.zero,
+        )
         val deliver1 = SequencerCounter(0) ->
           mkDeliver(dummyBatch, CantonTimestamp.Epoch, messageId1.some)
         val deliver2 = SequencerCounter(1) -> mkDeliver(
@@ -1228,7 +1237,7 @@ trait MessageDispatcherTest {
           psid,
           messageId3,
           SequencerErrors.SubmissionRequestRefused("invalid batch"),
-          Option.empty[TrafficReceipt],
+          Some(trafficReceipt),
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map {

@@ -34,6 +34,7 @@ final case class SerializableCompletionInfo(completionInfo: CompletionInfo) {
       commandId,
       deduplicateUntil,
       submissionId,
+      paidTrafficCost,
     ) =
       completionInfo
     v30.CompletionInfo(
@@ -42,6 +43,7 @@ final case class SerializableCompletionInfo(completionInfo: CompletionInfo) {
       commandId,
       deduplicateUntil.map(SerializableDeduplicationPeriod(_).toProtoV30),
       submissionId.getOrElse(""),
+      paidTrafficCost.value,
     )
   }
 }
@@ -50,7 +52,14 @@ object SerializableCompletionInfo {
   def fromProtoV30(
       completionInfoP: v30.CompletionInfo
   ): ParsingResult[CompletionInfo] = {
-    val v30.CompletionInfo(actAsP, userIdP, commandIdP, deduplicateUntilP, submissionIdP) =
+    val v30.CompletionInfo(
+      actAsP,
+      userIdP,
+      commandIdP,
+      deduplicateUntilP,
+      submissionIdP,
+      paidTrafficCostP,
+    ) =
       completionInfoP
     for {
       actAs <- actAsP.toList.traverse(ProtoConverter.parseLfPartyId(_, "act_as"))
@@ -58,12 +67,14 @@ object SerializableCompletionInfo {
       commandId <- ProtoConverter.parseCommandId(commandIdP)
       deduplicateUntil <- deduplicateUntilP.traverse(SerializableDeduplicationPeriod.fromProtoV30)
       submissionId <- ProtoConverter.parseLFSubmissionIdO(submissionIdP)
+      paidTrafficCost <- ProtoConverter.parseNonNegativeLong("paid_traffic_cost", paidTrafficCostP)
     } yield CompletionInfo(
       actAs,
       userId,
       commandId,
       deduplicateUntil,
       submissionId,
+      paidTrafficCost,
     )
   }
 }

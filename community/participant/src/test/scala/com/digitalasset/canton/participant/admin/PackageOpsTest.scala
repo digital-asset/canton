@@ -422,7 +422,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         when(
           persistentState.topologyStore.findPositiveTransactions(
             eqTo(asOfExpectedTime),
-            eqTo(true),
+            eqTo(false),
             eqTo(false),
             eqTo(Seq(VettedPackages.code)),
             eqTo(Some(NonEmpty(Seq, participantId1.uid))),
@@ -438,7 +438,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         when(
           persistentState.topologyStore.findPositiveTransactions(
             eqTo(asOfExpectedTime),
-            eqTo(true),
+            eqTo(false),
             eqTo(false),
             eqTo(Seq(VettedPackages.code)),
             eqTo(None),

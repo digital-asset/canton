@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform
 
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.timer.Timeout.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -19,8 +19,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import io.grpc.StatusRuntimeException
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.{Failure, Success}
 
 /** Life-cycle manager for the Ledger API streams offset dispatcher. */
@@ -28,7 +29,8 @@ class DispatcherState(
     dispatcherShutdownTimeout: Duration,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit
-    traceContext: TraceContext
+    traceContext: TraceContext,
+    scheduler: ScheduledExecutorService,
 ) extends NamedLogging {
 
   private val ServiceName = "Ledger API offset dispatcher"
@@ -111,21 +113,24 @@ class DispatcherState(
         logger.info(s"$ServiceName already shutdown.")
         Future.unit
       case DispatcherRunning(dispatcher) =>
-        dispatcher
-          .shutdown()
-          .withTimeout(dispatcherShutdownTimeout)(
-            logger.warn(
-              s"Shutdown of existing Ledger API streams did not finish in ${dispatcherShutdownTimeout.toSeconds} seconds."
-            )
-          )
-          .transform {
-            case success @ Success(_) =>
-              logger.info(s"$ServiceName shutdown.")
-              success
-            case f @ Failure(failure) =>
-              logger.warn(s"Error during $ServiceName shutdown", failure)
-              f
-          }(directEc)
+        new FutureSupervisor.Impl(
+          NonNegativeDuration(dispatcherShutdownTimeout + 1.seconds),
+          loggerFactory,
+        ).supervised(
+          description = s"Shutdown $ServiceName",
+          warnAfter = dispatcherShutdownTimeout,
+        )(
+          dispatcher
+            .shutdown()
+            .transform {
+              case success @ Success(_) =>
+                logger.info(s"Shutdown $ServiceName.")
+                success
+              case f @ Failure(failure) =>
+                logger.warn(s"Error during $ServiceName shutdown", failure)
+                f
+            }(directEc)
+        )
     }
   }
 
@@ -155,8 +160,12 @@ object DispatcherState {
   private final case object DispatcherStateShutdown extends State
   private final case class DispatcherRunning(dispatcher: Dispatcher[Offset]) extends State
 
-  def owner(apiStreamShutdownTimeout: Duration, loggerFactory: NamedLoggerFactory)(implicit
-      traceContext: TraceContext
+  def owner(
+      apiStreamShutdownTimeout: Duration,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      traceContext: TraceContext,
+      scheduler: ScheduledExecutorService,
   ): ResourceOwner[DispatcherState] = ResourceOwner.forReleasable(() =>
     new DispatcherState(apiStreamShutdownTimeout, loggerFactory)
   )(_.shutdown())

@@ -11,7 +11,7 @@ import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericComma
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.error.CantonErrorGroups.CommandErrorGroup
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ThrowableUtil
 import org.slf4j.event.Level
 
 import java.time.Duration
@@ -105,7 +105,7 @@ object ConsoleCommandResult {
             s"(failure on ${instance.name}): ${err.cause}"
           )
         case (instance, Failure(t)) =>
-          Left(s"(exception on ${instance.name}: ${ErrorUtil.messageWithStacktrace(t)}")
+          Left(s"(exception on ${instance.name}: ${ThrowableUtil.messageWithStacktrace(t)}")
       }
       .toList
       .separate

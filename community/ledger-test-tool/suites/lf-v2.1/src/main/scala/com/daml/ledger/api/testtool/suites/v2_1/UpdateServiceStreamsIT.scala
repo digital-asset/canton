@@ -13,10 +13,12 @@ import com.daml.ledger.api.testtool.infrastructure.{
 }
 import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.ledger.test.java.model.iou.Iou
 import com.daml.ledger.test.java.model.test.{Dummy, DummyFactory}
 import com.daml.ledger.test.java.ongoing_stream_package_upload.ongoingstreampackageuploadtest.OngoingStreamPackageUploadTestTemplate
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
+import com.digitalasset.canton.util.MonadUtil
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -51,7 +53,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       )
       fromAndToBegin =
         request.update(_.beginExclusive := ledgerEnd, _.endInclusive := ledgerEnd)
-      transactions <- ledger.transactions(fromAndToBegin)
+      transactions <- ledger.transactionsWithVariants(fromAndToBegin)
     } yield {
       assert(
         transactions.isEmpty,
@@ -72,7 +74,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       )
       end <- ledger.currentEnd()
       endToEnd = request.update(_.beginExclusive := end, _.endInclusive := end)
-      transactions <- ledger.transactions(endToEnd)
+      transactions <- ledger.transactionsWithVariants(endToEnd)
     } yield {
       assert(
         transactions.isEmpty,
@@ -374,8 +376,12 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     )
     for {
       _ <- ledger.submitAndWait(create)
-      transactions <- ledger.transactionsByTemplateId(Dummy.TEMPLATE_ID, Some(Seq(party)))
-      transactionsPartyWildcard <- ledger.transactionsByTemplateId(Dummy.TEMPLATE_ID, None)
+      transactions <- ledger.transactionsByTemplateIdWithVariants(
+        Dummy.TEMPLATE_ID,
+        Some(Seq(party)),
+      )
+      transactionsPartyWildcard <- ledger
+        .transactionsByTemplateIdWithVariants(Dummy.TEMPLATE_ID, None)
     } yield {
       val contract = assertSingleton("FilterByTemplate", transactions.flatMap(createdEvents))
       assertEquals(
@@ -407,7 +413,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       interfaceFilter <- ledger.getTransactionsRequest(
         ledger.transactionFormat(Some(Seq(party)), Seq.empty, Seq(IIou.TEMPLATE_ID -> true))
       )
-      transactions <- ledger.transactions(interfaceFilter)
+      transactions <- ledger.transactionsWithVariants(interfaceFilter)
     } yield {
       import com.daml.ledger.api.v2.event.CreatedEvent.toJavaProto
       import com.daml.ledger.javaapi.data.CreatedEvent.fromProto
@@ -488,7 +494,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       _ <- ledger.submitAndWait(
         ledger.submitAndWaitRequest(owner, new Dummy(owner).createAnd().exerciseArchive().commands)
       )
-      txs <- ledger.transactions(
+      txs <- ledger.transactionsWithVariants(
         transactionShape = LedgerEffects,
         parties = owner,
       )
@@ -512,7 +518,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       _ <- ledger.submitAndWait(
         ledger.submitAndWaitRequest(owner, new Dummy(owner).createAnd().exerciseArchive().commands)
       )
-      txs <- ledger.transactions(
+      txs <- ledger.transactionsWithVariants(
         transactionShape = AcsDelta,
         parties = owner,
       )
@@ -552,6 +558,117 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
         tx.events,
         acsDelta = false,
         "The acs_delta field in transient events should not be set",
+      )
+    }
+  })
+
+  test(
+    "TXServeStreamLedgerEffectsFromMiddlePoint",
+    "Transaction with ledger effects should be served  from middle of the ledger",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    val transactionsToSubmit = 15
+    for {
+      endOffsetAtTestStart <- ledger.currentEnd()
+      dummies <- Future.sequence(
+        Vector.fill(transactionsToSubmit)(ledger.create(party, new Dummy(party)))
+      )
+      ledgerMiddle <- ledger.currentEnd()
+      dummies2 <- Future.sequence(
+        Vector.fill(transactionsToSubmit)(ledger.create(party, new Dummy(party)))
+      )
+      request <- ledger.getTransactionsRequest(
+        transactionFormat =
+          ledger.transactionFormat(Some(Seq(party)), transactionShape = LedgerEffects)
+      )
+
+      fromAndToBegin =
+        request.update(
+          _.beginExclusive := endOffsetAtTestStart,
+          _.endInclusive := ledgerMiddle,
+        )
+      transactions <- ledger.transactionsWithVariants(
+        fromAndToBegin
+      )
+    } yield {
+      assert(
+        dummies.sizeIs == transactionsToSubmit,
+        s"$transactionsToSubmit should have been submitted but ${dummies.size} were instead",
+      )
+      assert(
+        dummies2.sizeIs == transactionsToSubmit,
+        s"$transactionsToSubmit should have been submitted but ${dummies2.size} were instead",
+      )
+      assert(
+        transactions.sizeIs == transactionsToSubmit,
+        s"$transactionsToSubmit should have been received but ${transactions.size} were instead",
+      )
+      assertAcsDelta(
+        transactions.flatMap(_.events),
+        acsDelta = true,
+        "The acs_delta field in created events should be set",
+      )
+    }
+  })
+
+  test(
+    "TXStreamDummyFilterDummyIouDummy",
+    "Updates stream with Dummy transaction filter should return empty stream if asking for a range containing sole Iou transaction surrounded by dummy transaction outside of the requested range",
+    allocate(SingleParty),
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      _ <- ledger.create(party, new Dummy(party))
+      beforeIou <- ledger.currentEnd()
+      _ <- ledger.create(
+        party,
+        new Iou(party, party, "USD", java.math.BigDecimal.ONE, Nil.asJava),
+      )
+      afterIou <- ledger.currentEnd()
+      _ <- ledger.create(party, new Dummy(party))
+      request = ledger.getTransactionsRequestWithEnd(
+        transactionFormat = ledger.transactionFormat(
+          Some(Seq(party)),
+          Seq(Dummy.TEMPLATE_ID),
+          transactionShape = LedgerEffects,
+        ),
+        begin = beforeIou,
+        end = Some(afterIou),
+        descendingOrder = true,
+      )
+      transactions <- ledger.transactions(request)
+    } yield {
+      assert(
+        transactions.isEmpty,
+        s"Reverse stream with Dummy filter should be empty.",
+      )
+    }
+  })
+
+  test(
+    "TXServeStreamInDescendingOrder",
+    "Transaction with descendingOrder=true should be in descending order",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      dummies <- MonadUtil.sequentialTraverse(Range(0, 10))(_ =>
+        ledger.create(party, new Dummy(party))
+      )
+      request <- ledger.getTransactionsRequest(
+        transactionFormat =
+          ledger.transactionFormat(Some(Seq(party)), transactionShape = LedgerEffects)
+      )
+
+      transactions <- ledger.transactions(
+        request.update(_.descendingOrder := true)
+      )
+    } yield {
+      assert(
+        transactions.map(_.events.loneElement.getCreated.contractId) == dummies.reverse.map(
+          _.contractId
+        ),
+        s"Expected contract ids in order ${dummies.reverse
+            .map(_.contractId)}, got ${transactions.map(_.events.loneElement.getCreated.contractId)}",
       )
     }
   })

@@ -35,7 +35,9 @@ private[mediator] trait MediatorStateInitialization { self: NamedLogging =>
       ),
       "The store most not be initialized more than once!",
     )
-    implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(logger)
+    implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
+      noTracingLogger
+    )
     doInitialize(firstEventTs).map(_ =>
       initialized.set(MediatorStateInitialization.State.Initialized)
     )

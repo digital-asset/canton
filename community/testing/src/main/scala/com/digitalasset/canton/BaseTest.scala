@@ -15,8 +15,9 @@ import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervi
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
+import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger, SuppressionRule}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
@@ -42,13 +43,14 @@ import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
 import org.scalacheck.Test
 import org.scalactic.source.Position
 import org.scalactic.{Prettifier, source}
-import org.scalatest.*
 import org.scalatest.concurrent.{Eventually, PatienceConfiguration, ScalaFutures}
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpecLike
+import org.scalatest.{Assertion, *}
 import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
@@ -56,6 +58,7 @@ import org.typelevel.discipline.Laws
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
+import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -134,6 +137,18 @@ trait TestEssentials
     * deal with imports.
     */
   lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
+
+  implicit def enrichSuppressingLogger(
+      loggerFactory: SuppressingLogger
+  ): BaseTest.EnrichedSuppressingLogger =
+    new BaseTest.EnrichedSuppressingLogger(loggerFactory)
+}
+
+trait TimestampHelpers { self: EitherValues =>
+  implicit def protoTimestampToCantonTimestamp(
+      proto: com.google.protobuf.timestamp.Timestamp
+  ): CantonTimestamp =
+    CantonTimestamp.fromProtoTimestamp(proto).value
 }
 
 trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
@@ -332,6 +347,7 @@ trait BaseTest
     with OptionValues
     with TryValues
     with AppendedClues
+    with TimestampHelpers
     with FutureHelpers { self =>
 
   /** A metrics factory constructed from an OpenTelemetryOnDemandMetricsReader which allows to make
@@ -470,7 +486,7 @@ trait BaseTest
 
   lazy val CantonExamplesPath: String = BaseTest.CantonExamplesPath
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath
-  lazy val CantonTestsDevPath: String = BaseTest.CantonTestsDevPath
+  lazy val CantonTestsLF23Path: String = BaseTest.CantonTestsLF23Path
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
   // TODO(#25385): Consider deduplicating the upgrade test DARs below
   lazy val FooV1Path: String = BaseTest.FooV1Path
@@ -643,7 +659,7 @@ object BaseTest {
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests-1.0.0.dar")
-  lazy val CantonTestsDevPath: String = getResourcePath("CantonTestsDev-1.0.0.dar")
+  lazy val CantonTestsLF23Path: String = getResourcePath("CantonTestsLF23-1.0.0.dar")
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev-1.0.0.dar")
   lazy val CantonLfV21: String = getResourcePath("CantonLfV21-1.0.0.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
@@ -672,6 +688,99 @@ object BaseTest {
     Option(getClass.getClassLoader.getResource(name))
       .map(_.getPath)
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $name"))
+
+  implicit final class EnrichedSuppressingLogger(private val loggerFactory: SuppressingLogger)
+      extends AnyVal {
+    def assertInternalErrorAsync[T <: Throwable](
+        within: => Future[?],
+        assertion: T => Assertion,
+    )(implicit c: ClassTag[T], pos: source.Position): Future[Assertion] =
+      loggerFactory.assertLogs(
+        within.transform {
+          case Success(_) =>
+            fail(s"An exception of type $c was expected, but no exception was thrown.")
+          case Failure(c(t)) => Success(assertion(t))
+          case Failure(t) => fail(s"Exception has wrong type. Expected type: $c.", t)
+        }(loggerFactory.directExecutionContext),
+        loggerFactory.checkLogsInternalError(assertion),
+      )
+
+    def assertInternalErrorAsyncUS[T <: Throwable](
+        within: => FutureUnlessShutdown[?],
+        assertion: T => Assertion,
+    )(implicit
+        c: ClassTag[T],
+        ec: ExecutionContext,
+        pos: source.Position,
+    ): FutureUnlessShutdown[Unit] =
+      for {
+        _ <- loggerFactory.assertLogs(
+          within.transform {
+            case Success(x) =>
+              fail(s"An exception of type $c was expected, but instead a value was returned: $x")
+            case Failure(c(t)) => Success(UnlessShutdown.Outcome(assertion(t)))
+            case Failure(t) => fail(s"Exception has wrong type. Expected type: $c.", t)
+          }(loggerFactory.directExecutionContext),
+          loggerFactory.checkLogsInternalError(assertion),
+        )
+      } yield ()
+
+    /** Asserts that the sequence of logged warnings/errors will eventually meet a given assertion.
+      * Use this if the expected sequence of logged warnings/errors is non-deterministic and the
+      * log-message assertion might not immediately succeed when it is called (e.g. because the
+      * messages might be logged with a delay). The SuppressingLogger only starts suppressing and
+      * capturing logs when this method is called, If some logs that we want to capture might fire
+      * before the start or after the end of the suppression. Please use method
+      * `assertEventuallyLogsSeq` instead to provide those action in `within` parameter. On success,
+      * the method will delete all logged messages. So this method is not idempotent.
+      *
+      * On failure of the log-message assertion, it will be retried until it eventually succeeds or
+      * a timeout occurs. On timeout without success, the method will not delete any logged message
+      */
+    def assertEventuallyLogsSeq_(
+        rule: SuppressionRule
+    )(
+        assertion: Seq[LogEntry] => Assertion,
+        timeUntilSuccess: FiniteDuration = 20.seconds,
+        maxPollInterval: FiniteDuration = 5.seconds,
+    ): Unit = assertEventuallyLogsSeq(rule)((), assertion, timeUntilSuccess, maxPollInterval)
+
+    /** Asserts that the sequence of logged warnings/errors will eventually meet a given assertion.
+      * Use this if the expected sequence of logged warnings/errors is non-deterministic and the
+      * log-message assertion might not immediately succeed when it is called (e.g. because the
+      * messages might be logged with a delay).
+      *
+      * On success, the method will delete all logged messages. So this method is not idempotent.
+      *
+      * On failure of the log-message assertion, it will be retried until it eventually succeeds or
+      * a timeout occurs. On timeout without success, the method will not delete any logged message
+      *
+      * This method will automatically use asynchronous suppression if `A` is `Future[_]`.
+      *
+      * @throws java.lang.IllegalArgumentException
+      *   if `A` is `EitherT` or `OptionT`, because the method cannot detect whether asynchronous
+      *   suppression is needed in this case. Use `EitherT.value` or `OptionT`.value to work around
+      *   this.
+      */
+    def assertEventuallyLogsSeq[A](
+        rule: SuppressionRule
+    )(
+        within: => A,
+        assertion: Seq[LogEntry] => Assertion,
+        timeUntilSuccess: FiniteDuration = 20.seconds,
+        maxPollInterval: FiniteDuration = 5.seconds,
+    ): A =
+      loggerFactory.suppress(rule) {
+        loggerFactory.runWithCleanup(
+          within,
+          (_: A) =>
+            BaseTest.eventually(timeUntilSuccess, maxPollInterval)(
+              loggerFactory.checkLogsAssertion(assertion)
+            ),
+          () => (),
+        )
+      }
+  }
 
 }
 

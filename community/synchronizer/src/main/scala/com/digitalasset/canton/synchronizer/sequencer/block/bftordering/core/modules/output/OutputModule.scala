@@ -21,7 +21,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
   TopologyActivationTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.HasDelayedInit
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule.DefaultDatabaseReadTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStoreReader
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.{
   DefaultRequestInspector,
@@ -214,13 +213,13 @@ class OutputModule[E <: Env[E]](
           context
             .blockingAwait(
               store.saveOnboardedNodeLowerBound(epochNumber, blockNumber),
-              DefaultDatabaseReadTimeout,
+              config.blockingDbReadTimeout,
             )
             .fold(error => abort(error), _ => ())
         }
 
         val lastStoredOutputBlockMetadata =
-          context.blockingAwait(store.getLastConsecutiveBlock, DefaultDatabaseReadTimeout)
+          context.blockingAwait(store.getLastConsecutiveBlock, config.blockingDbReadTimeout)
         val lastStoredBlockNumber = lastStoredOutputBlockMetadata.map(_.blockNumber)
 
         // The logic to compute `recoverFromBlockNumber` takes into account the following scenarios:
@@ -271,26 +270,27 @@ class OutputModule[E <: Env[E]](
 
         // If we are onboarding, rather than an initial node starting or restarting, there will be no actual blocks
         //  stored and the genesis will be returned, but we`ll have a truncated log and we`ll need to start from the
-        //  initial height, which will be set correctly by the sequencer runtime as the first block height that we
-        //  are expected to serve, not from the genesis height.
+        //  initial height, rather than from the genesis height, which will be set correctly by the sequencer
+        //  runtime as the first block height that we are expected to serve.
+        val firstBlockToProcess =
+          if (startupState.previousBftTimeForOnboarding.isDefined) {
+            val initialHeight = startupState.initialHeightToProvide
+            logger.info(
+              s"Output module bootstrap: onboarding, providing blocks from initial height $initialHeight"
+            )
+            initialHeight
+          } else {
+            logger.info(
+              s"Output module bootstrap: [re-]starting, providing blocks from $recoverFromBlockNumber"
+            )
+            recoverFromBlockNumber
+          }
+        // We skip the "is it empty" label for the startup figure of blocks ordered
+        metrics.global.blocksOrdered.mark(Math.max(0L, firstBlockToProcess - 1))
         maybeCompletedBlocksProcessingPeanoQueue
-          .putIfAbsent(
-            new PeanoQueue(
-              if (startupState.previousBftTimeForOnboarding.isDefined) {
-                val initialHeight = startupState.initialHeightToProvide
-                logger.info(
-                  s"Output module bootstrap: onboarding, providing blocks from initial height $initialHeight"
-                )
-                initialHeight
-              } else {
-                logger.info(
-                  s"Output module bootstrap: [re-]starting, providing blocks from $recoverFromBlockNumber"
-                )
-                recoverFromBlockNumber
-              }
-            )(abort)
-          )
+          .putIfAbsent(new PeanoQueue(firstBlockToProcess)(abort))
           .foreach(_ => abort("Completed block processing Peano Queue has already been set"))
+
         if (startupState.previousBftTimeForOnboarding.isEmpty) {
           logger.info(
             s"Output module bootstrap: [re-]starting, [re-]processing blocks from $recoverFromBlockNumber"
@@ -298,7 +298,7 @@ class OutputModule[E <: Env[E]](
           val orderedBlocksToProcess =
             context.blockingAwait(
               epochStoreReader.loadOrderedBlocks(recoverFromBlockNumber),
-              DefaultDatabaseReadTimeout,
+              config.blockingDbReadTimeout,
             )
           // Rehydrate the transient local state containing the previous stored block information (if any)
           //  to ensure that the BFT time is computed correctly even when restarting blocks with
@@ -306,7 +306,7 @@ class OutputModule[E <: Env[E]](
           context
             .blockingAwait(
               store.getBlock(BlockNumber(recoverFromBlockNumber - 1)),
-              DefaultDatabaseReadTimeout,
+              config.blockingDbReadTimeout,
             )
             .foreach { previousBlock =>
               previousStoredBlock.update(
@@ -320,7 +320,7 @@ class OutputModule[E <: Env[E]](
           val epochMetadata =
             context.blockingAwait(
               store.getEpoch(startEpochNumber),
-              DefaultDatabaseReadTimeout,
+              config.blockingDbReadTimeout,
             )
           // If an epoch's metadata was not recorded, then it had default values, so we can safely assume that
           //  the epoch could not alter the ordering topology.
@@ -332,6 +332,7 @@ class OutputModule[E <: Env[E]](
             context.self.asyncSend(BlockOrdered(orderedBlockForOutput))
           )
         }
+
         initCompleted(receiveInternal)
 
       case _ =>

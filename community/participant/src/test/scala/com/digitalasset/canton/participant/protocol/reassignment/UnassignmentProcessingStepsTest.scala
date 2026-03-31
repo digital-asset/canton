@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
@@ -36,7 +37,10 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDe
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.ContractValidationError
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractValidationError,
+  MultiSynchronizerIsNotEnabled,
+}
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessorError.*
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationError.PackageIdUnknownOrUnvetted
@@ -108,6 +112,7 @@ import com.digitalasset.canton.{
 }
 import com.google.rpc.status.Status
 import io.grpc.Status.Code.FAILED_PRECONDITION
+import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -242,6 +247,7 @@ final class UnassignmentProcessingStepsTest
     TestingTopology(synchronizers)
       .withReversedTopology(topology)
       .withPackages(packages)
+      .enableMultiSynchronizer(topology.keys.toSeq*)
       .build(loggerFactory)
 
   private val defaultTopologyPackageIds = Seq(
@@ -379,6 +385,7 @@ final class UnassignmentProcessingStepsTest
     cryptoSnapshot,
     cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
     reassignmentId,
+    NonNegativeLong.tryCreate(789),
   )
 
   "UnassignmentRequest.validated" should {
@@ -1082,6 +1089,7 @@ final class UnassignmentProcessingStepsTest
         participantSignatureVerificationResult = None,
         contractAuthenticationResultF = EitherT.right(FutureUnlessShutdown.unit),
         submitterCheckResult = None,
+        multiSynchronizerFeatureFlagCheckResult = None,
       ),
       reassigningParticipantValidationResult = ReassigningParticipantValidationResult(errors = Nil),
     )
@@ -1140,6 +1148,28 @@ final class UnassignmentProcessingStepsTest
           ),
         )
       } yield succeed
+    }
+
+    "don't commit when multi-synchronizer is not enabled" in {
+      val failingUnassignmentValidation = pendingUnassignment
+        .focus(
+          _.unassignmentValidationResult.commonValidationResult.multiSynchronizerFeatureFlagCheckResult
+        )
+        .replace(
+          Some(MultiSynchronizerIsNotEnabled(Set(submittingParticipant), sourceSynchronizer.unwrap))
+        )
+
+      for {
+        result <- unassignmentProcessingSteps
+          .getCommitSetAndContractsToBeStoredAndEventFactory(
+            NoOpeningErrors(signedContent),
+            reassignmentResult.verdict,
+            failingUnassignmentValidation,
+            state.pendingUnassignmentSubmissions,
+            crypto.pureCrypto,
+          )
+          .failOnShutdown
+      } yield result.commitSet.nonEmpty shouldBe false
     }
   }
 

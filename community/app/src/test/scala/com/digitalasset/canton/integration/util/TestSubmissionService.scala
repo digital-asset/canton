@@ -379,7 +379,7 @@ class TestSubmissionService(
         for {
           cidO <- keyResolver.resolveKey(gk)(traceContext)
           contracts <- cidO.toList.parTraverse(contractResolver(_)(traceContext))
-          r <- resolve(resume(contracts.flatten.toVector, None))
+          r <- resolve(resume(contracts.flatten.toVector, NeedKeyProgression.Finished))
         } yield r
 
       case ResultInterruption(continue, _) =>

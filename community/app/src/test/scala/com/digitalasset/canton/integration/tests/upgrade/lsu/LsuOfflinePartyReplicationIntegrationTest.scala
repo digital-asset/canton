@@ -150,6 +150,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       fixture.oldSynchronizerNodes.sequencers,
       fixture.newSynchronizerNodes.sequencers,
       suppressLogs = true,
+      trafficTsOverride = None,
     )
     eventually() {
       environment.simClock.value.advance(Duration.ofSeconds(1))
@@ -383,7 +384,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
 
       val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
         // TODO(#29427) - Address ongoing synchronizer upgrade "no more topology transaction after freeze"
-        // Switch back to import_party_acs(V2) from repair.import_acs
+        // Switch back to import_party_acs from repair.import_acs
         participant2.repair.import_acs(lsid, acsSnapshotFile.path.toString)
         participant2.ledger_api.state.end()
       }

@@ -890,6 +890,8 @@ private class SymbolicSolver(
     *   - the contract has been explicitly disclosed in the command, or
     *   - the participant hosts at least one party that is a stakeholder (signatory or observer) of
     *     the contract.
+    *   - the authentication context contains at least one party that is a stakeholder of the
+    *     contract.
     */
   private def visibleContracts(
       partiesOf: FuncDecl[PartySetSort],
@@ -899,6 +901,7 @@ private class SymbolicSolver(
   ): BoolExpr = {
 
     def visibleContractId(
+        actAs: PartySet,
         disclosures: BoundedContractIdList,
         participantId: ParticipantId,
         contractId: ContractId,
@@ -909,6 +912,7 @@ private class SymbolicSolver(
           isEmptyPartySet(
             ctx.mkSetIntersection(
               ctx.mkApp(partiesOf, participantId).asInstanceOf[PartySet],
+              actAs,
               ctx.mkSetUnion(
                 ctx.mkApp(signatoriesOf, contractId).asInstanceOf[PartySet],
                 ctx.mkApp(observersOf, contractId).asInstanceOf[PartySet],
@@ -919,6 +923,7 @@ private class SymbolicSolver(
       )
 
     def visibleAction(
+        actAs: PartySet,
         disclosures: BoundedContractIdList,
         participantId: ParticipantId,
         action: Action,
@@ -929,44 +934,49 @@ private class SymbolicSolver(
         ctx.mkTrue()
       case Exercise(_, contractId, _, _, subTransaction) =>
         ctx.mkAnd(
-          visibleContractId(disclosures, participantId, contractId),
-          and(subTransaction.map(visibleAction(disclosures, participantId, _))),
+          visibleContractId(actAs, disclosures, participantId, contractId),
+          and(subTransaction.map(visibleAction(actAs, disclosures, participantId, _))),
         )
       case ExerciseByKey(_, contractId, _, _, _, _, subTransaction) =>
         ctx.mkAnd(
-          visibleContractId(disclosures, participantId, contractId),
-          and(subTransaction.map(visibleAction(disclosures, participantId, _))),
+          visibleContractId(actAs, disclosures, participantId, contractId),
+          and(subTransaction.map(visibleAction(actAs, disclosures, participantId, _))),
         )
       case Fetch(contractId) =>
-        visibleContractId(disclosures, participantId, contractId)
+        visibleContractId(actAs, disclosures, participantId, contractId)
       case FetchByKey(contractId, _, _) =>
-        visibleContractId(disclosures, participantId, contractId)
+        visibleContractId(actAs, disclosures, participantId, contractId)
       case LookupByKey(contractId, _, _) =>
         contractId match {
           case Some(cid) =>
-            visibleContractId(disclosures, participantId, cid)
+            visibleContractId(actAs, disclosures, participantId, cid)
           case None =>
             ctx.mkTrue()
         }
       case QueryByKey(contractIds, _, _, _) =>
         allListElementsSatisfy(
           contractIds,
-          cid => visibleContractId(disclosures, participantId, cid),
+          cid => visibleContractId(actAs, disclosures, participantId, cid),
         )
       case Rollback(subTransaction) =>
-        and(subTransaction.map(visibleAction(disclosures, participantId, _)))
+        and(subTransaction.map(visibleAction(actAs, disclosures, participantId, _)))
     }
 
     def visibleCommand(
+        actAs: PartySet,
         disclosures: BoundedContractIdList,
         participantId: ParticipantId,
         command: Command,
     ): BoolExpr = command match {
-      case Command(_, action) => visibleAction(disclosures, participantId, action)
+      case Command(_, action) => visibleAction(actAs, disclosures, participantId, action)
     }
 
     def visibleCommands(commands: Commands): BoolExpr =
-      and(commands.commands.map(visibleCommand(commands.disclosures, commands.participantId, _)))
+      and(
+        commands.commands.map(
+          visibleCommand(commands.actAs, commands.disclosures, commands.participantId, _)
+        )
+      )
 
     and(ledger.map(visibleCommands))
   }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
+  ConnectionAttributes,
   SequencerConnectionXError,
   SequencerConnectionXState,
 }
@@ -39,6 +40,8 @@ class GrpcInternalSequencerConnectionXTest
     }
 
     "refuse to start if it is in a fatal state" in {
+      val errorMessage = "Validation failure: Failed handshake: bad handshake"
+
       val responses = TestResponses(
         apiResponses = Seq(correctApiResponse),
         handshakeResponses = Seq(failedHandshake),
@@ -48,12 +51,12 @@ class GrpcInternalSequencerConnectionXTest
           {
             connection.start().valueOrFail("start connection")
 
-            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some("Failed validation")))
+            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some(errorMessage)))
           },
           LogEntry.assertLogSeq(
             Seq(
               (
-                _.warningMessage should include("Validation failure: Failed handshake"),
+                _.warningMessage should include(errorMessage),
                 "Handshake fails",
               )
             )
@@ -63,7 +66,7 @@ class GrpcInternalSequencerConnectionXTest
         // Try to restart
         inside(connection.start()) {
           case Left(SequencerConnectionXError.InvalidStateError(message)) =>
-            message shouldBe "The connection is in Fatal(Failed validation) state and cannot be started"
+            message shouldBe s"The connection is in Fatal($errorMessage) state and cannot be started"
         }
 
         responses.assertAllResponsesSent()
@@ -71,6 +74,7 @@ class GrpcInternalSequencerConnectionXTest
     }
 
     "fail validation if the returned API is not for a sequencer" in {
+      val errorMessage = "Validation failure: Bad API: this is not a valid API info"
       val responses = TestResponses(
         apiResponses = Seq(incorrectApiResponse)
       )
@@ -78,13 +82,13 @@ class GrpcInternalSequencerConnectionXTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some("Failed validation")))
+            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some(errorMessage)))
             connection.attributes shouldBe None
           },
           LogEntry.assertLogSeq(
             Seq(
               (
-                _.warningMessage should include("Validation failure: Bad API"),
+                _.warningMessage should include(errorMessage),
                 "API response is invalid",
               )
             )
@@ -96,6 +100,8 @@ class GrpcInternalSequencerConnectionXTest
     }
 
     "fail validation if the protocol handshake fails" in {
+      val errorMessage = "Validation failure: Failed handshake: bad handshake"
+
       val responses = TestResponses(
         apiResponses = Seq(correctApiResponse),
         handshakeResponses = Seq(failedHandshake),
@@ -104,13 +110,13 @@ class GrpcInternalSequencerConnectionXTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some("Failed validation")))
+            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some(errorMessage)))
             connection.attributes shouldBe None
           },
           LogEntry.assertLogSeq(
             Seq(
               (
-                _.warningMessage should include("Validation failure: Failed handshake"),
+                _.warningMessage should include(errorMessage),
                 "Protocol handshake fails",
               )
             )
@@ -122,6 +128,9 @@ class GrpcInternalSequencerConnectionXTest
     }
 
     "fail validation if an expected sequencer ID is specified and it is incorrect" in {
+      val errorMessage = "Validation failure: Connection is not on expected sequencer: " +
+        s"expected Some(${testSequencerId(666)}), got ${testSequencerId(1)}"
+
       val responses = TestResponses(
         apiResponses = Seq(correctApiResponse),
         handshakeResponses = Seq(successfulHandshake),
@@ -133,16 +142,13 @@ class GrpcInternalSequencerConnectionXTest
           loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
               connection.start().valueOrFail("start connection")
-              listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some("Failed validation")))
+              listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some(errorMessage)))
               connection.attributes shouldBe None
             },
             LogEntry.assertLogSeq(
               Seq(
                 (
-                  _.warningMessage should include(
-                    s"Validation failure: Connection is not on expected sequencer:" +
-                      s" expected $expectedSequencerIdO, got ${testSequencerId(1)}"
-                  ),
+                  _.warningMessage should include(errorMessage),
                   "Protocol handshake fails",
                 )
               )
@@ -173,6 +179,19 @@ class GrpcInternalSequencerConnectionXTest
     }
 
     "validate the connection attributes after restart" in {
+      val attributes1 = ConnectionAttributes(
+        physicalSynchronizerId = testSynchronizerId(1),
+        sequencerId = testSequencerId(1),
+        staticParameters = defaultStaticSynchronizerParameters,
+      )
+      val attributes2 = ConnectionAttributes(
+        physicalSynchronizerId = testSynchronizerId(2),
+        sequencerId = testSequencerId(2),
+        staticParameters = defaultStaticSynchronizerParameters,
+      )
+      val errorMessage = "Attributes mismatch: Sequencer connection has changed attributes: " +
+        s"expected $attributes1, got $attributes2"
+
       val responses = TestResponses(
         apiResponses = Seq.fill(2)(correctApiResponse),
         handshakeResponses = Seq.fill(2)(successfulHandshake),
@@ -194,14 +213,14 @@ class GrpcInternalSequencerConnectionXTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some("Attributes mismatch")))
+            listener.shouldStabilizeOn(SequencerConnectionXState.Fatal(Some(errorMessage)))
             // Synchronizer info does not change
             connection.attributes shouldBe Some(correctConnectionAttributes)
           },
           LogEntry.assertLogSeq(
             Seq(
               (
-                _.warningMessage should include("Sequencer connection has changed attributes"),
+                _.warningMessage should include(errorMessage),
                 "Different attributes after restart",
               )
             )

@@ -67,6 +67,7 @@ object LegacyDTOs {
       filter: Option[LegacyDTOs.TransactionFilter],
       verbose: Boolean = false,
       updateFormat: Option[com.daml.ledger.api.v2.transaction_filter.UpdateFormat],
+      descendingOrder: Boolean = false,
   )
 
   final case class GetActiveContractsRequest(

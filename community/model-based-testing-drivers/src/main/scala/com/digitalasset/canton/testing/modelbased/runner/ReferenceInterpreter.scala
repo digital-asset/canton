@@ -160,7 +160,7 @@ class ReferenceInterpreter(
       result <- submit(
         state,
         committers = commands.actAs.map(partyIdMapping),
-        readAs = partyIdMapping.values.toSet,
+        readAs = Set.empty,
         commands = ImmArray.from(apiCommands),
         disclosures = disclosures,
       ).left.map[InterpreterError](SubmitFailure(_))

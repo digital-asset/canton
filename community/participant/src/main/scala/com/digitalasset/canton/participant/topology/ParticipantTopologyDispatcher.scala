@@ -158,10 +158,11 @@ class ParticipantTopologyDispatcher(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] = {
     val logicalSynchronizerId = synchronizerId.logical
-    val featureFlagsForPV = ParticipantProtocolFeatureFlags.supportedFeatureFlagsByPV.getOrElse(
-      synchronizerId.protocolVersion,
-      Set.empty,
-    )
+    val requiredFeatureFlagsForPV =
+      ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV.getOrElse(
+        synchronizerId.protocolVersion,
+        Set.empty,
+      )
 
     def alreadyTrustedInStore(
         store: TopologyStore[?]
@@ -197,7 +198,7 @@ class ParticipantTopologyDispatcher(
               SynchronizerTrustCertificate(
                 participantId,
                 logicalSynchronizerId,
-                featureFlagsForPV.toSeq,
+                requiredFeatureFlagsForPV.toSeq,
               ),
               serial = None,
               signingKeys = Seq.empty,

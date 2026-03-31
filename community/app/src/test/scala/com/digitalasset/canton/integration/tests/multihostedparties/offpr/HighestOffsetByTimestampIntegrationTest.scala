@@ -182,34 +182,32 @@ final class HighestOffsetByTimestampForceIntegrationTest
 
 /** Test motivated by
   * [[https://github.com/DACH-NY/canton/issues/29121 GetHighestOffsetByTimestamp fails to return the expected offset for a given timestamp #29121]]
-  * exercising thereafter implemented safeguards
+  * exercising the implemented safeguards from
   * [[https://github.com/DACH-NY/canton/pull/29539 Enhance debug logging for getHighestOffsetByTimestamp (#29121)]]
   *
-  * Ensures that `find_highest_offset_by_timestamp` strictly validates the exact recordTime of the
-  * found offset, protecting against returning a prior, mismatched offset instead of the requested
-  * one.
+  * This test ensures that `find_highest_offset_by_timestamp` correctly handles future timestamps,
+  * strictly validates exact record times when not forced, and remains resilient against cache lag.
   *
-  * At its core, this addresses two scenarios where the underlying database query (`<= t1`) might
-  * return a prior offset `o0` (at `t0`) when queried for `t1`:
-  *   1. Hypothetical Race Condition (historical bug, #29121): The Indexer updates the database
-  *      watermark (`cleanSynchronizerIndex`) and the in-memory `ledgerEndCache` asynchronously via
-  *      different thread pools. There is a microscopic window where the watermark allows a query
-  *      for `t1`, but the lagging in-memory cache artificially truncates the database read (`WHERE
-  *      offset <= ledgerEnd`). This blinds the query to the newly written `t1` events, forcing the
-  *      DB to incorrectly fall back to the prior event `o0`.
-  *   1. Empty Timestamp (expected behavior): The system is fully synchronized, but the client
-  *      queries a `t1` that simply has no events. The `<=` query naturally falls back to the prior
-  *      offset `o0`.
+  * The test proves the following safeguards are active:
   *
-  * This test proves the fixes for these issues are active:
-  *   - Safeguard 1 (Synchronizer Lag): If queried while the indexer is lagging, the endpoint
-  *     detects the `cleanSynchronizerIndex` has not reached `t1` and refuses to answer.
-  *   - Safeguard 2 (Exact Timestamp Match): This test deterministically exercises Scenario 2 (Empty
-  *     Timestamp). By querying a `t1` with no events, the DB predictably finds `o0` at `t0`. The
-  *     endpoint now explicitly checks that the found record time (`t0`) exactly matches the
-  *     requested time (`t1`). Since `t0 != t1`, it throws a "Timestamp mismatch" error, completely
-  *     preventing the return of the prior offset. This same strict validation identically protects
-  *     against the cache-truncation race condition (Scenario 1) in production.
+  *   1. Safeguard 1 (Future Timestamp + Force): When queried with a timestamp in the future (i.e.,
+  *      the `cleanSynchronizerIndex` has not yet reached `t1`) and `force = true`, the endpoint
+  *      gracefully and intentionally returns the current, stable `ledgerEnd` from a consistent
+  *      database snapshot, rather than failing or returning an unpredictable offset.
+  *
+  *   1. Safeguard 2 (Exact Timestamp Match): When queried with a timestamp in the past (`t1`) that
+  *      has no exact event, the underlying DB query naturally falls back to the prior offset at
+  *      `t0`. If `force = false`, the endpoint detects this mismatch (`t0 != t1`) and explicitly
+  *      throws an `INVALID_STATE_PARTY_MANAGEMENT_ERROR` to prevent silently returning an older
+  *      offset.
+  *
+  *   1. Safeguard 3 (Disaster Recovery Override): Exercises the same scenario as Safeguard 2, but
+  *      with `force = true`. It verifies that the exact timestamp validation is bypassed, allowing
+  *      the system to safely return the prior offset for disaster recovery purposes.
+  *
+  * Note: By asserting on a stable `ledgerEnd` in the first safeguard, this test also inherently
+  * exercises the endpoint's cache synchronization barrier, ensuring the returned persistent offset
+  * is fully observable in the in-memory `ledgerEndCache` before the command returns.
   */
 final class HighestOffsetByTimestampSafeguardsIntegrationTest
     extends OfflinePartyReplicationIntegrationTestBase {
@@ -234,18 +232,18 @@ final class HighestOffsetByTimestampSafeguardsIntegrationTest
     // Define T1 (a timestamp slightly in the future) = 1970-01-01T00:00:11Z
     val t1 = clock.now.plus(Duration.ofSeconds(5)).toInstant
 
-    // First Safeguard: Indexer has NOT reached T1 yet
-    // If we force the query, it detects the synchronizer is lagging and aborts
-    // rather than returning the stale T0 offset.
+    // First Safeguard: Indexer has NOT reached T1 yet.
+    // By forcing the query, the endpoint intentionally returns the stable ledger-end
+    // instead of failing or returning an unpredictable offset.
     clue("First Safeguard") {
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        source.parties.find_highest_offset_by_timestamp(daId, t1, force = true),
-        logEntry => {
-          logEntry.errorMessage should include("INVALID_STATE_PARTY_MANAGEMENT_ERROR")
-          logEntry.errorMessage should include regex
-            s"Synchronizer offset not found for offset \\d+ as determined by the requested timestamp $t1\\."
-        },
-      )
+      eventually() {
+        val ledgerEnd = source.ledger_api.state.end()
+        val result = source.parties.find_highest_offset_by_timestamp(daId, t1, force = true)
+        // ensuring stable ledgerEnd first
+        ledgerEnd shouldBe source.ledger_api.state.end()
+        // with stable ledgerEnd we expect to see the result being the same
+        result shouldBe ledgerEnd
+      }
     }
 
     // Advance clock past T1 to T2, and create a new event
@@ -255,23 +253,25 @@ final class HighestOffsetByTimestampSafeguardsIntegrationTest
     // Let indexer catch up to T2
     clock.advance(Duration.ofSeconds(1))
 
-    // Second Safeguard: Indexer is now past T1, but there was no exact event at T1
-    // The DB query finds T0's offset, but the new strict validation catches
-    // the mismatch (T0 != T1) and throws an error instead of returning stale offset.
+    // Second Safeguard: Indexer is now past T1, but there was no exact event at T1.
+    // The DB query falls back to T0's offset, but the strict validation catches
+    // the mismatch (T0 != T1) and throws an error to prevent returning a stale offset.
     clue("Second Safeguard") {
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         source.parties.find_highest_offset_by_timestamp(daId, t1, force = false),
         logEntry => {
           logEntry.errorMessage should include("INVALID_STATE_PARTY_MANAGEMENT_ERROR")
           logEntry.errorMessage should include regex
-            s"Timestamp mismatch: requested=$t1 != recordTime=.*\\. \\(Context: offset=\\d+ -> synchronizer offset=\\d+\\)"
-
+            s"Timestamp mismatch: requested=$t1 != recordTime=.*\\. \\(Context: offset=\\d+\\)"
         },
       )
     }
 
-    // Assert that an offset result is forceable without any error, knowingly accepting the returned offset
-    // belongs a different timestamp (record time) than requested (this is required for disaster recovery).
-    source.parties.find_highest_offset_by_timestamp(daId, t1, force = true) should be > 0L
+    // Third Safeguard: Disaster Recovery Override.
+    // Assert that the exact timestamp validation is bypassed when forced. It knowingly accepts
+    // and returns the prior offset (T0) even though the record time does not match T1.
+    clue("Third Safeguard")(
+      source.parties.find_highest_offset_by_timestamp(daId, t1, force = true) should be > 0L
+    )
   }
 }

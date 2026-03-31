@@ -154,12 +154,14 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Summary("Obtain traffic summaries for sequenced events")
   @Help.Description(
     """Use this command to retrieve the traffic summaries of
-      | sequenced events from their timestamps.
-      | timestamps: list of timestamps for which to retrieve traffic summaries
+      |sequenced events from their timestamps.
       |
-      | returns: traffic summaries of sequenced events available
-      |  on the sequencer matching the input timestamps.
-      | The response may contain less events than input timestamps.
+      |Parameters:
+      |- timestamps: list of timestamps for which to retrieve traffic summaries
+      |
+      |Returns: traffic summaries of sequenced events available
+      |on the sequencer matching the input timestamps.
+      |The response may contain less events than input timestamps.
       """
   )
   def traffic_summaries(timestamps: Seq[CantonTimestamp]): Seq[TrafficSummary] =
@@ -174,14 +176,20 @@ class TrafficControlSequencerAdministrationGroup(
   )
   @Help.Description(
     """Use this command on the old synchronizer to get the input for `set_lsu_state`
-      | to be run on the new synchronizer.
-      | A logical synchronizer upgrade must be ongoing and sequencer must have reached
-      | the upgrade time for this call to succeed.
+      |to be run on the new synchronizer.
+      |
+      |Parameters:
+      |- timestamp: The time used to fetch the traffic state.
+      | MUST be empty for regular LSUs. In that case, an LSU must be announced
+      | and sequencer must have reached the upgrade time for this call to succeed.
+      |
+      | SHOULD be defined in a disaster recovery scenario when requesting the topology
+      | from a synchronizer without an announced LSU.
       """
   )
-  def get_lsu_state(): ByteString =
+  def get_lsu_state(timestamp: Option[CantonTimestamp] = None): ByteString =
     consoleEnvironment.run(
-      runner.adminCommand(SequencerAdminCommands.GetLsuTrafficControlState)
+      runner.adminCommand(SequencerAdminCommands.GetLsuTrafficControlState(timestamp))
     )
 
   @Help.Summary(

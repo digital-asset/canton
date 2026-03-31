@@ -8,6 +8,8 @@ import com.typesafe.scalalogging.{CanLog, Logger}
 import org.slf4j
 import org.slf4j.helpers.NOPLogger
 
+import scala.annotation.tailrec
+
 trait NamedLogging {
 
   private implicit def canLogTraceContext: CanLog[TraceContext] = CanLogTraceContext
@@ -44,4 +46,21 @@ object NamedLogging {
 
   lazy val noopLogger: TracedLogger = Logger.takingImplicit[TraceContext](NOPLogger.NOP_LOGGER)
   lazy val noopNoTracingLogger: Logger = loggerWithoutTracing(noopLogger)
+
+  def readableQualifiedName(qualifiedName: String, maxLength: Int): String = {
+    @tailrec
+    def go(result: String): String =
+      if (result.length <= maxLength) {
+        result
+      } else {
+        val newResult = result.replaceFirst("^(([a-z]\\.)*[a-z])[a-zA-Z0-9-]*", "$1")
+        if (newResult == result) {
+          result
+        } else {
+          go(newResult)
+        }
+      }
+
+    go(qualifiedName)
+  }
 }

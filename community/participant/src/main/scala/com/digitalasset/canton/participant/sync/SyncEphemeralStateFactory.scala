@@ -231,7 +231,7 @@ object SyncEphemeralStateFactory {
             nextRequestCounter = RequestCounter.Genesis,
             nextSequencerCounter = SequencerCounter.Genesis,
             lastSequencerTimestamp = synchronizerPredecessor.upgradeTime,
-            currentRecordTime = synchronizerPredecessor.upgradeTime,
+            currentRecordTime = synchronizerPredecessor.upgradeTime.immediateSuccessor,
             nextRepairCounter = nextRepairCounter(synchronizerIndexO),
           )
 

@@ -15,6 +15,7 @@ import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 final case class ClosedCompressedEnvelope(
     override val bytes: ByteString,
@@ -72,6 +73,12 @@ final case class ClosedCompressedEnvelope(
 }
 
 object ClosedCompressedEnvelope {
+  @VisibleForTesting
+  val recipientsLens: Lens[ClosedCompressedEnvelope, Recipients] =
+    Lens[ClosedCompressedEnvelope, Recipients](_.recipients)(newRecipients =>
+      envelope => envelope.withRecipients(newRecipients)
+    )
+
   def create(bytes: ByteString, recipients: Recipients, algorithm: CompressionAlgorithm)(
       maxBytesToDecompress: MaxBytesToDecompress
   ): ClosedCompressedEnvelope =

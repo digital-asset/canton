@@ -294,7 +294,7 @@ final class GrpcParticipantRepairService(
               _.contract.stakeholders.intersect(excludedStakeholders).isEmpty
             )
           }
-          val resultEUS = sync.repairService.addContractsPekko(
+          val resultEUS = sync.repairService.addContracts(
             synchronizerId,
             filteredSource,
             contractImportMode,

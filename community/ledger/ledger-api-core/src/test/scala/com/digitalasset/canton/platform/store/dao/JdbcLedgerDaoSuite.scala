@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TemplateFilter
 import com.digitalasset.canton.ledger.participant.state
@@ -660,6 +661,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       commandId,
       None,
       Some(submissionId),
+      paidTrafficCost = NonNegativeLong.zero,
     )
 
   protected final def storeSync(

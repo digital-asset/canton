@@ -40,10 +40,13 @@ import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionCo
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnectionValidation}
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStoreId}
 import com.digitalasset.canton.topology.store.TimeQuery
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   ParticipantPermission,
   PartyToParticipant,
+  SignedTopologyTransaction,
+  SynchronizerTrustCertificate,
   TopologyChangeOp,
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId, UniqueIdentifier}
@@ -151,7 +154,77 @@ class DeclarativeParticipantApi(
         config.checkSelfConsistency,
         config.fetchedDarDirectory,
       )
-    } yield Seq(connections, idps, parties, users, dars).foldLeft(UpdateResult())(_.merge(_))
+      featureFlags <- enableMultiSynchronizerFeatureFlagIfNeeded(config, context)
+    } yield Seq(connections, idps, parties, users, dars, featureFlags).foldLeft(UpdateResult())(
+      _.merge(_)
+    )
+
+  private def enableMultiSynchronizerFeatureFlagIfNeeded(
+      config: DeclarativeParticipantConfig,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): Either[String, UpdateResult] = {
+    def baseQuery(synchronizerId: SynchronizerId): BaseQuery =
+      BaseQuery(
+        store = synchronizerId,
+        proposals = false,
+        timeQuery = TimeQuery.HeadState,
+        ops = TopologyChangeOp.Replace.some,
+        filterSigningKey = "",
+        protocolVersion = None,
+      )
+
+    def fetchSynchronizerTrustCertificate(synchronizerId: SynchronizerId) = queryAdminApi(
+      TopologyAdminCommands.Read.ListSynchronizerTrustCertificate(
+        baseQuery(synchronizerId),
+        filterUid = participantId.filterString,
+      )
+    )
+
+    def proposeEnableMultiSynchronizerFeatureFlag(
+        synchronizerId: SynchronizerId,
+        oldFeatureFlags: Seq[ParticipantTopologyFeatureFlag],
+    ): Either[String, SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate]] = {
+      val mapping = SynchronizerTrustCertificate(
+        participantId,
+        synchronizerId,
+        featureFlags =
+          (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer +: oldFeatureFlags),
+      )
+      queryAdminApi(
+        TopologyAdminCommands.Write.Propose(
+          mapping,
+          signedBy = Seq.empty,
+          store = synchronizerId,
+          mustFullyAuthorize = true,
+          waitToBecomeEffective = Some(consistencyTimeout),
+        )
+      )
+    }
+
+    if (config.enableMultiSynchronizerTopologyFeatureFlag) {
+      queryAdminApi(ListConnectedSynchronizers())
+        .flatMap { synchronizerIds =>
+          synchronizerIds.traverse { sid =>
+            for {
+              current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
+              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Seq.empty)
+              shouldUpdate = !currentFeatureFlags.contains(
+                ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer
+              )
+              done <-
+                if (shouldUpdate) {
+                  proposeEnableMultiSynchronizerFeatureFlag(sid.synchronizerId, currentFeatureFlags)
+                    .map(_ => UpdateResult(updated = 1))
+                } else Right(UpdateResult())
+            } yield done
+
+          }
+        }
+        .map(results => results.foldLeft(UpdateResult())(_.merge(_)))
+    } else Right(UpdateResult())
+  }
 
   private def createDarDirectoryIfNecessary(
       fetchedDarDirectory: File,

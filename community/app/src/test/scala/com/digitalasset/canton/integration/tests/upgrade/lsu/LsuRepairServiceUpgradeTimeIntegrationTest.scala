@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import better.files.File
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,18 +14,27 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
+import org.slf4j.event.Level
 
 import java.time.Duration
 
 /** This test ensures that the repair service can be used at upgrade time. We test an ACS import:
   * replicate Alice from p1 to p2.
+  *
+  * Base test class for ACS imports at upgrade time with two concrete variations:
+  *   - Use `repair.export_acs` and `repair.import_acs`, or
+  *   - Use `parties.export_party_acs` and `parties.import_party_acs` console commands
+  *
+  * Actually, both ACS import commands use the same gRPC service implementation:
+  * [[com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService#importAcs]]
   */
-@UnstableTest
-final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
+abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
 
-  override protected def testName: String = "lsu-repair-service-upgrade-time"
+  protected def useRepairCommands: Boolean
 
   registerPlugin(
     new UseBftSequencer(
@@ -68,7 +76,8 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
     "can be used at LSU/upgrade time" in { implicit env =>
       import env.*
 
-      val aliceAcs = File.newTemporaryFile(prefix = s"$testName-alice-acs")
+      val suffix = if (useRepairCommands) "repair" else "parties"
+      val aliceAcs = File.newTemporaryFile(prefix = s"$testName-alice-acs-$suffix")
       val fixture = fixtureWithDefaults()
 
       participant1.health.ping(participant2)
@@ -91,20 +100,35 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
 
       performSynchronizerNodesLsu(fixture)
 
-      val partyActivationOffset = participant1.parties.find_party_max_activation_offset(
-        alice,
-        participant2,
-        daId,
-        onboarding = true,
-        beginOffsetExclusive = ledgerEndP1,
-      )
+      if (useRepairCommands) {
+        var partyActivationOffset: Long = 0L
+        // Retry to account for the ledger not yet having processed the relevant topology transaction
+        utils.retry_until_true({
+          partyActivationOffset = participant1.parties.find_party_max_activation_offset(
+            alice,
+            participant2,
+            daId,
+            onboarding = testedProtocolVersion >= ProtocolVersion.v35,
+            beginOffsetExclusive = ledgerEndP1,
+          )
+          partyActivationOffset > 0L
+        })
 
-      participant1.repair.export_acs(
-        parties = Set(alice),
-        ledgerOffset = partyActivationOffset,
-        synchronizerId = Some(daId),
-        exportFilePath = aliceAcs.canonicalPath,
-      )
+        participant1.repair.export_acs(
+          parties = Set(alice),
+          ledgerOffset = partyActivationOffset,
+          synchronizerId = Some(daId),
+          exportFilePath = aliceAcs.canonicalPath,
+        )
+      } else {
+        participant1.parties.export_party_acs(
+          alice,
+          daId,
+          participant2.id,
+          ledgerEndP1,
+          aliceAcs.canonicalPath,
+        )
+      }
 
       sequencer2.stop() // to prevent reconnect to the synchronizer
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
@@ -124,7 +148,24 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
       val ledgerEndP2 = participant2.ledger_api.state.end()
 
       participant2.synchronizers.disconnect_all()
-      participant2.repair.import_acs(daId, aliceAcs.canonicalPath)
+
+      if (useRepairCommands) {
+        participant2.repair.import_acs(daId, aliceAcs.canonicalPath)
+      } else {
+        // TODO(#29427) - Possibly adapt depending on having revisited the logging in parties.import_party_acs
+        loggerFactory.assertEventuallyLogsSeq(
+          SuppressionRule.LevelAndAbove(Level.WARN)
+        )(
+          participant2.parties.import_party_acs(daId, Some(alice), aliceAcs.canonicalPath),
+          logEntries => {
+            logEntries should have size 1
+            logEntries.head.level shouldBe Level.WARN
+            logEntries.head.message should include(
+              "Found an already effective party-to-participant mapping"
+            )
+          },
+        )
+      }
 
       sequencer2.start()
       transferTraffic()
@@ -159,4 +200,16 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
       participant2.ledger_api.state.acs.active_contracts_of_party(alice) should have size 2
     }
   }
+}
+
+final class LsuRepairServicePartiesUpgradeTimeIntegrationTest
+    extends LsuRepairServiceUpgradeTimeIntegrationTestBase {
+  override protected def testName: String = "lsu-repair-service-upgrade-time-parties"
+  override protected def useRepairCommands: Boolean = false
+}
+
+final class LsuRepairServiceRepairUpgradeTimeIntegrationTest
+    extends LsuRepairServiceUpgradeTimeIntegrationTestBase {
+  override protected def testName: String = "lsu-repair-service-upgrade-time-repair"
+  override protected def useRepairCommands: Boolean = true
 }

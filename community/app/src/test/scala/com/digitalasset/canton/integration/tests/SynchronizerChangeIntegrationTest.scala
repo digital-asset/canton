@@ -106,11 +106,11 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
         simClockTransform, // required such that late message processing warning isn't emitted
         _.focus(_.monitoring.logging.delayLoggingThreshold)
           .replace(NonNegativeFiniteDurationConfig.ofDays(100)),
-      )
-      .addConfigTransform(
-        ConfigTransforms.updateTargetTimestampForwardTolerance(
-          config.targetTimestampForwardTolerance.duration
-        )
+        ConfigTransforms
+          .updateTargetTimestampForwardTolerance(
+            config.targetTimestampForwardTolerance.duration
+          ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .addConfigTransforms(additionalConfigTransforms*)
       .withSetup(setUp)

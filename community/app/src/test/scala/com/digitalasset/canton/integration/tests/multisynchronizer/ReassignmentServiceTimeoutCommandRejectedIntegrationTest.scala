@@ -77,6 +77,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateTargetTimestampForwardTolerance(60.seconds),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -100,6 +101,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
         programmableSequencers.put(daName, getProgrammableSequencer(sequencer1.name))
         programmableSequencers.put(acmeName, getProgrammableSequencer(sequencer2.name))
+
       }
 
   private val programmableSequencers: mutable.Map[SynchronizerAlias, ProgrammableSequencer] =

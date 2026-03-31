@@ -4,7 +4,7 @@
 package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
+import com.digitalasset.canton.util.{FutureUtil, ThrowableUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.typesafe.scalalogging.Logger
 import org.scalatest.exceptions.TestFailedException
@@ -477,7 +477,7 @@ class SuppressingLoggerTest extends AnyWordSpec with BaseTest with HasExecutionC
           entry.errorMessage should include("Test")
           entry.throwable.value.getMessage shouldBe "ONE"
           entry.throwable.value.getSuppressed should contain(ex2)
-          ErrorUtil.messageWithStacktrace(entry.throwable.value) should include("TWO")
+          ThrowableUtil.messageWithStacktrace(entry.throwable.value) should include("TWO")
         },
       )
     }

@@ -93,7 +93,8 @@ message ChangeAssignationRequest {
   // Required
   string target_synchronizer_alias = 2;
 
-  // Whether to skip inactive contracts. Default: true.
+  // Whether to skip inactive contracts.
+  // Note: This should be defaulted to true. However, omitting this field evaluates to false (standard proto3 behavior).
   bool skip_inactive = 3;
 
   repeated Contract contracts = 4;
@@ -116,22 +117,22 @@ message MigrateSynchronizerRequest {
 message MigrateSynchronizerResponse {}
 
 message ExportAcsTargetSynchronizer {
-  // The identifier of the synchronizer to which contracts should be assigned upon exporting the
-  // Active Contract Set (ACS).
+  // The identifier of the synchronizer to which contracts should be assigned upon exporting the ACS.
   // Required.
   string target_synchronizer_id = 1;
 }
 
 message ExportAcsRequest {
-  // The identifiers of the parties for which the Active Contract Set (ACS) will be exported.
-  // This field must contain at least one party ID.
-  // Required
+  // The identifiers of the parties for which the ACS will be exported.
+  // If empty, the ACS for all parties hosted by the participant will be exported.
+  // Optional
   repeated string party_ids = 1;
 
   // The identifier of the synchronizer to filter contracts.
   // Optional. If provided, only contracts assigned to a synchronizer with this exact ID will be included
   // in the exported ACS. If not set (empty string), all contracts for the specified parties will be included.
-  string synchronizer_id = 2; // Optional; filters by exact synchronizer ID if set
+  // Optional; filters by exact synchronizer ID if set
+  string synchronizer_id = 2;
 
   // The ledger offset at which the ACS snapshot should be taken. This determines the point in the
   // ledger history from which the active contracts will be retrieved.
@@ -152,8 +153,8 @@ message ExportAcsRequest {
 }
 
 message ExportAcsResponse {
-  // A chunk of the Active Contract Set (ACS) snapshot. This response is streamed, with each
-  // message containing a portion of the complete ACS data.
+  // A chunk of the ACS snapshot. This response is streamed, with each message containing a portion of the complete
+  // ACS data.
   // The raw binary data within each chunk consists of Ledger API active contract messages, specifically wrapped
   // in `v30.active_contract.ActiveContract` messages. However, a single chunk does not necessarily contain
   // exactly one complete message.
@@ -194,9 +195,9 @@ message ImportAcsRequest {
   // Optional in the first request, ignored in any subsequent request messages.
   optional RepresentativePackageIdOverride representative_package_id_override = 5;
 
-  // The identifier of the synchronizer of the contracts to be imported.
+  // The identifier of the synchronizer managing the contracts to be imported.
   // Only contracts in the snapshot assigned to this exact synchronizer ID will be imported.
-  // Any contract that is assigned to another synchronizer will be ignored (dropped) and logged.
+  // Any contract that is assigned to another synchronizer will be ignored.
   // Required in the first request, ignored in all subsequent request messages.
   optional string synchronizer_id = 6;
 }

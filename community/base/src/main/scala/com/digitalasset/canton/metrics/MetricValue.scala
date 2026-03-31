@@ -49,7 +49,9 @@ object MetricValue {
       case MetricDataType.HISTOGRAM =>
         item.getHistogramData.getPoints.asScala.map(fromHistogramData).toSeq
       case MetricDataType.EXPONENTIAL_HISTOGRAM =>
-        item.getHistogramData.getPoints.asScala.map(fromHistogramData).toSeq
+        item.getExponentialHistogramData.getPoints.asScala
+          .map(c => fromExponentialHistogramData(c))
+          .toSeq
     }
 
   import Pretty.*
@@ -175,6 +177,40 @@ object MetricValue {
 
   }
 
+  final case class ExponentialHistogram(
+      count: Long,
+      sum: Double,
+      min: Double,
+      max: Double,
+      attributes: Map[String, String],
+  ) extends MetricValue {
+
+    override def toCsvHeader(data: MetricData): String = "timestamp,sum,count,min,max,attributes"
+
+    override def toCsvRow(ts: CantonTimestamp, data: MetricData, unknownKeys: Seq[String]): String =
+      (Seq(
+        ts.getEpochSecond.toString,
+        sum.toString,
+        count.toString,
+        min.toString,
+        max.toString,
+      ) :+ renderUnknownKeys(
+        unknownKeys
+      ))
+        .mkString(",")
+
+    override protected def pretty: Pretty[ExponentialHistogram] =
+      ExponentialHistogram.prettyInstance
+  }
+  private object ExponentialHistogram {
+    private val prettyInstance = {
+      import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+      prettyOfClass[ExponentialHistogram](
+        param("attributes", _.attributes)
+      )
+    }
+  }
+
   private def fromLongPoint(data: LongPointData): LongPoint =
     LongPoint(data.getValue, mapAttributes(data.getAttributes))
   private def fromDoublePoint(data: DoublePointData): DoublePoint =
@@ -194,6 +230,17 @@ object MetricValue {
       data.getCount,
       data.getCounts.asScala.map(_.longValue()).toList,
       data.getBoundaries.asScala.map(_.doubleValue()).toList,
+      mapAttributes(data.getAttributes),
+    )
+
+  private def fromExponentialHistogramData(
+      data: ExponentialHistogramPointData
+  ): ExponentialHistogram =
+    ExponentialHistogram(
+      data.getCount,
+      data.getSum,
+      data.getMin,
+      data.getMax,
       mapAttributes(data.getAttributes),
     )
 

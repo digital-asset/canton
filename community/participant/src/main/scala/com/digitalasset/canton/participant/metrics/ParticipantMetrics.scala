@@ -101,6 +101,7 @@ class ParticipantMetrics(
   override def healthMetrics: HealthMetrics = ledgerApiServer.health
   override def storageMetrics: DbStorageMetrics = dbStorage
   val dbStorage = new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
+  val kmsMetrics: KmsMetrics = new KmsMetrics(prefix, openTelemetryMetricsFactory)
   val phase: Timer = openTelemetryMetricsFactory.timer(inventory.phase.info)
 
   // Private constructor to avoid being instantiated multiple times by accident
@@ -323,4 +324,5 @@ class ConnectedSynchronizerMetrics private[metrics] (
 
   val inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTrackerMetrics =
     new InFlightSubmissionSynchronizerTrackerMetrics
+
 }

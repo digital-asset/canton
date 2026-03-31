@@ -88,8 +88,15 @@ object TrafficControlParameters {
     PositiveInt.tryCreate(200)
   val DefaultMaxBaseTrafficAccumulationDuration: PositiveFiniteDuration =
     time.PositiveFiniteDuration.tryOfMinutes(10L)
+  // The `DefaultSetBalanceRequestSubmissionWindowSize` defines the default window used to compute
+  // the max sequencing time (i.e. 125% of this parameter) for set balance requests. If this value exceeds or
+  // equals what can be safely covered by a session signing key (i.e., `keyValidityDuration` - `cutOffDuration`, ),
+  // we will fall back to using the long-term key. This does not break correctness, but
+  // it will require additional KMS calls and may impact performance. The closer this parameter is to
+  // `keyValidityDuration`, the fewer opportunities we have to reuse a session signing key, as it leaves
+  // a smaller margin in the future for the validity period of a newly created session signing key.
   val DefaultSetBalanceRequestSubmissionWindowSize: time.PositiveFiniteDuration =
-    time.PositiveFiniteDuration.tryOfMinutes(4L)
+    time.PositiveFiniteDuration.tryOfMinutes(2L)
   val DefaultEnforceRateLimiting: Boolean = true
   val DefaultBaseEventCost: NonNegativeLong = NonNegativeLong.zero
   val DefaultFreeConfirmationResponses: Boolean = false

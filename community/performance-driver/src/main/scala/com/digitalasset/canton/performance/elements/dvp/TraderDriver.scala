@@ -162,7 +162,11 @@ class TraderDriver(
     filter = _ => true,
     loggerFactory,
   ) {
-    override protected def contractCreated(create: Propose.Contract, myProposal: Boolean): Unit =
+    override protected def contractCreated(
+        create: Propose.Contract,
+        myProposal: Boolean,
+        synchronizer: String,
+    ): Unit =
       // increment observation of my proposal being created
       if (myProposal) {
         proposalStats.incrementObserved()
@@ -264,6 +268,7 @@ class TraderDriver(
   listeners.appendAll(Seq(assets, assetRequests, proposals))
   protected val issuerBalancer = new Balancer()
   protected val traderBalancer = new Balancer()
+  protected val shouldBeConsistent = new AtomicBoolean(false)
 
   override protected def masterCreated(master: TestRun.Contract): Unit = {
     issuerBalancer.updateMembers(master.data.issuers.asScala.toSeq.map(new Party(_)))
@@ -293,6 +298,48 @@ class TraderDriver(
     true
   }
 
+  private def signalReadyIfWeAre(
+      master: M.orchestration.TestRun.Contract,
+      numAssetsPerIssuer: Long,
+      numInTransfer: Int,
+  ): Boolean =
+    testResult
+      .one(())
+      .exists { case (_, res) =>
+        if (res.data.flag == M.orchestration.ParticipantFlag.READY)
+          true
+        else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
+          val expected = synchronizers.size * numAssetsPerIssuer * master.data.issuers.size
+          val actual = assets.allAvailable.size + numInTransfer
+          if (actual == expected) {
+            // signal that we are ready if we have enough assets
+            updateFlag(res, M.orchestration.ParticipantFlag.READY)
+          } else {
+            logger.info(
+              s"Driver does not yet have the required number of assets (expected: $expected, actual: $actual)."
+            )
+          }
+          false
+        } else false
+      }
+
+  private def acquireAssets(
+      master: M.orchestration.TestRun.Contract,
+      payloadSize: Long,
+      numAssetsPerIssuer: Long,
+  ): Unit =
+    generator
+      .one(())
+      .foreach { case (_, res) =>
+        // if there is a new issuer that we haven't seen before
+        val issuers =
+          master.data.issuers.asScala.toSeq.filterNot(res.data.processedIssuers.contains)
+        if (issuers.nonEmpty) {
+          sendAssetRequest(res, numAssetsPerIssuer, issuers, payloadSize)
+          shouldBeConsistent.set(false)
+        }
+      }
+
   override def flush(): Boolean =
     if (running.get()) {
       val reflush = masterContract
@@ -319,7 +366,7 @@ class TraderDriver(
             case Mode.PREPAREISSUER => false
             case Mode.PREPARETRADER =>
               initExisting()
-              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer).discard
+              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer)
               signalReadyIfWeAre(
                 master,
                 params.numAssetsPerIssuer,
@@ -328,7 +375,7 @@ class TraderDriver(
               false
             case Mode.THROUGHPUT =>
               initExisting()
-              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer).discard
+              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer)
               if (signalReadyIfWeAre(master, params.numAssetsPerIssuer, proposals.num(item = true)))
                 checkConsistency(master, params)
               rate.updateRate(CantonTimestamp.now())

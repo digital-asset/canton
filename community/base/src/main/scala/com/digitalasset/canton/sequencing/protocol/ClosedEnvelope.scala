@@ -15,6 +15,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Optional
+import monocle.macros.GenPrism
 
 trait ClosedEnvelope extends Envelope[ByteString] {
 
@@ -36,6 +38,15 @@ trait ClosedEnvelope extends Envelope[ByteString] {
 }
 
 object ClosedEnvelope {
+
+  @VisibleForTesting
+  val recipientsLens: Optional[ClosedEnvelope, Recipients] =
+    GenPrism[ClosedEnvelope, ClosedCompressedEnvelope]
+      .andThen(ClosedCompressedEnvelope.recipientsLens)
+      .orElse(
+        GenPrism[ClosedEnvelope, ClosedUncompressedEnvelope]
+          .andThen(ClosedUncompressedEnvelope.recipientsLens)
+      )
 
   def verifySignatures(
       snapshot: SyncCryptoApi,

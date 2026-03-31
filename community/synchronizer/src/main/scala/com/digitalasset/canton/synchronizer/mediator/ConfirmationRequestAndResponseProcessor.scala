@@ -51,7 +51,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     batchingConfig: BatchingConfig,
-    getActiveLsuSuccessor: Mediator.GetActiveLsuSuccessor,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with Spanning
@@ -173,25 +172,16 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
   private[mediator] def handleTimeouts(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): HandlerResult =
+  ): HandlerResult =
     // Determine the timed-out requests in the synchronous processing stage, ...
-    (mediatorState
+    mediatorState
       .pendingTimedoutRequest(timestamp) match {
-      case Nil =>
-        HandlerResult.done
+      case Nil => HandlerResult.done
       case nonEmptyTimeouts =>
         // ... but perform the actual timeout handling in the asynchronous processing stage.
         // This allows us to wait for the individual requests' previous processing to finish without blocking
         // the synchronous processing stage of subsequent events.
         HandlerResult.asynchronous(nonEmptyTimeouts.map(handleTimeout(_, timestamp)).sequence_)
-    }).map { result =>
-      // If we have passed the LSU upgrade time there will be no further requests, so after the
-      // timeouts have been handled, signal that all requests are now finalized to the timestamp.
-      result.andThenF { _ =>
-        getActiveLsuSuccessor(timestamp).map { lsu =>
-          lsu.foreach(s => mediatorState.allRequestsFinalizedTo(s.upgradeTime))
-        }
-      }
     }
 
   @VisibleForTesting

@@ -8,7 +8,9 @@
 module Exceptions where
 
 import DA.Assert
+import DA.ContractKeys (lookupByKey)
 import DA.Exception (throw,throwPure)
+import Prelude hiding (lookupByKey)
 
 exception E
   where

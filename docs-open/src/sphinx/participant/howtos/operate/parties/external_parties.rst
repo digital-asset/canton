@@ -5,10 +5,9 @@
 
 .. _howto_external_parties:
 
-.. note::
+.. wip::
     - create a key for party namespace and party signing, or use one key for both
     - upload public keys to participant node
-    - document build topology transaction for party to key mapping
     - Link to SDK site for external party prepare and execute
 
 .. important::

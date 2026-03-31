@@ -683,7 +683,7 @@ abstract class EventStorageBackendTemplate(
       }
 
       logger.info("Finished pruning of Index DB events.")
-    }(connection, logger)
+    }(connection, noTracingLogger)
 
   private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(implicit
       connection: Connection,
@@ -880,42 +880,47 @@ abstract class EventStorageBackendTemplate(
   override def lastSynchronizerOffsetBeforeOrAtRecordTime(
       synchronizerId: SynchronizerId,
       beforeOrAtRecordTimeInclusive: Timestamp,
+      beforeOrAtLedgerEndOffsetInclusive: Offset,
   )(connection: Connection)(implicit traceContext: TraceContext): Option[SynchronizerOffset] = {
-    val ledgerEndOffset = ledgerEndCache().map(_.lastOffset)
-
     logger.debug(
-      s"Querying lastSynchronizerOffset: beforeOrAtRecordTime=$beforeOrAtRecordTimeInclusive, ledgerEndOffset=$ledgerEndOffset, synchronizerId=$synchronizerId"
+      s"Querying lastSynchronizerOffset: beforeOrAtRecordTime=$beforeOrAtRecordTimeInclusive, ledgerEndOffset=$beforeOrAtLedgerEndOffsetInclusive, synchronizerId=$synchronizerId"
     )
 
     val completionQueryResult =
       RowDefs
         .completionSynchronizerOffsetParser(stringInterning)
-        .querySingleOptRow(columns => SQL"""
+        .querySingleOptRow(columns =>
+          SQL"""
         SELECT $columns
         FROM lapi_command_completions
         WHERE
           synchronizer_id = ${stringInterning.synchronizerId.internalize(synchronizerId)} AND
           record_time <= ${beforeOrAtRecordTimeInclusive.micros} AND
-          ${QueryStrategy.offsetIsLessOrEqual("completion_offset", ledgerEndOffset)}
+          ${QueryStrategy
+              .offsetIsLessOrEqual("completion_offset", Some(beforeOrAtLedgerEndOffsetInclusive))}
         ORDER BY synchronizer_id DESC, record_time DESC, completion_offset DESC
         ${QueryStrategy.limitClause(Some(1))}
-        """)(connection)
+        """
+        )(connection)
 
     logger.debug(s"lapi_command_completions query result: $completionQueryResult")
 
     val metaQueryResult =
       RowDefs
         .metaSynchronizerOffsetParser(stringInterning)
-        .querySingleOptRow(columns => SQL"""
+        .querySingleOptRow(columns =>
+          SQL"""
         SELECT $columns
         FROM lapi_update_meta
         WHERE
           synchronizer_id = ${stringInterning.synchronizerId.internalize(synchronizerId)} AND
           record_time <= ${beforeOrAtRecordTimeInclusive.micros} AND
-          ${QueryStrategy.offsetIsLessOrEqual("event_offset", ledgerEndOffset)}
+          ${QueryStrategy
+              .offsetIsLessOrEqual("event_offset", Some(beforeOrAtLedgerEndOffsetInclusive))}
         ORDER BY synchronizer_id DESC, record_time DESC, event_offset DESC
         ${QueryStrategy.limitClause(Some(1))}
-        """)(connection)
+        """
+        )(connection)
 
     logger.debug(s"lapi_update_meta query result: $metaQueryResult")
 

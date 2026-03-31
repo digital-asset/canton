@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submission
 
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
@@ -29,8 +28,6 @@ import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class PartySetsITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -41,7 +38,7 @@ class PartySetsITSpec
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "benchtool" should {
-    "submit a party-set and apply party-set filter on a stream" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "submit a party-set and apply party-set filter on a stream" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       env =>
         import env.*
 

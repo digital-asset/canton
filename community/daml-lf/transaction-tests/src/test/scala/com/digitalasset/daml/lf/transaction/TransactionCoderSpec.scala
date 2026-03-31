@@ -121,6 +121,23 @@ class TransactionCoderSpec
       }
     }
 
+    "do Node.QueryByKey" in {
+      forAll(queryByKeyNodeGen, versionInIncreasingOrder()) {
+        case (queryByKeyNode, (nodeVersion, txVersion)) =>
+          val versionedNode = normalizeQueryByKey(queryByKeyNode.updateVersion(nodeVersion))
+          val Right(encodedNode) =
+            TransactionCoder.internal
+              .encodeNode(
+                enclosingVersion = txVersion,
+                nodeId = NodeId(0),
+                node = versionedNode,
+              )
+          TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
+            (NodeId(0), versionedNode)
+          )
+      }
+    }
+
     "do transactions" in
       forAll(noDanglingRefGenVersionedTransaction, minSuccessful(50)) { tx =>
         val tx2 = VersionedTransaction(
@@ -715,7 +732,7 @@ class TransactionCoderSpec
       case exe: Node.Exercise => normalizeExe(exe)
       case fetch: Node.Fetch => normalizeFetch(fetch)
       case create: Node.Create => normalizeCreate(create)
-      case lookup: Node.LookupByKey => lookup
+      case queryByKey: Node.QueryByKey => normalizeQueryByKey(queryByKey)
     }
 
   private[this] def adjustStakeholders(create: Node.Create) = {
@@ -801,6 +818,11 @@ class TransactionCoderSpec
         normalize(key.value, version),
         key.globalKey.hash,
       )
+    )
+
+  private[this] def normalizeQueryByKey(queryByKey: Node.QueryByKey): Node.QueryByKey =
+    queryByKey.copy(
+      key = normalizeKey(queryByKey.key, queryByKey.version),
     )
 
   private[this] def normalize(

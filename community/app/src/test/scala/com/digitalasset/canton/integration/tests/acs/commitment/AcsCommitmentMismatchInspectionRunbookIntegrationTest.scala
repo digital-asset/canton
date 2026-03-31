@@ -16,10 +16,10 @@ import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.acs.commitment.util.ContractsAndCommitment.IouCommitmentWithContracts
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
   IntervalDuration,
-  IouContractsAndCommitment,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -131,7 +131,7 @@ trait AcsCommitmentMismatchInspectionRunbookIntegrationTest
             .map(_.physicalSynchronizerId) should contain(daId)
         }
 
-        val IouContractsAndCommitment(_, period, commitment) =
+        val IouCommitmentWithContracts(_, period, commitment, _) =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
         val synchronizerId1 = daId

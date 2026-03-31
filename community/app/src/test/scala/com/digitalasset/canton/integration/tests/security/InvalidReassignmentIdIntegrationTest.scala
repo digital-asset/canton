@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -77,6 +78,7 @@ sealed trait InvalidReassignmentIdIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
 

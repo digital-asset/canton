@@ -66,6 +66,8 @@ message Enums {
     // UNUSED in PV >= 34 - Was meant to tactically fix a bug in the external signing hash computation
     // in model conformance in PV 33
     PARTICIPANT_FEATURE_FLAG_PV33_EXTERNAL_SIGNING_LOCAL_CONTRACT_IN_SUBVIEW = 1;
+    // This flag indicates that the participant supports reassignments between synchronizers.
+    PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER = 2;
   }
 }
 
@@ -147,11 +149,12 @@ message OwnerToKeyMapping {
   reserved 3; // was synchronizer = 3;
 }
 
-// [doc-entry-start: PartyToKeyMapping]
 // mapping a party to a key
 // authorization: whoever controls the party uid
 // UNIQUE(party)
 message PartyToKeyMapping {
+  // Deprecated in favor of PartyToParticipant
+  option deprecated = true;
   // the party
   string party = 1;
   // the authorization threshold
@@ -161,7 +164,6 @@ message PartyToKeyMapping {
 
   reserved 2; // was synchronizer_id = 2
 }
-// [doc-entry-end: PartyToKeyMapping]
 
 // the trust certificate issued by the participant confirming that the participant
 // wishes to be present on the given synchronizer
@@ -241,6 +243,7 @@ message VettedPackages {
   reserved 3; // was synchronizer_id = 3;
 }
 
+// [doc-entry-start: PartyToParticipant]
 // Mapping that maps a party to a participant
 // The PartyToParticipant mapping may also specify a list of signing keys for setting up an external party, in which
 // case the keys and the threshold take precedence over any PartyToKeyMapping for the same party.
@@ -297,6 +300,7 @@ message PartyToParticipant {
   // The max number of keys is 20
   optional com.digitalasset.canton.crypto.v30.SigningKeysWithThreshold party_signing_keys = 6;
 }
+// [doc-entry-end: PartyToParticipant]
 
 // which dynamic synchronizer parameters are supposed to be used on the given synchronizer
 // authorization: whoever controls the synchronizer
@@ -412,7 +416,8 @@ message TopologyMapping {
     SequencerSynchronizerState sequencer_synchronizer_state = 13;
     DynamicSequencingParametersState sequencing_dynamic_parameters_state = 15;
 
-    PartyToKeyMapping party_to_key_mapping = 16;
+    // Deprecated in favor of PartyToParticipant
+    PartyToKeyMapping party_to_key_mapping = 16 [deprecated = true];
 
     LsuAnnouncement synchronizer_upgrade_announcement = 17;
     LsuSequencerConnectionSuccessor sequencer_connection_successor = 18;

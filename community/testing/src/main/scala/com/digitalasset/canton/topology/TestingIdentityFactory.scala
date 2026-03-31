@@ -51,6 +51,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -129,6 +130,7 @@ final case class TestingTopology(
     sequencerGroup: SequencerGroup = defaultSequencerGroup,
     participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
     packages: Map[ParticipantId, Seq[VettedPackage]] = Map.empty,
+    featureFlags: Map[ParticipantId, Seq[ParticipantTopologyFeatureFlag]] = Map.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.All,
     synchronizerParameters: List[
       SynchronizerParameters.WithValidity[DynamicSynchronizerParameters]
@@ -201,6 +203,15 @@ final case class TestingTopology(
       participants: (ParticipantId, ParticipantAttributes)*
   ): TestingTopology =
     this.copy(participants = participants.toMap)
+
+  def enableMultiSynchronizer(participants: ParticipantId*): TestingTopology =
+    this.copy(featureFlags = participants.foldLeft(featureFlags) { (flags, participant) =>
+      val existing = flags.getOrElse(participant, Seq.empty)
+      flags.updated(
+        participant,
+        (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer +: existing).distinct,
+      )
+    })
 
   def allParticipants(): Set[ParticipantId] =
     (topology.values
@@ -369,6 +380,7 @@ class TestingIdentityFactory(
       ips(availableUpToInclusive, currentSnapshotApproximationTimestamp),
       crypto,
       cryptoConfig,
+      None,
       BatchingConfig().parallelism,
       CachingConfigs.defaultPublicKeyConversionCache,
       DefaultProcessingTimeouts.testing,
@@ -554,7 +566,7 @@ class TestingIdentityFactory(
       }
 
     val participantTxs =
-      participantsTxs(defaultPermissionByParticipant, topology.packages)
+      participantsTxs(defaultPermissionByParticipant, topology.packages, topology.featureFlags)
 
     val synchronizerMembers =
       (topology.sequencerGroup.active ++ topology.sequencerGroup.passive ++ topology.mediators)
@@ -598,6 +610,7 @@ class TestingIdentityFactory(
         )
       )
     )
+
     val transactions = (participantTxs ++
       synchronizerMembers ++
       mediatorOnboarding ++
@@ -786,6 +799,7 @@ class TestingIdentityFactory(
   private def participantsTxs(
       defaultPermissionByParticipant: Map[ParticipantId, ParticipantPermission],
       packages: Map[ParticipantId, Seq[VettedPackage]],
+      featureFlags: Map[ParticipantId, Seq[ParticipantTopologyFeatureFlag]],
   ): Seq[SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]] = topology
     .allParticipants()
     .toSeq
@@ -808,6 +822,7 @@ class TestingIdentityFactory(
         SynchronizerTrustCertificate(
           participantId,
           synchronizerId,
+          featureFlags.getOrElse(participantId, Seq.empty),
         )
       ) :+ mkAdd(
         ParticipantSynchronizerPermission(

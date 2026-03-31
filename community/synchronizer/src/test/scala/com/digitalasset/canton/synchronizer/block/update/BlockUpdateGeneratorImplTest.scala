@@ -109,10 +109,12 @@ class BlockUpdateGeneratorImplTest
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
             lsuSequencingBounds = Some(
-              LsuSequencingBounds(
-                sequencingTimeLowerBoundExclusive,
-                sequencingTimeLowerBoundExclusive,
-              )
+              LsuSequencingBounds
+                .create(
+                  sequencingTimeLowerBoundExclusive,
+                  sequencingTimeLowerBoundExclusive,
+                )
+                .value
             ),
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,

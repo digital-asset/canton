@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package language
 
+import io.circe.{Decoder, Json}
+
 import scala.math.Ordered.orderingToOrdered
 
 final case class LanguageVersion private[lf] (
@@ -22,35 +24,53 @@ final case class LanguageVersion private[lf] (
 }
 
 object LanguageVersion extends LanguageFeaturesGenerated {
-  private[this] lazy val V2NumericRegex = """2\.(\d+)(?:-rc(\d+))?""".r
 
-  def assertFromStringUnchecked(str: String): LanguageVersion =
-    data.assertRight(fromStringUnchecked(str))
-
-  /** Unchecked because it does not check if the parsed version "exists" (if you pass it 2.n it will
-    * succeed, even if 2.n is not released yet
+  /** Decode a LanguageVersion from a JSON string produced by the sbt plugin's Circe encoding of
+    * LanguageVersionDto. Expected format: {"major":2,"minor":{"Stable":{"version":1}}}
+    * {"major":2,"minor":{"Staging":{"version":3,"revision":1}}} {"major":2,"minor":{"Dev":{}}}
+    *
+    * Unchecked because it does not verify the parsed version is a known/released version.
     */
-  def fromStringUnchecked(str: String): Either[String, LanguageVersion] =
-    str match {
-      case "2.dev" =>
-        Right(LanguageVersion(Major.V2, Minor.Dev))
+  def fromDTOJson(jsonStr: String): Either[String, LanguageVersion] =
+    io.circe.parser.decode[LanguageVersion](jsonStr)(dtoDecoder).left.map(_.getMessage)
 
-      case V2NumericRegex(nStr, mStr) =>
-        try {
-          val n = nStr.toInt
-          val minor = if (mStr == null) {
-            Minor.Stable(n)
-          } else {
-            Minor.Staging(n, mStr.toInt)
+  def assertFromDTOJson(jsonStr: String): LanguageVersion = data.assertRight(fromDTOJson(jsonStr))
+
+  private implicit lazy val minorDecoder: Decoder[Minor] = Decoder.instance { cursor =>
+    cursor
+      .downField("Stable")
+      .as[Json]
+      .flatMap(_.hcursor.downField("version").as[Int])
+      .map(Minor.Stable(_))
+      .orElse(
+        cursor
+          .downField("Staging")
+          .as[Json]
+          .flatMap { json =>
+            for {
+              version <- json.hcursor.downField("version").as[Int]
+              revision <- json.hcursor.downField("revision").as[Int]
+            } yield Minor.Staging(version, revision)
           }
-          Right(LanguageVersion(Major.V2, minor))
-        } catch {
-          case _: NumberFormatException =>
-            Left(s"Version component in '$str' is too large for an Int")
-        }
-      case _ =>
-        Left(s"Unsupported LF version: '$str'. Expected '2.dev', '2.n', or '2.n-rcm'")
+      )
+      .orElse(
+        cursor.downField("Dev").as[Json].map(_ => Minor.Dev)
+      )
+  }
+
+  private lazy val dtoDecoder: Decoder[LanguageVersion] = Decoder.instance { cursor =>
+    for {
+      majorInt <- cursor.downField("major").as[Int]
+      minor <- cursor.downField("minor").as[Minor]
+    } yield {
+      val major = majorInt match {
+        case 2 => Major.V2
+        case unsupported =>
+          throw new IllegalArgumentException(s"Unsupported major version: $unsupported")
+      }
+      LanguageVersion(major, minor)
     }
+  }
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 

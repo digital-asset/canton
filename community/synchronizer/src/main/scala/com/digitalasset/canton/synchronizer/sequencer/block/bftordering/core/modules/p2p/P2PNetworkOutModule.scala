@@ -16,8 +16,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultBlockingDbReadTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule.DefaultDatabaseReadTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PMetrics.{
   emitAuthenticatedCount,
   emitConnectedCount,
@@ -52,6 +52,7 @@ import com.google.protobuf.timestamp.Timestamp
 
 import java.time.Instant
 import scala.collection.mutable
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success}
 
 final class P2PNetworkOutModule[
@@ -66,6 +67,7 @@ final class P2PNetworkOutModule[
     override val dependencies: P2PNetworkOutModuleDependencies[E, P2PNetworkManagerT],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
+    blockingDbReadTimeout: FiniteDuration = DefaultBlockingDbReadTimeout,
 )(implicit mc: MetricsContext)
     extends P2PNetworkOut[E, P2PNetworkManagerT]
     with P2PConnectionEventListener {
@@ -103,7 +105,7 @@ final class P2PNetworkOutModule[
     message match {
       case P2PNetworkOut.Start =>
         val p2pEndpoints =
-          context.blockingAwait(p2pEndpointsStore.listEndpoints, DefaultDatabaseReadTimeout)
+          context.blockingAwait(p2pEndpointsStore.listEndpoints, blockingDbReadTimeout)
         connectInitialNodes(p2pEndpoints)
         startModulesIfNeeded()
 

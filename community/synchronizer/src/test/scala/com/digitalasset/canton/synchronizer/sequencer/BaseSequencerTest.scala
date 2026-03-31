@@ -238,8 +238,8 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] = ???
 
-    override def getLsuTrafficControlState(implicit
-        traceContext: TraceContext
+    override def getLsuTrafficControlState(trafficTsOverride: Option[CantonTimestamp] = None)(
+        implicit traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] = ???
 
     override def setLsuTrafficControlState(state: LsuTrafficState)(implicit

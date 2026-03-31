@@ -19,6 +19,7 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -47,6 +48,9 @@ trait SynchronizerRouterIntegrationTestSetup
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .P4_S1M1_S1M1_S1M1()
+      .addConfigTransforms(
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
+      )
       .withSetup { implicit env =>
         import env.*
 

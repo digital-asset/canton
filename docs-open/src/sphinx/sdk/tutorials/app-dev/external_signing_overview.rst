@@ -19,10 +19,8 @@ In this set of tutorials, you will learn how to:
 - :ref:`Create a contract using external signing <tutorial_externally_signed_transactions>`
 - :ref:`Exercise a choice on a contract using external signing <tutorial_externally_signed_transactions_part_2>`
 
-For more advanced use cases, the following tutorials will guide you through the process of using the Admin API to
-manage parties or upload much more generic topology transactions using external signing:
+For more advanced use cases, the following tutorials will guide you through the process of creating and externally signing more generic topology transactions:
 
-- :ref:`Use the Admin API to onboard an external party <tutorial_onboard_external_party>`
 - :ref:`Build, sign and submit topology transactions <externally_signed_topology_transaction>`
 
 Context
@@ -81,7 +79,7 @@ permissions:
 
 Granting a validator **Submission** rights means that the party is an internal party. If the validators are
 granted **Confirmation** or **Observation** rights, then the party is an external party for which the authorizing key
-needs to be defined with an additional topology transaction, the **party to key mapping**.
+needs to be defined within the **party to participant mapping**.
 
 Please continue with the following tutorial to learn how to
 :ref:`onboard an external party using the Ledger API <tutorial_onboard_external_party_lapi>`.

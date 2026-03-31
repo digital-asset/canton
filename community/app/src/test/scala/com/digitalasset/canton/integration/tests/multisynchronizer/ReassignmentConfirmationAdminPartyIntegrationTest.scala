@@ -69,6 +69,7 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
         // Because we play with the simClock, ensure we have enough forward tolerance
         // on the target timestamp to not impact up unassigments.
         ConfigTransforms.updateTargetTimestampForwardTolerance(1.hours),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -118,6 +119,7 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
           getProgrammableSequencer(sequencer1.name),
         )
         programmableSequencers.put(acmeName, getProgrammableSequencer(sequencer2.name))
+
       }
 
   "admin party of a submitting participant" should {

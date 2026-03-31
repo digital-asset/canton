@@ -72,7 +72,7 @@ object ConfigValidations extends NamedLogging {
     * @return
     */
   protected def validations(ensurePortsSet: Boolean): List[Validation] =
-    List(
+    List[Validation](
       alphaProtocolVersionRequiresNonStandard,
       dbSequencerRequiresNonStandard,
       snapshotDirRequiresNonStandard,
@@ -617,17 +617,17 @@ object ConfigValidations extends NamedLogging {
               s"$toleranceShiftDuration must be longer than the cut-off (" +
               s"$cutOffDuration)."
           )
-        // keyValidity - tolerance - cut-off >= maxSequencingTimeOffset → to ensure that when the default max
-        // sequencing time is used, the submission request signature remains valid until that time.
+        // keyValidity - cut-off > maxSequencingTimeOffset → to ensure that when the default max
+        // sequencing time is used, we can pick a key that remains valid until that time.
         else if (
-          (keyValidityDuration.duration - toleranceShiftDuration.duration - cutOffDuration.duration) <
+          (keyValidityDuration.duration - cutOffDuration.duration) <=
             maxSequencingTimeOffset.duration
         )
           Seq(
             s"The selected session signing key validity parameters do not align with " +
               s"the current default max sequencing time offset ($maxSequencingTimeOffset). " +
               s"Parameters must be chosen so that " +
-              s"`keyValidityDuration` - `toleranceShiftDuration` - `cutOffDuration` >= `defaultMaxSequencingTimeOffset`."
+              s"`keyValidityDuration` - `cutOffDuration` > `defaultMaxSequencingTimeOffset`."
           )
         else if (keyEvictionPeriod.duration <= keyValidityDuration.duration)
           Seq(

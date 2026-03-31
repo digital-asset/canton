@@ -146,7 +146,9 @@ trait SequencerConnectionXPool extends FlagCloseable with NamedLogging {
       threshold: PositiveInt,
       ignored: Set[ConnectionXConfig] = Set.empty,
       extraUndecided: NonNegativeInt = NonNegativeInt.zero,
-  )(implicit traceContext: TraceContext): Boolean
+  )(implicit
+      traceContext: TraceContext
+  ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit]
 
   @VisibleForTesting
   def contents: Map[SequencerId, Set[SequencerConnectionX]]
@@ -194,7 +196,7 @@ object SequencerConnectionXPool {
       paramIfDefined("expectedPsidO", _.expectedPsidO),
     )
 
-    def validate: Either[SequencerConnectionXPoolError, Unit] = {
+    def validate: Either[SequencerConnectionXPoolError.InvalidConfigurationError, Unit] = {
       val (names, endpoints) = connections.map(conn => conn.name -> conn.endpoint).unzip
 
       val check = for {

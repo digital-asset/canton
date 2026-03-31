@@ -313,7 +313,7 @@ object PingService {
     }
 
     private val acs = TrieMap[ContractIdS, ContractWithExpiry]()
-    private val directEc = DirectExecutionContext(logger)
+    private val directEc = DirectExecutionContext(noTracingLogger)
 
     override private[admin] def processTransaction(tx: Transaction): Unit = {
       implicit val traceContext: TraceContext =

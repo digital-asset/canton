@@ -9,6 +9,7 @@ import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
@@ -34,6 +35,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDat
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
   ContractValidationError,
+  MultiSynchronizerIsNotEnabled,
   NotHostedOnParticipant,
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
@@ -163,6 +165,7 @@ final class AssignmentProcessingStepsTest
       )
     )
     .withSimpleParticipants(participant) // required such that `participant` gets a signing key
+    .enableMultiSynchronizer(participant)
     .build(crypto, loggerFactory)
 
   private lazy val cryptoClient =
@@ -272,6 +275,7 @@ final class AssignmentProcessingStepsTest
       cryptoSnapshot,
       cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
       view.reassignmentId,
+      NonNegativeLong.tryCreate(1235),
     )
   }
 
@@ -568,6 +572,7 @@ final class AssignmentProcessingStepsTest
               parsedRequest.mediator,
               parsedRequest.snapshot,
               parsedRequest.synchronizerParameters,
+              parsedRequest.trafficCost,
             ),
             _.shouldBeCantonError(
               SyncServiceAlarm,
@@ -807,6 +812,7 @@ final class AssignmentProcessingStepsTest
           contractAuthenticationResultF = EitherT.rightT(()),
           submitterCheckResult = None,
           reassignmentIdResult = None,
+          multiSynchronizerFeatureFlagCheckResult = None,
         ),
         reassigningParticipantValidationResult =
           ReassigningParticipantValidationResult(errors = Seq.empty),
@@ -875,6 +881,35 @@ final class AssignmentProcessingStepsTest
             ),
           )
       } yield result.commitSet.nonEmpty shouldBe false
+    }
+
+    "don't commit when multi-synchronizer is not enabled" in {
+      val failingAssignmentValidation = pendingRequestData
+        .focus(
+          _.assignmentValidationResult.commonValidationResult.multiSynchronizerFeatureFlagCheckResult
+        )
+        .replace(Some(MultiSynchronizerIsNotEnabled(Set(participant), targetPsid.unwrap)))
+
+      for {
+        deps <- statefulDependencies
+        (_persistentState, state) = deps
+        result <-
+          valueOrFail(
+            assignmentProcessingSteps
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
+                NoOpeningErrors(
+                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                ),
+                Verdict.Approve(testedProtocolVersion),
+                failingAssignmentValidation,
+                state.pendingAssignmentSubmissions,
+                crypto.pureCrypto,
+              )
+              .failOnShutdown
+          )("get commit set and contracts to be stored and event failed")
+      } yield {
+        result.commitSet.nonEmpty shouldBe false
+      }
     }
   }
 

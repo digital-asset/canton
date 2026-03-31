@@ -7,8 +7,8 @@ override-components:
   daml-script:
     version: $DAML_VERSION
 build-options:
-- --target=2.dev
-name: BasicTests-v2dev
+- --target=2.3-staging
+name: BasicTests-v23
 parties:
 - Alice
 - Bob

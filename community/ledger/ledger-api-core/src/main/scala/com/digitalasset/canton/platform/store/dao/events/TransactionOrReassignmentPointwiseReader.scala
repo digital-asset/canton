@@ -17,6 +17,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InternalUpdateFormat
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
@@ -45,7 +46,7 @@ final class TransactionOrReassignmentPointwiseReader(
 
   protected val dbMetrics: metrics.index.db.type = metrics.index.db
 
-  val directEC: DirectExecutionContext = DirectExecutionContext(logger)
+  val directEC: DirectExecutionContext = DirectExecutionContext(noTracingLogger)
 
   private def fetchRawAcsDeltaEvents(
       firstEventSequentialId: Long,
@@ -161,8 +162,10 @@ final class TransactionOrReassignmentPointwiseReader(
               .map(_.internalEventFormat.eventProjectionProperties),
             lfValueTranslation = lfValueTranslation,
           )(rawEvents)(
-            convertReassignment = (r: Reassignment) => GetUpdateResponse(Update.Reassignment(r)),
-            convertTransaction = (t: Transaction) => GetUpdateResponse(Update.Transaction(t)),
+            convertReassignment = (r: Reassignment) =>
+              GetUpdateResponse(Update.Reassignment(r)).withPrecomputedSerializedSize(),
+            convertTransaction = (t: Transaction) =>
+              GetUpdateResponse(Update.Transaction(t)).withPrecomputedSerializedSize(),
           ),
         )
       )

@@ -7,9 +7,8 @@ import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.lifecycle.ClosingException
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.ThrowableUtil
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 import com.typesafe.scalalogging.Logger
 
@@ -108,7 +107,7 @@ object Threading {
     new ThreadPoolIdlenessExecutorService(
       executor,
       monitoredExecutor,
-      createReporter(name, logger, exitOnFatal = true)(_),
+      ThrowableUtil.createReporter(name, logger, exitOnFatal = true)(_),
       name,
     )
   }
@@ -136,40 +135,7 @@ object Threading {
       logger: Logger,
       exitOnFatal: Boolean,
   ): Thread.UncaughtExceptionHandler =
-    (t: Thread, e: Throwable) => createReporter(t.getName, logger, exitOnFatal)(e)
-
-  /** @param exitOnFatal
-    *   terminate the JVM on fatal errors. Enable this in production to prevent data corruption by
-    *   termination of specific threads.
-    */
-  def createReporter(name: String, logger: Logger, exitOnFatal: Boolean)(
-      throwable: Throwable
-  ): Unit = {
-    if (exitOnFatal) doExitOnFatal(name, logger)(throwable)
-    throwable match {
-      case ex: io.grpc.StatusRuntimeException
-          if ex.getStatus.getCode == io.grpc.Status.Code.CANCELLED =>
-        logger.info(s"Grpc channel cancelled in $name.", ex)
-      case ClosingException(_) =>
-        logger.info(s"Unclean shutdown due to cancellation in $name.", throwable)
-      case _: Throwable =>
-        logger.error(s"A fatal error has occurred in $name. Terminating thread.", throwable)
-    }
-  }
-
-  private def doExitOnFatal(name: String, logger: Logger)(throwable: Throwable): Unit =
-    throwable match {
-      case _: LinkageError | _: VirtualMachineError =>
-        // Output the error reason both to stderr and the logger,
-        // because System.exit tends to terminate the JVM before everything has been output.
-        Console.err.println(
-          s"A fatal error has occurred in $name. Terminating immediately.\n${ErrorUtil.messageWithStacktrace(throwable)}"
-        )
-        Console.err.flush()
-        logger.error(s"A fatal error has occurred in $name. Terminating immediately.", throwable)
-        System.exit(-1)
-      case _: Throwable => // no fatal error, nothing to do
-    }
+    (t: Thread, e: Throwable) => ThrowableUtil.createReporter(t.getName, logger, exitOnFatal)(e)
 
   def newExecutionContext(
       name: String,
@@ -205,7 +171,7 @@ object Threading {
       exitOnFatal: Boolean = true,
   ): ExecutionContextIdlenessExecutorService = {
     val uncaughtExceptionReporter =
-      createReporter(name, logger, exitOnFatal)(_)
+      ThrowableUtil.createReporter(name, logger, exitOnFatal)(_)
 
     val uncaughtExceptionHandler =
       ((_, cause) => uncaughtExceptionReporter(cause)): Thread.UncaughtExceptionHandler

@@ -52,7 +52,7 @@ class GrpcAuthInterceptor(
     val (transport, clientAddr) = GrpcAddressHelper.extractTransportFromHeaders(call, headers)
     val callMetadata = CallMetadata(
       apiEndpoint =
-        show"${call.getMethodDescriptor.getFullMethodName().readableLoggerName(apiLoggingConfig.maxMethodLength)}",
+        show"${call.getMethodDescriptor.getFullMethodName().readableQualifiedName(apiLoggingConfig.maxMethodLength)}",
       transport = transport,
       remoteAddress = clientAddr,
     )

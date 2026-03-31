@@ -125,7 +125,6 @@ class TopologyTransactionsStreamReader(
                 dbDispatcher.executeSql(dbMetric)(
                   payloadDbQuery.fetchPayloads(eventSequentialIds = Ids(ids))
                 )
-
               }
             }
           }

@@ -644,9 +644,7 @@ fileComments:
               This can be either a single NamespaceDelegation,
               or DecentralizedNamespaceDefinition along with its authorized namespace owners in the form of NamespaceDelegations.
               May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-              - A PartyToKeyMapping to register the party's signing keys.
-              May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-              - A PartyToParticipant to register the hosting relationship of the party.
+              - A PartyToParticipant to register the hosting relationship of the party, and the party's signing keys and threshold.
               Must be provided.
 
               Required: must be non-empty
@@ -901,7 +899,7 @@ fileComments:
             signatures: |-
               Additional signatures for this transaction specifically
               Use for transactions that require additional signatures beyond the namespace key signatures
-              e.g: PartyToKeyMapping must be signed by all registered keys
+              e.g: PartyToParticipant must be signed by all registered keys
 
               Optional: can be empty
       UpdatePartyDetailsRequest:
@@ -1913,6 +1911,31 @@ fileComments:
               Must be a valid LedgerString (as described in ``value.proto``).
 
               Required
+            paid_traffic_cost: |-
+              The traffic cost paid by this participant node for the confirmation request
+              for the submitted command.
+
+              Commands whose execution is rejected before their corresponding
+              confirmation request is ordered by the synchronizer will report a paid
+              traffic cost of zero.
+              If a confirmation request is ordered for a command, but the request fails
+              (e.g., due to contention with a concurrent contract archival), the traffic
+              cost is paid and reported on the failed completion for the request.
+
+              If you want to correlate the traffic cost of a successful completion
+              with the transaction that resulted from the command, you can use the
+              ``offset`` field to retrieve the transaction using
+              ``UpdateService.GetUpdateByOffset`` on the same participant node; or alternatively use the ``update_id``
+              field to retrieve the transaction using ``UpdateService.GetUpdateById`` on any participant node
+              that sees the transaction.
+
+              Note: for completions processed before the participant started serving
+              traffic cost on the Ledger API, this field will be set to zero.
+              Additionally, the total cost incurred by the submitting node for the submission of the transaction may be greater
+              than the reported cost, for example if retries were issued due to failed submissions to the synchronizer.
+              The cost reported here is the one paid for ordering the confirmation request.
+
+              Optional
             deduplication_duration: |-
               Specifies the length of the deduplication period.
               It is measured in record time of completions.
@@ -2576,7 +2599,7 @@ fileComments:
               Details on the keys that will be used to sign the transaction (how many and of which type).
               Signature size impacts the cost of the transaction.
               If empty, the signature sizes will be approximated with threshold-many signatures (where threshold is defined
-              in the PartyToKeyMapping of the external party), using keys in the order they are registered.
+              in the PartyToParticipant of the external party), using keys in the order they are registered.
               Empty list is equivalent to not providing this field
 
               Optional: can be empty
@@ -4015,12 +4038,9 @@ fileComments:
         message:
           comments: null
           fieldComments:
-            workflow_id: |-
-              The workflow ID used in command submission which corresponds to the contract_entry. Only set if
-              the ``workflow_id`` for the command was set.
-              Must be a valid LedgerString (as described in ``value.proto``).
-
-              Optional
+            incomplete_unassigned: |-
+              Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
+              assigned event before or at the active_at_offset.
             active_contract: |-
               The contract is active on the assigned synchronizer, meaning: there was an activation event on the given synchronizer (
               created, assigned), which is not followed by a deactivation event (archived, unassigned) on the same
@@ -4028,9 +4048,12 @@ fileComments:
               Since activeness is defined as a per synchronizer concept, it is possible, that a contract is active on one
               synchronizer, but already archived on another.
               There will be one such message for each synchronizer the contract is active on.
-            incomplete_unassigned: |-
-              Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
-              assigned event before or at the active_at_offset.
+            workflow_id: |-
+              The workflow ID used in command submission which corresponds to the contract_entry. Only set if
+              the ``workflow_id`` for the command was set.
+              Must be a valid LedgerString (as described in ``value.proto``).
+
+              Optional
             stream_continuation_token: |-
               Opaque representation of a continuation token which can be used in the request to bypass the already processed part
               of the active contracts snapshot.
@@ -4643,24 +4666,28 @@ fileComments:
           comments: null
           fieldComments:
             begin_exclusive: |-
-              Beginning of the requested ledger section (non-negative integer).
+              Exclusive lower bound offset of the requested ledger section (non-negative integer).
               The response will only contain transactions whose offset is strictly greater than this.
-              If not populated or set to zero, the stream will start from the beginning of the ledger.
-              If positive, the streaming will start after this absolute offset.
-              If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
-
-              Optional
+              If set to zero, the lower bound is set to the beginning of the ledger.
+              If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
+              Required
             end_inclusive: |-
-              End of the requested ledger section.
-              The response will only contain transactions whose offset is less than or equal to this.
-              If empty, the stream will not terminate.
-              If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+              Inclusive higher bound offset of the requested ledger section.
+              If specified the response will only contain transactions whose offset is less than or equal to this.
+              If not specified,
+
+              - the descending_order must not be selected,
+              - the stream will not terminate.
 
               Optional
             update_format: |-
               The update format for this request
 
               Required
+            descending_order: |-
+              If set, the stream will populate the elements in descending order.
+
+              Optional
       GetUpdatesResponse:
         message:
           comments: null

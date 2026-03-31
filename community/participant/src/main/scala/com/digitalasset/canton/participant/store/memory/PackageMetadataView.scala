@@ -4,9 +4,12 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.implicits.catsSyntaxSemigroup
-import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{PackageMetadataViewConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{
+  NonNegativeDuration,
+  PackageMetadataViewConfig,
+  ProcessingTimeout,
+}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.error.{CommonErrors, PackageServiceErrors}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
@@ -25,7 +28,9 @@ import com.digitalasset.daml.lf.archive.{DamlLf, Decode}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Source
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 /** In-memory view of Daml-related package metadata (see
@@ -64,8 +69,11 @@ class MutablePackageMetadataViewImpl(
     val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
-)(implicit val actorSystem: ActorSystem, executionContext: ExecutionContext)
-    extends MutablePackageMetadataView
+)(implicit
+    actorSystem: ActorSystem,
+    executionContext: ExecutionContext,
+    scheduler: ScheduledExecutorService,
+) extends MutablePackageMetadataView
     with FlagCloseable
     with NamedLogging {
   private val loggingSubject = "Package Metadata View"
@@ -130,24 +138,23 @@ class MutablePackageMetadataViewImpl(
           )
         )
 
-    FutureUnlessShutdown(
-      initializationFUS.unwrap
-        .checkIfComplete(
-          packageMetadataViewConfig.initTakesTooLongInitialDelay,
-          packageMetadataViewConfig.initTakesTooLongInterval,
-        ) {
-          logger.warn(
-            s"$loggingSubject initialization takes too long (${elapsedDurationMillis()} ms)"
-          )
-        }
-        .map { result =>
-          logger.info(
-            s"$loggingSubject has been initialized (${elapsedDurationMillis()} ms)"
-          )
-          result
-        }
+    new FutureSupervisor.Impl(
+      NonNegativeDuration(packageMetadataViewConfig.initTakesTooLongInitialDelay + 1.seconds),
+      loggerFactory,
+    ).supervisedUS(
+      description = s"$loggingSubject initialization",
+      warnAfter = packageMetadataViewConfig.initTakesTooLongInitialDelay,
+    )(
+      FutureUnlessShutdown(
+        initializationFUS.unwrap
+          .map { result =>
+            logger.info(
+              s"$loggingSubject has been initialized (${elapsedDurationMillis()} ms)"
+            )
+            result
+          }
+      )
     )
-
   }
 
   def getSnapshot(implicit errorLoggingContext: ErrorLoggingContext): PackageMetadata =

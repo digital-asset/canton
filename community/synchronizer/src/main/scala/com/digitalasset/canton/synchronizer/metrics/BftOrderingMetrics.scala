@@ -416,21 +416,20 @@ class BftOrderingMetrics private[metrics] (
 
     private val prefix = histograms.global.prefix
 
-    val blockNumber: Gauge[Long] = openTelemetryMetricsFactory.gauge(
+    val blocksOrdered: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
-        prefix :+ "block-number",
-        summary = "Block number",
-        description = "Latest block number ordered by the node.",
+        prefix :+ "ordered-blocks",
+        summary = "Blocks ordered on synchronizer",
+        description = "Reports the number of blocks ordered on the synchronizer.",
         qualification = MetricQualification.Traffic,
-      ),
-      0,
+      )
     )
 
     val batchesOrdered: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
         prefix :+ "ordered-batches",
-        summary = "Batches ordered",
-        description = "Measures the total batches ordered.",
+        summary = "Batches ordered since startup",
+        description = "Measures the total batches ordered since this node last started up.",
         qualification = MetricQualification.Traffic,
       )
     )
@@ -438,8 +437,8 @@ class BftOrderingMetrics private[metrics] (
     val requestsOrdered: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
         prefix :+ "ordered-requests",
-        summary = "Requests ordered",
-        description = "Measures the total requests ordered.",
+        summary = "Requests ordered since startup",
+        description = "Measures the total requests ordered since this node last started up.",
         qualification = MetricQualification.Traffic,
       )
     )

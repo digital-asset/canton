@@ -59,7 +59,7 @@ class JsonDamlDefinitionsServiceTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "Daml definitions service" should {
-    "output the definitions of the reference DAR" onlyRunWithOrGreaterThan (ProtocolVersion.dev) in httpTestFixture {
+    "output the definitions of the reference DAR" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in httpTestFixture {
       fixture =>
         val darContent: ByteString =
           protobuf.ByteString.copyFrom(Files.readAllBytes(File(ReferenceTestDar).path))
@@ -120,7 +120,7 @@ class JsonDamlDefinitionsServiceTest
     }
 
     // TODO(#27652): re-enable after using DARs generated with SBT or non-dev dars
-    "validate the definitions in the golden DAR against the golden files" onlyRunWithOrGreaterThan ProtocolVersion.dev ignore httpTestFixture {
+    "validate the definitions in the golden DAR against the golden files" onlyRunWithOrGreaterThan ProtocolVersion.v35 ignore httpTestFixture {
       fixture =>
         val darContent: ByteString =
           protobuf.ByteString.copyFrom(Files.readAllBytes(File(GoldenTestDar).path))

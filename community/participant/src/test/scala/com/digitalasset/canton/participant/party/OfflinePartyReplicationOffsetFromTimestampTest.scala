@@ -47,7 +47,12 @@ class OfflinePartyReplicationOffsetFromTimestampTest extends AnyWordSpec with Ba
         ledgerEnd = ledgerEnd,
         synchronizerId,
       )
-      offsetE shouldBe Right(highestOffsetBeforeOrAtRequestedTimestamp.offset)
+      offsetE shouldBe Right(
+        (
+          highestOffsetBeforeOrAtRequestedTimestamp.offset,
+          CantonTimestamp(highestOffsetBeforeOrAtRequestedTimestamp.recordTime),
+        )
+      )
     }
 
     "error if the requested timestamp is not clean" in {
@@ -78,7 +83,12 @@ class OfflinePartyReplicationOffsetFromTimestampTest extends AnyWordSpec with Ba
         ledgerEnd = ledgerEnd,
         synchronizerId,
       )
-      offsetE shouldBe Right(highestOffsetBeforeOrAtRequestedTimestamp.offset)
+      offsetE shouldBe Right(
+        (
+          highestOffsetBeforeOrAtRequestedTimestamp.offset,
+          CantonTimestamp(highestOffsetBeforeOrAtRequestedTimestamp.recordTime),
+        )
+      )
     }
 
     "if forced, but no subsequent transactions, return the ledger end offset even if requested timestamp is not clean" in {
@@ -90,7 +100,12 @@ class OfflinePartyReplicationOffsetFromTimestampTest extends AnyWordSpec with Ba
         ledgerEnd = ledgerEnd,
         synchronizerId,
       )
-      offsetE shouldBe Right(ledgerEnd.lastOffset)
+      offsetE shouldBe Right(
+        (
+          ledgerEnd.lastOffset,
+          cleanTimestampBefore,
+        )
+      )
     }
 
     "refuse to emit a synchronizer offset with a record time after the requested timestamp" in {

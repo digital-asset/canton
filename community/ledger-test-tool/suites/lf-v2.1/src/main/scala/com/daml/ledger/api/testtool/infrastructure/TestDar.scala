@@ -15,16 +15,21 @@ object TestDar {
     Carbonv2TestDar,
   ).map(_.path)
 
+  private val v23Dars =
+    v21Dars ++ Seq(KeysTestDar).map(_.path)
+
   private val v2devDars =
-    v21Dars ++ Seq(ExperimentalTestDar).map(_.path)
+    v23Dars ++ Seq(ExperimentalTestDar).map(_.path)
 
   val paths: Map[String, List[String]] = Map(
     "2.1" -> v21Dars,
+    "2.3" -> v23Dars,
     "2.dev" -> v2devDars,
   )
 }
 
 case object ExperimentalTestDar extends TestDar { val path = "experimental-tests-1.0.0.dar" }
+case object KeysTestDar extends TestDar { val path = "keys-tests-1.0.0.dar" }
 case object ModelTestDar extends TestDar { val path = "model-tests-1.0.0.dar" }
 case object SemanticTestDar extends TestDar { val path = "semantic-tests-1.0.0.dar" }
 case object OngoingStreamPackageUploadTestDar extends TestDar {

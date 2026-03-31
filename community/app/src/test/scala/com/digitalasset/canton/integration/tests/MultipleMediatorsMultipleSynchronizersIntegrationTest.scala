@@ -17,6 +17,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgramm
 import com.digitalasset.canton.integration.util.AcsInspection
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -43,8 +44,9 @@ final class MultipleMediatorsMultipleSynchronizersIntegrationTest
       numSequencers = 2,
       numMediators = 4,
     ).withManualStart
-      .addConfigTransform(
-        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory)
+      .addConfigTransforms(
+        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

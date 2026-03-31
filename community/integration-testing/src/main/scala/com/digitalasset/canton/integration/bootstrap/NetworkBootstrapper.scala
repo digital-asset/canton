@@ -16,7 +16,12 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  MediatorId,
+  ParticipantId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.{SynchronizerAlias, protocol}
 import monocle.syntax.all.*
 
@@ -160,4 +165,22 @@ final case class InitializedSynchronizer(
     synchronizerOwners: Set[InstanceReference],
 ) {
   def synchronizerId: SynchronizerId = physicalSynchronizerId.logical
+  def allSequencerOwners: Set[SequencerReference] = synchronizerOwners.collect {
+    case seq: SequencerReference => seq
+  }
+  def allActiveMediators: Seq[MediatorId] = synchronizerOwners.headOption
+    .map {
+      _.topology.mediators
+        .list(Some(physicalSynchronizerId.logical))
+        .flatMap(_.item.active.forgetNE)
+    }
+    .getOrElse(Seq.empty)
+  def allParticipants: Seq[ParticipantId] =
+    synchronizerOwners.headOption
+      .map {
+        _.topology.synchronizer_trust_certificates
+          .list(Some(physicalSynchronizerId))
+          .map(_.item.participantId)
+      }
+      .getOrElse(Seq.empty)
 }

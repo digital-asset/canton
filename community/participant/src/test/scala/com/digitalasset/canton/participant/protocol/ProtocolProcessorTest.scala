@@ -12,7 +12,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
   ProcessingTimeout,
   SessionEncryptionKeyCacheConfig,
@@ -455,6 +455,7 @@ class ProtocolProcessorTest
           changeId.commandId,
           None,
           Some(subId),
+          paidTrafficCost = NonNegativeLong.zero,
         ),
         TransactionSubmissionTrackingData.TimeoutCause,
         psid,
@@ -523,7 +524,14 @@ class ProtocolProcessorTest
       submissionMap.get(1) shouldBe Some(())
       val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
       val asyncRes = sut
-        .processRequest(afterDecisionTime, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          afterDecisionTime,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -550,7 +558,14 @@ class ProtocolProcessorTest
     "succeed without errors" in {
       val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
       val asyncRes = sut
-        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          requestId.unwrap,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -574,7 +589,14 @@ class ProtocolProcessorTest
 
       val requestTs = CantonTimestamp.Epoch
       val asyncRes = sut
-        .processRequest(requestTs, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          requestTs,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -619,7 +641,14 @@ class ProtocolProcessorTest
       before shouldEqual None
 
       val asyncRes = sut
-        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          requestId.unwrap,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -647,7 +676,14 @@ class ProtocolProcessorTest
 
       // Process a request but never a corresponding response
       val asyncRes = sut
-        .processRequest(CantonTimestamp.Epoch, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          CantonTimestamp.Epoch,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -701,7 +737,14 @@ class ProtocolProcessorTest
       val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
       val asyncRes = loggerFactory.assertLogs(
         sut
-          .processRequest(requestId.unwrap, rc, requestSc, requestBatchWrongRH, publishNoop)
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            requestBatchWrongRH,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
           .onShutdown(fail())
           .futureValue,
         _.warningMessage should include(s"Request $rc: Found malformed payload: WrongRootHash"),
@@ -733,7 +776,14 @@ class ProtocolProcessorTest
       val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
       val asyncRes = loggerFactory.assertLogs(
         sut
-          .processRequest(requestId.unwrap, rc, requestSc, requestBatchDecryptError, publishNoop)
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            requestBatchDecryptError,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
           .onShutdown(fail())
           .futureValue,
         _.warningMessage should include(s"Request $rc: Decryption error: SyncCryptoDecryptError("),
@@ -763,7 +813,14 @@ class ProtocolProcessorTest
       loggerFactory
         .assertLogs(
           sut
-            .processRequest(requestId.unwrap, rc, requestSc, requestBatch, publishNoop)
+            .processRequest(
+              requestId.unwrap,
+              rc,
+              requestSc,
+              requestBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
             .onShutdown(fail()),
           _.errorMessage should include(
             s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
@@ -797,6 +854,7 @@ class ProtocolProcessorTest
               requestSc,
               someRequestBatch,
               publishNoop,
+              NonNegativeLong.zero,
             )
             .onShutdown(fail()),
           _.shouldBeCantonError(
@@ -821,7 +879,14 @@ class ProtocolProcessorTest
         )
 
       val asyncRes = sut
-        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          requestId.unwrap,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -852,6 +917,7 @@ class ProtocolProcessorTest
           requestSc,
           someRequestBatch.copy(isReceipt = true),
           publishNoop,
+          NonNegativeLong.zero,
         )
         .onShutdown(fail())
         .futureValue
@@ -874,7 +940,14 @@ class ProtocolProcessorTest
         )
 
       val asyncRes = sut
-        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch, publishNoop)
+        .processRequest(
+          requestId.unwrap,
+          rc,
+          requestSc,
+          someRequestBatch,
+          publishNoop,
+          NonNegativeLong.zero,
+        )
         .onShutdown(fail())
         .futureValue
       waitForAsyncResult(asyncRes)
@@ -932,7 +1005,14 @@ class ProtocolProcessorTest
 
         // The preplay gets processed and notifies the in-flight submission tracker
         _ <- sut
-          .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch, publishNoop)
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
           .onShutdown(fail())
           .futureValue
           .unwrap
@@ -1088,6 +1168,7 @@ class ProtocolProcessorTest
           handle,
           freshOwnTimelyTxF = FutureUnlessShutdown.pure(true),
           publishNoop,
+          trafficCost = NonNegativeLong.zero,
         )
         .onShutdown(fail())
         .futureValue

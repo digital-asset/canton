@@ -499,9 +499,19 @@ sealed abstract class HasTxNodes[Tx] {
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
   )
-  def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyMapping]] = {
-    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.LLState[NodeId]]](
-      Right(NextGenContractStateMachine.empty[NodeId](NextGenContractStateMachine.Mode.NUCK))
+  def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyMapping]] =
+    contractStateMachine.map(_.keyInputs)
+
+
+  @throws[IllegalArgumentException](
+    "If a contract key contains a contract id"
+  )
+  def contractOrder: Either[TxErr, List[ContractId]] =
+    contractStateMachine.map(_.contractOrder)
+
+  private[this] def contractStateMachine: Either[TxErr, NextGenContractStateMachine.LLState] =
+    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.LLState]](
+      Right(NextGenContractStateMachine.empty(NextGenContractStateMachine.Mode.NUCK))
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
@@ -515,8 +525,9 @@ sealed abstract class HasTxNodes[Tx] {
         acc.flatMap(
           _.handleNode(nid, leaf)
         ), // ok to use None as keyInput, because mode is strict
-    ).map(_.keyInputs)
-  }
+    )
+
+
 
   /** The contract keys created or consumed as part of the transaction.
     *  For each key, a vector of Contract IDs created and removed is returned
@@ -529,7 +540,7 @@ sealed abstract class HasTxNodes[Tx] {
           (
             exec.gkeyOpt.fold(acc)(acc.updatedWith(_) {
               case Some(ContractKeyUpdate(created, consumed)) if created.contains(exec.targetCoid) => Some(ContractKeyUpdate(created.filterNot(_==exec.targetCoid), consumed))
-              case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(created, consumed + exec.targetCoid)) 
+              case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(created, consumed + exec.targetCoid))
               case None => Some(ContractKeyUpdate(Vector.empty, Set(exec.targetCoid)))
             }),
             ChildrenRecursion.DoRecurse,
@@ -702,6 +713,7 @@ object Transaction {
       timeBoundaries: Time.Range,
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
       globalKeyMapping: Map[GlobalKey, Vector[ContractId]],
+      contractOrder: List[ContractId],
   ) {
     def dependsOnTime: Boolean =
       timeBoundaries != Time.Range.unconstrained

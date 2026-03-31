@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Executors, LinkedBlockingQueue, TimeUnit}
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
-import scala.util.{Failure, Success, Try}
+import scala.util.control.NonFatal
 
 object PropertyChecker {
 
@@ -180,31 +180,40 @@ object PropertyChecker {
   }
 
   private object CheckPropertyAuxiliaryTypes {
-    // Used by checkProperty to represent the outcome of generating and evaluating a single sample.
-    sealed trait SampleResult[+A]
-    case object SamplePassed extends SampleResult[Nothing]
-    final case class SampleFailed[A](value: A, error: String) extends SampleResult[A]
-    case object SampleTimedOut extends SampleResult[Nothing]
+    // Placed by evaluator threads into the result queue.
+    sealed trait EvaluationOutcome[+A]
+    case object EvaluationPassed extends EvaluationOutcome[Nothing]
+    final case class EvaluationFailed[A](value: A, error: String) extends EvaluationOutcome[A]
+    final case class EvaluationError(error: Throwable) extends EvaluationOutcome[Nothing]
+    final case class EvaluationGeneratorFailure(error: Throwable) extends EvaluationOutcome[Nothing]
 
-    // Used by dequeue to represent the outcome of polling the pre-generation queue.
-    sealed trait DequeueResult[+A]
-    final case class Dequeued[A](value: A) extends DequeueResult[A]
-    case object DequeueTimedOut extends DequeueResult[Nothing]
-    final case class DequeuedGeneratorFailure(error: Throwable) extends DequeueResult[Nothing]
+    sealed trait SampleQueueEntry[+A]
+    final case class GeneratedSample[A](value: A) extends SampleQueueEntry[A]
+    final case class GeneratorFailure(error: Throwable) extends SampleQueueEntry[Nothing]
   }
 
   /** Repeatedly generates random values, checks `property` on each, and shrinks the first failing
     * value.
     *
     * Samples are pre-generated in parallel by `generatorParallelism` threads, filling a bounded
-    * queue of size `sampleBufferSize`. The main loop dequeues samples one at a time and evaluates
-    * the property. Running several generators in parallel improves the latency of the generation if
-    * generation time has a large variance. Running the generation and the evaluation in parallel
-    * improves the throughput in case both generation and evaluation are slow.
+    * queue of size `sampleBufferSize`. Evaluator threads pull samples from the queue, evaluate the
+    * property in parallel, and put results into a result queue. The main loop polls the result
+    * queue and reacts accordingly.
+    *
+    * If your samples are expensive to generate but cheap to evaluate, increase
+    * `generatorParallelism` and set `evaluatorParallelism` to 1. If your samples are cheap to
+    * generate but expensive to evaluate, do the opposite. If both are expensive, experiment with
+    * different ratios. Finally, if evaluating the property is not thread safe, set
+    * `evaluatorParallelism` to 1.
     *
     * The process stops when `maxSamples` have been checked, the `timeout` is reached, or a sample
     * fails the property. In the failure case the value is shrunk using `shrinkToFailure` with
     * whatever time remains from the overall timeout.
+    *
+    * Up to `evaluatorParallelism - 1` extra evaluations may run after the first failure is
+    * detected. This is inherent to the parallel design: other workers may have already started
+    * evaluating by the time the main loop processes the failure. A shared `stopped` flag minimizes
+    * waste by cooperatively stopping them.
     *
     * @param generate
     *   a function that produces one random value when called
@@ -222,6 +231,8 @@ object PropertyChecker {
     *   maximum number of pre-generated samples to buffer (defaults to 100)
     * @param generatorParallelism
     *   number of threads used to generate samples in parallel (defaults to 1)
+    * @param evaluatorParallelism
+    *   number of threads used to evaluate the property in parallel (defaults to 1)
     */
   def checkProperty[A](
       generate: () => A,
@@ -231,109 +242,177 @@ object PropertyChecker {
       timeout: FiniteDuration,
       sampleBufferSize: Int,
       generatorParallelism: Int,
+      evaluatorParallelism: Int,
   ): CheckResult[A] = {
     import CheckPropertyAuxiliaryTypes.*
+
+    // == Implementation overview ==
+    //
+    // Three groups of threads cooperate through two shared data structures:
+    //
+    //   generators -> sampleQueue -> evaluators -> resultQueue -> main loop
+    //
+    // 1. Generator threads (generatorPool) run generateForever loops that call
+    //    generate() and put samples into a bounded LinkedBlockingQueue. They
+    //    block on put when the queue is full.
+    //
+    // 2. Evaluator threads (evaluatorPool) run evaluateForever loops that poll
+    //    the sample queue for a value, evaluate the property against it, and
+    //    put the resulting EvaluationOutcome into the result queue.
+    //
+    // 3. The main loop runs on the caller's thread. It polls the result queue
+    //    for completed evaluations. On success, it loops. On failure, it shuts
+    //    everything down and delegates to shrinkToFailure. On timeout or
+    //    maxSamples, it returns.
+    //
+    // Cooperative cancellation: the `stopped` flag is passed to each property
+    // evaluation. When set to true, evaluator threads stop polling the sample
+    // queue and in-flight property evaluations should exit as soon as possible.
+    //
+    // Shutdown: shutdownAll interrupts the generator threads via shutdownNow()
+    // (which is assumed to be a safe operation, as the generators are not
+    // supposed to log errors on shutdown), and gracefully shuts down evaluators
+    // by setting `stopped` to true. A finally block ensures that shutdownAll
+    // runs on every exit path.
 
     val deadline = timeout.fromNow
 
     def elapsedSoFar(): FiniteDuration = timeout - deadline.timeLeft
 
-    val sampleQueue = new LinkedBlockingQueue[Try[A]](sampleBufferSize)
+    // Bounded buffer between generator threads and evaluator threads.
+    val sampleQueue = new LinkedBlockingQueue[SampleQueueEntry[A]](sampleBufferSize)
+    // Thread pool running `generateForever` loops that fill the sample queue.
     val generatorPool = Executors.newFixedThreadPool(generatorParallelism)
-    val evaluatorExecutor = Executors.newSingleThreadExecutor()
-    val evaluatorExecutionContext: ExecutionContext =
-      ExecutionContext.fromExecutor(evaluatorExecutor)
+    // Thread pool running `evaluateForever` loops that drain the sample queue.
+    val evaluatorPool = Executors.newFixedThreadPool(evaluatorParallelism)
+    // Unbounded buffer between evaluator threads and the main loop. Should stay
+    // mostly empty, as the main loop consumes results very quickly.
+    val resultQueue = new LinkedBlockingQueue[EvaluationOutcome[A]]()
 
-    // Currently only one evaluation runs at a time so a single cancellation flag suffices.
-    // When multiple evaluators run in parallel this will need to become a per-evaluation flag.
-    val cancelled = new AtomicBoolean(false)
+    // Set to true when the main loop decides to stop (failure, timeout, or
+    // maxSamples reached). Also passed to each property evaluation for
+    // cooperative cancellation.
+    val stopped = new AtomicBoolean(false)
 
+    // Runs in a generator-pool thread. Repeatedly generates samples and puts
+    // them into the sample queue. Blocks on `put` when the queue is full.
     @scala.annotation.tailrec
     def generateForever(): Unit = {
-      sampleQueue.put(Try(generate()))
+      sampleQueue.put(
+        try GeneratedSample(generate())
+        catch { case NonFatal(e) => GeneratorFailure(e) }
+      )
       generateForever()
     }
 
+    // Stops all activity: sets `stopped` to true, interrupts generators, and
+    // waits for evaluator threads to exit. Generators are interrupted
+    // immediately. Evaluators get a graceful shutdown: the `stopped` flag
+    // signals them to exit cooperatively between gRPC calls, avoiding mid-call
+    // interrupts that would cause them to log internal errors.
     def shutdownAll(): Unit = {
-      // Signal the property evaluation to stop cooperatively, then use graceful shutdown for the evaluator
-      // to avoid interrupting a property evaluation mid-flight (e.g. a gRPC streaming call), which would cause Canton
-      // to log an internal error.
-      cancelled.set(true)
+      stopped.set(true)
       discard(generatorPool.shutdownNow())
-      evaluatorExecutor.shutdown()
-      if (!evaluatorExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
-        discard(evaluatorExecutor.shutdownNow())
+      evaluatorPool.shutdown()
+      if (!evaluatorPool.awaitTermination(60, TimeUnit.SECONDS)) {
+        discard(evaluatorPool.shutdownNow())
       }
     }
 
-    def dequeue(remaining: FiniteDuration): DequeueResult[A] =
-      Option(sampleQueue.poll(remaining.toMillis, TimeUnit.MILLISECONDS)) match {
-        case None => DequeueTimedOut
-        case Some(Failure(e)) => DequeuedGeneratorFailure(e)
-        case Some(Success(value)) => Dequeued(value)
-      }
-
-    def evaluateWithTimeout(sample: A, remaining: FiniteDuration): SampleResult[A] =
-      try
-        Await.result(
-          Future(property(sample, cancelled))(evaluatorExecutionContext),
-          remaining,
-        ) match {
-          case Left(e) => SampleFailed(sample, e)
-          case Right(()) => SamplePassed
-        }
-      catch {
-        case _: TimeoutException =>
-          cancelled.set(true)
-          SampleTimedOut
-      }
-
-    def dequeueThenEvaluate(): SampleResult[A] =
-      dequeue(deadline.timeLeft) match {
-        case DequeueTimedOut => SampleTimedOut
-        case DequeuedGeneratorFailure(e) => throw e
-        case Dequeued(sample) => evaluateWithTimeout(sample, deadline.timeLeft)
-      }
-
+    // Runs in an evaluator-pool thread. Polls the sample queue with short
+    // timeouts, rechecking `stopped` between attempts so the worker exits
+    // promptly on shutdown. When a sample is obtained, evaluates the property
+    // and puts the result into the result queue.
     @scala.annotation.tailrec
-    def sampleLoop(checked: Int): CheckResult[A] =
-      if (checked >= maxSamples) CheckPassed(checked, elapsedSoFar(), timedOut = false)
-      else if (deadline.isOverdue()) CheckPassed(checked, elapsedSoFar(), timedOut = true)
+    def evaluateForever(): Unit =
+      if (!stopped.get()) {
+        Option(sampleQueue.poll(100L, TimeUnit.MILLISECONDS)) match {
+          case None =>
+            evaluateForever()
+          case Some(GeneratorFailure(e)) =>
+            resultQueue.put(EvaluationGeneratorFailure(e))
+            evaluateForever()
+          case Some(GeneratedSample(sample)) =>
+            val outcome: EvaluationOutcome[A] =
+              try
+                property(sample, stopped) match {
+                  case Left(error) => EvaluationFailed(sample, error)
+                  case Right(()) => EvaluationPassed
+                }
+              catch {
+                case NonFatal(e) => EvaluationError(e)
+              }
+            resultQueue.put(outcome)
+            evaluateForever()
+        }
+      }
+
+    // Main loop. Consumes completed evaluations from the result queue and:
+    // - on success, loops
+    // - on failure, shuts everything down and shrinks
+    // - on timeout/maxSamples, returns CheckPassed immediately (in-flight
+    //   evaluations are discarded)
+    @scala.annotation.tailrec
+    def mainLoop(checked: Int): CheckResult[A] =
+      if (checked >= maxSamples || deadline.isOverdue())
+        CheckPassed(checked, elapsedSoFar(), timedOut = deadline.isOverdue())
       else
-        dequeueThenEvaluate() match {
-          case SamplePassed => sampleLoop(checked + 1)
-          case SampleTimedOut => CheckPassed(checked, elapsedSoFar(), timedOut = true)
-          case SampleFailed(value, error) =>
-            shutdownAll()
-            val shrinkResult =
-              shrinkToFailure(
-                value,
-                shrink,
-                error,
-                property,
-                deadline.timeLeft,
-              )
-            CheckFailed(
-              originalValue = value,
-              originalError = error,
-              shrinkResult = shrinkResult,
-              samplesChecked = checked,
-              elapsed = elapsedSoFar(),
-            )
+        Option(resultQueue.poll(deadline.timeLeft.toMillis, TimeUnit.MILLISECONDS)) match {
+          case None =>
+            CheckPassed(checked, elapsedSoFar(), timedOut = true)
+
+          case Some(outcome) =>
+            outcome match {
+              case EvaluationPassed =>
+                mainLoop(checked + 1)
+
+              case EvaluationFailed(value, error) =>
+                // Shut down eagerly (rather than relying on `finally`) to free the
+                // generator and evaluator pools before the potentially long shrink.
+                shutdownAll()
+                val shrinkResult =
+                  shrinkToFailure(value, shrink, error, property, deadline.timeLeft)
+                CheckFailed(
+                  originalValue = value,
+                  originalError = error,
+                  shrinkResult = shrinkResult,
+                  samplesChecked = checked,
+                  elapsed = elapsedSoFar(),
+                )
+
+              case EvaluationGeneratorFailure(e) =>
+                throw e
+
+              case EvaluationError(e) =>
+                throw e
+            }
         }
 
-    // Start the generator threads and the main loop
+    // Start the generator and evaluator threads
 
     (1 to generatorParallelism).foreach(_ =>
       generatorPool.execute { () =>
         try generateForever()
         catch {
+          // Expected: shutdownAll() calls generatorPool.shutdownNow(), which
+          // interrupts generator threads blocked on sampleQueue.put().
           case _: InterruptedException => ()
         }
       }
     )
 
-    try sampleLoop(0)
+    (1 to evaluatorParallelism).foreach(_ =>
+      evaluatorPool.execute { () =>
+        try evaluateForever()
+        catch {
+          // Expected: shutdownAll() may call evaluatorPool.shutdownNow() as a
+          // last resort, which interrupts threads blocked on sampleQueue.poll().
+          case _: InterruptedException => ()
+        }
+      }
+    )
+
+    try mainLoop(0)
     finally shutdownAll()
   }
 
@@ -346,6 +425,7 @@ object PropertyChecker {
       timeout: FiniteDuration = 365.days,
       bufferSize: Int = 100,
       generatorParallelism: Int = 1,
+      evaluatorParallelism: Int = 1,
   ): CheckResult[A] =
     checkProperty(
       generate = generate,
@@ -355,5 +435,6 @@ object PropertyChecker {
       timeout = timeout,
       sampleBufferSize = bufferSize,
       generatorParallelism = generatorParallelism,
+      evaluatorParallelism = evaluatorParallelism,
     )
 }

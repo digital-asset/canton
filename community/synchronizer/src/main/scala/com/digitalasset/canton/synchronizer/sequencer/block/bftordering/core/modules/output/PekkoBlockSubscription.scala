@@ -149,7 +149,11 @@ class PekkoBlockSubscription[E <: Env[E]](
   private def advance(
       newTracedBlockO: Option[Traced[BlockFormat.Block]] = None,
       taskComplete: Boolean = false,
-  ): Unit =
+  ): Unit = {
+    // Create the promise outside the CAS block, rather than inside it, in order to avoid
+    //  registering untriggerable futures with the execution context when CAS fails due contention,
+    //  which may constitute a memory leak.
+    val promise = PromiseUnlessShutdown.unsupervised[Unit]()
     AtomicUtil
       .updateAndGetComputed(stateRef) { case State(blocksToEnqueue, taskO) =>
         // noinspection ConvertibleToMethodValue
@@ -163,10 +167,14 @@ class PekkoBlockSubscription[E <: Env[E]](
             ) { case (tracedBlock, restOfBlocks) =>
               Some(tracedBlock) -> restOfBlocks
             }
-          val promise = PromiseUnlessShutdown.unsupervised[Unit]()
           State(
             restOfBlocksToEnqueue,
             tracedBlockToEnqueueO.map(tracedBlockToEnqueue =>
+              // The promise's continuation future, i.e. the insertion into the Pekko queue source,
+              //  is registered and triggered multiple times for the same block height when CAS fails
+              //  due to contention, but it's fine to insert a block out-of-order and/or multiple
+              //  times in the Pekko queue because inserting into the Peano queue afterward
+              //  (see body of `statefulMapConcat` on the Pekko queue) is an idempotent operation.
               promise.futureUS.flatMap(_ => pekkoEnqueue(tracedBlockToEnqueue))
             ),
           ) -> Some(() => promise.outcome_(()))
@@ -175,6 +183,7 @@ class PekkoBlockSubscription[E <: Env[E]](
         }
       }
       .foreach(_()) // Start the next enqueueing task if it exists
+  }
 
   private def pekkoEnqueue(
       tracedBlockToEnqueue: Traced[BlockFormat.Block]

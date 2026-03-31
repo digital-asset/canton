@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto.sync
 
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.{PositiveFiniteDuration, SessionSigningKeysConfig}
+import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys
 import com.digitalasset.canton.crypto.{
@@ -20,7 +20,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.ResourceUtil
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 
 class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
   override protected lazy val sessionSigningKeysConfig: SessionSigningKeysConfig =
@@ -72,9 +72,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       topologySnapshot: TopologySnapshot,
       signature: Signature,
       p: SynchronizerCryptoClient = p1,
-      validityPeriodLength: PositiveFiniteDuration =
-        PositiveFiniteDuration.ofSeconds(validityDuration.underlying.toSeconds),
-      approximateTimestampForSigning: Option[CantonTimestamp] = None,
+      signingTimestampOverrides: Option[SigningTimestampOverrides] = None,
   ): SignatureDelegation = {
 
     val cache = sessionKeysCache(p)
@@ -97,11 +95,26 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
     // The signature contains the session key in the 'signedBy' field.
     signature.signedBy shouldBe sessionKeyId
 
+    val start = signingTimestampOverrides match {
+      // Interval to cover: [ts - cutoff, ts + cutoff]
+      // The validity period for a new key is the default [ts - tolerance, (ts - tolerance) + keyValidityDuration]
+      case Some(SigningTimestampOverrides(ts, None)) =>
+        ts.minus(toleranceShiftDuration(p).asJava)
+      // Interval to cover: [ts - cutOff, max(ts, validityPeriodEnd)]
+      // The validity period for a new key is
+      // [ts - cutoff, (ts - cutoff) + keyValidityDuration].
+      case Some(SigningTimestampOverrides(ts, Some(_))) =>
+        ts.minus(cutOffDuration(p).asJava)
+      // Interval to cover: [ts, None]
+      // The validity period for a new key is the default [ts - tolerance, (ts - tolerance) + keyValidityDuration],
+      case None =>
+        topologySnapshot.timestamp.minus(toleranceShiftDuration(p).asJava)
+    }
+
     // Verify it has the correct validity period
-    val ts = approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp)
     validityPeriod shouldBe SignatureDelegationValidityPeriod(
-      ts.minus(toleranceShiftDuration(p1).asJava),
-      validityPeriodLength,
+      start,
+      validityDuration,
     )
 
     sessionKeyAndDelegation.signatureDelegation
@@ -160,6 +173,7 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
     }
 
     "sign and verify message with different synchronizers uses different session keys" in {
+
       ResourceUtil.withResource(
         testingTopology.forOwnerAndSynchronizer(
           owner = participant1,
@@ -252,7 +266,14 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       checkSignatureDelegation(
         testSnapshot,
         signatureEnd,
-        approximateTimestampForSigning = Some(end),
+        signingTimestampOverrides = Some(
+          SigningTimestampOverrides(
+            approximateTimestamp = end,
+            // Use `None` to ignore the validity period end and select the session signing key
+            // using only the approximate timestamp
+            validityPeriodEnd = None,
+          )
+        ),
       )
 
       // There must be a second key in the cache because we used a different session key for the latest sign call.
@@ -264,7 +285,9 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
           testSnapshot,
           Some(
             SigningTimestampOverrides(
-              approximateTimestamp = start,
+              // The immediate predecessor so that the timestamp lies just before the cutOff,
+              // because the session signing key's validity period is left-inclusive ([start, end)).
+              approximateTimestamp = start.immediatePredecessor,
               // Use `None` to ignore the validity period end and select the session signing key
               // using only the approximate timestamp
               validityPeriodEnd = None,
@@ -279,7 +302,14 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
       checkSignatureDelegation(
         testSnapshot,
         signatureStart,
-        approximateTimestampForSigning = Some(start),
+        signingTimestampOverrides = Some(
+          SigningTimestampOverrides(
+            approximateTimestamp = start.immediatePredecessor,
+            // Use `None` to ignore the validity period end and select the session signing key
+            // using only the approximate timestamp
+            validityPeriodEnd = None,
+          )
+        ),
       )
 
       // There must be a third key in the cache because we used a different session key for the latest sign call.
@@ -428,6 +458,116 @@ class SyncCryptoWithSessionKeysTest extends AnyWordSpec with SyncCryptoTest {
         .valueOrFail("no signature delegation")
 
       signatureDelegationNew should not equal signatureDelegation1
+
+    }
+
+    def signWithValidityPeriodEnd(
+        approximateTimestamp: CantonTimestamp,
+        validityPeriodEnd: CantonTimestamp,
+        expectSignatureDelegation: Boolean,
+    ): Unit = {
+
+      val testingTopologyAtTs =
+        testingTopology.topologySnapshot(timestampOfSnapshot = approximateTimestamp)
+
+      val signature = syncCryptoSignerP1
+        .sign(
+          testingTopologyAtTs,
+          Some(
+            SigningTimestampOverrides(
+              approximateTimestamp = approximateTimestamp,
+              validityPeriodEnd = Some(validityPeriodEnd),
+            )
+          ),
+          hash,
+          defaultUsage,
+        )
+        .valueOrFail("sign failed")
+        .futureValueUS
+
+      if (expectSignatureDelegation)
+        checkSignatureDelegation(
+          testingTopologyAtTs,
+          signature,
+          signingTimestampOverrides = Some(
+            SigningTimestampOverrides(
+              approximateTimestamp = approximateTimestamp,
+              validityPeriodEnd = Some(validityPeriodEnd),
+            )
+          ),
+        )
+      else
+        signature.signatureDelegation shouldBe empty
+
+      val testingTopologyAtValidityPeriodEnd =
+        testingTopology.topologySnapshot(timestampOfSnapshot = validityPeriodEnd)
+
+      // verify that signature is still valid at `validityPeriodEnd`
+      syncCryptoVerifierP1
+        .verifySignature(
+          testingTopologyAtValidityPeriodEnd,
+          hash,
+          participant1.member,
+          signature,
+          defaultUsage,
+        )
+        .valueOrFail("verification failed")
+        .futureValueUS
+
+    }
+
+    "correctly produces a signature delegation with a key validity that covers both timestamp and validity period end" in {
+
+      cleanCache(p1)
+
+      // select an `validityPeriodEnd` that CAN be covered by a session signing key
+      signWithValidityPeriodEnd(
+        testSnapshot.timestamp,
+        testSnapshot.timestamp.immediateSuccessor,
+        expectSignatureDelegation = true,
+      )
+
+    }
+
+    "uses a different session key when previous one doesn’t cover the validity period end" in {
+
+      val (_, currentSessionKey) = sessionKeysCache(p1).loneElement
+
+      signWithValidityPeriodEnd(
+        // The previous session signing key can cover [timestamp - cutOff, (timestamp - cutOff) + keyValidityDuration[
+        // so we use the excluded end as our validity period end. However, we use the immediate successor as
+        // our signing timestamp due to the constraint that keyValidity - cutOff > maxSequencingTimeOffset.
+        testSnapshot.timestamp.immediateSuccessor,
+        currentSessionKey.signatureDelegation.validityPeriod.toExclusive,
+        expectSignatureDelegation = true,
+      )
+
+      sessionKeysCache(p1).size shouldBe 2
+
+    }
+
+    "revert to signing with long-term key if the validity period end cannot be covered" in {
+
+      signWithValidityPeriodEnd(
+        testSnapshot.timestamp,
+        testSnapshot.timestamp
+          .add(
+            sessionSigningKeysConfig.keyValidityDuration.asJava
+          ),
+        expectSignatureDelegation = false,
+      )
+
+    }
+
+    "uses a session signing key even if the validity period end is in the past" in {
+
+      cleanCache(p1)
+
+      signWithValidityPeriodEnd(
+        testSnapshot.timestamp.immediateSuccessor,
+        testSnapshot.timestamp,
+        expectSignatureDelegation = true,
+      )
 
     }
 

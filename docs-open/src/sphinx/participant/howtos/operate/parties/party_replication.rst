@@ -233,7 +233,7 @@ the original ``source`` and ``newTarget`` participants.
 
 .. note::
 
-    For **external parties**, the threshold is defined during the :externalref:`onboarding process <tutorial_onboard_external_party>` already,
+    For **external parties**, the threshold is defined during the :externalref:`onboarding process <tutorial_onboard_external_party_lapi>` already,
     so this section is not relevant to them.
 
 To change a party's confirmation threshold, you must use a different procedure for

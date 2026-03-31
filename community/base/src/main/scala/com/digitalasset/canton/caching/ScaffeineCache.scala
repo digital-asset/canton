@@ -135,7 +135,8 @@ object ScaffeineCache {
       tracedLogger: TracedLogger,
       context: String,
   ) extends TunnelledAsyncCache[K, V] {
-    implicit private[this] val ec: ExecutionContext = DirectExecutionContext(tracedLogger)
+    implicit private[this] val ec: ExecutionContext =
+      DirectExecutionContext(NamedLogging.loggerWithoutTracing(tracedLogger))
     val tunnel: EffectTunnel[FutureUnlessShutdown, Future] =
       EffectTunnel.effectTunnelFutureUnlessShutdown
     def getFuture(
@@ -332,7 +333,8 @@ object ScaffeineCache {
       tunnel: EffectTunnel[F, Future],
       context: String,
   ) {
-    implicit private[this] val ec: ExecutionContext = DirectExecutionContext(tracedLogger)
+    implicit private[this] val ec: ExecutionContext =
+      DirectExecutionContext(NamedLogging.loggerWithoutTracing(tracedLogger))
 
     /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.get

@@ -1,30 +1,55 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import DamlLfPlugin.LfVersionsDTO.LanguageVersionDto
 import sbt.*
 import sbt.Keys.*
-import sbt.nio.{Keys => _, *}
+import sbt.nio.{Keys as _, *}
 import sbt.util.HashFileInfo
 import xsbti.compile.CompileAnalysis
 
 import java.io.File
 import scala.jdk.CollectionConverters.*
-
-import _root_.io.circe._
-import _root_.io.circe.syntax._
-import _root_.io.circe.generic.auto._
+import _root_.io.circe.*
+import _root_.io.circe.syntax.*
+import _root_.io.circe.generic.auto.*
 
 object DamlLfPlugin extends AutoPlugin {
+  object LfVersionsDTO {
+    sealed trait MinorDto extends Product with Serializable {
+      // TODO(#31057): remove dotted when damlc does not depend on it anymore
+      def dotted: String
+    }
 
-  object LfVersions {
-    private val v2_1 = "2.1"
-    private val v2_2 = "2.2"
-    private val v2_3_1 = "2.3-rc1"
+    object MinorDto {
+      final case class Stable(version: Int) extends MinorDto {
+        // TODO(#31057): remove when damlc does not depend on it anymore
+        def dotted: String = version.toString
+      }
+
+      final case class Staging(version: Int, revision: Int) extends MinorDto {
+        // TODO(#31057): remove when damlc does not depend on it anymore
+        def dotted: String = s"${version.toString}-rc$revision"
+      }
+
+      case object Dev extends MinorDto {
+        // TODO(#31057): remove when damlc does not depend on it anymore
+        def dotted: String = "dev"
+      }
+    }
+
+    final case class LanguageVersionDto(major: Int, minor: MinorDto) {
+      def dotted: String = s"$major.${minor.dotted}"
+      def toJson: String = this.asJson.noSpaces
+    }
+
+    private val v2_1 = LanguageVersionDto(2, MinorDto.Stable(1))
+    private val v2_2 = LanguageVersionDto(2, MinorDto.Stable(2))
+    private val v2_3_1 = LanguageVersionDto(2, MinorDto.Staging(3, 1))
     // keep v2_3 pointed to latest revision
     private val v2_3 = v2_3_1
-    private val v2_dev = "2.dev"
-
-    val explicitVersions: Map[String, String] = Map(
+    private val v2_dev = LanguageVersionDto(2, MinorDto.Dev)
+    val explicitVersions: Map[String, LanguageVersionDto] = Map(
       "v2_1" -> v2_1,
       "v2_2" -> v2_2,
       "v2_3_1" -> v2_3_1,
@@ -35,28 +60,34 @@ object DamlLfPlugin extends AutoPlugin {
     private val defaultLfVersion = v2_2
     private val devLfVersion = v2_dev
     private val latestStableLfVersion = v2_2
-
-    val namedVersions: Map[String, String] = Map(
+    val namedVersions: Map[String, LanguageVersionDto] = Map(
       "defaultLfVersion" -> defaultLfVersion,
       "devLfVersion" -> devLfVersion,
       "latestStableLfVersion" -> latestStableLfVersion,
     )
 
-    private[DamlLfPlugin] val allLfVersions = List(v2_1, v2_2, v2_3_1, v2_dev)
+    private[DamlLfPlugin] val allLfVersions = List(v2_1, v2_2, v2_3, v2_dev)
     private val stableLfVersions = List(v2_1, v2_2)
-    // DEPRECATED langauge lists
     private val compilerLfVersions = allLfVersions
 
-    val versionLists = Map(
+    val versionLists: Map[String, List[LanguageVersionDto]] = Map(
       "allLfVersions" -> allLfVersions,
       "stableLfVersions" -> stableLfVersions,
       "compilerInputLfVersions" -> compilerLfVersions,
       "compilerOutputLfVersions" -> compilerLfVersions,
-
-      // DEPRECATED, use compiler(Input/Output)Versions instead
       "compilerLfVersions" -> compilerLfVersions,
     )
 
+    // Top-level report DTO for your JSON
+    case class LfVersionReport(
+        explicitVersions: List[LanguageVersionDto],
+        namedVersions: Map[String, LanguageVersionDto],
+        versionLists: Map[String, List[LanguageVersionDto]],
+    )
+  }
+
+  // TODO(#31057):remove this object in favour of dto
+  object LfVersions {
     case class LfVersionReport(
         explicitVersions: Seq[String],
         namedVersions: Map[String, String],
@@ -69,23 +100,39 @@ object DamlLfPlugin extends AutoPlugin {
     val lfVersions = settingKey[Seq[String]]("List of LF versions to generate DARs for")
     val lfDarOutput = settingKey[File]("Directory where DAR will be outputted")
     val generateLfVersionJson = taskKey[Seq[File]]("Generates the LF version JSON file")
+    val generateDTOLfVersionJson = taskKey[Seq[File]]("Generates the DTO LF version JSON file")
   }
 
   import autoImport.*
 
   private val unscopedProjectSettings = Seq(
     lfSourceDirectory := sourceDirectory.value / "lf",
-    lfVersions := LfVersions.allLfVersions,
+    lfVersions := LfVersionsDTO.allLfVersions.map(_.dotted),
     lfDarOutput := { target.value / "lf-dars" / configuration.value.name },
     resourceGenerators += generateDar.taskValue,
   )
 
+  def generateDTOJsonLogic = Def.task {
+    val report = LfVersionsDTO.LfVersionReport(
+      explicitVersions = LfVersionsDTO.explicitVersions.values.toList,
+      namedVersions = LfVersionsDTO.namedVersions,
+      versionLists = LfVersionsDTO.versionLists,
+    )
+
+    val jsonString = report.asJson.spaces2
+
+    val outputFile = (Compile / resourceManaged).value / "daml-lf-versions-dto.json"
+    IO.write(outputFile, jsonString)
+
+    Seq(outputFile)
+  }
+
   def generateJsonLogic = Def.task {
     // 1. Gather data
     val report = LfVersions.LfVersionReport(
-      explicitVersions = LfVersions.explicitVersions.values.toList,
-      namedVersions = LfVersions.namedVersions,
-      versionLists = LfVersions.versionLists,
+      explicitVersions = LfVersionsDTO.explicitVersions.values.toList.map(_.dotted),
+      namedVersions = LfVersionsDTO.namedVersions.mapValues(_.dotted),
+      versionLists = LfVersionsDTO.versionLists.mapValues(_.map(_.dotted)),
     )
 
     // 2. Generate JSON
@@ -94,8 +141,6 @@ object DamlLfPlugin extends AutoPlugin {
     // 3. Write file (to target/scala-2.12/resource_managed/main/...)
     val outputFile = (Compile / resourceManaged).value / "daml-lf-versions.json"
     IO.write(outputFile, jsonString)
-
-    streams.value.log.info(s"Generated LF version JSON at: $outputFile")
 
     Seq(outputFile)
   }

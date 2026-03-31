@@ -31,6 +31,14 @@ iouSynchronizerOwner.topology.synchronizer_parameters
 paintSynchronizerOwner.topology.synchronizer_parameters
   .propose_update(paintId, _.update(assignmentExclusivityTimeout = 2 seconds))
 
+// enable multi-synchronizer topology feature flag for all participants for both synchronizers
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+participant1.topology.synchronizer_trust_certificates.propose(participant1, iouId, featureFlags = featureFlag)
+participant2.topology.synchronizer_trust_certificates.propose(participant2, iouId, featureFlags = featureFlag)
+participant3.topology.synchronizer_trust_certificates.propose(participant3, iouId, featureFlags = featureFlag)
+participant2.topology.synchronizer_trust_certificates.propose(participant2, paintId, featureFlags = featureFlag)
+participant3.topology.synchronizer_trust_certificates.propose(participant3, paintId, featureFlags = featureFlag)
+
 // connect participants to the synchronizers
 participant1.synchronizers.connect_local(iou_sequencer, alias = iouAlias)
 participant2.synchronizers.connect_local(iou_sequencer, alias = iouAlias)

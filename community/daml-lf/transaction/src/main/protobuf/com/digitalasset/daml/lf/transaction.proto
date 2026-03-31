@@ -48,7 +48,7 @@ message Node {
     Fetch fetch = 4;
     Exercise exercise = 5;
     Rollback rollback = 6;
-    LookupByKey lookup_by_key = 1001; // *since dev*
+    QueryByKey query_by_key = 7;
   }
 
   message Fetch {
@@ -59,8 +59,8 @@ message Node {
     repeated string non_maintainer_signatories = 4;
     repeated string non_signatory_stakeholders = 5;
     repeated string actors = 6;
-    KeyWithMaintainers key_with_maintainers = 1001; // optional *since dev*
-    bool by_key = 1002; //  *since dev*
+    KeyWithMaintainers key_with_maintainers = 8;
+    bool by_key = 9;
   }
 
   message Exercise {
@@ -80,12 +80,12 @@ message Node {
     repeated string children = 1; // node ids
   }
 
-  // *since dev*
-  message LookupByKey {
+  message QueryByKey {
     string package_name = 1;
     com.digitalasset.daml.lf.value.Identifier template_id = 2;
     KeyWithMaintainers key_with_maintainers = 3;
-    bytes contract_id = 4;
+    repeated bytes contract_id = 4;
+    bool exaustive = 5;
   }
 }
 

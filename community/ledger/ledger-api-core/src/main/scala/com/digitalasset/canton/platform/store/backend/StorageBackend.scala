@@ -410,6 +410,7 @@ trait EventStorageBackend {
   def lastSynchronizerOffsetBeforeOrAtRecordTime(
       synchronizerId: SynchronizerId,
       beforeOrAtRecordTimeInclusive: Timestamp,
+      beforeOrAtLedgerEndOffsetInclusive: Offset,
   )(connection: Connection)(implicit traceContext: TraceContext): Option[SynchronizerOffset]
 
   def lastRecordTimeBeforeOrAtSynchronizerOffset(

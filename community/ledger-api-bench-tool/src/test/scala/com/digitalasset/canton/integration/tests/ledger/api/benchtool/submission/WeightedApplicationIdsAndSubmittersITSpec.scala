@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
 import com.daml.timer.Delayed
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -26,8 +25,6 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class WeightedUserIdsAndSubmittersITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -40,7 +37,7 @@ class WeightedUserIdsAndSubmittersITSpec
   private val timeout: FiniteDuration = 2.minutes
 
   "benchtool" should {
-    "populate participant with contracts using specified user-ids and submitters" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "populate participant with contracts using specified user-ids and submitters" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       env =>
         import env.*
 

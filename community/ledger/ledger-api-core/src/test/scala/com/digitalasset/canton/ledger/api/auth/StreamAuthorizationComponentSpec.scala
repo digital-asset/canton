@@ -351,6 +351,7 @@ class StreamAuthorizationComponentSpec
               includeTopologyEvents = None,
             )
           ),
+          descendingOrder = false,
         ),
       )
     }

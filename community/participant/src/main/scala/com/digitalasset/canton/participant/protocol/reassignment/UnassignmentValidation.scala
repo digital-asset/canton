@@ -124,11 +124,23 @@ private[reassignment] object UnassignmentValidation {
         parsedRequest.fullViewTree,
       )
       submitterCheckResult <- checkSubmitterCheckResult(parsedRequest)
+      // check multi-synchronizer flag is enabled on the source synchronizer
+      multiSynchronizerCheckResult <- EitherT.right(
+        ReassignmentValidation
+          .checkMultiSynchronizerEnabled(
+            topologySnapshot = parsedRequest.snapshot.ipsSnapshot,
+            stakeholders = parsedRequest.fullViewTree.stakeholders,
+            psid = parsedRequest.fullViewTree.sourceSynchronizer.unwrap,
+          )
+          .value
+          .map(_.swap.toOption)
+      )
     } yield UnassignmentValidationResult.CommonValidationResult(
       activenessResult,
       participantSignatureVerificationResult,
       contractAuthenticationResultF,
       submitterCheckResult,
+      multiSynchronizerCheckResult,
     )
   }
 
@@ -240,9 +252,20 @@ private[reassignment] object UnassignmentValidation {
           for {
             participantsErrors <- checkReassigningParticipants(parsedRequest, targetTopology)
             vettingErrors <- checkTargetPackagesVetted(parsedRequest.fullViewTree, targetTopology)
+            // check multi-synchronizer flag is enabled on the target synchronizer
+            multiSynchronizerCheckResult <- EitherT.right(
+              ReassignmentValidation
+                .checkMultiSynchronizerEnabled(
+                  topologySnapshot = targetTopology.unwrap,
+                  stakeholders = parsedRequest.fullViewTree.stakeholders,
+                  psid = parsedRequest.fullViewTree.targetSynchronizer.unwrap,
+                )
+                .value
+                .map(_.swap.toOption)
+            )
           } yield {
             ReassigningParticipantValidationResult(
-              participantsErrors.toList ++ vettingErrors.toList
+              participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList
             )
           }
         case None =>

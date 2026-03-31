@@ -50,7 +50,8 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
         ConfigTransforms.updateParticipantConfig("participant1") {
           _.focus(_.parameters.minimumProtocolVersion)
             .replace(Some(ParticipantProtocolVersion(beforeLastStable)))
-        }
+        },
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
       .withSetup { implicit env =>

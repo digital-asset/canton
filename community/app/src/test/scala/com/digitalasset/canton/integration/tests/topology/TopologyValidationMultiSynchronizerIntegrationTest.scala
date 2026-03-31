@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.util.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -34,6 +35,9 @@ class TopologyValidationMultiSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransforms(
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
+      )
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)

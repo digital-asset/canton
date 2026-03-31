@@ -72,6 +72,7 @@ import io.opentelemetry.api.trace.Tracer
 import java.time.Instant
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import scala.jdk.DurationConverters.*
 import scala.util.{Failure, Random, Success, Try}
 
 import AvailabilityModuleMetrics.{emitDisseminationStateStats, emitInvalidMessage}
@@ -124,8 +125,6 @@ final class AvailabilityModule[E <: Env[E]](
 
   private val spanManager = new AvailabilityModuleSpanManager()
 
-  // TODO(#27806): make this dynamic
-  private val proposalResponseInterval: FiniteDuration = 50.millis
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var proposeResponseCancellableEvent: Option[CancellableEvent] = None
 
@@ -350,20 +349,7 @@ final class AvailabilityModule[E <: Env[E]](
             progress.addAck(AvailabilityAck(from, signature)),
           )
         }
-
-        proposeResponseCancellableEvent match {
-          case None => attemptSatisfyingProposalRequest(actingOnMessageType)
-          case Some(cancellable) =>
-            val reachedMaxBatchesReady =
-              disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal.exists(
-                _ <= disseminationProtocolState.disseminationCompleteView.size
-              )
-            if (reachedMaxBatchesReady) {
-              cancellable.cancel().discard
-              proposeResponseCancellableEvent = None
-              attemptSatisfyingProposalRequest(actingOnMessageType)
-            }
-        }
+        attemptSatisfyingProposalRequestIfNotWaitingForDelayedResponse(actingOnMessageType)
     }
   }
 
@@ -485,8 +471,7 @@ final class AvailabilityModule[E <: Env[E]](
             )
           }
         // Storing and signing a batch can make it ready for ordering if F == 0
-        if (proposeResponseCancellableEvent.isEmpty)
-          attemptSatisfyingProposalRequest(actingOnMessageType)
+        attemptSatisfyingProposalRequestIfNotWaitingForDelayedResponse(actingOnMessageType)
     }
   }
 
@@ -641,18 +626,38 @@ final class AvailabilityModule[E <: Env[E]](
       topologyChangedSinceLastProposalRequest = false
     }
 
+    val currentTime = clock.now
     // if we have enough batches ready to reach the max batches per proposal, we just respond
     // otherwise we delay the response a bit to allow more batches to become ready
-    val numberOfAvailableBatches = disseminationProtocolState.disseminationCompleteView.size
-    if (
+    val reachedMaxBatchesPerProposal = {
+      val numberOfAvailableBatches = disseminationProtocolState.disseminationCompleteView.size
       newNextToBeProvidedToConsensus.maxBatchesPerProposal.exists(_ <= numberOfAvailableBatches)
-    ) {
-      attemptSatisfyingProposalRequest(shortType(actingOnMessageType))
-    } else {
-      val cancellableEvent =
-        context.delayedEvent(proposalResponseInterval, Availability.DelayedProposalResponse)
-      proposeResponseCancellableEvent = Some(cancellableEvent)
     }
+    disseminationProtocolState.lastProposalRequestTime.map(previousTime =>
+      (currentTime - previousTime).toScala
+    ) match {
+      case Some(lastBlockDuration)
+          if ((lastBlockDuration < config.availabilityMaxProposalCreationDelay) && !reachedMaxBatchesPerProposal) =>
+        // but we only delay the response if the time to complete the last block was below
+        // the configured max proposal creation delay.
+        // And the delay will be the difference between the two durations.
+        proposeResponseCancellableEvent = Some(
+          context.delayedEvent(
+            delay = config.availabilityMaxProposalCreationDelay - lastBlockDuration,
+            Availability.DelayedProposalResponse,
+          )
+        )
+      case _ =>
+        attemptSatisfyingProposalRequest(
+          shortType(actingOnMessageType),
+          notifyConsensusIfNoReadyBatches = true,
+        )
+    }
+    // We start counting the new delay from the time of the current request, but alternatively we could take
+    // the maximum between this timestamp and the previous (lastProposalRequestTime + availabilityMaxProposalCreationDelay).
+    // That would guarantee no overlapping intervals.
+    // TODO(#27806): consider alternative interval implementation
+    disseminationProtocolState.lastProposalRequestTime = Some(currentTime)
   }
 
   private def delayedProposalResponse(message: String)(implicit
@@ -817,6 +822,26 @@ final class AvailabilityModule[E <: Env[E]](
           tracedBatchId -> batch
         }
         f(batchesWithTraced)
+    }
+
+  private def attemptSatisfyingProposalRequestIfNotWaitingForDelayedResponse(
+      actingOnMessageType: => String
+  )(implicit
+      context: E#ActorContextT[Availability.Message[E]],
+      traceContext: TraceContext,
+  ): Unit =
+    proposeResponseCancellableEvent match {
+      case None => attemptSatisfyingProposalRequest(actingOnMessageType)
+      case Some(cancellable) =>
+        val reachedMaxBatchesReady =
+          disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal.exists(
+            _ <= disseminationProtocolState.disseminationCompleteView.size
+          )
+        if (reachedMaxBatchesReady) {
+          cancellable.cancel().discard
+          proposeResponseCancellableEvent = None
+          attemptSatisfyingProposalRequest(actingOnMessageType)
+        }
     }
 
   private def attemptSatisfyingProposalRequest(

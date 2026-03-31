@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import anorm.SqlParser.{byteArray, int, str}
+import anorm.SqlParser.{byteArray, int, long, str}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.Conversions.{parties, timestampFromMicros}
 import com.digitalasset.canton.platform.store.backend.RowDef.column
@@ -30,6 +30,7 @@ object CommonRowDefs {
   val recordTime: RowDef[Timestamp] = column("record_time", timestampFromMicros)
   val traceContext: RowDef[Array[Byte]] = column("trace_context", byteArray(_))
   val commandId: RowDef[CommandId] = column("command_id", str).map(CommandId.assertFromString)
+  val trafficCost: RowDef[Long] = column("traffic_cost", long)
   def submitters(stringInterning: StringInterning): RowDef[Seq[Party]] =
     column("submitters", parties(stringInterning)(_))
   val publicationTime: RowDef[Timestamp] = column("publication_time", timestampFromMicros)

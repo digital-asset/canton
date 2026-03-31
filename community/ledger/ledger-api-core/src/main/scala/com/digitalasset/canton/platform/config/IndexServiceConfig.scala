@@ -30,7 +30,7 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   size of the thread-pool backing the Ledger API query-services (fe not the command
   *   submission/interpretation). If not set, defaults to ((number of thread)/4 + 1)
   * @param preparePackageMetadataTimeOutWarning
-  *   timeout for package metadata preparation after which a warning will be logged
+  *   timeout for package metadata preparation after which a warning will be logged. deprecated
   * @param completionsPageSize
   *   database / pekko page size for batching of ledger api server index ledger completion queries
   * @param activeContractsServiceStreams

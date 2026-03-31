@@ -62,6 +62,7 @@ sealed trait ReassignmentPruningIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

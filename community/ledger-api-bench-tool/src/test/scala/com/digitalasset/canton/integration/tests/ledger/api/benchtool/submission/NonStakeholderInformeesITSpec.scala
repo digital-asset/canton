@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -18,8 +17,6 @@ import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class NonStakeholderInformeesITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -30,7 +27,7 @@ class NonStakeholderInformeesITSpec
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "NonStakeholderInformees" should {
-    "divulge events" onlyRunWithOrGreaterThan ProtocolVersion.dev in { env =>
+    "divulge events" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
       import env.*
 
       val expectedTemplateNames = Set("Foo1", "Divulger")

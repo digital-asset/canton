@@ -86,21 +86,21 @@ class AwsKms(
       case err: CompletionException =>
         Option(err.getCause) match {
           case Some(kmsErr: KmsException) if kmsErr.retryable() =>
-            kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+            kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
           // we look for network failure errors to retry on
           case Some(sdkErr: SdkClientException)
               if errorMessagesToRetry.exists(sdkErr.getMessage.contains(_)) || sdkErr.retryable() =>
-            kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+            kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
           // we retry on resource exceptions as well
           case Some(resourceException: ResourceExhaustedException) =>
             logger.debug(
               s"ResourceExhaustedException with retry: ${resourceException.isRetryable}"
             )(TraceContext.empty)
-            kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+            kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
           case _ =>
-            kmsErrorGen(ErrorUtil.messageWithStacktrace(err), false)
+            kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), false)
         }
-      case err => kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+      case err => kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
     }
 
   /** Creates an AWS KMS key based on a series of specifications and returns its key identifier.
@@ -136,7 +136,7 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsCreateKeyRequestError(ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err => KmsCreateKeyRequestError(ThrowableUtil.messageWithStacktrace(err)))
       response <- EitherTUtil.fromFuture[KmsError, aws.CreateKeyResponse](
         synchronizeWithClosingF(functionFullName)(kmsClient.createKey(keyRequest).asScala),
         err => errorHandler(err, (errStr, retryable) => KmsCreateKeyError(errStr, retryable)),
@@ -209,7 +209,9 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsGetPublicKeyRequestError(keyId, ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err =>
+            KmsGetPublicKeyRequestError(keyId, ThrowableUtil.messageWithStacktrace(err))
+          )
       pkResponse <- EitherTUtil.fromFuture[KmsError, aws.GetPublicKeyResponse](
         synchronizeWithClosingF(functionFullName)(
           kmsClient.getPublicKey(getPublicKeyRequest).asScala
@@ -388,7 +390,7 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsEncryptRequestError(keyId, ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err => KmsEncryptRequestError(keyId, ThrowableUtil.messageWithStacktrace(err)))
       response <- EitherTUtil.fromFuture[KmsError, aws.EncryptResponse](
         synchronizeWithClosingF(functionFullName)(kmsClient.encrypt(encryptRequest).asScala),
         err => errorHandler(err, (errStr, retryable) => KmsEncryptError(keyId, errStr, retryable)),
@@ -433,7 +435,7 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsDecryptRequestError(keyId, ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err => KmsDecryptRequestError(keyId, ThrowableUtil.messageWithStacktrace(err)))
       response <- EitherTUtil.fromFuture[KmsError, aws.DecryptResponse](
         synchronizeWithClosingF(functionFullName)(kmsClient.decrypt(decryptRequest).asScala),
         err => errorHandler(err, (errStr, retryable) => KmsDecryptError(keyId, errStr, retryable)),
@@ -505,7 +507,7 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsSignRequestError(keyId, ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err => KmsSignRequestError(keyId, ThrowableUtil.messageWithStacktrace(err)))
       response <- EitherTUtil.fromFuture[KmsError, aws.SignResponse](
         synchronizeWithClosingF(functionFullName)(kmsClient.sign(signRequest).asScala),
         err => errorHandler(err, (errStr, retryable) => KmsSignError(keyId, errStr, retryable)),
@@ -531,7 +533,7 @@ class AwsKms(
               .build
           }
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err => KmsDeleteKeyRequestError(keyId, ErrorUtil.messageWithStacktrace(err)))
+          .leftMap(err => KmsDeleteKeyRequestError(keyId, ThrowableUtil.messageWithStacktrace(err)))
       _ <- EitherTUtil.fromFuture[KmsError, aws.ScheduleKeyDeletionResponse](
         synchronizeWithClosingF(functionFullName)(
           kmsClient.scheduleKeyDeletion(scheduleKeyDeletionRequest).asScala
@@ -558,7 +560,7 @@ class AwsKms(
           }
           .toEitherT[FutureUnlessShutdown]
           .leftMap(err =>
-            KmsRetrieveKeyMetadataRequestError(keyId, ErrorUtil.messageWithStacktrace(err))
+            KmsRetrieveKeyMetadataRequestError(keyId, ThrowableUtil.messageWithStacktrace(err))
           )
       response <- EitherTUtil.fromFuture[KmsError, aws.DescribeKeyResponse](
         synchronizeWithClosingF(functionFullName)(kmsClient.describeKey(describeRequest).asScala),
@@ -675,7 +677,7 @@ object AwsKms extends Kms.SupportedSchemes {
           loggerFactory,
         )
       }
-      .leftMap[KmsError](err => KmsCreateClientError(ErrorUtil.messageWithStacktrace(err)))
+      .leftMap[KmsError](err => KmsCreateClientError(ThrowableUtil.messageWithStacktrace(err)))
 
   }
 }

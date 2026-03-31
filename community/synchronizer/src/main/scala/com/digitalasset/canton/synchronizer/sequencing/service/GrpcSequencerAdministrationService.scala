@@ -470,9 +470,17 @@ class GrpcSequencerAdministrationService(
       request: GetLsuTrafficControlStateRequest
   ): Future[GetLsuTrafficControlStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val result = sequencer.getLsuTrafficControlState
-      .map(trafficState => GetLsuTrafficControlStateResponse(trafficState.toByteString))
-      .leftMap(_.toCantonRpcError)
+
+    val result = for {
+      trafficTsOverride <- wrapErrUS(request.timestamp.traverse(CantonTimestamp.fromProtoTimestamp))
+
+      result <- sequencer
+        .getLsuTrafficControlState(trafficTsOverride)
+        .map(trafficState => GetLsuTrafficControlStateResponse(trafficState.toByteString))
+        .leftMap(_.toCantonRpcError)
+
+    } yield result
+
     mapErrNewEUS(result)
   }
 

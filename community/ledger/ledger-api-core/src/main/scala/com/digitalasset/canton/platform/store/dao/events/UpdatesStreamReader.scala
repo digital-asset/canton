@@ -16,6 +16,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.UpdatesStreamsConfig
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{RawEvent, RawThinEvent}
 import com.digitalasset.canton.platform.store.backend.common.{
@@ -28,6 +29,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdPageQuery,
 }
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.TopologyTransactionsStreamQueryParams
+import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.VectorOps
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
 import com.digitalasset.canton.platform.store.utils.{
   ConcurrencyLimiter,
@@ -241,7 +243,7 @@ class UpdatesStreamReader(
             .map { case (offset, topologyTransaction) =>
               offset -> GetUpdatesResponse(
                 GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction)
-              )
+              ).withPrecomputedSerializedSize()
             }
         case None => Source.empty
       }
@@ -262,11 +264,11 @@ class UpdatesStreamReader(
             convertReassignment = reassignment =>
               Offset.tryFromLong(reassignment.offset) -> GetUpdatesResponse(
                 GetUpdatesResponse.Update.Reassignment(reassignment)
-              ),
+              ).withPrecomputedSerializedSize(),
             convertTransaction = transaction =>
               Offset.tryFromLong(transaction.offset) -> GetUpdatesResponse(
                 GetUpdatesResponse.Update.Transaction(transaction)
-              ),
+              ).withPrecomputedSerializedSize(),
           )
         )
       }
@@ -445,15 +447,17 @@ class UpdatesStreamReader(
         queryRange = queryRange,
         ids = idsActivate,
         fetchEvents = (ids, connection) =>
-          eventStorageBackend.fetchEventPayloadsAcsDelta(
-            EventPayloadSourceForUpdatesAcsDelta.Activate
-          )(
-            eventSequentialIds = Ids(ids),
-            requestingPartiesForTx =
-              txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-            requestingPartiesForReassignment =
-              reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-          )(connection),
+          eventStorageBackend
+            .fetchEventPayloadsAcsDelta(
+              EventPayloadSourceForUpdatesAcsDelta.Activate
+            )(
+              eventSequentialIds = Ids(ids),
+              requestingPartiesForTx =
+                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+              requestingPartiesForReassignment =
+                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+            )(connection)
+            .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
         dbMetric = dbMetrics.updatesAcsDeltaStream.fetchEventActivatePayloads,
         payloadQueriesLimiter = payloadQueriesLimiter,
@@ -464,15 +468,17 @@ class UpdatesStreamReader(
         queryRange = queryRange,
         ids = idsDeactivate,
         fetchEvents = (ids, connection) =>
-          eventStorageBackend.fetchEventPayloadsAcsDelta(
-            EventPayloadSourceForUpdatesAcsDelta.Deactivate
-          )(
-            eventSequentialIds = Ids(ids),
-            requestingPartiesForTx =
-              txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-            requestingPartiesForReassignment =
-              reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-          )(connection),
+          eventStorageBackend
+            .fetchEventPayloadsAcsDelta(
+              EventPayloadSourceForUpdatesAcsDelta.Deactivate
+            )(
+              eventSequentialIds = Ids(ids),
+              requestingPartiesForTx =
+                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+              requestingPartiesForReassignment =
+                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+            )(connection)
+            .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
         dbMetric = dbMetrics.updatesAcsDeltaStream.fetchEventDeactivatePayloads,
         payloadQueriesLimiter = payloadQueriesLimiter,
@@ -755,15 +761,17 @@ class UpdatesStreamReader(
         queryRange = queryRange,
         ids = idsActivate,
         fetchEvents = (ids, connection) =>
-          eventStorageBackend.fetchEventPayloadsLedgerEffects(
-            EventPayloadSourceForUpdatesLedgerEffects.Activate
-          )(
-            eventSequentialIds = Ids(ids),
-            requestingPartiesForTx =
-              txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-            requestingPartiesForReassignment =
-              reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-          )(connection),
+          eventStorageBackend
+            .fetchEventPayloadsLedgerEffects(
+              EventPayloadSourceForUpdatesLedgerEffects.Activate
+            )(
+              eventSequentialIds = Ids(ids),
+              requestingPartiesForTx =
+                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+              requestingPartiesForReassignment =
+                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+            )(connection)
+            .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
         dbMetric = dbMetrics.updatesLedgerEffectsStream.fetchEventActivatePayloads,
         payloadQueriesLimiter = payloadQueriesLimiter,
@@ -774,15 +782,17 @@ class UpdatesStreamReader(
         queryRange = queryRange,
         ids = idsDeactivate,
         fetchEvents = (ids, connection) =>
-          eventStorageBackend.fetchEventPayloadsLedgerEffects(
-            EventPayloadSourceForUpdatesLedgerEffects.Deactivate
-          )(
-            eventSequentialIds = Ids(ids),
-            requestingPartiesForTx =
-              txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-            requestingPartiesForReassignment =
-              reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-          )(connection),
+          eventStorageBackend
+            .fetchEventPayloadsLedgerEffects(
+              EventPayloadSourceForUpdatesLedgerEffects.Deactivate
+            )(
+              eventSequentialIds = Ids(ids),
+              requestingPartiesForTx =
+                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+              requestingPartiesForReassignment =
+                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+            )(connection)
+            .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadDeactivateQueries,
         dbMetric = dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivatePayloads,
         payloadQueriesLimiter = payloadQueriesLimiter,
@@ -793,15 +803,17 @@ class UpdatesStreamReader(
         queryRange = queryRange,
         ids = idsVariousWitnessed,
         fetchEvents = (ids, connection) =>
-          eventStorageBackend.fetchEventPayloadsLedgerEffects(
-            EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
-          )(
-            eventSequentialIds = Ids(ids),
-            requestingPartiesForTx =
-              txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-            requestingPartiesForReassignment =
-              reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
-          )(connection),
+          eventStorageBackend
+            .fetchEventPayloadsLedgerEffects(
+              EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
+            )(
+              eventSequentialIds = Ids(ids),
+              requestingPartiesForTx =
+                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+              requestingPartiesForReassignment =
+                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+            )(connection)
+            .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadVariousWitnessedQueries,
         dbMetric = dbMetrics.updatesLedgerEffectsStream.fetchEventVariousWitnessedPayloads,
         payloadQueriesLimiter = payloadQueriesLimiter,
@@ -931,4 +943,11 @@ class UpdatesStreamReader(
       Ordering.Long.reverse
     else
       Ordering.Long
+}
+
+object UpdatesStreamReader {
+  final implicit class VectorOps[T](vec: Vector[T]) {
+    def reverseIfDescendingOrder(descendingOrder: Boolean): Vector[T] =
+      if (descendingOrder) vec.reverse else vec
+  }
 }

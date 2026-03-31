@@ -781,14 +781,19 @@ class TopologyAdministrationGroup(
         |A logical synchronizer upgrade must be ongoing for this call to succeed.
         |Parameters:
         |- topologyStore: Optional, if the node only has one active synchronizer store, it will
-        |                 be detected automatically. If the node has more than one active
-        |                 synchronizer store, as can be the case for participants, the desired
-        |                 topology store must be set explicitly.
+        | be detected automatically. If the node has more than one active
+        | synchronizer store, as can be the case for participants, the desired
+        | topology store must be set explicitly.
+        |- timestamp: The effective time used to fetch the topology transactions
+        | MUST be empty for regular LSUs.
+        | SHOULD be defined in a disaster recovery scenario when requesting the topology
+        | from a synchronizer without an announced LSU.
         """
     )
     def sequencer_lsu_state(
         outputFile: String,
         topologyStore: Option[TopologyStoreId.Synchronizer] = None,
+        timestamp: Option[CantonTimestamp] = None,
         timeout: NonNegativeDuration = timeouts.unbounded,
     ): Unit =
       consoleEnvironment.run {
@@ -799,7 +804,8 @@ class TopologyAdministrationGroup(
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           adminCommand(
-            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, fileStreamObserver)
+            TopologyAdminCommands.Read
+              .SequencerLsuState(topologyStore, timestamp, fileStreamObserver)
           )
 
         processResult(

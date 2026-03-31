@@ -39,7 +39,7 @@ class CommandSubmitterWithRetry(
     extends NamedLogging
     with FlagCloseableAsync {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   // abort retries if the remaining timeout is less than this (in case there is little chance that the command will succeed)
   // if our descendants ever get to lower latencies, they should lower this value as well

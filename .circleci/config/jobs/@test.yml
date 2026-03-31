@@ -35,16 +35,27 @@ external_parties_test:
         override_java_version_for_tests: << parameters.override_java_version_for_tests >>
 
 variations_test:
-  parameters:
-    protocol_version:
-      type: string
-      default: ""
-    override_java_version_for_tests:
-      type: string
-      default: ""
   executor: canton-xlarge-docker-with-postgres
   parallelism: 4
+  parameters:
+    only_for_selected_users:
+      type: boolean
+      default: false
+    override_java_version_for_tests:
+      default: ""
+      type: string
+    protocol_version:
+      default: ""
+      type: string
   steps:
+    - checkout:
+        method: blobless
+    - when:
+        condition: << parameters.only_for_selected_users >>
+        steps:
+          - run:
+              name: Skip test (except for selected users)
+              command: .circleci/skip-variations-test.sh
     - set_canton_protocol_version:
         protocol_version: << parameters.protocol_version >>
     - run_variations_tests:
@@ -265,9 +276,6 @@ nightly_integration_test_bftordering_only:
 model_based_test:
   executor: canton-xlarge-docker-with-postgres
   steps:
-    # TODO(#30398): remove once the default PV supports NUCK
-    - set_canton_protocol_version:
-        protocol_version: "dev" # NUCK only works in dev for now
     - run_tests:
         command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: "cat" # cat acts as identity filter
@@ -278,7 +286,7 @@ model_based_test:
         # every PR and we're making many NUCK related changes. So we disable
         # reporting to avoid spamming the flaky test rota. Paul is notified of
         # failures on slack for now (see fixed_volunteer below).
-        report_to_datadog: false 
+        report_to_datadog: false
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U05KX5V7KJN" # Paul
 
@@ -456,7 +464,6 @@ test_data_continuity_dumps:
         num_test_buckets: "8"
         num_parallel_tasks: "1" # ports are hardcoded
         timeout: 1h
-        report_to_datadog: false # because of Slack notification and no need for failing test statistics
     - slack_red_main_with_volunteer
 
 print_tests:

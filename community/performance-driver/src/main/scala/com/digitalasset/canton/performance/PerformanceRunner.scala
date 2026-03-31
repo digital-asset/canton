@@ -163,10 +163,20 @@ object PartyRole {
       RateSettings.defaultCommandClientConfiguration
   }
 
+  /** Transferer role (just sends assets)
+    *
+    * @param name
+    *   the name of the role
+    * @param balancingThreshold
+    *   at what threshold are we considering to be too fast or to slow and adjust our rate?
+    * @param issuers
+    *   if non-empty, we will only grab assets from the given list of issuers.
+    */
   final case class Transfer(
       name: String,
       override val settings: RateSettings,
       balancingThreshold: Double = 0.5,
+      issuers: Set[String] = Set.empty,
   ) extends ActivePartyRole {
     override def role: M.orchestration.Role = M.orchestration.Role.TRADER
     override def commandClientConfiguration: CommandClientConfiguration =

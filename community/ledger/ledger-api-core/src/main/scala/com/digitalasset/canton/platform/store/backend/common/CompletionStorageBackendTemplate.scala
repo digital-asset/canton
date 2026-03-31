@@ -78,6 +78,7 @@ class CompletionStorageBackendTemplate(
       submissionId.?,
       synchronizerId(stringInterning).map(_.toProtoPrimitive),
       traceContext.map(Conversions.protoTraceContextFrom(noTracingLogger)),
+      trafficCost.?.map(_.getOrElse(0L)),
       deduplicationOffset,
       deduplicationDurationSeconds,
       deduplicationDurationNanos,

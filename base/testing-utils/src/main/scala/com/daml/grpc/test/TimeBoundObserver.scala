@@ -4,23 +4,28 @@
 package com.daml.grpc.test
 
 import com.daml.timer.Delayed
-import io.grpc.Context
+import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 final class TimeBoundObserver[A](
-    duration: FiniteDuration
-)(delegate: StreamObserver[A])(implicit executionContext: ExecutionContext)
+    duration: FiniteDuration,
+    delegate: StreamObserver[A],
+    cancellableContext: CancellableContext,
+)(implicit executionContext: ExecutionContext)
     extends StreamObserver[A] {
 
   private var done = false
 
-  Delayed.by(duration)(synchronized {
-    if (!done) {
-      onCompleted()
-      val _ = Context.current().withCancellation().cancel(null)
+  Delayed.by(duration)({
+    synchronized {
+      if (!done) {
+        done = true
+        delegate.onCompleted()
+        cancellableContext.cancel(null)
+      }
     }
   })
 
@@ -34,6 +39,7 @@ final class TimeBoundObserver[A](
     if (!done) {
       delegate.onError(t)
       done = true
+      val _ = cancellableContext.cancel(null)
     }
   }
 
@@ -41,6 +47,7 @@ final class TimeBoundObserver[A](
     if (!done) {
       delegate.onCompleted()
       done = true
+      val _ = cancellableContext.cancel(null)
     }
   }
 }

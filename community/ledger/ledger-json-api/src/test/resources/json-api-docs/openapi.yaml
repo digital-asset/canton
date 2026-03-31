@@ -568,8 +568,77 @@ paths:
     get:
       description: |-
         Lists which participant node vetted what packages on which synchronizer.
-        Can be called by any authenticated user.
+        This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.
       operationId: getV2Package-vetting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListVettedPackagesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListVettedPackagesResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+    post:
+      description: |-
+        Update the vetted packages of this participant
+        This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.
+      operationId: postV2Package-vetting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVettedPackagesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateVettedPackagesResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/package-vetting/list:
+    post:
+      description: |-
+        Lists which participant node vetted what packages on which synchronizer.
+        Can be called by any authenticated user.
+      operationId: postV2Package-vettingList
       requestBody:
         content:
           application/json:
@@ -598,9 +667,10 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/package-vetting/update:
     post:
       description: Update the vetted packages of this participant
-      operationId: postV2Package-vetting
+      operationId: postV2Package-vettingUpdate
       requestBody:
         content:
           application/json:
@@ -2389,9 +2459,7 @@ components:
             This can be either a single NamespaceDelegation,
             or DecentralizedNamespaceDefinition along with its authorized namespace owners in the form of NamespaceDelegations.
             May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-            - A PartyToKeyMapping to register the party's signing keys.
-            May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-            - A PartyToParticipant to register the hosting relationship of the party.
+            - A PartyToParticipant to register the hosting relationship of the party, and the party's signing keys and threshold.
             Must be provided.
 
             Required: must be non-empty
@@ -2879,6 +2947,34 @@ components:
             - for successful/failed assign commands: identifies the target synchronizer
 
             Required
+        paidTrafficCost:
+          description: |-
+            The traffic cost paid by this participant node for the confirmation request
+            for the submitted command.
+
+            Commands whose execution is rejected before their corresponding
+            confirmation request is ordered by the synchronizer will report a paid
+            traffic cost of zero.
+            If a confirmation request is ordered for a command, but the request fails
+            (e.g., due to contention with a concurrent contract archival), the traffic
+            cost is paid and reported on the failed completion for the request.
+
+            If you want to correlate the traffic cost of a successful completion
+            with the transaction that resulted from the command, you can use the
+            ``offset`` field to retrieve the transaction using
+            ``UpdateService.GetUpdateByOffset`` on the same participant node; or alternatively use the ``update_id``
+            field to retrieve the transaction using ``UpdateService.GetUpdateById`` on any participant node
+            that sees the transaction.
+
+            Note: for completions processed before the participant started serving
+            traffic cost on the Ledger API, this field will be set to zero.
+            Additionally, the total cost incurred by the submitting node for the submission of the transaction may be greater
+            than the reported cost, for example if retries were issued due to failed submissions to the synchronizer.
+            The cost reported here is the one paid for ordering the confirmation request.
+
+            Optional
+          type: integer
+          format: int64
     CompletionResponse:
       title: CompletionResponse
       description: Required
@@ -3034,7 +3130,7 @@ components:
             Details on the keys that will be used to sign the transaction (how many and of which type).
             Signature size impacts the cost of the transaction.
             If empty, the signature sizes will be approximated with threshold-many signatures (where threshold is defined
-            in the PartyToKeyMapping of the external party), using keys in the order they are registered.
+            in the PartyToParticipant of the external party), using keys in the order they are registered.
             Empty list is equivalent to not providing this field
 
             Optional: can be empty
@@ -4560,24 +4656,26 @@ components:
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
+      required:
+      - beginExclusive
       properties:
         beginExclusive:
           description: |-
-            Beginning of the requested ledger section (non-negative integer).
+            Exclusive lower bound offset of the requested ledger section (non-negative integer).
             The response will only contain transactions whose offset is strictly greater than this.
-            If not populated or set to zero, the stream will start from the beginning of the ledger.
-            If positive, the streaming will start after this absolute offset.
-            If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
-
-            Optional
+            If set to zero, the lower bound is set to the beginning of the ledger.
+            If the participant has been pruned, this parameter must be greater or equal than the pruning offset.
+            Required
           type: integer
           format: int64
         endInclusive:
           description: |-
-            End of the requested ledger section.
-            The response will only contain transactions whose offset is less than or equal to this.
-            If empty, the stream will not terminate.
-            If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+            Inclusive higher bound offset of the requested ledger section.
+            If specified the response will only contain transactions whose offset is less than or equal to this.
+            If not specified,
+
+            - the descending_order must not be selected,
+            - the stream will not terminate.
 
             Optional
           type: integer
@@ -4610,6 +4708,12 @@ components:
             - include_reassignments.filter = the same filter specified on this request
             - include_reassignments.verbose = the same flag specified on this request
             - include_topology_events.include_participant_authorization_events.parties = all the parties specified in filter
+        descendingOrder:
+          description: |-
+            If set, the stream will populate the elements in descending order.
+
+            Optional
+          type: boolean
     GetUserResponse:
       title: GetUserResponse
       type: object
@@ -7095,7 +7199,7 @@ components:
           description: |-
             Additional signatures for this transaction specifically
             Use for transactions that require additional signatures beyond the namespace key signatures
-            e.g: PartyToKeyMapping must be signed by all registered keys
+            e.g: PartyToParticipant must be signed by all registered keys
 
             Optional: can be empty
           type: array

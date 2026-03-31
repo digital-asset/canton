@@ -46,7 +46,7 @@ private[platform] final case class InitializeParallelIngestion(
       initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
       achsConfig: Option[AchsConfig],
   ): Future[(Option[LedgerEnd], AchsWorkDistance)] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.empty
     logger.info(s"Attempting to initialize with participant ID $providedParticipantId")

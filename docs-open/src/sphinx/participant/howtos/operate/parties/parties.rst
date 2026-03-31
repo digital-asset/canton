@@ -14,7 +14,7 @@ to a Participant Node, which allows them to submit transactions and access the l
 The following section explains how to onboard a (local) party. Refer to the following howtos for onboarding of other kind of parties:
 
 - For decentralized parties, refer to the :ref:`Decentralized Party Overview documentation <howto_decentralized_parties>`.
-- For external parties, refer to the :externalref:`Onboard External Party tutorial <tutorial_onboard_external_party>`.
+- For external parties, refer to the :externalref:`Onboard External Party tutorial <tutorial_onboard_external_party_lapi>`.
 - For a party that is already hosted on a participant, refer to the :ref:`Party Replication documentation <party-replication>`.
 
 

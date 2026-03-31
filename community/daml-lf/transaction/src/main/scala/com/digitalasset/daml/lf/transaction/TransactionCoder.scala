@@ -234,10 +234,10 @@ class TransactionCoder(allowNullCharacters: Boolean) {
                   unversioned <- encodeExercise(ne)
                 } yield nodeBuilder.setExercise(unversioned).build()
 
-              case nlbk: Node.LookupByKey =>
+              case nqbk: Node.QueryByKey =>
                 for {
-                  unversionned <- encodeLookUp(nlbk)
-                } yield nodeBuilder.setLookupByKey(unversionned).build()
+                  unversioned <- encodeQueryByKey(nqbk)
+                } yield nodeBuilder.setQueryByKey(unversioned).build()
 
             }
           }
@@ -326,19 +326,25 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       } yield builder.build()
     }
 
-    private[this] def encodeLookUp(
-        node: Node.LookupByKey
-    ): Either[EncodeError, TransactionOuterClass.Node.LookupByKey] =
+    private[this] def encodeQueryByKey(
+        node: Node.QueryByKey
+    ): Either[EncodeError, TransactionOuterClass.Node.QueryByKey] =
       for {
         _ <- Either.cond(
           node.version >= SerializationVersion.minContractKeys,
           (),
           EncodeError(s"Contract keys not supported by version ${node.version}"),
         )
-        builder = TransactionOuterClass.Node.LookupByKey.newBuilder()
+        _ <- Either.cond(
+          node.exhaustive || node.result.nonEmpty,
+          (),
+          EncodeError("non exhaustive query by key node must have at least one contract id"),
+        )
+        builder = TransactionOuterClass.Node.QueryByKey.newBuilder()
         _ = discard(builder.setPackageName(node.packageName))
         _ = discard(builder.setTemplateId(ValueCoder.encodeIdentifier(node.templateId)))
-        _ = node.result.foreach(cid => discard(builder.setContractId(cid.toBytes.toByteString)))
+        _ = node.result.foreach(cid => discard(builder.addContractId(cid.toBytes.toByteString)))
+        _ = discard(builder.setExaustive(node.exhaustive))
         encodedKey <- encodeKeyWithMaintainers(node.version, node.key)
       } yield builder.setKeyWithMaintainers(encodedKey).build()
 
@@ -409,8 +415,8 @@ class TransactionCoder(allowNullCharacters: Boolean) {
             decodeFetch(txVersion, msg.getVersion, msg.getFetch)
           case NodeTypeCase.EXERCISE =>
             decodeExercise(txVersion, msg.getVersion, msg.getExercise)
-          case NodeTypeCase.LOOKUP_BY_KEY =>
-            decodeLookup(txVersion, msg.getVersion, msg.getLookupByKey)
+          case NodeTypeCase.QUERY_BY_KEY =>
+            decodeQueryByKey(txVersion, msg.getVersion, msg.getQueryByKey)
           case NodeTypeCase.NODETYPE_NOT_SET => Left(DecodeError("Unset Node type"))
         }
       } yield (nodeId, node)
@@ -551,17 +557,22 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       )
     }
 
-    private[this] def decodeLookup(
+    private[this] def decodeQueryByKey(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: TransactionOuterClass.Node.LookupByKey,
+        msg: TransactionOuterClass.Node.QueryByKey,
     ) =
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
         _ <- Either.cond(
           txVersion >= SerializationVersion.minContractKeys,
           (),
-          DecodeError(s"Contract ket not supported by version $nodeVersion"),
+          DecodeError(s"Contract key not supported by version $nodeVersion"),
+        )
+        _ <- Either.cond(
+          msg.getExaustive || msg.getContractIdCount > 0,
+          (),
+          DecodeError("non exhaustive query by key node must have at least one contract id")
         )
         pkgName <- decodePackageName(msg.getPackageName)
         templateId <- ValueCoder.decodeIdentifier(msg.getTemplateId)
@@ -572,8 +583,15 @@ class TransactionCoder(allowNullCharacters: Boolean) {
             pkgName,
             msg.getKeyWithMaintainers,
           )
-        cid <- ValueCoder.decodeOptionalCoid(msg.getContractId)
-      } yield Node.LookupByKey(pkgName, templateId, key, cid, nodeVersion)
+        contractIds <- msg.getContractIdList.asScala.toVector
+          .foldLeft[Either[DecodeError, Vector[Value.ContractId]]](Right(Vector.empty)) {
+            case (acc, cidBytes) =>
+              for {
+                prev <- acc
+                cid <- ValueCoder.decodeCoid(cidBytes)
+              } yield prev :+ cid
+          }
+      } yield Node.QueryByKey(pkgName, templateId, msg.getExaustive, key, contractIds, nodeVersion)
 
     private[this] def decodeChildren(
         strList: ProtocolStringList

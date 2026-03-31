@@ -100,6 +100,12 @@ sealed trait MetricRegistryIntegrationTest
 
     participant1.health.ping(participant1)
 
+    val phase = participant1.metrics.get_histogram(
+      "daml.participant.phase.duration.seconds",
+      attributes = Map("phase" -> "1b_request-generation"),
+    )
+    phase.count should be > 0L
+
     val updatesBefore =
       participant1.metrics.get_long_point("daml.participant.api.indexer.updates").value
 

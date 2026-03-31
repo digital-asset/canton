@@ -9,7 +9,6 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SResult._
 import com.digitalasset.daml.lf.stablepackages.StablePackages
@@ -39,8 +38,6 @@ private[speedy] object SpeedyTestLib {
       extends Error(s"unknown package '$packageId'")
 
   final case object UnexpectedSResultScenarioX extends Error("unexpected SResultScenarioX")
-
-  case class ContinuationToken(cids: Vector[FatContractInstance]) extends NeedKeyContinuationToken
 
   @throws[SError.SErrorCrash]
   def run(
@@ -79,21 +76,11 @@ private[speedy] object SpeedyTestLib {
           case None =>
             throw UnknownPackage(pkg)
         }
-      case Question.Update.NeedKey(key, n, canContinueProgress, _, callback) =>
-        val cids = canContinueProgress match {
-          case NeedKeyProgression.InProgress(ContinuationToken(rest)) =>
-            rest
-          case NeedKeyProgression.Unstarted =>
-            getKeys.lift(key).getOrElse(Vector.empty)
-        }
-        val (returned, kept) = cids.splitAt(n)
-        val startedProgress = if (kept.nonEmpty) {
-          NeedKeyProgression.InProgress(ContinuationToken(kept))
-        } else {
-          NeedKeyProgression.Finished
-        }
+      case Question.Update.NeedKey(key, n, canContinue, _, callback) =>
+        val (returned, hasStarted) =
+          NeedKeyProgression.takeN(canContinue, n, getKeys.lift(key).getOrElse(Vector.empty))
         discard(
-          callback(returned, startedProgress)
+          callback(returned, hasStarted)
         )
     }
     runTxQ(onQuestion, machine) match {

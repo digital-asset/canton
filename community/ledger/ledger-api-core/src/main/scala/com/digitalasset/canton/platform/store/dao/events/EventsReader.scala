@@ -16,6 +16,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InternalEventFormat
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   FatCreatedEventProperties,
   RawFatCreatedEvent,
@@ -117,7 +118,7 @@ private[dao] sealed class EventsReader(
           synchronizerId = fatCreatedEvent.synchronizerId,
         )
       ),
-    )).value.flatMap {
+    ).withPrecomputedSerializedSize()).value.flatMap {
       case Some(result) => Future.successful(result)
       case None =>
         Future.failed(

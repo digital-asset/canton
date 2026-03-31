@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawParticipantAuthorization,
@@ -211,11 +212,22 @@ class LedgerApiStore(
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): FutureUnlessShutdown[Option[SynchronizerOffset]] =
-    executeSqlUS(metrics.index.db.lastSynchronizerOffsetBeforeOrAtRecordTime)(
-      eventStorageBackend.lastSynchronizerOffsetBeforeOrAtRecordTime(
-        synchronizerId,
-        beforeOrAtRecordTimeInclusive.underlying,
+  ): FutureUnlessShutdown[Option[LastSynchronizerOffset]] =
+    executeSqlUS(metrics.index.db.lastSynchronizerOffsetBeforeOrAtRecordTime)(connection =>
+      for {
+        ledgerEnd <- parameterStorageBackend.ledgerEnd(connection)
+        synchronizerIndex <- parameterStorageBackend.cleanSynchronizerIndex(synchronizerId)(
+          connection
+        )
+        lastSynchronizerOffset = eventStorageBackend.lastSynchronizerOffsetBeforeOrAtRecordTime(
+          synchronizerId,
+          beforeOrAtRecordTimeInclusive.underlying,
+          ledgerEnd.lastOffset,
+        )(connection)
+      } yield LastSynchronizerOffset(
+        ledgerEnd = ledgerEnd,
+        syncrhonizerIndex = synchronizerIndex,
+        lastSynchronizerOffset = lastSynchronizerOffset,
       )
     )
 
@@ -348,4 +360,10 @@ object LedgerApiStore {
         else ledgerApiStore.initializeInMemoryState
     } yield ledgerApiStore
   }
+
+  final case class LastSynchronizerOffset(
+      ledgerEnd: LedgerEnd,
+      syncrhonizerIndex: SynchronizerIndex,
+      lastSynchronizerOffset: Option[SynchronizerOffset],
+  )
 }

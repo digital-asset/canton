@@ -19,12 +19,8 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.performance.PartyRole.{DvpIssuer, Transfer}
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
-import com.digitalasset.canton.performance.console.{MissionControl, RunTypeConfig as C}
 import com.digitalasset.canton.performance.model.java as M
-import com.digitalasset.canton.performance.scenarios.LongRunning.{
-  WithPreparedLogging,
-  getMasterSetup,
-}
+import com.digitalasset.canton.performance.scenarios.LongRunning.WithPreparedLogging
 import com.digitalasset.canton.performance.{
   Connectivity,
   PerformanceRunner,
@@ -33,7 +29,7 @@ import com.digitalasset.canton.performance.{
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
+import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SynchronizerAlias, config}
 
@@ -44,7 +40,7 @@ object TransferTesting {
   def startupMaster(
       masterName: String = "1Master",
       totalCycles: Int = sys.env.get("NUM_CYCLES").map(_.toInt).getOrElse(Int.MaxValue),
-      numAssetsPerIssuer: Int = sys.env.get("NUM_ASSETS_PER_ISSUER").map(_.toInt).getOrElse(1000),
+      numAssetsPerActor: Int = sys.env.get("NUM_ASSETS_PER_ISSUER").map(_.toInt).getOrElse(50000),
       transferBatchSize: Int = sys.env.get("TRANSFER_BATCH_SIZE").map(_.toInt).getOrElse(150),
       reportFrequency: Int = sys.env.get("REPORT_FREQUENCY").map(_.toInt).getOrElse(250000),
       waitUntilReady: config.NonNegativeDuration = config.NonNegativeDuration.ofMinutes(
@@ -177,7 +173,7 @@ object TransferTesting {
             reportFrequency = reportFrequency,
             runType =
               new com.digitalasset.canton.performance.model.java.orchestration.runtype.TransferRun(
-                numAssetsPerIssuer, // num assets per issuer
+                numAssetsPerActor, // num assets per actor
                 transferBatchSize, // transfer batch size
                 0, // payload
               ),
@@ -204,6 +200,7 @@ object TransferTesting {
       partyDiscriminator: String = "",
       issuersPerNode: Int = 1,
       transferersPerNode: Int = 5,
+      onlyLocalIssuer: Boolean = true,
       rateSettings: RateSettings = RateSettings(
         SubmissionRateSettings.TargetLatencyNew(
           targetLatencyMs = sys.env.get("TARGET_LATENCY_MS").map(_.toInt).getOrElse(9000)
@@ -291,14 +288,23 @@ object TransferTesting {
         case ref: RemoteParticipantReference => Connectivity(ref.name, ref.config.ledgerApi)
         case _ => sys.error("unknown type")
       }
-      val roles = (0 until issuersPerNode).map(idx =>
+
+      val issuers = (0 until issuersPerNode).map(idx =>
         DvpIssuer(s"${partyDiscriminator}issuer-${participant.name}-$idx", rateSettings)
-      ) ++ (0 until transferersPerNode).map(idx =>
-        Transfer(s"${partyDiscriminator}transfer-${participant.name}-$idx", rateSettings)
+      )
+
+      val useIssuers = if (onlyLocalIssuer) issuers.map(_.name).toSet else Set.empty[String]
+
+      val transfers = (0 until transferersPerNode).map(idx =>
+        Transfer(
+          s"${partyDiscriminator}transfer-${participant.name}-$idx",
+          rateSettings,
+          issuers = useIssuers,
+        )
       )
       val prconfig = PerformanceRunnerConfig(
         master = masterName,
-        localRoles = roles.toSet,
+        localRoles = (issuers ++ transfers).toSet,
         ledger = connectivity,
         baseSynchronizerId = baseSynchronizer,
         otherSynchronizers = otherSynchronizers,
@@ -317,104 +323,6 @@ object TransferTesting {
       FutureUtil.doNotAwait(runner.startup(), "perf-runner failed")
       runner
     }
-
   }
-  def startup(
-      masterName: String = "1Master",
-      localMaster: Boolean = !sys.env.contains("REMOTE_MASTER"),
-      totalCycles: Int = sys.env.get("NUM_CYCLES").map(_.toInt).getOrElse(Int.MaxValue),
-      numAssetsPerIssuer: Int = 500,
-      transferBatchSize: Int = 250,
-      payloadSize: Int = 0,
-      reportFrequency: Int = 10000,
-      // number of transfer batches per submission (so batchSize * transferBatchSize assets will be moved)
-      batchSize: Int = 1,
-      issuersPerNode: Int = 5,
-      tradersPerNode: Int = 5,
-      otherSynchronizersRatio: Double = 0.0,
-  )(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): MissionControl = {
 
-    import consoleEnvironment.*
-
-    val prepared = (new WithPreparedLogging("transfertest", consoleEnvironment))
-    import prepared.*
-
-    // we assume that connectivity is done outside
-    ErrorUtil.requireState(
-      participants.all.filter(_.health.active).forall { pp =>
-        if (!pp.health.initialized()) {
-          myLogger.error(s"Participant ${pp.name} is not initialized")
-          false
-        } else if (pp.synchronizers.list_connected().isEmpty) {
-          myLogger.error(s"Participant ${pp.name} is not connected to a synchronizer")
-          false
-        } else true
-      },
-      "Participants are not read",
-    )
-    val participant1 = participants.all.filter(_.health.active).toList match {
-      case one :: _ => one
-      case Nil => throw new IllegalStateException("No active participant is available")
-    }
-    LongRunning.uploadDarToNodes(participants.all, myLogger)
-    val (baseSynchronizer, otherSynchronizers) =
-      participant1.synchronizers.list_connected().toList match {
-        case fst :: next => (fst.physicalSynchronizerId, next.map(_.physicalSynchronizerId))
-        case Nil => throw new IllegalStateException("Can't happen as we just checked above")
-      }
-
-    val (runTypeConfig, runTypeParams) = {
-      val protoConf = new M.orchestration.runtype.TransferRun(
-        numAssetsPerIssuer,
-        transferBatchSize,
-        payloadSize,
-      )
-      (C.TransferRun(masterName), protoConf)
-    }
-
-    val masterSetup = getMasterSetup(
-      masterName,
-      localMaster,
-      totalCycles,
-      reportFrequency,
-      issuersPerNode,
-      tradersPerNode,
-      runTypeConfig,
-      runTypeParams,
-      participants.all.count(_.health.active),
-    )
-
-    val participantInfo = participants.local.active.map(x =>
-      Connectivity(x.name, x.config.ledgerApi.clientConfig)
-    ) ++ participants.remote.active.map(x => Connectivity(x.name, x.config.ledgerApi))
-
-    myLogger.info(
-      s"Starting runners now, using synchronizer $baseSynchronizer as base, and other synchronizers $otherSynchronizers with participants at ${participantInfo
-          .map(x => s"${x.host}:${x.port.unwrap}")
-          .mkString(",")}"
-    )
-
-    val mc = new MissionControl(
-      loggerFactory,
-      consoleEnvironment.environment.metricsRegistry,
-      consoleEnvironment.environment.clock,
-      masterSetup,
-      participantInfo,
-      events = List(),
-      issuersPerNode = issuersPerNode,
-      tradersPerNode = tradersPerNode,
-      settings = RateSettings(SubmissionRateSettings.TargetLatency(), batchSize = batchSize),
-      baseSynchronizerId = baseSynchronizer.logical,
-      otherSynchronizers = otherSynchronizers.map(_.logical),
-      otherSynchronizersRatio = otherSynchronizersRatio,
-    )(consoleEnvironment.environment.executionContext)
-
-    onClose.set(Some(() => mc.close()))
-
-    myLogger.info("Started runners")
-    mc
-
-  }
 }

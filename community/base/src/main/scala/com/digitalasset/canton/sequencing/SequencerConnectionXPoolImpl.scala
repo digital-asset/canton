@@ -180,14 +180,20 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       threshold: PositiveInt,
       ignored: Set[ConnectionXConfig],
       extraUndecided: NonNegativeInt,
-  )(implicit traceContext: TraceContext): Boolean =
+  )(implicit
+      traceContext: TraceContext
+  ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit] =
     lock.exclusive {
-      // Grab all attributes only once to prevent a race condition if a connection is validated between the next calls
-      val nonFatalAttributes = trackedConnections.toSeq.collect {
-        case (connection, _validated)
-            if !connection.health.getState.isFatal && !ignored.contains(connection.config) =>
-          connection.attributes
-      }
+      // Grab all information at once to prevent a race condition if a connection is validated between the next calls
+      val (nonFatalAttributes, fatalErrors) = trackedConnections.toSeq
+        .filter { case (connection, _validated) => !ignored.contains(connection.config) }
+        .partitionMap { case (connection, _validated) =>
+          Either.cond(
+            connection.health.getState.isFatal,
+            connection.config.name -> connection.lastFailureReason.getOrElse("N/A"),
+            connection.attributes,
+          )
+        }
 
       // Number of unique sequencer IDs that have been validated at some point, differentiated by bootstrap
       val validatedSequencerIds = nonFatalAttributes.flatten.toSet
@@ -207,7 +213,22 @@ class SequencerConnectionXPoolImpl private[sequencing] (
           + s"validatedSequencerIds = $validatedSequencerIds; undecided = $undecided + $extraUndecided"
       )
 
-      isReachable
+      lazy val message = {
+        val main = s"Trust threshold of $threshold is no longer reachable"
+        val errors = NonEmpty.from(fatalErrors) match {
+          case Some(errors) =>
+            val lines =
+              Seq("", "Fatal errors:") ++ errors.map { case (name, error) => s"- $name: $error" }
+            lines.mkString("\n")
+          case None => ""
+        }
+        s"$main$errors"
+      }
+      Either.cond(
+        isReachable,
+        (),
+        SequencerConnectionXPoolError.ThresholdUnreachableError(message),
+      )
     }
 
   private def updateTrackedConnections(
@@ -235,7 +256,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       // further processing via health state changes and modify the tracked connections or the pool.
       // Even if this happens in the same thread, it does not interfere with our processing.
       removedConnections.foreach { connection =>
-        connection.fatal("removed from config")
+        connection.fatal("Removed from configuration")
       }
       if (isInitialUpdate) {
         metrics.removeMetricsForAllConnections()
@@ -380,7 +401,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       newConfig: SequencerConnectionXPoolConfig
   )(implicit
       traceContext: TraceContext
-  ): Either[SequencerConnectionXPoolError, Unit] =
+  ): Either[SequencerConnectionXPoolError.InvalidConfigurationError, Unit] =
     lock.exclusive {
       val currentConfig = config
       val newThreshold = newConfig.trustThreshold
@@ -400,18 +421,16 @@ class SequencerConnectionXPoolImpl private[sequencing] (
 
         // Check whether the trust threshold is reachable with the new configuration
         _ <-
-          Either.cond(
-            isThresholdStillReachable(
-              newThreshold,
-              // The removed connections don't count
-              ignored = changedConnections.removed,
-              // The added connections are so far undecided
-              extraUndecided = NonNegativeInt.tryCreate(changedConnections.added.size),
-            ),
-            (),
+          isThresholdStillReachable(
+            newThreshold,
+            // The removed connections don't count
+            ignored = changedConnections.removed,
+            // The added connections are so far undecided
+            extraUndecided = NonNegativeInt.tryCreate(changedConnections.added.size),
+          ).leftMap(_ =>
             SequencerConnectionXPoolError.InvalidConfigurationError(
               s"Trust threshold $newThreshold cannot be reached"
-            ),
+            )
           )
 
         // Check whether the new threshold is now reached, which can only happen if it was lowered
@@ -463,19 +482,15 @@ class SequencerConnectionXPoolImpl private[sequencing] (
   private def checkIfThresholdIsStillReachable(
       threshold: PositiveInt
   )(implicit traceContext: TraceContext): Unit =
-    if (!isClosing && !isThresholdStillReachable(threshold)) {
-      val message = s"Trust threshold of ${config.trustThreshold} is no longer reachable"
-      logger.info(message)
-      if (
-        initializedP
-          .outcome(
-            Left(SequencerConnectionXPoolError.ThresholdUnreachableError(message))
-          )
-      ) {
-        // Close if we have not yet initialized
-        logger.info("Connection pool failed to initialize -- closing")
-        close()
-      }
+    if (!isClosing) {
+      isThresholdStillReachable(threshold).leftMap { error =>
+        logger.info(error.error)
+        if (initializedP.outcome(Left(error))) {
+          // Close if we have not yet initialized
+          logger.info("Connection pool failed to initialize -- closing")
+          close()
+        }
+      }.discard
     }
 
   /** Check whether a group of validated connections reaches the threshold
@@ -583,12 +598,11 @@ class SequencerConnectionXPoolImpl private[sequencing] (
                   )
                 )(initializePool)
             } else {
-              logger.warn(
-                s"Connection ${connection.name} is not on expected synchronizer:" +
-                  s" expected ${currentConfig.expectedPsidO}," +
-                  s" got ${attributes.physicalSynchronizerId}. Closing connection."
-              )
-              connection.fatal(reason = "invalid synchronizer")
+              val message =
+                s"Invalid synchronizer: expected ${currentConfig.expectedPsidO}, got ${attributes.physicalSynchronizerId}"
+
+              logger.warn(s"Connection ${connection.name}: $message. Closing connection.")
+              connection.fatal(reason = message)
             }
 
           case Some(`bootstrapInfo`) =>
@@ -607,10 +621,9 @@ class SequencerConnectionXPoolImpl private[sequencing] (
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    logger.warn(
-      s"Connection ${connection.name} has invalid bootstrap info: expected $good, got $bad. Closing connection."
-    )
-    connection.fatal(reason = "invalid bootstrap info")
+    val message = s"Invalid bootstrap info: expected $good, got $bad"
+    logger.warn(s"Connection ${connection.name}: $message. Closing connection.")
+    connection.fatal(reason = message)
   }
 
   private def addConnectionToPool(

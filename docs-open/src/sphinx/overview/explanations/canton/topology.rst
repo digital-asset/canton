@@ -345,12 +345,12 @@ signatures allow receivers to verify the originator of each message, whereas
 encryption ensures that sensitive data in those messages remains confidential.
 
 Canton key holders declare which keys they want to use with topology mappings;
-``OwnerToKeyMapping`` for Canton nodes and ``PartyToKeyMapping`` for external
+``OwnerToKeyMapping`` for Canton nodes and ``PartyToParticipant`` for external
 parties (see :ref:`overview_canton_external_parties`). Canton key holders use the keys listed in
 these topology mappings for various use cases across the layers of Canton's
 communication protocols (see :ref:`protocols`) except for topology management.
 Specifically, the signing keys in ``OwnerToKeyMapping`` and
-``PartyToKeyMapping`` cannot be used for signing topology transactions, unless
+``PartyToParticipant`` cannot be used for signing topology transactions, unless
 the same key is also the target of a ``NamespaceDelegation``. This practice is
 highly discouraged for security reasons.
 

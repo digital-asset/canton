@@ -160,12 +160,12 @@ class TrafficPurchasedSubmissionHandlerTest
 
     val minutesBucketEnd =
       (8 * trafficParams.setBalanceRequestSubmissionWindowSize.duration.toMinutes).toInt
-    // 01/01/2024 15:31:00
-    val currentSimTime = LocalDateTime.of(2024, 1, 1, 15, minutesBucketEnd - 1, 0)
+    // 01/01/2024 15:15:30
+    val currentSimTime = LocalDateTime.of(2024, 1, 1, 15, minutesBucketEnd - 1, 30)
     val newTime = CantonTimestamp.ofEpochMilli(
       currentSimTime.toInstant(ZoneOffset.UTC).toEpochMilli
     )
-    // Advance the clock to 15:minutesBucketEnd - 1 - within one minute of the next time bucket (every setBalanceRequestSubmissionWindowSize minutes)
+    // Advance the clock to 15:minutesBucketEnd - 1 - within 30 seconds of the next time bucket (every setBalanceRequestSubmissionWindowSize minutes)
     clock.advanceTo(newTime)
 
     when(
@@ -206,6 +206,7 @@ class TrafficPurchasedSubmissionHandlerTest
     def mkTimeBucketUpperBound(minutes: Int) = CantonTimestamp.ofEpochMilli(
       currentSimTime
         .withMinute(minutes)
+        .minusSeconds(30)
         .toInstant(ZoneOffset.UTC)
         .toEpochMilli
     )

@@ -22,7 +22,6 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -35,9 +34,9 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
+  NeedKeyProgression,
   NextGenContractStateMachine,
   Node,
   SubmittedTransaction,
@@ -262,6 +261,8 @@ final class StoreBackedCommandInterpreter(
     import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerOnShutdownSyntax
     val readers = actAs ++ readAs
 
+    import StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
+
     val lookupActiveContractTime = new AtomicLong(0L)
     val lookupActiveContractCount = new AtomicLong(0L)
 
@@ -312,22 +313,22 @@ final class StoreBackedCommandInterpreter(
     def disclosedOrStoreNKeyLookup(
         key: GlobalKeyWithMaintainers,
         limit: Int,
-        continuationToken: Option[NeedKeyContinuationToken],
-    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NeedKeyContinuationToken])] = {
+        progression: NeedKeyProgression.CanContinue,
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] = {
       val disclosedContracts = disclosedContractsByKey.getOrElse(key, Vector.empty)
-      continuationToken
-        .map {
-          case validToken: StoreNeedKeyContinuationToken => validToken
-          case invalidToken =>
-            throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
-        }
-        .getOrElse(StoreNeedKeyContinuationToken.ContinueDisclosed(0)) match {
+      val token = progression match {
+        case NeedKeyProgression.Unstarted => StoreNeedKeyContinuationToken.ContinueDisclosed(0)
+        case NeedKeyProgression.InProgress(t: StoreNeedKeyContinuationToken) => t
+        case NeedKeyProgression.InProgress(invalidToken) =>
+          throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
+      }
+      token match {
         case StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
           val (fromDisclosed, remainingFromDisclosed) =
             disclosedContracts.drop(usedFromDisclosed).splitAt(limit)
           if (remainingFromDisclosed.nonEmpty) {
             FutureUnlessShutdown.pure(
-              fromDisclosed -> Some(
+              fromDisclosed -> NeedKeyProgression.InProgress(
                 StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
               )
             )
@@ -336,19 +337,19 @@ final class StoreBackedCommandInterpreter(
               key = key,
               limit = limit - fromDisclosed.size,
               continuationToken = StoreNeedKeyContinuationToken.ContinueFromStore(None),
-            ).map { case (contracts, token) =>
+            ).map { case (contracts, hasStarted) =>
               val contractsNotDisclosed = contracts.filterNot(contract =>
                 disclosedContractsById.contains(contract.contractId)
               )
-              (fromDisclosed ++ contractsNotDisclosed, token)
+              (fromDisclosed ++ contractsNotDisclosed, hasStarted)
             }
           }
 
-        case token: StoreNeedKeyContinuationToken.ContinueFromStore =>
+        case storeToken: StoreNeedKeyContinuationToken.ContinueFromStore =>
           timedNKeyLookup(
             key = key,
             limit = limit,
-            continuationToken = token,
+            continuationToken = storeToken,
           )
       }
     }
@@ -357,10 +358,12 @@ final class StoreBackedCommandInterpreter(
         key: GlobalKeyWithMaintainers,
         limit: Int,
         continuationToken: StoreNeedKeyContinuationToken.ContinueFromStore,
-    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NeedKeyContinuationToken])] =
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] =
       if (limit <= 0)
         FutureUnlessShutdown.pure(
-          Vector.empty -> Some(StoreNeedKeyContinuationToken.ContinueFromStore(None))
+          Vector.empty -> NeedKeyProgression.InProgress(
+            StoreNeedKeyContinuationToken.ContinueFromStore(None)
+          )
         )
       else {
         val start = System.nanoTime
@@ -378,8 +381,13 @@ final class StoreBackedCommandInterpreter(
                 .map(contractKeyPage =>
                   (
                     contractKeyPage.contracts,
-                    contractKeyPage.nextPageToken
-                      .map(token => StoreNeedKeyContinuationToken.ContinueFromStore(Some(token))),
+                    contractKeyPage.nextPageToken.fold[NeedKeyProgression.HasStarted](
+                      NeedKeyProgression.Finished
+                    )(token =>
+                      NeedKeyProgression.InProgress(
+                        StoreNeedKeyContinuationToken.ContinueFromStore(Some(token))
+                      )
+                    ),
                   )
                 )
             ),
@@ -560,7 +568,7 @@ final class StoreBackedCommandInterpreter(
 
 object StoreBackedCommandInterpreter {
 
-  sealed trait StoreNeedKeyContinuationToken extends NeedKeyContinuationToken
+  sealed trait StoreNeedKeyContinuationToken extends NeedKeyProgression.Token
   object StoreNeedKeyContinuationToken {
     final case class ContinueDisclosed(usedFromDisclosed: Int) extends StoreNeedKeyContinuationToken
     final case class ContinueFromStore(token: Option[Long]) extends StoreNeedKeyContinuationToken

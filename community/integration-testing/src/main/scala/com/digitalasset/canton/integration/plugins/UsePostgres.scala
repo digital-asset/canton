@@ -36,8 +36,8 @@ import scala.util.{Random, Success}
 /** Plugin to provide a postgres backend to a
   * [[com.digitalasset.canton.integration.BaseIntegrationTest]] instance.
   *
-  * By default, tests will run against a dockerized db. So you need to nothing except for installing
-  * docker.
+  * By default, tests will run against a dockerized db. So you need to do nothing except for
+  * installing docker.
   *
   * To get higher performance (in particular on Mac OSX), you may want to run tests against a
   * non-containerized postgres db. To do so, export the following environment variables:

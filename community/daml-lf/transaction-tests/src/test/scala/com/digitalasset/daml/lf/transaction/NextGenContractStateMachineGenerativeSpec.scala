@@ -154,19 +154,19 @@ object NextGenContractStateMachineGenerativeSpec {
 
   private class TransactionProcessor(keyMap: Map[Concrete.ContractId, Concrete.KeyId]) {
     private var nodeCounter: Int = 0
-    private def freshNodeId(): Int = {
+    private def freshNodeId(): NodeId = {
       val nid = nodeCounter
       nodeCounter += 1
-      nid
+      NodeId(nid)
     }
 
     private def keyOf(contractId: Concrete.ContractId): Option[GlobalKey] =
       keyMap.get(contractId).map(toGlobalKey)
 
     def processAction(
-        state: NextGenContractStateMachine.LLState[Int],
+        state: NextGenContractStateMachine.LLState,
         action: Concrete.Action,
-    ): Either[TransactionError, NextGenContractStateMachine.LLState[Int]] = {
+    ): Either[TransactionError, NextGenContractStateMachine.LLState] = {
       import NextGenContractStateMachine.HHState
       action match {
         case Concrete.Create(contractId, _, _) =>
@@ -253,10 +253,10 @@ object NextGenContractStateMachineGenerativeSpec {
     }
 
     def processTransaction(
-        state: NextGenContractStateMachine.LLState[Int],
+        state: NextGenContractStateMachine.LLState,
         tx: Concrete.Transaction,
-    ): Either[TransactionError, NextGenContractStateMachine.LLState[Int]] =
-      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.LLState[Int]]](
+    ): Either[TransactionError, NextGenContractStateMachine.LLState] =
+      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.LLState]](
         Right(state)
       ) {
         case (Right(s), action) => processAction(s, action)
@@ -270,7 +270,7 @@ object NextGenContractStateMachineGenerativeSpec {
     val keyMap = collectKeys(scenario)
     new TransactionProcessor(keyMap)
       .processTransaction(
-        NextGenContractStateMachine.empty[Int](authorizeRollBack = false),
+        NextGenContractStateMachine.empty(authorizeRollBack = false),
         scenario.ledger(1).commands.map(_.action),
       )
       .left
@@ -280,7 +280,7 @@ object NextGenContractStateMachineGenerativeSpec {
 
   // TODO(#31454)
   private def handleViaEmptyEffectfulRollback[A](
-      eOrA: Either[Set[Int], A]
+      eOrA: Either[Set[NodeId], A]
   ): Either[TransactionError, A] =
     eOrA.left.map(_ => TransactionError.EffectfulRollback(Set()))
 

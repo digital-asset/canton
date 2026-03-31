@@ -24,6 +24,23 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 
 #### Protocol Version 35
 
+##### Multi-Synchronizer feature flag
+
+- Multi-synchronizer is available in early access and has to be enabled explicitly.
+  This feature should only be used in test environments.
+
+- To enable contract reassignment across synchronizers, this flag must be activated on all participants
+  hosting a stakeholder of the contract on both the source and target synchronizers. For a synchronizer,
+  it can be done as follows:
+
+```
+participant.topology.synchronizer_trust_certificates.propose(
+  p.id,
+  synchronizerId,
+  featureFlags = Seq(ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer),
+)
+```
+
 ##### Time to Live (TTL) and Hashing Algorithm Update
 
 - A new hashing scheme version `HASHING_SCHEME_VERSION_V3` has been introduced that includes the TTL in the hash computation.
@@ -40,6 +57,13 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 
 
 ### Minor Improvements
+- *BREAKING* We reduced the defaults for `setBalanceRequestSubmissionWindowSize` and `defaultMaxSequencingTimeOffset`
+  to 2 minutes.
+- The Ledger JSON API `v2/package-vetting` endpoint exposes list functionality on the GET method by accepting a request body. This is not recommended by the HTTP specification, hence the endpoint is deprecated.
+  For consistency, the POST method, used for updating the vetting state, of the same endpoint is also deprecated.
+  In turn, two new endpoints are implemented to provide the same functionality:
+  - `v2/package-vetting/list` accepts a POST request with the same body as the deprecated GET `v2/package-vetting` endpoint and returns the list of vetted packages in the same format.
+  - `v2/package-vetting/update` accepts a POST request with the same body as the deprecated POST endpoint `v2/package-vetting` and returns the updated vetting state of the package in the same format.
 - JSON Ledger API OpenAPI/AsyncAPI spec corrections
   - Fields not marked as required in the Ledger API `.proto` specification are now also optional in the OpenAPI/AsyncAPI specifications.
     If your client code is using code generated using previous versions of these specifications, it may not compile or function correctly with the new version. To migrate:
@@ -72,7 +96,6 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
     - Redundant Request TID removed from logs.
     - Additional CLI options added: `--log-access`, `--log-access-errors`...
     - Additional config options added: `debugInProcessRequests`, `prefixGrpcAddresses`
-- ParticipantRepairService.ExportAcsOld and ImportAcsOld are deprecated. Instead use ParticipantRepairService.ExportAcs and ImportAcs respectively as a direct replacement. For party replication use PartyManagementService.ExportPartyAcs and ImportPartyAcs instead.
 - `package-dependency-cache` field in `caching` configuration is deprecated. It can be removed safely from node configurations.
 - The `generateExternalPartyTopology` endpoint on the Ledger API now returns a single `PartyToParticipant` topology transaction to onboard the party.
 The transaction contains signing threshold and signing keys. This effectively deprecate the usage of `PartyToKeyMapping`.
@@ -149,6 +172,27 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 This corresponds to `max-concurrent-streams-per-connection` in the app configs, e.g.,
 `docker/canton/images/canton-sequencer/app.conf` and can be changed there. At present
 the value for sequencers is  configured to be 500 for the public API and 100 for the Admin API.
+- Deprecated: the parameter
+  `canton.participants.<participant>.parameters.package-metadata-view.init-takes-too-long-interval`
+  is now ignored, and a warning will only be printed once, rather than periodically.
+- Deprecated: the parameter
+  `canton.participants.<participant>.parameters.ledger-api-server.indexer.prepare-package-metadata-time-out-warning`
+  is now ignored.
+- Deprecated usage of `PartyToKeyMapping`. The functionality provided by `PartyToKeyMapping` is now available directly in `PartyToParticipant`.
+  Please use `PartyToParticipant` for new transactions. `PartyToKeyMapping` is still fully supported in this version (including existing and new transactions).
+  In future version, creation of new `PartyToKeyMapping` transactions may be disallowed.
+
+### Enhanced Reliability for `GetHighestOffsetByTimestamp`
+
+Previously, the `GetHighestOffsetByTimestamp` RPC and the `find_highest_offset_by_timestamp` console command could return offsets not yet synced with the participant's local cache. Furthermore, forcing a query with a future timestamp resulted in an error.
+
+Specific changes:
+- The required state is now retrieved atomically via a consistent database snapshot.
+- The endpoint now includes an internal barrier (waiting up to 10 seconds) to ensure the local Ledger API cache catches up with the database before returning the offset.
+- When `force` is true, requesting a future timestamp now gracefully returns the current ledger end instead of failing.
+
+No migration required.
+
 ### Preview Features
 - preview feature
 
@@ -286,67 +330,96 @@ clients to continue an interrupted ACS stream from the last element which made t
 the `stream_continuation_token` field of the last response element received before the interruption, and the stream will
 continue from the next element after that.
 
+### GetUpdates stream in descending order of events
+
+The `GetUpdatesRequest` object has new optional parameter `descending_order`. When this parameter is `true` the events
+are streamed from the newest to the oldest ones.
+
 ### Removal of deprecated, legacy ACS export and import endpoints
 
 The legacy repair endpoints for the ACS export and import have been removed:
+
 - Console command `participant.repair.export_acs_old`
-- Console command `pariticpant.repair.import_acs_old`
+- Console command `participant.repair.import_acs_old`
 - gRPC rpc `ParticipantRepairService.ExportAcsOld`
 - gRPC rpc `ParticipantRepairService.ImportAcsOld`
 
 #### Migration advice
 
 Use repair endpoints without the 'old' suffix:
+
 - Migrate to `participant.repair.export_acs` from `participant.repair.export_acs_old`
 - Migrate to `participant.repair.import_acs` from `participant.repair.import_acs_old`
 - Migrate to `ParticipantRepairService.ExportAcs` from `ParticipantRepairService.ExportAcsOld`
 - Migrate to `ParticipantRepairService.ImportAcs` from `ParticipantRepairService.ImportAcsOld`
 
-Note that previously created ACS snapshots with the legacy endpoints cannot not be imported with the current endpoints
-as the underlying data format has completely changed.
+Note that previously created ACS snapshots with the legacy endpoints cannot be imported with the current endpoints as
+the underlying data format has completely changed.
 
 ##### Migrating to export_acs
+
 The most significant change is the removal of the `timestamp` parameter, which has been replaced by a mandatory
 `ledgerOffset` parameter.
 
-Parameter changes:
-- New mandatory parameter: `ledgerOffset (Long)`, you must now specify the exact ledger offset for the snapshot
+**Console parameter changes:**
+
+- **New mandatory parameter:** `ledgerOffset (Long)`. You must now specify the exact ledger offset for the snapshot
   instead of a `timestamp`.
-- Removed parameters: `partiesOffboarding`, `timestamp` (replaced by `ledgerOffset`), `force`
-- Renamed parameters: `outputFile` is now `exportFilePath` (default is `"canton-acs-export.gz"`), `filterSynchronizerId`
-  is now `synchronizerId`.
-- New optional parameters: `excludedStakeholders` allows you to omit contracts that have one or more of these parties
-  as a stakeholder parties; `contractSynchronizerRenames` allows mapping contracts from one synchronizer to another
+- **Removed parameters:** `partiesOffboarding`, `timestamp` (replaced by `ledgerOffset`), `force`.
+- **Renamed parameters:** `outputFile` is now `exportFilePath` (default is `"canton-acs-export.gz"`),
+  `filterSynchronizerId` is now `synchronizerId`.
+- **New optional parameters:** `excludedStakeholders` allows you to omit contracts that have one or more of these
+  parties as a stakeholder; `contractSynchronizerRenames` allows mapping contracts from one synchronizer to another
   during export.
 
-Parameters changes are analogous for the gRPC RPC endpoint `ParticipantRepairService.ExportAcs`.
+**gRPC changes for `ExportAcsRequest`:**
+
+- **`parties` -> `party_ids`:** Field renamed for consistency. If left empty, the endpoint will act as a wildcard and
+  export the ACS for *all* parties hosted by the participant.
+- **`timestamp` -> `ledger_offset` (Breaking):** You must provide an exact `int64 ledger_offset` instead of a timestamp.
+- **`filter_synchronizer_id` -> `synchronizer_id`:** Field renamed for consistency.
+- **Removed fields:** `force` and `parties_offboarding` have been completely removed.
+- **New fields:** `contract_synchronizer_renames` and `excluded_stakeholder_ids`.
 
 ##### Migrating to import_acs
+
 The import command remains largely the same in basic usage, but introduces new optional parameters for advanced
-validation and overrides.
+validation and overrides, alongside strict memory-efficient streaming semantics for gRPC.
 
-Parameter changes:
-- Renamed parameter: `inputFile` is now `importFilePath` (default is `"canton-acs-export.gz"`).
-- New optional parameters: `contractImportMode` governs contract validation upon import, defaults to
-  `ContractImportMode.Validation`; `representativePackageIdOverride` allows overriding representative package IDs
-  during import; `excludedStakeholders` allows omitting specific parties' contracts during import.
+**Console parameter changes:**
 
-Parameters changes are analogous for the gRPC RPC endpoint `ParticipantRepairService.ImportAcs`.
+- **Renamed parameter:** `inputFile` is now `importFilePath` (default is `"canton-acs-export.gz"`).
+- **New optional parameters:** `contractImportMode` governs contract validation upon import (defaults to
+  `ContractImportMode.Validation`); `representativePackageIdOverride` allows overriding representative package IDs
+  during import; `excludedStakeholders` allows omitting contracts that have one or more of these parties as a
+  stakeholder.
+
+**gRPC changes for `ImportAcsRequest`:**
+
+- **Streaming Semantics (Breaking):** The new endpoint requires metadata fields (like `contract_import_mode`,
+  `synchronizer_id`, etc.) to be populated *only* in the first request of the stream. Subsequent requests must omit
+  metadata and only contain the binary `acs_snapshot` chunks.
+- **New mandatory fields:** `contract_import_mode` and `synchronizer_id` must be explicitly defined in the first stream
+  request.
+- **Removed fields:** `allow_contract_id_suffix_recomputation` is completely removed.
+- **New fields:** `excluded_stakeholder_ids` and `representative_package_id_override`.
+- **Response update:** `ImportAcsResponse` is now a completely empty message (previously returned a contract ID
+  mapping).
 
 ### Improvements for `repair.add` and migration advice
 
-The `participant.repair.add` admin command has been revised to use the new `ImportAcsV2` backend, bringing significant
+The `participant.repair.add` admin command has been revised to use the new `ImportAcs` backend, bringing significant
 memory performance improvements, stricter default safety validations, and several new parameters.
 
 #### Important behavioral change: strict `Validation` by default
 
-Previously, `repair.add` implicitly accepted all injected contracts without re-evaluating their cryptographic hashes.
-To prevent accidental data corruption, the command now defaults to **Validation** mode
-(`contractImportMode = ContractImportMode.Validation`).
+Previously, `repair.add` implicitly accepted all injected contracts without re-evaluating their cryptographic hashes. To
+prevent accidental data corruption, the command now defaults to **Validation** mode (
+`contractImportMode = ContractImportMode.Validation`).
 
 - **Impact:** If you have existing scripts or recovery procedures that inject manually modified, synthetic, or
-  inconsistent contracts (where the payload does not strictly match the `ContractId` hash), they will now fail with
-  a `"Failed to authenticate contract with id"` error.
+  inconsistent contracts (where the payload does not strictly match the `ContractId` hash), they will now fail with a
+  `"Failed to authenticate contract with id"` error.
 - **Migration:** To bypass this cryptographic validation and restore the legacy behavior, explicitly pass the `Accept`
   mode in your command call:
     ```scala
@@ -360,21 +433,23 @@ To prevent accidental data corruption, the command now defaults to **Validation*
 
 #### New parameters
 
-The command signature has been expanded to support several optional parameters for complex recovery scenarios:
+The command signature has been expanded to support several optional parameters:
+
 - `workflowIdPrefix`: Allows you to set a custom prefix for the generated workflow ID to easily track the repair
   transactions (defaults to `import-<UUID>`).
 - `contractImportMode`: Choose between `Validation` (default, validates that contract IDs comply with the scheme
   associated to the synchronizer where the contracts are assigned), or `Accept` the contracts as they are (if you know
   what you are doing).
-- `representativePackageIdOverride`: Allows you to remap or override the representative package IDs of the contracts
-  as they are imported.
+- `representativePackageIdOverride`: Allows you to remap or override the representative package IDs of the contracts as
+  they are imported.
 - `excludedStakeholders`: When defined, any contract that has one or more of these parties as a stakeholder will not be
   added.
 
 ### Improved party and repair ACS imports
 
 We have completely overhauled the ACS import endpoints for both party replication and participant repair to be
-memory-efficient endpoints:
+memory-efficient streaming endpoints:
+
 - Console command `participant.parties.import_party_acs`
 - Console command `participant.repair.import_acs`
 - gRPC RPC `PartyManagementService.ImportPartyAcs`
@@ -384,20 +459,54 @@ This resolves previous memory limitations, as these endpoints no longer load the
 once.
 
 #### Action required: Breaking API change
+
 The `synchronizerId` is now a **mandatory** first parameter for both the `import_party_acs` and `import_acs` console
 commands as well as their analogous gRPC endpoints. You will need to update any existing scripts.
 
 **For `import_party_acs`:**
+
 - **Old usage:** `participant.parties.import_party_acs("canton-acs-export.gz")`
 - **New usage:** `participant.parties.import_party_acs(mySynchronizerId, importFilePath = "canton-acs-export.gz")`
 
 **For `import_acs`:**
+
 - **Old usage:** `participant.repair.import_acs("canton-acs-export.gz")`
 - **New usage:** `participant.repair.import_acs(mySynchronizerId, importFilePath = "canton-acs-export.gz")`
 
 Because of the mandatory `synchronizerId` parameter, to import a multi-synchronizer ACS snapshot, you must now call the
-endpoint sequentially for each synchronizer your participant is connected to, using the exact same snapshot file.
-The import process will ignore any contracts in the snapshot that belong to a different synchronizer.
+endpoint sequentially for each synchronizer your participant is connected to, using the exact same snapshot file. The
+import process will ignore any contracts in the snapshot that are associated to a different synchronizer.
+
+##### Details on the gRPC `ImportAcs` repair endpoint
+
+The `ImportAcs` and `ImportAcsV2` RPCs have been consolidated, introducing the following breaking changes and migration
+steps:
+
+- **Endpoint removed:** `ImportAcsV2` (along with its request/response messages) is completely removed. All clients must
+  migrate to the standard `ImportAcs` RPC.
+- **Request signature and type changes:**
+    - Fields `workflow_id_prefix` (2), `contract_import_mode` (3), and `representative_package_id_override` (5) in
+      `ImportAcsRequest` are now explicitly `optional`.
+    - A new `optional string synchronizer_id = 6` field was added.
+    - **Migration (ScalaPB):** Adding `optional` changes generated code from base types to `Option[T]`. Existing clients
+      will fail to compile and must be updated to wrap assigned values (e.g., `workflowIdPrefix = Some("prefix")`) and
+      explicitly handle reading `Option` types.
+- **Behavioral change (`synchronizer_id`):** When filtering by synchronizer, mismatched contracts are now ignored. This
+  breaks previous logic that relied on the import strictly aborting upon a mismatch.
+
+##### Details on the gRPC `ImportPartyAcs` party replication endpoint
+
+The `ImportPartyAcs` endpoint underwent the exact same consolidation (removing `ImportPartyAcsV2`), streaming semantics
+updates, generated code changes (ScalaPB `Option[T]`), and mismatched synchronizer behavior (ignoring rather than
+failing) as `ImportAcs`.
+
+**Key differences specific to `ImportPartyAcs`:**
+
+- **New capability (`party_id`):** A new `optional string party_id = 6` field was added. Providing this in the first
+  request of the stream enables automatic, crash-resilient scheduling of the onboarding flag clearance. If omitted, the
+  participant logs a warning, and the flag must be cleared manually.
+- **Logical/Physical ID support:** The `synchronizer_id` (field 2) temporarily accepts either a logical or physical
+  synchronizer ID to better support Logical Synchronizer Upgrade (LSU) scenarios. This support is subject to change.
 
 ### update to GRPC 1.77.0
 

@@ -32,6 +32,7 @@ import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
+  NeedKeyProgression,
   NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -361,13 +362,21 @@ class DAMLe(
                 EitherT(
                   contracts.lookupFatContract(cid).value.flatMap {
                     case Some(fatContract) =>
-                      handleResultInternal(contracts, resume(Vector(fatContract), None))
+                      handleResultInternal(
+                        contracts,
+                        resume(Vector(fatContract), NeedKeyProgression.Finished),
+                      )
                     case None =>
-                      handleResultInternal(contracts, resume(Vector.empty, None))
+                      handleResultInternal(
+                        contracts,
+                        resume(Vector.empty, NeedKeyProgression.Finished),
+                      )
                   }
                 )
               case None =>
-                EitherT(handleResultInternal(contracts, resume(Vector.empty, None)))
+                EitherT(
+                  handleResultInternal(contracts, resume(Vector.empty, NeedKeyProgression.Finished))
+                )
             }
             .value
         case ResultNeedContract(acoid, resume) =>

@@ -14,6 +14,10 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVe
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.util.TestUtils.{
+  waitForTargetTimeOnMediator,
+  waitForTargetTimeOnSequencer,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -101,6 +105,7 @@ class LedgerApiConformanceMultiSynchronizerTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   // ensure ledger api conformance tests have less noisy neighbours
@@ -154,6 +159,15 @@ class LedgerApiConformanceWithTrafficControlTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
+      .withSetup { implicit env =>
+        // Wait for the synchronizer owners' time to have advanced to a recent wall-clock time
+        //  to avoid that traffic control flakily rejects topology changes due to submission times
+        //  close to epoch being too far behind a later synchronizer time close to wall-clock.
+        val now = wallClock.now
+        import env.*
+        waitForTargetTimeOnSequencer(sequencer1, now, logger)
+        waitForTargetTimeOnMediator(mediator1, now, logger)
+      }
       .withTrafficControl()
       .withSetup(setupLedgerApiConformanceEnvironment(_))
 

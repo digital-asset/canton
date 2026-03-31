@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -21,8 +20,6 @@ import org.scalatest.{AppendedClues, Checkpoints}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class FooCommandSubmitterITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -32,7 +29,7 @@ class FooCommandSubmitterITSpec
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "FooCommandSubmitter" should {
-    "populate participant with create, consuming and non consuming exercises" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "populate participant with create, consuming and non consuming exercises" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       env =>
         import env.*
 

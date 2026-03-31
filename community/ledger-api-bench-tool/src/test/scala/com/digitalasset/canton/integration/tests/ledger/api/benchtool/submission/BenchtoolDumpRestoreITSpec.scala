@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.HasTempDirectory
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
@@ -25,8 +24,6 @@ import org.apache.pekko.actor.typed.{ActorSystem, SpawnProtocol}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
-@NuckTest
-@RollbackTest
 class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with HasTempDirectory {
   registerPlugin(NoAuthPlugin(loggerFactory))
 
@@ -77,7 +74,7 @@ class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with Ha
       ),
     )
 
-    "create persistent contracts" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "create persistent contracts" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       implicit env: TestConsoleEnvironment =>
         import env.*
 

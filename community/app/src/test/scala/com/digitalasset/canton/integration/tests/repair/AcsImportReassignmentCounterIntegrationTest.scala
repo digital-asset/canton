@@ -33,7 +33,8 @@ sealed trait AcsImportReassignmentCounterIntegrationTest
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaMultiSynchronizerSupport)
             .replace(true)
-        )
+        ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

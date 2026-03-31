@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
@@ -13,6 +14,7 @@ import org.apache.pekko.Done
 import org.apache.pekko.stream.Materializer
 import org.scalatest.wordspec.AnyWordSpec
 
+@UnstableTest // TODO(#31679)
 class PekkoBlockSubscriptionTest
     extends AnyWordSpec
     with BftSequencerBaseTest

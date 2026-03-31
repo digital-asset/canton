@@ -25,6 +25,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.pkgdars.PackageUsableMixin
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -72,6 +73,7 @@ sealed trait PackageRemovalIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
 
   // Note that CantonTests depends on CantonExamples
   private val cantonTestsPkg = PackageId.assertFromString(Many.PACKAGE_ID)

@@ -324,6 +324,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
       transactionFormat: TransactionFormat,
       begin: Long = referenceOffset,
       end: Option[Long],
+      descendingOrder: Boolean = false,
   ): GetUpdatesRequest
 
   def getUpdatesRequestWithEnd(
@@ -332,9 +333,21 @@ trait ParticipantTestContext extends UserManagementTestContext {
       topologyFilterO: Option[Seq[Party]] = None,
       begin: Long = referenceOffset,
       end: Option[Long] = None,
+      descendingOrder: Boolean = false,
   ): GetUpdatesRequest
 
+  /** Non-managed version of
+    * [[transactionsWithVariants(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdatesRequest):*]],
+    * use this only if you need to tweak the request (i.e. to test low-level details)
+    */
+  def transactionsWithVariants(request: GetUpdatesRequest): Future[Vector[Transaction]]
+
   def transactionsByTemplateId(
+      templateId: Identifier,
+      parties: Option[Seq[Party]],
+  ): Future[Vector[Transaction]]
+
+  def transactionsByTemplateIdWithVariants(
       templateId: Identifier,
       parties: Option[Seq[Party]],
   ): Future[Vector[Transaction]]
@@ -350,6 +363,11 @@ trait ParticipantTestContext extends UserManagementTestContext {
     * this unless you need to tweak the request (i.e. to test low-level details)
     */
   def transactions(transactionShape: TransactionShape, parties: Party*): Future[Vector[Transaction]]
+
+  def transactionsWithVariants(
+      transactionShape: TransactionShape,
+      parties: Party*
+  ): Future[Vector[Transaction]]
 
   /** Non-managed version of
     * [[transactions(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdatesRequest):*]], use

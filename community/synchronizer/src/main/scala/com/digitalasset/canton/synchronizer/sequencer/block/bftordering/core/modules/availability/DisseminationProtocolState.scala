@@ -26,6 +26,7 @@ final class DisseminationProtocolState(
     var nextToBeProvidedToConsensus: NextToBeProvidedToConsensus =
       NextToBeProvidedToConsensus.First,
     var lastProposalTime: Option[CantonTimestamp] = None,
+    var lastProposalRequestTime: Option[CantonTimestamp] = None,
     val disseminationQuotas: BatchDisseminationNodeQuotaTracker =
       new BatchDisseminationNodeQuotaTracker,
 ) {

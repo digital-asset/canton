@@ -40,6 +40,11 @@ object Question {
         callback: CompiledPackages => Unit,
     ) extends Update
 
+    // Requests up to `limit` FatContractInstances matching `key`, delivered via `callback`.
+    // `callback` takes at most `limit` contracts and a progression token:
+    //   - Finished when all matches have been delivered (only valid with strictly fewer than `limit` results),
+    //   - InProgress when more results may follow.
+    // `progression` is Unstarted on the first call, InProgress on continuations.
     final case class NeedKey(
         key: GlobalKeyWithMaintainers,
         limit: Int,

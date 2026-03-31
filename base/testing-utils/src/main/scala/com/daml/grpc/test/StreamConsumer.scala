@@ -3,12 +3,19 @@
 
 package com.daml.grpc.test
 
+import io.grpc.Context
+import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
+
+  private def attachWithCancelContext(f: CancellableContext => StreamObserver[A]): Unit = {
+    val context = Context.ROOT.withCancellation()
+    context.run(() => attach(f(context)))
+  }
 
   /** THIS WILL NEVER COMPLETE IF FED AN UNBOUND STREAM!!!
     */
@@ -22,15 +29,17 @@ final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
     */
   def filterTake(predicate: A => Boolean)(sizeCap: Int): Future[Vector[A]] = {
     val finiteObserver = new FiniteStreamObserver[A]
-    val sizeBoundObserver = new SizeBoundObserver(sizeCap)(finiteObserver)
-    val filteringObserver = new ObserverFilter(predicate)(sizeBoundObserver)
-    attach(filteringObserver)
+    attachWithCancelContext(context =>
+      new ObserverFilter(predicate)(
+        new SizeBoundObserver(sizeCap, finiteObserver, context)
+      )
+    )
     finiteObserver.result
   }
 
   def take(sizeCap: Int): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
-    attach(new SizeBoundObserver(sizeCap)(observer))
+    attachWithCancelContext(new SizeBoundObserver(sizeCap, observer, _))
     observer.result
   }
 
@@ -42,13 +51,19 @@ final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
 
   def within(duration: FiniteDuration)(implicit ec: ExecutionContext): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
-    attach(new TimeBoundObserver(duration)(observer))
+    attachWithCancelContext(new TimeBoundObserver(duration, observer, _))
     observer.result
   }
 
   def firstWithin(duration: FiniteDuration)(implicit ec: ExecutionContext): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
-    attach(new TimeBoundObserver(duration)(new SizeBoundObserver(sizeCap = 1)(observer)))
+    attachWithCancelContext(context =>
+      new TimeBoundObserver(
+        duration,
+        new SizeBoundObserver(sizeCap = 1, observer, context),
+        context,
+      )
+    )
     observer.result
   }
 
@@ -56,7 +71,13 @@ final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
       ec: ExecutionContext
   ): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
-    attach(new TimeBoundObserver(duration)(new SizeBoundObserver(sizeCap = n)(observer)))
+    attachWithCancelContext(context =>
+      new TimeBoundObserver(
+        duration,
+        new SizeBoundObserver(sizeCap = n, observer, context),
+        context,
+      )
+    )
     observer.result
   }
 

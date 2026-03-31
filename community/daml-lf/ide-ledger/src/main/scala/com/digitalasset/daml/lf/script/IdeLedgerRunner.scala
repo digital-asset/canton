@@ -70,6 +70,7 @@ private[lf] object IdeLedgerRunner {
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
+        disclosures: Vector[FatContractInstance],
     ): Either[Error, Vector[FatContractInstance]]
     def currentTime: Time.Timestamp
     def commit(
@@ -131,20 +132,23 @@ private[lf] object IdeLedgerRunner {
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
+        disclosures: Vector[FatContractInstance],
     ): Either[Error, Vector[FatContractInstance]] =
-      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs))
+      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs, disclosures))
 
     private def lookupKeyUnsafe(
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
+        disclosures: Vector[FatContractInstance],
     ): Vector[FatContractInstance] = {
 
       val effectiveAt = ledger.currentTime
       val readers = actAs union readAs
 
-      val acoids = ledger.ledgerData.activeKeys.getOrElse(gk, Vector.empty)
-      acoids.collect(Function.unlift{ acoid => 
+      val acoids =
+        ledger.ledgerData.activeKeys.getOrElse(gk, Vector.empty) diff disclosures.map(_.contractId)
+      acoids.collect(Function.unlift { acoid =>
         ledger.lookupGlobalContract(
           actAs,
           readAs,
@@ -196,15 +200,24 @@ private[lf] object IdeLedgerRunner {
 
   private[this] abstract class Enricher {
     def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction
-    def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction
+    def enrich(tx: IncompleteTransaction)(implicit
+        traceContext: TraceContext
+    ): IncompleteTransaction
   }
 
   private[this] object NoEnricher extends Enricher {
-    override def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction = tx
-    override def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction = tx
+    override def enrich(tx: VersionedTransaction)(implicit
+        traceContext: TraceContext
+    ): VersionedTransaction = tx
+    override def enrich(tx: IncompleteTransaction)(implicit
+        traceContext: TraceContext
+    ): IncompleteTransaction = tx
   }
 
-  private[this] class EnricherImpl(compiledPackages: CompiledPackages, loggerFactory: NamedLoggerFactory) extends Enricher {
+  private[this] class EnricherImpl(
+      compiledPackages: CompiledPackages,
+      loggerFactory: NamedLoggerFactory,
+  ) extends Enricher {
     val config = Engine.DevConfig
     def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] = {
       crash(LookupError.MissingPackage.pretty(pkgId, context))
@@ -232,9 +245,13 @@ private[lf] object IdeLedgerRunner {
         case ResultDone(x) => x
         case x => crash(s"unexpected Result when enriching value: $x")
       }
-    override def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction =
+    override def enrich(tx: VersionedTransaction)(implicit
+        traceContext: TraceContext
+    ): VersionedTransaction =
       consume(strictEnricher.enrichVersionedTransaction(tx))
-    override def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction =
+    override def enrich(tx: IncompleteTransaction)(implicit
+        traceContext: TraceContext
+    ): IncompleteTransaction =
       consume(lenientEnricher.enrichIncompleteTransaction(tx))
   }
 
@@ -307,7 +324,7 @@ private[lf] object IdeLedgerRunner {
     val disclosuresByKey =
       disclosures
         .filter(_.contractKeyWithMaintainers.isDefined)
-        .groupMapReduce(_.contractKeyWithMaintainers.get.globalKey)(Vector(_))(_++_)
+        .groupMapReduce(_.contractKeyWithMaintainers.get.globalKey)(Vector(_))(_ ++ _)
 
     val ledgerMachine = Speedy.UpdateMachine(
       packageResolution = packageResolution,
@@ -324,7 +341,9 @@ private[lf] object IdeLedgerRunner {
     )
     // TODO (drsk) validate and propagate errors back to submitter
     // https://github.com/digital-asset/daml/issues/14108
-    val enricher = if (doEnrichment) new EnricherImpl(compiledPackages, loggingContext.loggerFactory) else NoEnricher
+    val enricher =
+      if (doEnrichment) new EnricherImpl(compiledPackages, loggingContext.loggerFactory)
+      else NoEnricher
     import enricher._
     val suffixer = new CidSuffixer(compiledPackages)
 
@@ -332,6 +351,7 @@ private[lf] object IdeLedgerRunner {
 
     // Wrapper for Vector[FatContractInstance] to avoid type erasure of `FatContractInstance` within the Vector when casting from Any
     final case class FatContractInstanceVector(getInstances: Vector[FatContractInstance])
+        extends NeedKeyProgression.Token
 
     @tailrec
     def go(): SubmissionResult[R] = {
@@ -372,25 +392,47 @@ private[lf] object IdeLedgerRunner {
                     case Right(_) => go()
                   }
               }
-            case Question.Update.NeedKey(keyWithMaintainers, limit, progress, committers, callback) =>
+            case Question.Update.NeedKey(
+                  keyWithMaintainers,
+                  limit,
+                  progress,
+                  committers,
+                  callback,
+                ) =>
               val contracts = progress match {
                 case NeedKeyProgression.Unstarted =>
+                  val disclosedInsts =
+                    disclosuresByKey.get(keyWithMaintainers.globalKey).getOrElse(Vector.empty)
                   for {
-                    globalInsts <- ledger.lookupKey(
-                      keyWithMaintainers.globalKey,
-                      committers,
-                      readAs,
-                    ).left.map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
-                    disclosedInsts = disclosuresByKey.get(keyWithMaintainers.globalKey).getOrElse(Vector.empty)
+                    globalInsts <- ledger
+                      .lookupKey(
+                        keyWithMaintainers.globalKey,
+                        committers,
+                        readAs,
+                        disclosedInsts,
+                      )
+                      .left
+                      .map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
                   } yield disclosedInsts ++ globalInsts // Engine dedups for us (Paul thinks) TODO: verify
                 case NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) => Right(rest)
-                case NeedKeyProgression.InProgress(token) => throw new IllegalStateException(s"unexpected continuation token of type ${token.getClass}")
+                case NeedKeyProgression.InProgress(token) =>
+                  throw new IllegalStateException(
+                    s"unexpected continuation token of type ${token.getClass}"
+                  )
               }
               contracts match {
                 case Left(err) => err
                 case Right(contracts) =>
                   val (result, rest) = contracts.splitAt(limit)
-                  callback(result, if (rest.nonEmpty) NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) else NeedKeyProgression.Finished)
+                  callback(
+                    result,
+                    // it is important not return `Finished` if result.length == n
+                    // See NeedKeyProgression for more details
+                    if (result.length == limit)
+                      NeedKeyProgression.InProgress(FatContractInstanceVector(rest))
+                    else
+                      NeedKeyProgression.Finished
+                  )
                   go()
               }
             case Question.Update.NeedTime(callback) =>
@@ -403,7 +445,7 @@ private[lf] object IdeLedgerRunner {
           Interruption(continue)
         case SResult.SResultFinal(_) =>
           ledgerMachine.finish match {
-            case Right(Speedy.UpdateMachine.Result(tx, locationInfo, _, _)) =>
+            case Right(Speedy.UpdateMachine.Result(tx, locationInfo, _, _, _)) =>
               val committedTx = CommittedTransaction(enrich(suffixer.suffixCids(tx)))
               ledger.commit(committers, readAs, location, committedTx, locationInfo) match {
                 case Left(err) =>

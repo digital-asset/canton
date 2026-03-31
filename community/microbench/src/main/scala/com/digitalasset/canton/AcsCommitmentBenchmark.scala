@@ -615,7 +615,7 @@ class AcsCommitmentBenchmark
             .trySignAndCreate(
               payload,
               snapshot,
-              None, // not needed for benchmark tests; session signing keys disabled
+              signingTimestampOverrides = None, // not needed for benchmark tests; session signing keys disabled
             )
         }
       }

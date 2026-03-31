@@ -224,6 +224,25 @@ jobs:
           only: /^v.*/
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
+  - variations_test: # this variations_test is the complement of the above: running for selected users on feature branches
+      only_for_selected_users: true
+      name: variation_test_selected_users_only
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          ignore:
+            - main
+            - /^release-line.*/
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
+      requires:
+        - compile
 # TODO(#16458) enable this test after the first release of Canton 3
 #  - protocol_continuity_test_latest:
 #      context:

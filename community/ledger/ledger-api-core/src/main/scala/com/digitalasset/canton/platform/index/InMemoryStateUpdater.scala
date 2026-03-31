@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.index
 import cats.data.NonEmptyVector
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.timer.FutureCheck.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -53,15 +53,13 @@ private[platform] object InMemoryStateUpdaterFlow {
       prepareUpdatesParallelism: Int,
       prepareUpdatesExecutionContext: ExecutionContext,
       updateCachesExecutionContext: ExecutionContext,
-      preparePackageMetadataTimeOutWarning: FiniteDuration,
       offsetCheckpointCacheUpdateInterval: FiniteDuration,
       metrics: LedgerApiServerMetrics,
-      logger: TracedLogger,
   )(
       inMemoryState: InMemoryState,
       prepare: (Vector[(Offset, Update)], LedgerEnd, TraceContext) => PrepareResult,
       update: (PrepareResult, Boolean) => Unit,
-  )(implicit traceContext: TraceContext): UpdaterFlow = { repairMode =>
+  ): UpdaterFlow = { repairMode =>
     Flow[Batch[?]]
       .filter(_.offsetsUpdates.nonEmpty)
       .via(updateOffsetCheckpointCacheFlow(inMemoryState, offsetCheckpointCacheUpdateInterval))
@@ -73,11 +71,6 @@ private[platform] object InMemoryStateUpdaterFlow {
             batch.batchTraceContext,
           )
         }(prepareUpdatesExecutionContext)
-          .checkIfComplete(preparePackageMetadataTimeOutWarning)(
-            logger.warn(
-              s"Package Metadata View live update did not finish in ${preparePackageMetadataTimeOutWarning.toMillis}ms"
-            )
-          )
       }
       .async
       .mapAsync(1) { case (batch, result) =>
@@ -198,11 +191,10 @@ private[platform] object InMemoryStateUpdater {
   def owner(
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
-      preparePackageMetadataTimeOutWarning: FiniteDuration,
       offsetCheckpointCacheUpdateInterval: FiniteDuration,
       metrics: LedgerApiServerMetrics,
       loggerFactory: NamedLoggerFactory,
-  )(implicit traceContext: TraceContext): ResourceOwner[UpdaterFlow] = for {
+  ): ResourceOwner[UpdaterFlow] = for {
     prepareUpdatesExecutor <- ResourceOwner.forExecutorService(() =>
       InstrumentedExecutors.newWorkStealingExecutor(
         metrics.lapi.threadpool.indexBypass.prepareUpdates,
@@ -220,10 +212,8 @@ private[platform] object InMemoryStateUpdater {
     prepareUpdatesParallelism = prepareUpdatesParallelism,
     prepareUpdatesExecutionContext = ExecutionContext.fromExecutorService(prepareUpdatesExecutor),
     updateCachesExecutionContext = ExecutionContext.fromExecutorService(updateCachesExecutor),
-    preparePackageMetadataTimeOutWarning = preparePackageMetadataTimeOutWarning,
     offsetCheckpointCacheUpdateInterval = offsetCheckpointCacheUpdateInterval,
     metrics = metrics,
-    logger = logger,
   )(
     inMemoryState = inMemoryState,
     prepare = prepare,
@@ -535,6 +525,7 @@ private[platform] object InMemoryStateUpdater {
               deduplicationDurationNanos = deduplicationDurationNanos,
               synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(txAccepted.traceContext).toDamlProto,
+              trafficCost = completionInfo.paidTrafficCost.value,
             ),
           updateId = txAccepted.updateId,
         )
@@ -551,6 +542,8 @@ private[platform] object InMemoryStateUpdater {
       synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
       recordTime = txAccepted.recordTime.toLf,
       externalTransactionHash = txAccepted.externalTransactionHash,
+      paidTrafficCost =
+        txAccepted.completionInfoO.map(_.paidTrafficCost).getOrElse(NonNegativeLong.zero),
     )(txAccepted.traceContext)
   }
 
@@ -576,6 +569,7 @@ private[platform] object InMemoryStateUpdater {
           deduplicationDurationNanos = deduplicationDurationNanos,
           synchronizerId = u.synchronizerId.toProtoPrimitive,
           traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
+          trafficCost = u.completionInfo.paidTrafficCost.value,
         ),
         status = u.reasonTemplate.status,
       ),
@@ -605,6 +599,8 @@ private[platform] object InMemoryStateUpdater {
               deduplicationDurationNanos = deduplicationDurationNanos,
               synchronizerId = u.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
+              // TODO(i31036): support traffic cost for re-assignments
+              trafficCost = 0L,
             ),
           updateId = u.updateId,
         )

@@ -295,7 +295,6 @@ class ConfirmationRequestAndResponseProcessorTest
       loggerFactory,
       timeouts,
       BatchingConfig(),
-      Mediator.GetActiveLsuSuccessor.Never,
     )
   }
 

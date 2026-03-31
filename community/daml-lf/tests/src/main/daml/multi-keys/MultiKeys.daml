@@ -4,8 +4,10 @@
 module MultiKeys where
 
 import DA.Assert
+import DA.ContractKeys (lookupByKey)
 import DA.Exception (throw)
 import DA.Optional
+import Prelude hiding (lookupByKey)
 
 exception E
   where

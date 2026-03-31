@@ -75,7 +75,7 @@ private[mediator] class MediatorState(
   // 1. pending requests: t0, t1, t2
   // 2. t1 and t2 get finalized before t0
   // 3. once t0 gets finalized, we want to signal that the verdicts for all requests up to including t2 are now
-  //    save to load from the store without potentially messing up the order
+  //    safe to load from the store without potentially messing up the order
   @VisibleForTesting
   private[canton] val youngestFinalizedRequest = new AtomicReference(CantonTimestamp.MinValue)
 
@@ -249,9 +249,6 @@ private[mediator] class MediatorState(
       }
     } yield true).getOrElse(false)
   }
-
-  def allRequestsFinalizedTo(ts: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
-    checkAndPublishNewRecordTime(RequestId(ts))
 
   private def checkAndPublishNewRecordTime(
       requestId: RequestId

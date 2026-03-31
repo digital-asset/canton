@@ -18,5 +18,5 @@ class SimulationBftOrdererPruningSchedulerStore
 
   override def close(): Unit = ()
 
-  override implicit def ec: ExecutionContext = DirectExecutionContext(NoLogging.logger)
+  override implicit def ec: ExecutionContext = DirectExecutionContext(NoLogging.noTracingLogger)
 }

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
@@ -25,10 +24,10 @@ import io.circe.*
 import io.circe.parser.*
 import monocle.macros.syntax.lens.*
 import org.apache.commons.io.FileUtils
-import org.scalatest.{Assertion, BeforeAndAfterAllConfigMap, ConfigMap}
+import org.scalatest.{Args, Assertion, BeforeAndAfterAllConfigMap, ConfigMap, Status}
 
 import java.nio.file.*
-import scala.collection.immutable.SortedMap
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 abstract class DamlScriptIT
     extends CommunityIntegrationTest
@@ -47,6 +46,128 @@ abstract class DamlScriptIT
 
   protected var damlProjectDir: Path = _
   var env: Seq[(String, String)] = _
+
+  private val darFileUploaded: AtomicBoolean = new AtomicBoolean(false)
+
+  // As non-isolated daml-scripts are ran as a single batch, we use this var to cache the result of the first `dpm script --all` run
+  // This allows non-isolated to then be treated as test cases on a per script ID basis
+  private val actualNonIsolatedTestData
+      : AtomicReference[Option[Map[String, Either[String, Json]]]] = new AtomicReference(None)
+
+  // TODO (#30398): replace the following with the results of a call to `dpm script --list`
+  private val scriptIdsToTest: List[String] = List(
+    "ActionTest:testFilterA",
+    "AuthEvalOrder:t1_create_success",
+    "AuthEvalOrder:t2_create_badlyAuthorized",
+    "AuthEvalOrder:t3_createViaExerice_success",
+    "AuthEvalOrder:t4_createViaExerice_badlyAuthorized",
+    "AuthFailure:t1_CreateMissingAuthorization",
+    "AuthFailure:t2_MaintainersNotSubsetOfSignatories",
+    "AuthFailure:t3_FetchMissingAuthorization",
+    "AuthFailure:t4_LookupByKeyMissingAuthorization",
+    "AuthFailure:t5_ExerciseMissingAuthorization",
+    "AuthorizedDivulgence:test_authorizedFetch",
+    "AuthorizedDivulgence:test_divulgeChoiceTargetContractId",
+    "AuthorizedDivulgence:test_noDivulgenceForFetch",
+    "AuthorizedDivulgence:test_noDivulgenceOfCreateArguments",
+    "BasicTests:test_createAndFetch",
+    "BasicTests:test_doubleLetTest",
+    "BasicTests:test_exponentiation",
+    "BasicTests:test_failedAuths",
+    "BasicTests:test_getTimeTest",
+    "BasicTests:test_letTest",
+    "BasicTests:test_listMatchTest",
+    "BasicTests:test_mustFails",
+    "BasicTests:test_payoutTest",
+    "BasicTests:test_screateAndExercise",
+    "BasicTests:test_screateAndExerciseComposit",
+    "BasicTests:test_sgetTimeTest",
+    "BasicTests:test_testXyzTest",
+    "BasicTests:test_typeWithParameters",
+    "ChoiceShadowing:test1",
+    "CoerceContractId:test",
+    "Conjunction:main",
+    "ConjunctionChoices:demo",
+    "ConsumedContractKey:testFetchFromConsumingChoice",
+    "ConsumedContractKey:testFetchKeyFromConsumingChoice",
+    "ConsumedContractKey:testLookupKeyFromConsumingChoice",
+    "ConsumingTests:main",
+    "ContractIdInContractKeySkipCheck:createCmdCrashes",
+    "ContractIdInContractKeySkipCheck:createCrashes",
+    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes",
+    "ContractIdInContractKeySkipCheck:exerciseCrashes",
+    "ContractIdInContractKeySkipCheck:fetchCrashes",
+    "ContractIdInContractKeySkipCheck:lookupCrashes",
+    "ContractIdInContractKeySkipCheck:queryCrashes",
+    "ContractKeyNotEffective:fetchByKeyMustFail",
+    "ContractKeyNotVisible:aScript",
+    "ContractKeyNotVisible:blindLookup",
+    "ContractKeyNotVisible:divulgeeLookup",
+    "ContractKeyNotVisible:localFetch",
+    "ContractKeyNotVisible:localLookup",
+    "ContractKeys:test",
+    "CreateAndExercise:main",
+    "DamlScriptTrySubmit:authorizationError",
+    "DamlScriptTrySubmit:contractKeyNotFound",
+    "DamlScriptTrySubmit:contractNotActive",
+    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers",
+    // TODO(#30398): move to a 2.dev test suite
+    // "DamlScriptTrySubmit:devError",
+    "DamlScriptTrySubmit:duplicateContractKey",
+    "DamlScriptTrySubmit:failureStatusError",
+    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers",
+    "DamlScriptTrySubmit:truncatedError",
+    "DamlScriptTrySubmit:wronglyTypedContract",
+    "EmptyContractKeyMaintainers:createCmdNoMaintainer",
+    "EmptyContractKeyMaintainers:createNoMaintainer",
+    "EmptyContractKeyMaintainers:fetchNoMaintainer",
+    "EmptyContractKeyMaintainers:lookupNoMaintainer",
+    "EmptyContractKeyMaintainers:queryNoMaintainer",
+    "EqContractId:main",
+    "ExceptionAndContractKey:testCreate",
+    "ExceptionAndContractKey:testLookup",
+    "ExceptionSemantics:divulgence",
+    "ExceptionSemantics:duplicateKey",
+    "ExceptionSemantics:handledArithmeticError",
+    "ExceptionSemantics:handledUserException",
+    "ExceptionSemantics:rollbackArchive",
+    "ExceptionSemantics:rollbackConsumingExercise",
+    "ExceptionSemantics:rollbackCreate",
+    "ExceptionSemantics:tryContext",
+    "ExceptionSemantics:uncaughtArithmeticError",
+    "ExceptionSemantics:uncaughtUserException",
+    "ExceptionSemantics:unhandledArithmeticError",
+    "ExceptionSemantics:unhandledUserException",
+    "FailedFetch:fetchNonStakeholder",
+    "FetchByKey:failLedger",
+    "FetchByKey:failSpeedy",
+    "FetchByKey:mustFail",
+    "Interface:main",
+    "InterfaceArchive:main",
+    "Iou12:main",
+    "KeyNotVisibleStakeholders:blindFetch",
+    "KeyNotVisibleStakeholders:blindLookup",
+    "KeyNotVisibleStakeholders:divulgeeFetch",
+    "KeyNotVisibleStakeholders:divulgeeLookup",
+    "LargeTransaction:largeListAsAChoiceArgTest",
+    "LargeTransaction:largeTransactionWithManyContractsTest",
+    "LargeTransaction:largeTransactionWithOneContractTest",
+    "LargeTransaction:listSizeTest",
+    "LargeTransaction:rangeOfIntsToListContainerTest",
+    "LargeTransaction:rangeOfIntsToListTest",
+    "LargeTransaction:rangeTest",
+    "LedgerTestException:test",
+    "LFContractKeys:lookupTest",
+    "LfInterfaces:run",
+    "LfStableContractKeys:run",
+    "LfStableContractKeyThroughExercises:run",
+    "MoreChoiceObserverDivulgence:test",
+    "Self:main",
+    "Self2:main",
+    "TransientFailure:testBio",
+  )
+
+  private var scalatestFilteredScriptIdsToIgnore: List[String] = List.empty
 
   final override def beforeAll(configMap: ConfigMap): Unit = {
     super.beforeAll(configMap)
@@ -148,7 +269,7 @@ abstract class DamlScriptIT
       List("--ledger-port", port.unwrap.toString),
       List("--static-time"),
       List("--max-inbound-message-size", Int.MaxValue.toString),
-      List("--upload-dar", "true"),
+      List("--upload-dar", s"${!darFileUploaded.get()}"),
       List("--json-test-summary", outputFile.toString),
     ).flatten
     val (stdout, stderr) = run(cmd, ignoreExitCode = true)
@@ -159,6 +280,7 @@ abstract class DamlScriptIT
     } yield result
     resultOrErr match {
       case Right(value) =>
+        darFileUploaded.set(true)
         value
       case Left(err) =>
         scriptError(
@@ -169,8 +291,6 @@ abstract class DamlScriptIT
         )
     }
   }
-
-  protected def uckMode: Boolean
 
   protected def langVersion: LanguageVersion
 
@@ -253,139 +373,110 @@ abstract class DamlScriptIT
         Some(s"script $scriptId was expected to fail but it was not found in the results")
     }
 
-  def assertDamlScriptTestResults(
-      actualResults: Map[String, Either[String, Json]],
-      skippedTests: Seq[String],
-  ): Assertion = {
-    //  In case you are missing expected results when adding new test file, you can uncomment the following code to
-    //  print the missing expected results based on the actual results.
-    //  Make sure to replace the placeholder string with the proper ExpectedResult (Success, Failure or Broken) and
-    //  its parameters.
-    //
-    //    println(
-    //      actualResults
-    //        .collect {
-    //          case (id, Right(_)) if !expectedResults.isDefinedAt(id) =>
-    //            s"\"$id\" -> Failure("replace me with proper ExpectedResult")"
-    //        }
-    //        .mkString("Map(\n", ",\n", ")")
-    //    )
-
-    // Any daml-script that ran, but for which we have no expected result is unexpected
-    val unexpected = actualResults.keys.flatMap(scriptId =>
-      expectedResults.get(scriptId) match {
-        case Some(
-              _: ExpectedResult.Success | _: ExpectedResult.Failure | _: ExpectedResult.Broken
-            ) =>
-          List.empty
-        case _ if skippedTests.contains(scriptId) =>
-          List.empty
-        case _ =>
-          List(scriptId)
-      }
-    )
-
-    if (unexpected.nonEmpty)
-      fail(
-        s"the following script ids produced results, but we have no test assertions for them: ${unexpected
-            .mkString("\n  ", ",\n  ", ",")}"
-      )
-
-    forEvery(expectedResults) {
-      case (scriptId, expectedResult) if !skippedTests.contains(scriptId) =>
-        val actualResult = actualResults.get(scriptId)
-        expectedResult match {
-          case ExpectedResult.Ignored =>
-            actualResult match {
-              case None =>
-                // Not able to distinguish between a non-existent and actual tests that are to be ignored
-                if (debug) println(s"script $scriptId was ignored")
-                succeed
-              case Some(_) =>
-                fail(s"script $scriptId was expected to be skipped but it was executed")
-            }
-          case ExpectedResult.Success(expectedValueOpt, _*) =>
-            checkForSuccess(scriptId, expectedValueOpt, actualResult) match {
-              case Some(error) if error.endsWith("was not found in the results") =>
-                if (debug) println(error)
-                fail(error)
-              case Some(error) =>
-                if (debug) println(s"script $scriptId failed, but was expected to succeed - $error")
-                fail(error)
-              case None =>
-                if (debug) println(s"script $scriptId succeeded")
-                succeed
-            }
-          case ExpectedResult.Failure(errorMsgPattern, _*) =>
-            checkForFailure(scriptId, errorMsgPattern, actualResult) match {
-              case Some(error) if error.endsWith("was not found in the results") =>
-                if (debug) println(error)
-                fail(error)
-              case Some(error) =>
-                if (debug) println(s"script $scriptId succeeded, but was expected to fail - $error")
-                fail(error)
-              case None =>
-                if (debug) println(s"script $scriptId failed")
-                succeed
-            }
-          case ExpectedResult.Broken(expected) =>
-            val assessment = expected match {
-              case Left(ExpectedResult.Failure(errorMsgPattern, _*)) =>
-                checkForFailure(scriptId, errorMsgPattern, actualResult)
-              case Right(ExpectedResult.Success(expectedValueOpt, _*)) =>
-                checkForSuccess(scriptId, expectedValueOpt, actualResult)
-            }
-            assessment match {
-              case Some(error) if error.endsWith("was not found in the results") =>
-                if (debug) println(error)
-                fail(error)
-              case Some(_) =>
-                if (debug) println(s"script $scriptId is broken")
-                succeed
-              case None =>
-                fail(s"script $scriptId was expected to be broken but it succeeded")
-            }
+  def assertDamlScriptTestResult(
+      scriptId: String,
+      expectedResult: Option[ExpectedResult],
+      actualResult: Option[Either[String, Json]],
+  ): Assertion =
+    expectedResult match {
+      case None =>
+        fail(s"script $scriptId had no test expectations")
+      case Some(ExpectedResult.Ignored) =>
+        actualResult match {
+          case None =>
+            // Not able to distinguish between a non-existent and actual tests that are to be ignored
+            if (debug) println(s"script $scriptId was ignored")
+            succeed
+          case Some(_) =>
+            fail(s"script $scriptId was expected to be skipped but it was executed")
         }
-
-      case _ =>
-        succeed
+      case Some(ExpectedResult.Success(expectedValueOpt, _*)) =>
+        checkForSuccess(scriptId, expectedValueOpt, actualResult) match {
+          case Some(error) if error.endsWith("was not found in the results") =>
+            if (debug) println(error)
+            fail(error)
+          case Some(error) =>
+            if (debug) println(s"script $scriptId failed, but was expected to succeed - $error")
+            fail(error)
+          case None =>
+            if (debug) println(s"script $scriptId succeeded")
+            succeed
+        }
+      case Some(ExpectedResult.Failure(errorMsgPattern, _*)) =>
+        checkForFailure(scriptId, errorMsgPattern, actualResult) match {
+          case Some(error) if error.endsWith("was not found in the results") =>
+            if (debug) println(error)
+            fail(error)
+          case Some(error) =>
+            if (debug) println(s"script $scriptId succeeded, but was expected to fail - $error")
+            fail(error)
+          case None =>
+            if (debug) println(s"script $scriptId failed")
+            succeed
+        }
+      case Some(ExpectedResult.Broken(expected)) =>
+        val assessment = expected match {
+          case Left(ExpectedResult.Failure(errorMsgPattern, _*)) =>
+            checkForFailure(scriptId, errorMsgPattern, actualResult)
+          case Right(ExpectedResult.Success(expectedValueOpt, _*)) =>
+            checkForSuccess(scriptId, expectedValueOpt, actualResult)
+        }
+        assessment match {
+          case Some(error) if error.endsWith("was not found in the results") =>
+            if (debug) println(error)
+            fail(error)
+          case Some(_) =>
+            if (debug) println(s"script $scriptId is broken")
+            succeed
+          case None =>
+            fail(s"script $scriptId was expected to be broken but it succeeded")
+        }
     }
+
+  // For the current test suite capture the test names that are to run so that `dpm script --all` may respect command line test filtering
+  override protected def runTests(testName: Option[String], args: Args): Status = {
+    val testSuiteName = getClass.getName
+
+    args.filter.dynaTags.testTags.get(testSuiteName).foreach { testSuiteTags =>
+      // scalatest runner test filtering has been specified, so we save the test cases that are to be ignored
+      scalatestFilteredScriptIdsToIgnore =
+        args.filter.apply(scriptIdsToTest.toSet, testSuiteTags, testSuiteName).collect {
+          case (scriptId, true) => scriptId
+        }
+    }
+
+    super.runTests(testName, args)
   }
 
-  s"daml-script tests should produce expected results" onlyRunWithOrGreaterThan minimumProtocolVersion in {
-    env =>
+  "All project script IDs match expected result map script IDs" onlyRunWithOrGreaterThan minimumProtocolVersion in {
+    _ =>
+      expectedResults.keySet shouldEqual scriptIdsToTest.toSet
+  }
+
+  scriptIdsToTest.foreach { testScriptId =>
+    testScriptId onlyRunWithOrGreaterThan minimumProtocolVersion in { env =>
       import env.participant1
 
       val ignoredTests = expectedResults.collect {
         case (id, ExpectedResult.Ignored) => id
         case (id, ExpectedResult.Broken(_)) => id
       }.toList
-      val isolatedTests = expectedResults.collect {
-        case (id, ExpectedResult.Success(_, logAssertions*)) if logAssertions.nonEmpty => id
-        case (id, ExpectedResult.Failure(_, logAssertions*)) if logAssertions.nonEmpty => id
-      }.toList
 
-      withClue("Non-isolated daml-script test cases") {
+      if (ignoredTests.contains(testScriptId)) {
+        if (debug) println(s"script $testScriptId was ignored")
+        succeed
+      } else {
+        val isolatedTests = expectedResults.collect {
+          case (id, ExpectedResult.Success(_, logAssertions*)) if logAssertions.nonEmpty => id
+          case (id, ExpectedResult.Failure(_, logAssertions*)) if logAssertions.nonEmpty => id
+        }.toList
         val testsToIgnore = ignoredTests ++ isolatedTests
-        val actualNonIsolatedTestResults = runDamlScriptTests(
-          host = participant1.config.ledgerApi.address,
-          port = participant1.config.ledgerApi.port,
-          skippedTests = testsToIgnore,
-        )
+        val expectedResult = expectedResults.get(testScriptId)
 
-        assertDamlScriptTestResults(
-          actualNonIsolatedTestResults,
-          skippedTests = testsToIgnore,
-        )
-      }
-
-      for (testScriptId <- isolatedTests) {
-        withClue(s"Isolated $testScriptId daml-script test case") {
-          val testsToIgnore = expectedResults.collect {
-            case (id, _) if id != testScriptId => id
-          }.toList
-          val actualIsolatedTestResults =
-            loggerFactory.assertLogs(
+        if (isolatedTests.contains(testScriptId)) {
+          // Isolated test case - run these with no result caching
+          val actualResult = loggerFactory
+            .assertLogs(
               within = {
                 runDamlScriptTests(
                   host = participant1.config.ledgerApi.address,
@@ -398,33 +489,49 @@ abstract class DamlScriptIT
                 .get(testScriptId)
                 .fold[Seq[LogEntry => Assertion]](Seq.empty)(_.logAssertions) *,
             )
+            .get(testScriptId)
 
-          assertDamlScriptTestResults(
-            actualIsolatedTestResults,
-            skippedTests = testsToIgnore,
-          )
+          assertDamlScriptTestResult(testScriptId, expectedResult, actualResult)
+        } else {
+          // Non-isolated test cases - run all of these scripts once and cache all results
+          val actualResults = actualNonIsolatedTestData.get().getOrElse {
+            runDamlScriptTests(
+              host = participant1.config.ledgerApi.address,
+              port = participant1.config.ledgerApi.port,
+              skippedTests = testsToIgnore ++ scalatestFilteredScriptIdsToIgnore,
+            )
+          }
+          actualNonIsolatedTestData.set(Some(actualResults))
+
+          assertDamlScriptTestResult(testScriptId, expectedResult, actualResults.get(testScriptId))
         }
       }
+    }
   }
 }
 
-// TODO(#16458) This should be a stable protocol version
-//  Split the tests into a stable and a dev suite and run the dev suite only with the dev protocol version
-abstract class DamlScriptDevIT(contractStateMode: ContractStateMachine.Mode) extends DamlScriptIT {
+// TODO(#16458) we eventually need:
+//     - a PV34, LF 2.2 test suite with mode NoKey
+//     - a PV35, LF 2.3 test suite with mode NUCK
+//     - a PVDev test suite with mode NUCK, because guarded exercises are only available in LF dev
+//   For now we have :
+//     - a PV35, LF 2.3 test suite with mode NoKey
+//     - a PV35, LF 2.3 test suite with mode NUCK
+//     - the only LF 2.dev test case (guarded exercises) is disabled
+abstract class DamlScriptPV35IT(contractStateMode: ContractStateMachine.Mode) extends DamlScriptIT {
 
   import DamlScriptIT.withContractStateMode
   import DamlScriptIT.ExpectedResult.*
 
-  override lazy val uckMode = true
-  override lazy val langVersion = LanguageVersion.v2_dev
-  override lazy val projectName = "ScriptDevTests"
-  override lazy val minimumProtocolVersion = ProtocolVersion.dev
+  override lazy val langVersion = LanguageVersion.v2_3
+  override lazy val projectName = "ScriptLF23Tests"
+  override lazy val minimumProtocolVersion = ProtocolVersion.v35
 
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
       .addConfigTransforms(withContractStateMode(contractStateMode)*)
 
-  override def expectedResults = SortedMap(
+  override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
     "AuthEvalOrder:t1_create_success" -> Failure("t1 finished with no authorization failure"),
     "AuthEvalOrder:t2_create_badlyAuthorized" -> Failure(
@@ -505,9 +612,7 @@ abstract class DamlScriptDevIT(contractStateMode: ContractStateMachine.Mode) ext
   )
 }
 
-@NuckTest
-@RollbackTest
-class DamlScriptDevNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mode.NUCK) {
+class DamlScriptPV35NUCKIT extends DamlScriptPV35IT(ContractStateMachine.Mode.NUCK) {
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
@@ -519,7 +624,8 @@ class DamlScriptDevNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mode.NUCK
     ),
     "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
     "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
-    "DamlScriptTrySubmit:devError" -> Success(),
+    // TODO(#30398): move to a 2.dev test suite
+    // "DamlScriptTrySubmit:devError" -> Success(),
     "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "DamlScriptTrySubmit:wronglyTypedContract" -> Success(),
     "ExceptionSemantics:divulgence" -> Success(),
@@ -601,15 +707,13 @@ class DamlScriptDevNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mode.NUCK
   )
 }
 
-@NuckTest
-@RollbackTest
-class DamlScriptDevNoContractKeyIT extends DamlScriptDevIT(ContractStateMachine.Mode.NoKey) {
+class DamlScriptPV35NoContractKeyIT extends DamlScriptPV35IT(ContractStateMachine.Mode.NoKey) {
   import DamlScriptIT.{assertionFailed, contractIDsNotSupported, commandSubmissionFailure}
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 
-  override val expectedResults = super.expectedResults ++ SortedMap(
+  override val expectedResults = super.expectedResults ++ List(
     // TODO(#30398): ignoring key-related test cases as you shouldn't be able to run a dar that uses a keys against PV34
     //     anyway, so all these tests will eventually fail with a compilation error or not exist.
     "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Ignored,
@@ -626,7 +730,8 @@ class DamlScriptDevNoContractKeyIT extends DamlScriptDevIT(ContractStateMachine.
     "ContractKeys:test" -> Ignored,
     "DamlScriptTrySubmit:contractKeyNotFound" -> Ignored,
     "DamlScriptTrySubmit:contractNotActive" -> Ignored,
-    "DamlScriptTrySubmit:devError" -> Ignored,
+    // TODO(#30398): move to a 2.dev test suite
+    // "DamlScriptTrySubmit:devError" -> Ignored,
     "DamlScriptTrySubmit:truncatedError" -> Ignored,
     "DamlScriptTrySubmit:wronglyTypedContract" -> Ignored,
     "ExceptionSemantics:divulgence" -> Ignored,

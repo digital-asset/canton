@@ -245,20 +245,20 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
     def handleFailedValidation(error: SequencerConnectionXInternalError): Unit = error match {
       case SequencerConnectionXInternalError.ValidationError(message) =>
         logger.warn(s"Validation failure: $message")
-        fatal("Failed validation")
+        fatal(s"Validation failure: $message")
 
       case SequencerConnectionXInternalError.StubError(
-            SequencerConnectionXStubError.DeserializationError(error)
+            SequencerConnectionXStubError.DeserializationError(message)
           ) =>
-        logger.info(s"Deserialization error: $error")
-        fatal("Deserialization error")
+        logger.info(s"Deserialization error: $message")
+        fatal(s"Deserialization error: $message")
 
       case SequencerConnectionXInternalError.StubError(
-            SequencerConnectionXStubError.ConnectionError(error)
+            SequencerConnectionXStubError.ConnectionError(message)
           ) =>
         // Might need to refine on the errors
-        logger.debug(s"Network error: $error")
-        fail(s"Network error: $error")
+        logger.debug(s"Network error: $message")
+        fail(s"Network error: $message")
     }
 
     def handleSuccessfulValidation(newAttributes: ConnectionAttributes): Unit =
@@ -279,10 +279,10 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
           }
 
         case Some(currentAttributes) =>
-          logger.warn(
-            s"Sequencer connection has changed attributes: expected $currentAttributes, got $newAttributes. Closing connection."
-          )
-          fatal("Attributes mismatch")
+          val message =
+            s"Attributes mismatch: Sequencer connection has changed attributes: expected $currentAttributes, got $newAttributes"
+          logger.warn(s"$message. Closing connection.")
+          fatal(message)
       }
 
     logger.debug(s"Starting validation of $name")

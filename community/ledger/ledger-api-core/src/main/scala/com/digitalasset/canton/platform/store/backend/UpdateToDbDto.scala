@@ -642,6 +642,7 @@ object UpdateToDbDto {
       message_uuid = messageUuid.map(_.toString),
       is_transaction = isTransaction,
       trace_context = serializedTraceContext,
+      traffic_cost = completionInfo.paidTrafficCost.value,
     )
   }
 }

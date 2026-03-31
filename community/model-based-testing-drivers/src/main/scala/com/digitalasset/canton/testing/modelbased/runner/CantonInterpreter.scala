@@ -86,17 +86,13 @@ final class CantonInterpreter private (
             com.digitalasset.canton.topology.PartyId
               .tryFromProtoPrimitive(partyIdMapping(pid))
           )
-        val allParties =
-          partyIdMapping.values.toSeq.map(p =>
-            com.digitalasset.canton.topology.PartyId.tryFromProtoPrimitive(p)
-          )
         // Submit with LEDGER_EFFECTS shape to get exercise results and created event blobs
         Either
           .catchOnly[CommandFailure](
             participant.ledger_api.commands.submit(
               actAs = actAs,
               commands = protoCommands,
-              readAs = allParties,
+              readAs = Seq.empty,
               disclosedContracts = disclosures,
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
               includeCreatedEventBlob = true,

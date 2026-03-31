@@ -273,6 +273,18 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
         attributes: Map[String, String] = Map(),
     ): MetricValue.Histogram = getOneOfType[MetricValue.Histogram](metricName, attributes)
 
+    @Help.Summary("Get a particular exponential histogram")
+    @Help.Description(
+      """Returns the metric with the given name and optionally matching attributes, or error if
+        |multiple matching are found. Also errors if the metric is not of the given type.
+        """
+    )
+    def get_exponential_histogram(
+        metricName: String,
+        attributes: Map[String, String] = Map(),
+    ): MetricValue.ExponentialHistogram =
+      getOneOfType[MetricValue.ExponentialHistogram](metricName, attributes)
+
     @Help.Summary("Get a particular summary")
     @Help.Description(
       """Returns the metric with the given name and optionally matching attributes, or error if

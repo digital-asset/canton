@@ -310,7 +310,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
+          "expr": "sum(irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
           "legendFormat": "All blocks -",
           "range": true,
           "refId": "A"
@@ -321,7 +321,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
+          "expr": "irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Empty blocks -",
           "range": true,

@@ -55,7 +55,8 @@ private[lsu] trait LsuBase
   protected val useStaticTime: Boolean = true
 
   protected def configTransforms: Seq[ConfigTransform] = List(
-    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet)
+    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
+    ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
   ) ++ ConfigTransforms.enableAlphaVersionSupport
     ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
@@ -136,9 +137,16 @@ private[lsu] trait LsuBase
     *   Whether errors in the log (NotAtUpgradeTimeOrBeyond) should be suppressed. Use false if the
     *   call to transferTraffic is already in a suppression logger block (since those cannot be
     *   nested).
+    *
+    * @param trafficTsOverride
+    *   The time used to fetch the traffic state. MUST be empty for regular LSUs. In that case, an
+    *   LSU must be announced and sequencer must have reached the upgrade time for this call to
+    *   succeed. SHOULD be defined in a disaster recovery scenario when requesting the topology from
+    *   a synchronizer without an announced LSU.
     */
   protected def transferTraffic(
       fixtureOverride: Option[Fixture] = None,
+      trafficTsOverride: Option[CantonTimestamp] = None,
       suppressLogs: Boolean = true,
   ): Unit = {
 
@@ -152,6 +160,7 @@ private[lsu] trait LsuBase
       oldSequencers = oldSequencers,
       newSequencers = newSequencers,
       suppressLogs = suppressLogs,
+      trafficTsOverride = trafficTsOverride,
     )
   }
 
@@ -258,10 +267,20 @@ private[lsu] trait LsuBase
 
   /** Instantiate the new synchronizer nodes with identity of the previous ones and import topology
     * state.
+    * @param fixture
+    *   Fixture to be sued
+    * @param ignorePsidCheck
+    *   Whether the psid check should be ignored on the new synchronizer. Should be used only in the
+    *   context of a roll forward when the new synchronizer psid does not correspond to the
+    *   successor of an announced LSU.
+    * @param sequencerLsuStateTsOverride
+    *   Specifies the timestamp to be used for the sequencer state export. Should be used only in
+    *   the context of a roll forward when there is no announced LSU.
     */
   protected def migrateSynchronizerNodes(
       fixture: Fixture,
       ignorePsidCheck: Boolean = false,
+      sequencerLsuStateTsOverride: Option[CantonTimestamp] = None,
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
     val exportDirectory = exportNodesData(
       SynchronizerNodes(
@@ -269,6 +288,7 @@ private[lsu] trait LsuBase
         mediators = fixture.oldSynchronizerNodes.mediators,
       ),
       successorPsid = fixture.newPsid,
+      sequencerLsuStateTsOverride = sequencerLsuStateTsOverride,
     )
 
     // Migrate nodes preserving their data (and IDs)

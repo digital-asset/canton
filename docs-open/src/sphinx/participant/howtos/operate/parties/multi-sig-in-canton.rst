@@ -95,7 +95,7 @@ We'll cover this in section 3.
 For further details, see:
 
 * :ref:`decentralized-parties`
-* :ref:`tutorial_onboard_external_party`
+* :ref:`tutorial_onboard_external_party_lapi`
 * :ref:`overview_canton_external_parties`
 
 2: Decentralizing Confirmations

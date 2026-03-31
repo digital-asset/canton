@@ -662,6 +662,7 @@ object TopologyAdminCommands {
 
     final case class SequencerLsuState(
         store: Option[TopologyStoreId],
+        ts: Option[CantonTimestamp],
         observer: StreamObserver[SequencerLsuStateResponse],
     ) extends BaseCommand[
           v30.SequencerLsuStateRequest,
@@ -669,7 +670,7 @@ object TopologyAdminCommands {
           CancellableContext,
         ] {
       override protected def createRequest(): Either[String, v30.SequencerLsuStateRequest] =
-        Right(v30.SequencerLsuStateRequest(store.map(_.toProtoV30)))
+        Right(v30.SequencerLsuStateRequest(store.map(_.toProtoV30), ts.map(_.toProtoTimestamp)))
 
       override protected def submitRequest(
           service: TopologyManagerReadServiceStub,

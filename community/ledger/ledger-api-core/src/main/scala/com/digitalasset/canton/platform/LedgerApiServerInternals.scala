@@ -15,6 +15,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.ExecutionContext
 
 object LedgerApiServerInternals {
@@ -31,7 +32,8 @@ object LedgerApiServerInternals {
       mutableLedgerEndCache: MutableLedgerEndCache,
       stringInterningView: StringInterningView,
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      scheduler: ScheduledExecutorService,
   ): ResourceOwner[(InMemoryState, InMemoryStateUpdater.UpdaterFlow)] =
     for {
       inMemoryState <- InMemoryState.owner(
@@ -53,8 +55,6 @@ object LedgerApiServerInternals {
       inMemoryStateUpdater <- InMemoryStateUpdater.owner(
         inMemoryState = inMemoryState,
         prepareUpdatesParallelism = indexServiceConfig.inMemoryStateUpdaterParallelism,
-        preparePackageMetadataTimeOutWarning =
-          indexServiceConfig.preparePackageMetadataTimeOutWarning.underlying,
         offsetCheckpointCacheUpdateInterval =
           indexServiceConfig.offsetCheckpointCacheUpdateInterval.underlying,
         metrics = metrics,

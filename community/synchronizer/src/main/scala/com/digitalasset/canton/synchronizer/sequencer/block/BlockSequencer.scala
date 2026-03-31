@@ -290,14 +290,14 @@ class BlockSequencer(
       TraceContext.createNew("block-sequencer-driver-source")
 
     val pauseAtUpgradeTimeUntilLsuTrafficInitialized =
-      lsuSequencingBounds.fold(Flow[Traced[RawLedgerBlock]]) {
-        case LsuSequencingBounds(upgradeTime, _) =>
-          PekkoUtil.mapAsyncAndDrainUS(Flow[Traced[RawLedgerBlock]], 1) {
-            case block if block.value.baseSequencingTimeMicrosFromEpoch > upgradeTime.toMicros =>
-              lsuTrafficInitialized.futureUS.map(_ => block)
-            case block =>
-              FutureUnlessShutdown.pure(block)
-          }
+      lsuSequencingBounds.fold(Flow[Traced[RawLedgerBlock]]) { lsuSequencingBounds =>
+        PekkoUtil.mapAsyncAndDrainUS(Flow[Traced[RawLedgerBlock]], 1) {
+          case block
+              if block.value.baseSequencingTimeMicrosFromEpoch > lsuSequencingBounds.upgradeTime.toMicros =>
+            lsuTrafficInitialized.futureUS.map(_ => block)
+          case block =>
+            FutureUnlessShutdown.pure(block)
+        }
       }
     val driverSource = Source
       .futureSource(runtimeReady.unwrap.map {
@@ -1108,23 +1108,40 @@ class BlockSequencer(
     super.updateLsuSuccessor(successorO, announcementEffectiveTime)
   }
 
-  override def getLsuTrafficControlState(implicit
+  override def getLsuTrafficControlState(trafficTsOverride: Option[CantonTimestamp] = None)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
     for {
-      // - Check that LSU is ongoing
-      upgrade <- EitherT
-        .fromOption[FutureUnlessShutdown](
-          announcedLsu.get(),
-          SequencerError.NoLsuAnnounced.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
-        )
-        .leftWiden[CantonBaseError]
+      ts <- trafficTsOverride match {
+        case Some(trafficTsOverride) =>
+          EitherT.pure[FutureUnlessShutdown, CantonBaseError](trafficTsOverride)
+        case None =>
+          // Read upgrade time from LSU
+          EitherT
+            .fromOption[FutureUnlessShutdown](
+              announcedLsu.get().map(_.successor.upgradeTime),
+              SequencerError.NoLsuAnnounced
+                .Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
+            )
+            .leftWiden[CantonBaseError]
+      }
+
+      trafficStates <- getLsuTrafficControlStateInternal(ts)
+    } yield {
+      LsuTrafficState(trafficStates)(
+        LsuTrafficState.protocolVersionRepresentativeFor(protocolVersion)
+      )
+    }
+
+  private def getLsuTrafficControlStateInternal(ts: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Map[Member, TrafficState]] = {
+    logger.info(s"Computing LSU traffic state at $ts")
+    for {
       // - Traffic control is enabled
       _ <- EitherT(
         cryptoApi.ips.currentSnapshotApproximation
-          .flatMap(
-            _.trafficControlParameters(protocolVersion)
-          )
+          .flatMap(_.trafficControlParameters(protocolVersion))
           .map(_.toRight[CantonBaseError](TrafficControlDisabled.Error()))
       )
 
@@ -1132,11 +1149,8 @@ class BlockSequencer(
       _ <- {
         val now = clock.now
         EitherTUtil.condUnitET[FutureUnlessShutdown](
-          now >= upgrade.successor.upgradeTime,
-          SequencerError.NotAtUpgradeTimeOrBeyond.Error(
-            upgrade.successor.upgradeTime,
-            Some(now),
-          ),
+          now >= ts,
+          SequencerError.NotAtUpgradeTimeOrBeyond.Error(ts, Some(now)),
         )
       }
 
@@ -1148,13 +1162,11 @@ class BlockSequencer(
         store.readHeadBlockInfo().map(_.map(_.lastTs))
       )
       latestSequencerEventTimestamp = stateManager.getHeadState.block.latestSequencerEventTimestamp
-        .orElse(
-          lsuSequencingBounds.map(_.upgradeTime)
-        )
+        .orElse(lsuSequencingBounds.map(_.upgradeTime))
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        latestPersistedBlockTimeO.exists(_ >= upgrade.successor.upgradeTime),
+        latestPersistedBlockTimeO.exists(_ >= ts),
         SequencerError.NotAtUpgradeTimeOrBeyond.Error(
-          upgrade.successor.upgradeTime,
+          ts,
           latestPersistedBlockTimeO,
         ),
       )
@@ -1164,21 +1176,19 @@ class BlockSequencer(
       _ <- EitherT.right[LsuSequencerError](
         SyncCryptoClient.getSnapshotForTimestamp(
           cryptoApi,
-          upgrade.successor.upgradeTime,
+          ts,
           latestSequencerEventTimestamp,
         )
       )
       // - All checks passed
       // - Get all members known at the upgrade time
       allMembers <- EitherT.right[LsuSequencerError](
-        dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive =
-          upgrade.successor.upgradeTime
-        )
+        dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive = ts)
       )
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
         blockRateLimitManager.trafficConsumedStore
-          .lookupLatestBeforeInclusive(upgrade.successor.upgradeTime.immediatePredecessor)
+          .lookupLatestBeforeInclusive(ts.immediatePredecessor)
           .map(_.map(tc => tc.member -> tc).toMap)
       )
       // TODO(#29997): This doesn't scale to millions of traffic accounts, need a batch method or a different approach
@@ -1189,7 +1199,7 @@ class BlockSequencer(
             val trafficPurchasedET =
               blockRateLimitManager.trafficPurchasedManager.getTrafficPurchasedAt(
                 member,
-                upgrade.successor.upgradeTime,
+                ts,
                 latestSequencerEventTimestamp.orElse(lsuSequencingBounds.map(_.upgradeTime)),
               )
             trafficPurchasedET.map { trafficPurchasedO =>
@@ -1206,20 +1216,14 @@ class BlockSequencer(
           .map(_.toMap)
       _ = {
         if (logger.underlying.isDebugEnabled) {
-          logger.debug(
-            "Traffic states at LSU time for all members:"
-          )
+          logger.debug("Traffic states at LSU time for all members:")
           trafficStates.foreach { case (member, trafficState) =>
             logger.debug(s"\t- $member: $trafficState")
           }
         }
       }
-
-    } yield {
-      LsuTrafficState(trafficStates)(
-        LsuTrafficState.protocolVersionRepresentativeFor(protocolVersion)
-      )
-    }
+    } yield trafficStates
+  }
 
   private val runningSetLsuTraffic =
     new AtomicReference[

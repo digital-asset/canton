@@ -9,7 +9,7 @@ override-components:
   codegen:
     version: $DAML_VERSION
 build-options:
-- --target=2.dev
+- --target=2.3-staging
 name: universal
 source: .
 version: 1.0.0

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
@@ -24,6 +25,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ParsedReassignmentRequest
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  MultiSynchronizerIsNotEnabled,
   ReassigningParticipantsMismatch,
   SubmitterMustBeStakeholder,
 }
@@ -61,23 +63,23 @@ final class AssignmentValidationTest
   )
   private val targetMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(0))
 
-  private val signatory: LfPartyId = PartyId(
-    UniqueIdentifier.tryFromProtoPrimitive("signatory::party")
-  ).toLf
-  private val observer: LfPartyId = PartyId(
-    UniqueIdentifier.tryFromProtoPrimitive("observer::party")
-  ).toLf
+  private val signatory: LfPartyId = LfPartyId.assertFromString("signatory::party")
+  private val observer: LfPartyId = LfPartyId.assertFromString("observer::party")
+  private val alice: LfPartyId = LfPartyId.assertFromString("alice::party")
+  private val bob: LfPartyId = LfPartyId.assertFromString("bob::party")
 
   private val otherParty: LfPartyId = PartyId(
     UniqueIdentifier.tryFromProtoPrimitive("otherParty::party")
   ).toLf
 
-  private val submittingParticipant = ParticipantId(
-    UniqueIdentifier.tryFromProtoPrimitive("bothsynchronizers::participant")
-  )
-  private val observingParticipant = ParticipantId(
-    UniqueIdentifier.tryFromProtoPrimitive("bothsynchronizers::observingParticipant")
-  )
+  private val submittingParticipant =
+    ParticipantId.tryFromProtoPrimitive("PAR::bothsynchronizers::participant")
+  private val observingParticipant =
+    ParticipantId.tryFromProtoPrimitive("PAR::bothsynchronizers::observingParticipant")
+  private val aliceParticipant =
+    ParticipantId.tryFromProtoPrimitive("PAR::bothsynchronizers::aliceParticipant")
+  private val bobParticipant =
+    ParticipantId.tryFromProtoPrimitive("PAR::bothsynchronizers::bobParticipant")
 
   private val otherParticipant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("synchronizer::participant")
@@ -93,17 +95,22 @@ final class AssignmentValidationTest
       workflowId = None,
     )
 
-  private val identityFactory = TestingTopology()
+  private def mkTestingTopology(multiSyncFor: ParticipantId*) = TestingTopology()
     .withSynchronizers(sourceSynchronizer.unwrap)
     .withReversedTopology(
       Map(
         submittingParticipant -> Map(signatory -> ParticipantPermission.Submission),
         observingParticipant -> Map(observer -> ParticipantPermission.Observation),
+        aliceParticipant -> Map(alice -> ParticipantPermission.Submission),
+        bobParticipant -> Map(bob -> ParticipantPermission.Submission),
       )
     )
     // required such that `participant` gets a signing key
     .withSimpleParticipants(submittingParticipant)
+    .enableMultiSynchronizer(multiSyncFor*)
     .build(loggerFactory)
+
+  private val identityFactory = mkTestingTopology(submittingParticipant, observingParticipant)
 
   private lazy val reassigningParticipants = Set(submittingParticipant, observingParticipant)
 
@@ -130,6 +137,7 @@ final class AssignmentValidationTest
   private def mkParsedRequest(
       view: FullAssignmentTree,
       recipients: Recipients = RecipientsTest.testInstance,
+      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
   ): ParsedReassignmentRequest[FullAssignmentTree] = {
     val signature = cryptoSnapshot
       .sign(
@@ -155,6 +163,7 @@ final class AssignmentValidationTest
       cryptoSnapshot,
       cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
       view.reassignmentId,
+      NonNegativeLong.tryCreate(456),
     )
   }
 
@@ -369,6 +378,84 @@ final class AssignmentValidationTest
         NonInitiatorSubmitsBeforeExclusivityTimeout
       ]
 
+    }
+
+    "multi-synchronizer feature flg" should {
+      def validateMultiSynchronizerFeatureFlag(
+          contract: ContractInstance,
+          participants: ParticipantId*
+      ) = {
+        val identityFactory = mkTestingTopology(participants*)
+
+        val helpers = ReassignmentDataHelpers(
+          contract,
+          sourceSynchronizer,
+          targetSynchronizer,
+          identityFactory,
+        )
+
+        val unassignmentRequest =
+          helpers.unassignmentRequest(
+            signatory,
+            submittingParticipant,
+            sourceMediator,
+          )(reassigningParticipants = reassigningParticipants)
+
+        val unassignmentData = helpers.unassignmentData(unassignmentRequest)
+
+        val assignmentRequest = makeFullAssignmentTree(
+          unassignmentData.reassignmentId,
+          contract,
+        )
+
+        val cryptoSnapshot =
+          identityFactory
+            .forOwnerAndSynchronizer(submittingParticipant, sourceSynchronizer.unwrap)
+            .currentSnapshotApproximation
+            .futureValueUS
+
+        testInstance(targetSynchronizer, cryptoSnapshot, None, submittingParticipant)
+          .perform(
+            unassignmentDataE = Right(unassignmentData),
+            activenessF = activenessF,
+          )(mkParsedRequest(assignmentRequest, cryptoSnapshot = cryptoSnapshot))
+          .value
+          .futureValueUS
+          .value
+          .commonValidationResult
+          .multiSynchronizerFeatureFlagCheckResult
+      }
+      "be enabled on all participants hosting a stakeholder" in {
+        val contract = ExampleContractFactory.build(
+          signatories = Set(alice),
+          stakeholders = Set(alice, bob),
+        )
+
+        validateMultiSynchronizerFeatureFlag(contract) shouldBe Some(
+          MultiSynchronizerIsNotEnabled(
+            Set(aliceParticipant, bobParticipant),
+            targetSynchronizer.unwrap,
+          )
+        )
+
+        validateMultiSynchronizerFeatureFlag(contract, aliceParticipant) shouldBe Some(
+          MultiSynchronizerIsNotEnabled(
+            Set(bobParticipant),
+            targetSynchronizer.unwrap,
+          )
+        )
+        validateMultiSynchronizerFeatureFlag(contract, bobParticipant) shouldBe Some(
+          MultiSynchronizerIsNotEnabled(
+            Set(aliceParticipant),
+            targetSynchronizer.unwrap,
+          )
+        )
+        validateMultiSynchronizerFeatureFlag(
+          contract,
+          aliceParticipant,
+          bobParticipant,
+        ) shouldBe None
+      }
     }
   }
 

@@ -7,7 +7,8 @@ import RollbackException
 import qualified DA.Map as M
 import DA.Exception (ActionThrow(throw))
 import DA.Optional (isSome)
-import DA.ContractKeys (queryNByKey)
+import DA.ContractKeys (queryNByKey, lookupByKey)
+import Prelude hiding (lookupByKey)
 
 data Kind = Consuming | NonConsuming
   deriving (Eq, Show)

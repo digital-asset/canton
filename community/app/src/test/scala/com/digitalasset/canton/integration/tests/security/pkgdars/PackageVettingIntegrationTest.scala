@@ -83,7 +83,8 @@ sealed trait PackageVettingIntegrationTest
           // Setting a high value, because otherwise reassignment participants get dropped
           _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
             .replace(config.NonNegativeFiniteDuration.ofMinutes(10))
-        )
+        ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

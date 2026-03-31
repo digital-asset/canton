@@ -110,7 +110,7 @@ private[dao] final class DbDispatcherOfStorage(
 ) extends DbDispatcher
     with ReportsHealth
     with NamedLogging {
-  private implicit val directEc: ExecutionContext = DirectExecutionContext(logger)
+  private implicit val directEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   /** consider using executeSqlUS if possible */
   override def executeSql[T](databaseMetrics: DatabaseMetrics)(

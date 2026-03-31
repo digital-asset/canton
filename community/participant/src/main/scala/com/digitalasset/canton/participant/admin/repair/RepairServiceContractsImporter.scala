@@ -11,7 +11,6 @@ import cats.syntax.traverseFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -35,15 +34,11 @@ import com.digitalasset.canton.participant.admin.data.{
   RepairContract,
   RepresentativePackageIdOverride,
 }
-import com.digitalasset.canton.participant.admin.repair.RepairServiceContractsImporter.{
-  ContractToAdd,
-  workflowIdsFromPrefix,
-}
+import com.digitalasset.canton.participant.admin.repair.RepairServiceContractsImporter.ContractToAdd
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError.ImportAcsError
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
-import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
@@ -69,7 +64,6 @@ final class RepairServiceContractsImporter(
     syncPersistentStateLookup: SyncPersistentStateLookup,
     packageMetadataView: PackageMetadataView,
     contractStore: Eval[ContractStore],
-    aliasManager: SynchronizerAliasManager,
     nodeParameters: ParticipantNodeParameters,
     helpers: RepairServiceHelpers,
     contractValidator: ContractValidator,
@@ -166,183 +160,6 @@ final class RepairServiceContractsImporter(
     }
   }
 
-  /** Participant repair utility for manually adding contracts to a synchronizer in an offline
-    * fashion.
-    *
-    * @param synchronizerAlias
-    *   alias of synchronizer to add contracts to. The synchronizer needs to be configured, but
-    *   disconnected to prevent race conditions.
-    * @param contracts
-    *   contracts to add. Relevant pieces of each contract: create-arguments (LfThinContractInst),
-    *   template-id (LfThinContractInst), contractId, ledgerCreateTime, salt (to be added to
-    *   SerializableContract), and witnesses, SerializableContract.metadata is only validated, but
-    *   otherwise ignored as stakeholder and signatories can be recomputed from contracts.
-    * @param contractImportMode
-    *   Whether contract ids should be validated
-    * @param packageMetadataSnapshot
-    *   Snapshot of the packages metadata
-    * @param representativePackageIdOverride
-    *   Description for the override of the representative package ids
-    * @param workflowIdPrefix
-    *   If present, each transaction generated for added contracts will have a workflow ID whose
-    *   prefix is the one set and the suffix is a sequential number and the number of transactions
-    *   generated as part of the addition (e.g. `import-foo-1-2`, `import-foo-2-2`)
-    *
-    * Note: Assigning the internal contract ids to the contracts requires that all the contracts are
-    * already persisted in the contract store.
-    */
-  def addContracts(
-      synchronizerAlias: SynchronizerAlias,
-      contracts: Seq[RepairContract],
-      contractImportMode: ContractImportMode,
-      packageMetadataSnapshot: PackageMetadata,
-      representativePackageIdOverride: RepresentativePackageIdOverride,
-      workflowIdPrefix: Option[String] = None,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
-    logger.info(
-      s"Adding ${contracts.length} contracts to synchronizer $synchronizerAlias"
-    )
-    if (contracts.isEmpty) {
-      Either.right(logger.info("No contracts to add specified"))
-    } else {
-      helpers.runConsecutiveAndAwaitUS(
-        "repair.add",
-        helpers.withRepairIndexer { repairIndexer =>
-          val selectRepresentativePackageIds = new SelectRepresentativePackageIds(
-            representativePackageIdOverride = representativePackageIdOverride,
-            knownPackages = packageMetadataSnapshot.packages.keySet,
-            packageNameMap = packageMetadataSnapshot.packageNameMap,
-            contractImportMode = contractImportMode,
-            loggerFactory = loggerFactory,
-          )
-
-          (for {
-            synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
-              aliasManager
-                .synchronizerIdForAlias(synchronizerAlias)
-                .toRight(s"Could not find $synchronizerAlias")
-            )
-
-            synchronizer <- helpers.readSynchronizerData(synchronizerId, repairIndexer)
-
-            contractsWithOverriddenRpId <- selectRepresentativePackageIds(contracts)
-              .toEitherT[FutureUnlessShutdown]
-
-            _ <- ContractAuthenticationImportProcessor.validate(
-              loggerFactory,
-              syncPersistentStateLookup,
-              contractValidator,
-              contractImportMode,
-            )(contractsWithOverriddenRpId)
-
-            contractStates <- EitherT.right[String](
-              helpers.readContractAcsStates(
-                synchronizer.persistentState,
-                contractsWithOverriddenRpId.map(_.contract.contractId),
-              )
-            )
-
-            contractInstances <-
-              helpers
-                .logOnFailureWithInfoLevel(
-                  contractStore.value
-                    .lookupManyUncached(contractsWithOverriddenRpId.map(_.contract.contractId)),
-                  "Unable to lookup contracts in contract store",
-                )
-                .map(_.flatten)
-
-            storedContracts = contractInstances.map(c => c.contractId -> c).toMap
-            filteredContracts <- EitherT.fromEither[FutureUnlessShutdown](
-              contractsWithOverriddenRpId.zip(contractStates).traverseFilter {
-                case (contract, acsState) =>
-                  contractToAdd(
-                    repairContract = contract,
-                    acsState = acsState,
-                    storedContract = storedContracts.get(contract.contract.contractId),
-                  )
-              }
-            )
-
-            _ <- EitherT.fromEither[FutureUnlessShutdown](addContractsCheck(filteredContracts))
-
-            contractsByCreation = filteredContracts
-              .groupBy(_.contract.inst.createdAt)
-              .toList
-              .sortBy { case (ledgerCreateTime, _) => ledgerCreateTime.time }
-
-            _ <- PositiveInt
-              .create(contractsByCreation.size)
-              .fold(
-                _ =>
-                  EitherT.rightT[FutureUnlessShutdown, String](
-                    logger.info("No contract needs to be added")
-                  ),
-                groupCount => {
-                  val workflowIds = workflowIdsFromPrefix(workflowIdPrefix, groupCount)
-                  for {
-                    repair <- helpers.initRepairRequestAndVerifyPreconditions(
-                      synchronizer = synchronizer,
-                      repairCountersToAllocate = groupCount,
-                    )
-
-                    contractsToAdd = repair.timesOfRepair.zip(contractsByCreation)
-
-                    _ = logger.debug(s"Publishing ${filteredContracts.size} added contracts")
-
-                    contractsWithTimeOfChange = contractsToAdd.flatMap { case (tor, (_, cs)) =>
-                      cs.map(_ -> tor.toToc)
-                    }
-
-                    _ <- persistAddContracts(
-                      synchronizer,
-                      contractsToAdd = contractsWithTimeOfChange,
-                      storedContracts = storedContracts,
-                    )
-
-                    internalContractIdsForContractsAdded <-
-                      helpers.logOnFailureWithInfoLevel(
-                        contractStore.value.lookupBatchedInternalIdsNonReadThrough(
-                          contractsWithTimeOfChange.map(_._1.contract.contractId)
-                        ),
-                        "Unable to lookup internal contract ids in contract store",
-                      )
-                    contractsToAddWithInternalIds = checked(
-                      tryAddInternalContractIds(
-                        contractsToAdd,
-                        internalContractIdsForContractsAdded,
-                      )
-                    )
-
-                    _ <-
-                      if (nodeParameters.alphaMultiSynchronizerSupport) {
-                        // Publish added contracts via the indexer to the ledger api.
-                        publishAssignedEvents(
-                          synchronizer.psid.logical,
-                          recordTime = synchronizer.currentRecordTime,
-                          contractsToAddWithInternalIds,
-                          workflowIds,
-                          repairIndexer,
-                        )
-                      } else {
-                        // Commit and publish added contracts via the indexer to the ledger api.
-                        EitherT.right[String](
-                          writeContractsAddedEvents(
-                            synchronizer.psid.logical,
-                            contractsToAddWithInternalIds,
-                            workflowIds,
-                            repairIndexer,
-                          )
-                        )
-                      }
-                  } yield ()
-                },
-              )
-          } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("addContracts"))
-        },
-      )
-    }
-  }
-
   // This function requires that all contracts in contractsToAdd are already present in the
   // contract store and therefore their internal contract ids can be looked up.
   private def tryAddInternalContractIds(
@@ -366,7 +183,17 @@ final class RepairServiceContractsImporter(
       (timeOfRepair, (createdAt, batchWithInternalIds))
     }
 
-  def addContractsPekko(
+  /** Participant repair utility for manually adding contracts to a synchronizer in an offline
+    * fashion.
+    *
+    * For argument description:
+    * @see
+    *   [[com.digitalasset.canton.participant.admin.repair.RepairService#addContracts]]
+    *
+    * Note: Assigning the internal contract ids to the contracts requires that all the contracts are
+    * already persisted in the contract store.
+    */
+  private[repair] def addContracts(
       synchronizerId: SynchronizerId,
       contracts: PekkoSource[RepairContract, NotUsed],
       contractImportMode: ContractImportMode,
@@ -387,7 +214,7 @@ final class RepairServiceContractsImporter(
           res => FutureUnlessShutdown.pure(res),
         )
       )
-      .failOnShutdownToAbortException("addContractsPekko")
+      .failOnShutdownToAbortException("addContracts")
 
     val workflowProvider =
       Iterator
@@ -456,7 +283,6 @@ final class RepairServiceContractsImporter(
             s"Dropped $totalDropped contracts belonging to other synchronizers than $synchronizerId"
           )
         }
-//        ()
       })
     }
   }
@@ -851,20 +677,5 @@ object RepairServiceContractsImporter {
     def authenticationData: Bytes =
       contract.inst.authenticationData
   }
-
-  /** Generate workflow IDs from a given prefix. Allow to correlate updates with the repair
-    * operation
-    */
-  private def workflowIdsFromPrefix(
-      prefix: Option[String],
-      n: PositiveInt,
-  ): Iterator[Option[LfWorkflowId]] =
-    prefix.fold(
-      Iterator.continually(Option.empty[LfWorkflowId])
-    )(prefix =>
-      1.to(n.value)
-        .map(i => Some(LfWorkflowId.assertFromString(s"$prefix-$i-${n.value}")))
-        .iterator
-    )
 
 }

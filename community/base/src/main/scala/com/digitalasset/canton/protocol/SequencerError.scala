@@ -398,7 +398,7 @@ object SequencerError extends SequencerErrorGroup {
         currentTopologyTimestamp: CantonTimestamp,
     ) extends CantonBaseError.Impl(
           cause =
-            s"No ongoing LSU found on the synchronizer $synchronizerId as of $currentTopologyTimestamp"
+            s"No LSU announcement found on the synchronizer $synchronizerId as of $currentTopologyTimestamp"
         )
         with LsuSequencerError
   }

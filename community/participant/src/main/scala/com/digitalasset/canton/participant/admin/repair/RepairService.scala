@@ -77,7 +77,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *   Sequential execution queue on which repair actions must be run. This queue is shared with the
   *   CantonSyncService, which uses it for synchronizer connections. Sharing it ensures that we
   *   cannot connect to the synchronizer while a repair action is running and vice versa. It also
-  *   ensure only one repair runs at a time. This ensures concurrent activity among repair
+  *   ensures only one repair runs at a time. This ensures concurrent activity among repair
   *   operations does not corrupt state.
   */
 final class RepairService(
@@ -117,7 +117,6 @@ final class RepairService(
     syncPersistentStateLookup,
     packageMetadataView,
     contractStore,
-    aliasManager,
     parameters,
     helpers,
     contractValidator,
@@ -136,43 +135,26 @@ final class RepairService(
   /** Participant repair utility for manually adding contracts to a synchronizer in an offline
     * fashion.
     *
-    * @param synchronizerAlias
-    *   alias of synchronizer to add contracts to. The synchronizer needs to be configured, but
+    * @param synchronizerId
+    *   ID of the synchronizer to add contracts to. The synchronizer needs to be configured, but
     *   disconnected to prevent race conditions.
     * @param contracts
-    *   contracts to add. Relevant pieces of each contract: create-arguments (LfThinContractInst),
+    *   Contracts to add. Relevant pieces of each contract: create-arguments (LfThinContractInst),
     *   template-id (LfThinContractInst), contractId, ledgerCreateTime, salt (to be added to
     *   SerializableContract), and witnesses, SerializableContract.metadata is only validated, but
     *   otherwise ignored as stakeholder and signatories can be recomputed from contracts.
     * @param contractImportMode
-    *   Whether contract ids should be validated
+    *   Whether contract IDs should be validated.
     * @param packageMetadataSnapshot
-    *   Snapshot of the packages metadata
+    *   Snapshot of the package's metadata.
     * @param representativePackageIdOverride
-    *   Description for the override of the representative package ids
+    *   Description for the override of the representative package IDs.
     * @param workflowIdPrefix
     *   If present, each transaction generated for added contracts will have a workflow ID whose
     *   prefix is the one set and the suffix is a sequential number and the number of transactions
     *   generated as part of the addition (e.g. `import-foo-1-2`, `import-foo-2-2`)
     */
   def addContracts(
-      synchronizerAlias: SynchronizerAlias,
-      contracts: Seq[RepairContract],
-      contractImportMode: ContractImportMode,
-      packageMetadataSnapshot: PackageMetadata,
-      representativePackageIdOverride: RepresentativePackageIdOverride,
-      workflowIdPrefix: Option[String],
-  )(implicit traceContext: TraceContext): Either[String, Unit] = contractsImporter.addContracts(
-    synchronizerAlias = synchronizerAlias,
-    contracts = contracts,
-    contractImportMode = contractImportMode,
-    packageMetadataSnapshot = packageMetadataSnapshot,
-    representativePackageIdOverride = representativePackageIdOverride,
-    workflowIdPrefix = workflowIdPrefix,
-  )
-
-  // TODO(#30342) - Consolidate with addContracts, or separate it clearly
-  def addContractsPekko(
       synchronizerId: SynchronizerId,
       contracts: Source[RepairContract, NotUsed],
       contractImportMode: ContractImportMode,
@@ -180,7 +162,7 @@ final class RepairService(
       representativePackageIdOverride: RepresentativePackageIdOverride,
       workflowIdPrefix: Option[String],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    contractsImporter.addContractsPekko(
+    contractsImporter.addContracts(
       synchronizerId = synchronizerId,
       contracts = contracts,
       contractImportMode = contractImportMode,

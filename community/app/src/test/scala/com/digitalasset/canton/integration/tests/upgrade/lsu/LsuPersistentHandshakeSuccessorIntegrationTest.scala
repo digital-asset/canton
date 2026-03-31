@@ -171,20 +171,18 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
         participant1.stop()
         sequencer3.start()
 
+        val failedHandshakeError = "Validation failure: Failed handshake: "
+          + "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
           participant1.start(),
           logs => {
-            forExactly(1, logs)(
-              _.warningMessage should include(
-                "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
-              )
-            )
+            forExactly(1, logs)(_.warningMessage should include(failedHandshakeError))
 
-            // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
             forExactly(1, logs)(
               _.errorMessage should (include(
                 s"Failed to perform the synchronizer handshake with ${fixture.newPsid}"
-              ) and include("Trust threshold of 1 is no longer reachable"))
+              ) and include(failedHandshakeError))
             )
           },
         )

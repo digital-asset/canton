@@ -126,7 +126,13 @@ message SetTrafficPurchasedRequest {
 
 message SetTrafficPurchasedResponse {}
 
-message GetLsuTrafficControlStateRequest {}
+message GetLsuTrafficControlStateRequest {
+  // The timestamp at which exporting traffic state
+  // MUST be empty for regular LSUs.
+  // SHOULD be defined in a disaster recovery scenario when requesting the topology from a synchronizer
+  // without an announced LSU.
+  optional google.protobuf.Timestamp timestamp = 1;
+}
 
 message LsuTrafficState {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";

@@ -90,7 +90,7 @@ class GcpKms(
     } catch {
       case e: IOException =>
         Left(
-          s"failed to convert public key from PEM to DER format: ${ErrorUtil.messageWithStacktrace(e)}"
+          s"failed to convert public key from PEM to DER format: ${ThrowableUtil.messageWithStacktrace(e)}"
         )
     } finally {
       pemParser.close()
@@ -104,13 +104,13 @@ class GcpKms(
     err match {
       // we look for network failure errors to retry on
       case networkErr if errorMessagesToRetry.exists(networkErr.getMessage.contains(_)) =>
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
       // we retry on resource exceptions as well
       case resourceException: ResourceExhaustedException =>
         logger.debug(s"ResourceExhaustedException with retry: ${resourceException.isRetryable}")(
           TraceContext.empty
         )
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
       // CancelledException is a subclass of ApiException, so this case must come *before*
       // the generic `ApiException` clause to ensure CancelledExceptions are handled specifically.
       case cancelled: com.google.api.gax.rpc.CancelledException
@@ -118,7 +118,7 @@ class GcpKms(
         logger.debug("Got CancelledException(CANCELLED) — treating it as retryable")(
           TraceContext.empty
         )
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
       case internalErr: com.google.api.gax.rpc.InternalException
           if Option(internalErr.getMessage)
             .exists(errMsg => errorMessagesToRetry.exists(errMsg.contains(_))) =>
@@ -127,11 +127,11 @@ class GcpKms(
         )(
           TraceContext.empty
         )
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
       case apiErr: ApiException if apiErr.isRetryable =>
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), true)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), true)
       case _ =>
-        kmsErrorGen(ErrorUtil.messageWithStacktrace(err), false)
+        kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), false)
     }
 
   private def wrapKmsCall[A](
@@ -734,7 +734,7 @@ object GcpKms extends Kms.SupportedSchemes {
               loggerFactory,
             )
           }
-          .leftMap[KmsError](err => KmsCreateClientError(ErrorUtil.messageWithStacktrace(err)))
+          .leftMap[KmsError](err => KmsCreateClientError(ThrowableUtil.messageWithStacktrace(err)))
     } yield kms
 
 }

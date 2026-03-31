@@ -24,6 +24,7 @@ import com.digitalasset.canton.metrics.{
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,
+  KmsMetrics,
   SequencerClientHistograms,
   SequencerClientMetrics,
   TrafficConsumptionMetrics,
@@ -80,6 +81,8 @@ class SequencerMetrics(
       prefix,
       openTelemetryMetricsFactory,
     )
+
+  val kmsMetrics: KmsMetrics = new KmsMetrics(histograms.prefix, openTelemetryMetricsFactory)
 
   val eventBuffer: CacheMetrics =
     new CacheMetrics("events-fan-out-buffer", openTelemetryMetricsFactory)
@@ -386,6 +389,8 @@ class MediatorMetrics(
 
   val sequencerClient: SequencerClientMetrics =
     new SequencerClientMetrics(histograms.sequencerClient, openTelemetryMetricsFactory)
+
+  val kmsMetrics: KmsMetrics = new KmsMetrics(histograms.prefix, openTelemetryMetricsFactory)
 
   val outstanding: Gauge[Int] =
     openTelemetryMetricsFactory.gauge(

@@ -406,7 +406,7 @@
             "uid": "$DS"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "sum(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"})",
           "format": "time_series",
           "hide": false,
           "instant": true,
@@ -415,7 +415,7 @@
           "refId": "A"
         }
       ],
-      "title": "Latest Block Number",
+      "title": "Total Output Blocks",
       "type": "stat"
     },
     {
@@ -1403,7 +1403,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
+          "expr": "sum(irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
           "format": "time_series",
           "fullMetaSearch": false,
           "hide": false,
@@ -1422,7 +1422,7 @@
             "uid": "$DS"
           },
           "editorMode": "code",
-          "expr": "irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
+          "expr": "irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Empty blocks -",
           "range": true,

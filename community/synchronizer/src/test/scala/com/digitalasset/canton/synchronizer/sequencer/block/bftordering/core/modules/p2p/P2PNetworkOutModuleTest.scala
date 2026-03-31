@@ -776,7 +776,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       output,
       pruning,
     )
-    val outputModule =
+    val module =
       new P2PNetworkOutModule[ProgrammableUnitTestEnv, FakeP2PNetworkManager](
         selfNode,
         isGenesis,
@@ -787,7 +787,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         P2PNetworkOutModuleTest.this.loggerFactory,
         P2PNetworkOutModuleTest.this.timeouts,
       )(MetricsContext.Empty)
-    (outputModule, outputModule.p2pNetworkManager)
+    (module, module.p2pNetworkManager)
   }
 
   private def connect(
