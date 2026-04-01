@@ -1,0 +1,9 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module DA.External where
+
+type BytesHex = Text
+
+externalCall : Text -> Text -> BytesHex -> BytesHex -> Update BytesHex
+externalCall _extensionId _functionId _configHash input = pure input

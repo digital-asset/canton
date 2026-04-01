@@ -1382,8 +1382,6 @@ object CantonConfig {
       implicit val cantonEngineConfigReader: ConfigReader[CantonEngineConfig] = {
         implicit val engineLoggingConfigReader: ConfigReader[EngineLoggingConfig] =
           deriveReader[EngineLoggingConfig]
-        implicit val declaredFunctionReader: ConfigReader[ExtensionFunctionDeclaration] =
-          ExtensionFunctionDeclaration.reader
         implicit val extensionServiceConfigReader: ConfigReader[ExtensionServiceConfig] =
           ExtensionServiceConfig.reader
         implicit val engineExtensionsConfigReader: ConfigReader[EngineExtensionsConfig] =
@@ -2069,8 +2067,6 @@ object CantonConfig {
       implicit val cantonEngineConfigWriter: ConfigWriter[CantonEngineConfig] = {
         implicit val engineLoggingConfigWriter: ConfigWriter[EngineLoggingConfig] =
           deriveWriter[EngineLoggingConfig]
-        implicit val declaredFunctionWriter: ConfigWriter[ExtensionFunctionDeclaration] =
-          ExtensionFunctionDeclaration.writer
         implicit val extensionServiceConfigWriter: ConfigWriter[ExtensionServiceConfig] =
           ExtensionServiceConfig.writer
         implicit val engineExtensionsConfigWriter: ConfigWriter[EngineExtensionsConfig] =

@@ -34,7 +34,7 @@ sealed trait ErrorHandlingExternalCallIntegrationTest
     with MockServerSetup {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    externalCallEnvironmentDefinition(EnvironmentDefinition.P2S1M1_Manual)
       .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,

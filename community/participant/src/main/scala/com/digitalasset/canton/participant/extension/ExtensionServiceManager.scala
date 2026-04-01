@@ -38,6 +38,20 @@ class ExtensionServiceManager private[extension] (
   def this(
       extensionConfigs: Map[String, ExtensionServiceConfig],
       engineExtensionsConfig: EngineExtensionsConfig,
+      runtime: HttpExtensionClientRuntime,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext) =
+    this(
+      extensionConfigs = extensionConfigs,
+      engineExtensionsConfig = engineExtensionsConfig,
+      resourcesFactory = new JdkHttpExtensionClientResourcesFactory(loggerFactory),
+      runtime = runtime,
+      loggerFactory = loggerFactory,
+    )
+
+  def this(
+      extensionConfigs: Map[String, ExtensionServiceConfig],
+      engineExtensionsConfig: EngineExtensionsConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext) =
     this(

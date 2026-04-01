@@ -131,7 +131,8 @@ object DamlLfPlugin extends AutoPlugin {
         /* NOTE: this prints the entire strArg to log, which causes /scripts/ci/check-logs.sh to report it as error
       since this will mention the string "Exception". Currently, we whitelist any string that contains "running
       com.digitalasset.daml.lf.archive.testing.DamlLfEncoder" (see /project/errors-in-log-to-ignore.txt) */
-        (`daml-lf-encoder` / Compile / run).toTask(args)
+        (`daml-lf-encoder` / Compile / runMain)
+          .toTask(s" com.digitalasset.daml.lf.archive.testing.DamlLfEncoder$args")
       }
       .join
       .map(_ => outputDarFiles)

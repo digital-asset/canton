@@ -15,7 +15,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
 import scala.jdk.CollectionConverters.*
-import java.util.concurrent.atomic.AtomicInteger
 
 /** Integration tests for per-party external call consistency checking.
   *
@@ -39,7 +38,7 @@ sealed trait ExternalCallConsistencyIntegrationTest
     with MockServerSetup {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
+    externalCallEnvironmentDefinition(EnvironmentDefinition.P3S1M1_Manual)
       .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,

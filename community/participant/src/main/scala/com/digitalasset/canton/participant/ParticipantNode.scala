@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.extension.{
   ExtensionServiceExternalCallHandler,
   ExtensionServiceManager,
+  HttpExtensionClientRuntime,
 }
 import com.digitalasset.canton.participant.ledger.api.{
   AcsCommitmentPublicationPostProcessor,
@@ -679,6 +680,7 @@ class ParticipantNodeBootstrap(
           val manager = new ExtensionServiceManager(
             extensionConfigs = parameters.engine.extensions,
             engineExtensionsConfig = parameters.engine.extensionSettings,
+            runtime = HttpExtensionClientRuntime.fromClock(clock),
             loggerFactory = loggerFactory,
           )
           logger.info(

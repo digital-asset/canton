@@ -3,19 +3,30 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
   CommunityIntegrationTest,
   ConfigTransform,
+  EnvironmentDefinition,
   EnvironmentSetup,
 }
+import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
 import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
+import com.digitalasset.canton.participant.config.ExtensionServiceTokenEndpointConfig
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters as StaticSynchronizerParametersInternal
+import com.digitalasset.canton.time.{RemoteClock, SimClock}
+import com.digitalasset.canton.{SynchronizerAlias}
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 import com.digitalasset.canton.BaseTest
+
+import java.nio.file.Path
 
 /** Base trait for external call integration tests.
   *
@@ -30,6 +41,74 @@ import com.digitalasset.canton.BaseTest
   */
 trait ExternalCallIntegrationTestBase {
   self: CommunityIntegrationTest with EnvironmentSetup =>
+
+  /** Create an external-call test environment with a dev-protocol synchronizer.
+    *
+    * External-call test DARs currently require LF-dev support at submission time, so these tests
+    * must bootstrap the shared synchronizer at protocol version `dev` instead of relying on the
+    * default single-synchronizer fixtures.
+    */
+  protected def externalCallEnvironmentDefinition(
+      base: EnvironmentDefinition
+  ): EnvironmentDefinition =
+    base
+      .addConfigTransforms(ConfigTransforms.setProtocolVersion(ProtocolVersion.dev)*)
+      .addConfigTransform(
+        ConfigTransforms.updateSequencerConfig("sequencer1")(
+          _.focus(_.parameters.alphaVersionSupport).replace(true)
+        )
+      )
+      .addConfigTransform(
+        ConfigTransforms.updateMediatorConfig("mediator1")(
+          _.focus(_.parameters.alphaVersionSupport).replace(true)
+        )
+      )
+      .addConfigTransform(
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.engine.extensionSettings.validateExtensionsOnStartup)
+            .replace(false)
+            .focus(_.parameters.engine.extensionSettings.failOnExtensionValidationError)
+            .replace(false)
+        )
+      )
+      .withSetup { implicit env =>
+        import env.*
+
+        participants.local.start()
+        sequencers.local.foreach(_.start())
+        mediators.local.foreach(_.start())
+
+        val topologyChangeDelay = environment.clock match {
+          case _: RemoteClock | _: SimClock => NonNegativeFiniteDuration.Zero
+          case _ => StaticSynchronizerParametersInternal.defaultTopologyChangeDelay.toConfig
+        }
+        val staticSynchronizerParameters =
+          StaticSynchronizerParameters.defaults(
+            sequencer1.config.crypto,
+            ProtocolVersion.dev,
+            topologyChangeDelay = topologyChangeDelay,
+          )
+        val synchronizerId = bootstrap.synchronizer(
+          daName.unwrap,
+          sequencers = Seq(sequencer1),
+          mediators = Seq(mediator1),
+          synchronizerOwners = Seq(sequencer1),
+          synchronizerThreshold = PositiveInt.one,
+          staticSynchronizerParameters = staticSynchronizerParameters,
+        )
+        initializedSynchronizers.put(
+          SynchronizerAlias.tryCreate(daName.unwrap),
+          InitializedSynchronizer(
+            synchronizerId,
+            staticSynchronizerParameters.toInternal,
+            synchronizerOwners = Set(sequencer1),
+          ),
+        )
+
+        sequencers.local.foreach(_.health.wait_for_initialized())
+        mediators.local.foreach(_.health.wait_for_initialized())
+        participants.local.foreach(_.health.wait_for_initialized())
+      }
 
   /** Port for the mock external call server - each test class should use a unique port */
   protected lazy val mockServerPort: Int = MockExternalCallServer.findFreePort()
@@ -94,6 +173,40 @@ trait ExternalCallIntegrationTestBase {
     )
   }
 
+  /** Configuration transform to enable OAuth-backed HTTPS external call extension on a participant. */
+  protected def enableOAuthExternalCallExtension(
+      extensionId: String,
+      port: Int,
+      privateKeyFile: Path,
+      trustCollectionFile: Path,
+      participantName: String = "participant1",
+      tokenEndpointPath: String = "/oauth2/token",
+  ): ConfigTransform = {
+    val extensionConfig = ExtensionServiceConfig(
+      name = extensionId,
+      host = "localhost",
+      port = Port.tryCreate(port),
+      useTls = true,
+      trustCollectionFile = Some(trustCollectionFile),
+      auth = ExtensionServiceAuthConfig.OAuth(
+        tokenEndpoint = ExtensionServiceTokenEndpointConfig(
+          host = "localhost",
+          port = Port.tryCreate(port),
+          path = tokenEndpointPath,
+          trustCollectionFile = Some(trustCollectionFile),
+        ),
+        clientId = participantName,
+        privateKeyFile = privateKeyFile,
+        scope = Some("external.call.invoke"),
+      ),
+      requestTimeout = NonNegativeFiniteDuration.ofSeconds(10),
+      maxRetries = com.digitalasset.canton.config.RequireTypes.NonNegativeInt.tryCreate(2),
+    )
+    ConfigTransforms.updateParticipantConfig(participantName)(
+      _.focus(_.parameters.engine.extensions).modify(_ + (extensionId -> extensionConfig))
+    )
+  }
+
   /** Initialize the mock server.
     * Should be called in test setup (e.g., in withSetup block).
     */
@@ -108,6 +221,14 @@ trait ExternalCallIntegrationTestBase {
   protected def shutdownMockServer(): Unit = {
     if (mockServer != null) {
       mockServer.stop()
+    }
+  }
+
+  /** Helper to verify mock server received expected number of token calls */
+  protected def verifyTokenCallCount(expected: Int): Unit = {
+    val actual = mockServer.getTokenCallCount
+    withClue(s"Expected $expected token calls but got $actual") {
+      actual shouldBe expected
     }
   }
 

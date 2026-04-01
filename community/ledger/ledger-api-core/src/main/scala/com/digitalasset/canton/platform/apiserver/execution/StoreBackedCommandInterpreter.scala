@@ -79,6 +79,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -534,15 +535,35 @@ final class StoreBackedCommandInterpreter(
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
 
-        case ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
-          // During submission, external calls are handled by the engine via needExternalCall.
-          // During validation/enrichment, storedResult should be available.
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, storedResult, resume) =>
           storedResult match {
-            case Some(storedOutput) => resolveStep(resume(Right(storedOutput)))
+            case Some(storedOutput) =>
+              resolveStep(resume(Right(storedOutput)))
             case None =>
-              resolveStep(resume(Left(
-                com.digitalasset.daml.lf.engine.ExternalCallError(500, "External call result not available", None)
-              )))
+              externalCallHandler match {
+                case Some(handler) =>
+                  handler
+                    .handleExternalCall(
+                      extensionId = extensionId,
+                      functionId = functionId,
+                      configHash = configHash,
+                      input = input,
+                      mode = "submission",
+                    )
+                    .flatMap(callResult => resolveStep(resume(callResult)))
+                case None =>
+                  resolveStep(
+                    resume(
+                      Left(
+                        com.digitalasset.daml.lf.engine.ExternalCallError(
+                          500,
+                          "External call result not available",
+                          None,
+                        )
+                      )
+                    )
+                  )
+              }
           }
       }
 

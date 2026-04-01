@@ -37,6 +37,10 @@ import scala.language.postfixOps
 import scala.util.control.NonFatal
 
 object BuildCommon {
+  lazy val patchExternalCallTestDar = taskKey[File](
+    "Patch the ExternalCallTest DAR so DA.External.externalCall resolves to the LF builtin."
+  )
+
   lazy val publishToSonatypeEnabled =
     Def.settingKey[Boolean]("enable publishing to Sonatype repository")
 
@@ -833,6 +837,38 @@ object BuildCommon {
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
         Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
+        Test / patchExternalCallTestDar := {
+          val log = streams.value.log
+          val rawDar = (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar"
+          val classpathDar = (Test / classDirectory).value / rawDar.getName
+          val stablePackageResources =
+            (DamlProjects.`daml-lf-stable-packages` / Test / resources).value
+          val stableDependenciesDar = stablePackageResources.find(_.getName == "Simple-v2dev.dar").getOrElse(
+            sys.error("Cannot find Simple-v2dev.dar in daml-lf-stable-packages test resources")
+          )
+          val encoderClasspath = (DamlProjects.`daml-lf-encoder` / Compile / fullClasspath).value
+          val classpathString =
+            encoderClasspath.map(_.data.getAbsolutePath).mkString(File.pathSeparator)
+          (Test / damlBuild).value
+          runSeqCommand(
+            Seq(
+              "java",
+              "-cp",
+              classpathString,
+              "com.digitalasset.daml.lf.archive.testing.ExternalCallDarPatcher",
+              "--input",
+              rawDar.getAbsolutePath,
+              "--dependencies-dar",
+              stableDependenciesDar.getAbsolutePath,
+              "--output",
+              rawDar.getAbsolutePath,
+            ),
+            log,
+            Some("Failed to patch ExternalCallTest DAR to use the real EXTERNAL_CALL builtin"),
+          )
+          IO.copyFile(rawDar, classpathDar)
+          rawDar
+        },
         // Explicit set the Daml project dependency to common
         Test / damlDependencies := (`community-common` / Compile / damlBuild).value,
         Test / damlBuildOrder := Seq(
@@ -902,7 +938,7 @@ object BuildCommon {
           ),
           (
             (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
-            (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
+            (Test / patchExternalCallTestDar).value,
             "com.digitalasset.canton.externalcall",
           ),
         ),

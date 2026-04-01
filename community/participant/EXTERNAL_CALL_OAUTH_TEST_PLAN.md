@@ -49,8 +49,8 @@ from the agreed OAuth v1 contract.
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenResponseParserTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionOAuthTokenClientTest.scala`
 - `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
-- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryOAuthTest.scala`
-- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerOAuthTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/JdkHttpExtensionClientResourcesFactoryTest.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/ExtensionServiceExternalCallHandlerTest.scala`
 - `community/app/src/test/scala/com/digitalasset/canton/integration/tests/externalcall/OAuthExternalCallIntegrationTest.scala`
 
 The exact file split may change during implementation, but the checklist coverage below must remain
@@ -109,12 +109,12 @@ Do not add checklist items for:
 - [x] With `auth.type = oauth`, add `Authorization: Bearer <token>`.
 - [x] Forward `mode = submission` unchanged.
 - [x] Forward `mode = validation` unchanged.
-- [ ] Clamp the resource request timeout to `min(configured request-timeout, remaining budget)`.
+- [x] Clamp the resource request timeout to `min(configured request-timeout, remaining budget)`.
 
 ### 3. Token Request Construction
 
 - [x] Send token acquisition to the configured token-endpoint URI.
-- [ ] Use HTTP `POST` for token acquisition.
+- [x] Use HTTP `POST` for token acquisition.
 - [x] Use `Content-Type: application/x-www-form-urlencoded`.
 - [x] Attach a participant-generated request ID using the configured request ID header.
 - [x] Include `grant_type = client_credentials`.
@@ -158,44 +158,45 @@ Do not add checklist items for:
 - [x] Reacquire a token on the next business request after local expiry.
 - [x] Perform no proactive refresh before a business request needs a token.
 - [x] Perform no background refresh work.
-- [ ] Invalidate a cached token after a resource-server `401` only when that same token was sent.
-- [ ] Reacquire a fresh token after invalidation and replay the resource request exactly once.
-- [ ] Return success when the replay succeeds.
-- [ ] Return terminal `401` with the OAuth-specific rejection message when the replay also gets `401`.
-- [ ] Do not perform a second auth-local replay after the first replay is exhausted.
-- [ ] Trigger auth-local invalidate-and-replay only on resource `401`.
-- [ ] Preserve a newer cached token if a late `401` arrives for an older token value.
-- [ ] Store and reuse the freshly acquired token after a successful replay.
+- [x] Invalidate a cached token after a resource-server `401` only when that same token was sent.
+- [x] Reacquire a fresh token after invalidation and replay the resource request exactly once.
+- [x] Return success when the replay succeeds.
+- [x] Return terminal `401` with the OAuth-specific rejection message when the replay also gets `401`.
+- [x] Do not perform a second auth-local replay after the first replay is exhausted.
+- [x] Trigger auth-local invalidate-and-replay only on resource `401`.
+- [x] Preserve a newer cached token if a late `401` arrives for an older token value.
+- [x] Store and reuse the freshly acquired token after a successful replay.
 
 ### 7. Concurrency And Serialization
 
-- [ ] Serialize concurrent cold-cache misses so only one token acquisition is in flight per extension.
-- [ ] Make concurrent requests wait for an in-flight token acquisition instead of starting a second one.
-- [ ] Serialize concurrent refreshes caused by expiry.
-- [ ] Serialize concurrent refreshes caused by resource-server `401`.
-- [ ] Propagate a shared refresh success to all waiting requests.
-- [ ] Propagate a shared refresh failure to all waiting requests.
-- [ ] Allow a new acquisition attempt after a prior shared refresh failure has completed.
-- [ ] Keep token caches isolated per extension.
+- [x] Serialize concurrent cold-cache misses so only one token acquisition is in flight per extension.
+- [x] Make concurrent requests wait for an in-flight token acquisition instead of starting a second one.
+- [x] Serialize concurrent refreshes caused by expiry.
+- [x] Serialize concurrent refreshes caused by resource-server `401`.
+- [x] Propagate a shared refresh success to all waiting requests.
+- [x] Propagate a shared refresh failure to all waiting requests.
+- [x] Allow a new acquisition attempt after a prior shared refresh failure has completed.
+- [x] Keep token caches isolated per extension.
 
 ### 8. Retry And Deadline Model
 
-- [ ] Compute one absolute deadline per external-call operation from `max-total-timeout`.
-- [ ] Refuse to start token acquisition when the remaining budget is non-positive.
-- [ ] Refuse to start a resource request when the remaining budget is non-positive.
-- [ ] Count only outer retries against `maxRetries`.
-- [ ] Do not charge the auth-local replay against `maxRetries`.
+- [x] Compute one absolute deadline per external-call operation from `max-total-timeout`.
+- [x] Refuse to start token acquisition when the remaining budget is non-positive.
+- [x] Refuse to start a resource request when the remaining budget is non-positive.
+- [x] Count only outer retries against `maxRetries`.
+- [x] Do not charge the auth-local replay against `maxRetries`.
 - [x] Continue to classify resource `400`, `401`, `403`, and `404` as terminal.
-- [ ] Continue to classify resource `408`, `429`, `500`, `502`, `503`, and `504` as retryable.
-- [ ] Retry token-endpoint `408`, `429`, `500`, `502`, `503`, and `504` through the same outer retry loop.
-- [ ] Treat token-endpoint `400`, `401`, `403`, and `404` as terminal through the same outer retry loop.
-- [ ] Preserve `Retry-After` handling for retryable token-endpoint failures.
-- [ ] Preserve exponential backoff behavior for retryable failures without `Retry-After`.
-- [ ] Feed the replay result back into the normal outer retry classification after the one allowed replay.
-- [ ] Stop retrying when insufficient remaining time exists for another attempt.
-- [ ] Clamp token-request timeout to the remaining budget.
-- [ ] Keep `connect-timeout` fixed per client and do not dynamically clamp it per attempt.
-- [ ] Consume total budget across token acquisition, resource request, replay, and outer retries.
+- [x] Continue to classify resource `408`, `429`, `500`, `502`, `503`, and `504` as retryable.
+- [x] Retry token-endpoint `408`, `429`, `500`, `502`, `503`, and `504` through the same outer retry loop.
+- [x] Treat token-endpoint `400`, `401`, `403`, and `404` as terminal through the same outer retry loop.
+- [x] Preserve `Retry-After` handling for retryable token-endpoint failures.
+- [x] Preserve exponential backoff behavior for retryable failures without `Retry-After`.
+- [x] Feed the replay result back into the normal outer retry classification after the one allowed replay.
+- [x] Stop retrying when insufficient remaining time exists for another attempt.
+- [x] Clamp token-request timeout to the remaining budget.
+- [x] Clamp resource-request timeout to the remaining budget.
+- [x] Keep `connect-timeout` fixed per client and do not dynamically clamp it per attempt.
+- [x] Consume total budget across token acquisition, resource request, replay, and outer retries.
 
 ### 9. Error Mapping And Error Boundary
 
@@ -208,69 +209,82 @@ Do not add checklist items for:
 - [x] Map token-endpoint unexpected local exception to `500`.
 - [x] Map local signing failure to `500`.
 - [x] Map local key-loading failure to `500`.
-- [ ] Map local auth-material failure to `500`.
-- [ ] After replay exhaustion, map resource token rejection to `401` with message `Unauthorized - OAuth token rejected by resource server`.
+- [x] Map local auth-material failure to `500`.
+- [x] After replay exhaustion, map resource token rejection to `401` with message `Unauthorized - OAuth token rejected by resource server`.
 - [x] Return the outbound request ID of the interaction that produced the final error.
 - [x] Return `requestId = None` when failure occurs before any outbound HTTP interaction is sent.
-- [ ] Preserve the existing `ExtensionServiceExternalCallHandler` boundary of `statusCode`, `message`, and `requestId` only.
+- [x] Preserve the existing `ExtensionServiceExternalCallHandler` boundary of `statusCode`, `message`, and `requestId` only.
 
 ### 10. HTTP Client Ownership, TLS, And Material Initialization
 
-- [ ] With `auth.type = none`, create exactly one internal HTTP client/transport for resource requests.
-- [ ] With `auth.type = oauth`, create separate internal HTTP clients/transports for resource and token requests.
-- [ ] Keep HTTP client ownership per extension with no required cross-extension sharing.
-- [ ] Do not load signing key, trust material, or OAuth-specific HTTP client state during `HttpExtensionServiceClient` construction.
-- [ ] Do not fail client construction solely because OAuth key or trust material is invalid before the first OAuth use.
-- [ ] Load signing key, trust material, and OAuth-specific HTTP client state on demand rather than at construction time.
-- [ ] Reuse successfully initialized signing key material for the lifetime of the `HttpExtensionServiceClient`.
-- [ ] Reuse successfully initialized trust material for the lifetime of the `HttpExtensionServiceClient`.
-- [ ] Reuse successfully initialized OAuth-specific HTTP client state for the lifetime of the `HttpExtensionServiceClient`.
-- [ ] Do not re-read key material on every token request.
-- [ ] Do not re-read trust material on every token request.
-- [ ] Keep resource-endpoint and token-endpoint trust configuration independent.
-- [ ] Ensure top-level resource `tls-insecure` does not apply to the token endpoint.
-- [ ] Use endpoint-specific custom trust material when configured.
-- [ ] Fall back to the JVM default trust store when endpoint-specific trust material is omitted.
+- [x] With `auth.type = none`, create exactly one internal HTTP client/transport for resource requests.
+- [x] With `auth.type = oauth`, create separate internal HTTP clients/transports for resource and token requests.
+- [x] Keep HTTP client ownership per extension with no required cross-extension sharing.
+- [x] Do not load signing key during `HttpExtensionServiceClient` construction.
+- [x] Do not load trust material during `HttpExtensionServiceClient` construction.
+- [x] Do not load OAuth-specific HTTP client state during `HttpExtensionServiceClient` construction.
+- [x] Do not fail client construction solely because the OAuth signing key is invalid before the first OAuth use.
+- [x] Do not fail client construction solely because OAuth trust material is invalid before the first OAuth use.
+- [x] Do not fail client construction solely because OAuth-specific HTTP client state is invalid before the first OAuth use.
+- [x] Load signing key on demand rather than at construction time.
+- [x] Load trust material on demand rather than at construction time.
+- [x] Load OAuth-specific HTTP client state on demand rather than at construction time.
+- [x] Reuse successfully initialized signing key material for the lifetime of the `HttpExtensionServiceClient`.
+- [x] Reuse successfully initialized trust material for the lifetime of the `HttpExtensionServiceClient`.
+- [x] Reuse successfully initialized OAuth-specific HTTP client state for the lifetime of the `HttpExtensionServiceClient`.
+- [x] Do not re-read key material on every token request.
+- [x] Do not re-read trust material on every token request.
+- [x] Keep resource-endpoint and token-endpoint `tls-insecure` configuration independent.
+- [x] Keep resource-endpoint and token-endpoint custom trust-material configuration independent.
+- [x] Ensure top-level resource `tls-insecure` does not apply to the token endpoint.
+- [x] Use endpoint-specific custom trust material when configured.
+- [x] Fall back to the JVM default trust store when endpoint-specific trust material is omitted.
 - [ ] Treat insecure or trust-all TLS as test-only scaffolding rather than the canonical contract.
 
 ### 11. Logging And Secret Redaction
 
-- [ ] Log token acquisition start.
-- [ ] Log token acquisition success.
-- [ ] Log token acquisition failure.
-- [ ] Log cache reuse.
-- [ ] Log token reacquisition.
-- [ ] Log token invalidation after resource-server `401`.
-- [ ] Log final external-call failure classification.
-- [ ] Do not log access tokens.
-- [ ] Do not log client assertions.
-- [ ] Do not log private key material.
-- [ ] Do not log token-endpoint request bodies.
+- [x] Log token acquisition start.
+- [x] Log token acquisition success.
+- [x] Log token acquisition failure.
+- [x] Log cache reuse.
+- [x] Log token reacquisition.
+- [x] Log token invalidation after resource-server `401`.
+- [x] Log final external-call failure classification.
+- [x] Do not log access tokens.
+- [x] Do not log client assertions.
+- [x] Do not log private key material.
+- [x] Do not log token-endpoint request bodies.
 
 ### 12. Integration Coverage
 
-- [ ] Keep existing `auth.type = none` behavior covered separately from OAuth-specific behavior.
+- [x] Keep existing `auth.type = none` behavior covered separately from OAuth-specific behavior.
 - [ ] Keep existing non-OAuth `401` no-replay behavior covered separately from OAuth-specific replay behavior.
-- [ ] Cover end-to-end OAuth success over HTTPS for both the resource endpoint and the token endpoint.
-- [ ] Cover cached-token reuse across multiple business requests.
-- [ ] Cover expiry-driven reacquisition on the next business request.
-- [ ] Cover single `401` refresh-and-replay.
-- [ ] Cover submission and validation producing the same successful business response under OAuth.
+- [x] Cover end-to-end OAuth success over HTTPS for both the resource endpoint and the token endpoint.
+- [x] Cover cached-token reuse across multiple business requests.
+- [x] Cover expiry-driven reacquisition on the next business request.
+- [x] Cover single `401` refresh-and-replay.
+- [x] Cover submission and validation producing the same successful business response under OAuth.
 - [ ] Cover token-endpoint retryable failure followed by success through the outer retry loop.
 - [ ] Cover token-endpoint terminal failure surfacing the preserved HTTP status.
-- [ ] Cover malformed token response surfacing `502`.
+- [x] Cover malformed token response surfacing `502`.
 - [ ] Cover local key-loading failure before outbound HTTP with `requestId = None`.
 - [ ] Cover local trust-material failure before outbound HTTP with `requestId = None`.
 - [ ] Preserve participant startup with OAuth configured even when OAuth key or trust material is invalid until the first OAuth call path is exercised.
 - [ ] Do not send token-endpoint HTTP interactions during participant startup or extension-manager construction.
 - [ ] Preserve existing startup validation semantics without introducing OAuth-specific startup gating.
 - [ ] Cover test-only insecure TLS scaffolding when the integration harness relies on it.
-- [ ] Cover explicit trust-material configuration when the integration harness relies on custom test trust roots.
+- [x] Cover explicit trust-material configuration when the integration harness relies on custom test trust roots.
 - [ ] Preserve `echoMode` short-circuit behavior without token or resource HTTP calls.
-- [ ] Extend the mock server and harness to serve both `/api/v1/external-call` and the configured token-endpoint path.
+- [x] Extend the mock server and harness to serve both `/api/v1/external-call` and the configured token-endpoint path.
 
 ### 13. Regression Additions
 
+- [x] Keep concurrent OAuth test transports thread-safe so shared refresh and acquisition tests measure client behavior rather than fixture races.
+- [x] Bootstrap the shared external-call integration synchronizer with `topologyChangeDelay = 0` under simulated or remote clocks so participants become active before the test connects them.
+- [x] Wire the ledger-api submission path through `ExternalCallHandler` so submission can materialize external-call results before replay.
+- [x] Keep OAuth integration expectations aligned with submission-plus-validation execution, which produces two resource calls per business request on the confirming participant.
+- [x] Drive OAuth integration expiry and deadline decisions from the participant clock rather than `System.currentTimeMillis()` so sim-clock advancement exercises the real OAuth cache path.
+- [x] Isolate shared-environment OAuth integration slices by extension ID so warm token caches from earlier examples do not leak into later per-slice assertions.
 - [ ] Add a new checkbox item here for each OAuth-specific bug discovered during implementation.
 
 ## Implementation Notes
@@ -284,6 +298,41 @@ Do not add checklist items for:
 - 2026-03-30: `HttpExtensionOAuthTokenResponseParserTest` covers the implemented token-response parsing items in section 5, including malformed-response `502` mapping and opaque-token handling. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenResponseParserTest'`, which first failed with `not found: type HttpExtensionOAuthTokenResponseParser`, then exposed one intermediate red case where the parser was still too permissive for `expires_in`, and finally passed after tightening field-shape validation.
 - 2026-03-30: `HttpExtensionOAuthTokenClientTest` covers the implemented acquisition helper behavior and section 9 token-endpoint error mapping items for preserved HTTP status codes, transport exception mapping, local signing/key-loading failures, and `requestId` presence or absence depending on whether any outbound HTTP interaction occurred. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenClientTest'`, which first failed with `not found: type HttpExtensionOAuthTokenClient`, then passed after adding the client.
 - 2026-03-30: `HttpExtensionServiceClientOAuthTest` covers the implemented section 6 token-cache behavior for first-call acquisition, unexpired cache reuse, expiry-driven reacquisition, and the absence of proactive or background refresh work. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, which first failed because `HttpExtensionClientResources` and `HttpExtensionServiceClient` did not yet expose the OAuth seams needed for the slice, then passed after adding optional token transport support and an OAuth token cache to `HttpExtensionServiceClient`.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the implemented section 6 and section 9 replay behavior for single `401` invalidate-refresh-replay, replay exhaustion with the OAuth-specific terminal `401` message, and reuse of the freshly acquired token after a successful replay. The explicit red-green command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the new examples first failed against the pre-replay service-client path, then passed after adding the auth-local replay flow.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the implemented section 8 deadline behavior for clamping token and resource request timeouts to the remaining outer budget and refusing to start the resource request once token acquisition has exhausted that budget. The explicit red-green command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: after fixing one missing `Duration` import in the test, the new examples failed against the pre-deadline service-client path and then passed after threading the absolute deadline through auth resolution and resource sends.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the implemented section 9 and section 10 behavior for lazy OAuth-specific HTTP client initialization and local auth-material failure mapping. The explicit red-green command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the first new example proved client construction stayed lazy, the second initially failed because the lazy initialization exception escaped the future, and it passed after mapping that pre-outbound failure to `500` with `requestId = None`. The error-boundary example fixes `maxRetries = 0` so it isolates the mapping instead of the retry policy.
+- 2026-04-01: `JdkHttpExtensionClientResourcesFactoryTest` now covers the implemented section 10 transport-ownership split for `auth.type = none` versus `auth.type = oauth`. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest'`: the new OAuth example first failed because `tokenTransport` was still `None`, then passed after `JdkHttpExtensionClientResourcesFactory` began creating a distinct token transport for OAuth configs.
+- 2026-04-01: `JdkHttpExtensionClientResourcesFactoryTest` now also covers the remaining section 3 HTTP-method item by sending a real token-transport request to the local HTTPS server and asserting that the server observed `POST`. The explicit TDD command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest'`, and this slice went green immediately without production changes because `JdkHttpExtensionClientTransport` already sends requests with `POST`.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also contains representative token-endpoint outer-loop examples for a retryable `503` with `Retry-After` and a terminal `400` that must not send the resource request. The explicit command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes; the current implementation already satisfied these representative cases. The broader status-family checklist items in section 8 remain open until parameterized coverage is expanded beyond the `503` and `400` examples.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also contains representative section 6 and section 8 examples for non-`401` no-replay behavior, auth-local replay succeeding with `maxRetries = 0`, replaying into a retryable `503` that flows back through the outer retry loop, and token-endpoint `503` retry using exponential backoff when `Retry-After` is absent. The explicit command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice also went green immediately without production changes; the current implementation already satisfied these representative cases.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the implemented cold-cache concurrency behavior in section 7. The explicit red-green command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the first red exposed one order-sensitive success assertion plus the real bug where a waiting caller started a second token acquisition after the first failed, then the suite passed after switching `HttpExtensionServiceClient` to a shared in-flight token-acquisition promise. This slice closes only the cold-cache concurrency items; the refresh-specific concurrency items remain open until the same mechanism is exercised through expiry-driven and `401`-driven refresh paths.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the refresh-specific concurrency behavior in section 7 for expiry-driven shared refresh success, `401`-driven shared refresh success, `401`-driven shared refresh failure, and a later retry after that shared failure. The explicit command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes because the shared in-flight token-acquisition promise added in the previous slice already generalized to refresh paths.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining section 6 `401` invalidation guards: only invalidating when the rejected token is the one that was sent, and preserving a newer cached token when a late `401` arrives for an older token value. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest -- -z "preserve a newer cached token"'`: the first red was a test-compile failure because the helper factory still required `FakeTransport`, then a second red exposed thread-unsafe request-ID scaffolding in the concurrent test helper. The slice went green after generalizing the test helper transport type, making `FakeRuntime` request-ID access thread-safe, and tightening the new late-`401` example back to a strict six-request fixture. No production change was required for the OAuth client itself. The broader suite was then reverified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers per-extension cache isolation in section 7 by driving two OAuth clients against shared scripted transports and proving that each extension acquires and reuses its own token. The explicit command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest -- -z "keep token caches isolated per extension"'`, and this slice went green immediately without production changes. During the required full-suite rerun, an existing concurrent-`401` refresh example became red because `FakeTransport` was not thread-safe; fixing that test-harness race required synchronizing `FakeTransport.send`. The full suite then passed with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`.
+- 2026-04-01: `ExtensionServiceExternalCallHandlerTest` now also covers the section 9 boundary contract that the external-call handler preserves only `statusCode`, `message`, and `requestId` when mapping extension errors into the engine-facing `ExternalCallError`, even when the source error is `ExtensionCallErrorWithRetry`. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`: the first red was a missing `FutureUnlessShutdown` import in the new test helper override, and the suite then went green immediately after adding that import with no production changes.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining token-endpoint status-family items in section 8: terminal `401`, `403`, and `404` responses, and retryable `408`, `429`, `500`, `502`, `503`, and `504` responses flowing through the same outer retry loop. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the first red was test-side, where the expected token-endpoint `404` and `403` messages were still using resource-endpoint wording, and the required rerun also exposed that synchronizing the entire fake transport `send` path was too coarse because some concurrency hooks intentionally block inside `onSend`. The slice went green after correcting those test expectations and narrowing `FakeTransport` synchronization to just the mutable queue operations. No production change was required for the OAuth client itself.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining resource retryable-status item in section 8 by parameterizing OAuth calls over resource `408`, `429`, `500`, `502`, `503`, and `504`, asserting one outer retry and cached-token reuse on the second attempt. The same rerun also reconfirmed the existing timeout-clamping examples, which closes the section 2 resource-request timeout clamp item. The explicit command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining section 8 item requiring the client to refuse token acquisition when the outer deadline is already exhausted. The explicit command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice also went green immediately without production changes: with `maxTotalTimeout = 0`, the client returns `504` and sends neither token nor resource HTTP.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining retry-budget items in section 8: auth-local `401` replays do not consume the outer `maxRetries` budget, and the client must stop retrying once the remaining budget cannot support another full outer attempt. The explicit TDD command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the new `maxRetries` example went green immediately, while the insufficient-budget example first failed because the client still retried with `0ms` backoff. The fix was in [HttpExtensionServiceClient.scala](/Users/al/Projects/angelo/zenith/full-stack/canton/community/participant/src/main/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClient.scala), where the outer loop now checks for enough time for another attempt before scheduling a retry. Reverified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` and `JdkHttpExtensionClientResourcesFactoryTest` now cover the remaining section 8 deadline-model items: one absolute deadline is carried across token acquisition, `401` refresh, and replay; the remaining budget is consumed across token acquisition, replay, and the outer retry backoff; and `connect-timeout` stays fixed on both resource and token clients rather than being attempt-clamped. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest'`, and this slice went green immediately without production changes.
+- 2026-04-01: Section 10 originally grouped signing-key and trust-material initialization into shared checklist items. That was too coarse once implementation reached the signing-key lifecycle slice, so those items are now split into separate signing-key and trust-material behaviors. The split is intentional and required by the maintenance rule that materially different behaviors stay independently checkable.
+- 2026-04-01: `HttpExtensionOAuthClientAssertionFactoryTest` and `HttpExtensionServiceClientOAuthTest` now cover the signing-key lifecycle items in section 10: the service client does not touch the signing key during construction, missing keys fail only on the first OAuth call before any outbound HTTP, and a successfully loaded key is reused across later token reacquisition without rereading the key file. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthClientAssertionFactoryTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes.
+- 2026-04-01: Section 10 also originally collapsed all resource/token trust behavior into one broad “trust configuration independence” item. That is now split so the already-covered `tls-insecure` independence can be tracked separately from the still-open custom trust-material implementation.
+- 2026-04-01: `JdkHttpExtensionClientResourcesFactoryTest` now also covers the remaining transport-ownership and `tls-insecure` independence items in section 10: each extension gets its own resource/token transports, resource and token `tls-insecure` settings are independent, and top-level resource `tls-insecure` does not bleed into the token client. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest'`, and this slice went green immediately without production changes.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the first log-redaction items in section 11 by capturing the full DEBUG-and-above log stream for a successful OAuth call and asserting that it does not contain the opaque access token, the client assertion, or token-endpoint request-body fields such as `grant_type` or `client_assertion`. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes. The private-key-material log item remains open because it needs a stronger dedicated proof than this generic redaction check.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now covers the remaining section 11 logging items: token acquisition start, success, failure, cache reuse, expiry-driven reacquisition, `401`-driven invalidation, final failure classification, and private-key-material redaction during key-loading failure. The explicit TDD command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the first red exposed missing OAuth lifecycle log messages, a follow-up rerun exposed one compile issue where the new invalidation log needed an implicit `TraceContext`, and the slice went green after adding narrow OAuth token-state logging to `HttpExtensionServiceClient`.
+- 2026-04-01: `JdkHttpExtensionClientResourcesFactoryTest` now also covers the remaining section 10 custom-trust behavior: resource and token transports can each use endpoint-specific trust material, the two trust settings remain independent under OAuth, and omitting custom trust falls back to the JVM default trust path rather than silently inheriting the other endpoint's trust settings. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest'`: the first red was the expected `SSLHandshakeException` on the new positive custom-trust examples because the JDK client builder still ignored `trust-collection-file`, and the suite went green after `JdkHttpExtensionClientResourcesFactory` started propagating endpoint-specific trust files into a custom SSL context built from the configured PEM trust collection.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining section 10 construction-time trust-lifecycle items: invalid OAuth trust files do not fail `HttpExtensionServiceClient` construction, trust loading is deferred until the first OAuth call path, and that first-use failure is still mapped before any outbound HTTP with `requestId = None`. The explicit TDD command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, and this slice went green immediately without production changes because the existing lazy `resources` path already satisfied the new trust-laziness example.
+- 2026-04-01: `HttpExtensionServiceClientOAuthTest` now also covers the remaining section 10 trust-lifetime items by running a real HTTPS token/resource server with custom trust files, deleting those trust files after the first successful call, expiring the token locally, and proving the second call still reacquires a token and reaches the resource server. The explicit TDD command remained `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`: the first red was test-side only because an inner helper `case class` triggered a Scala warning under `-Werror`, and the slice went green after changing that helper to a plain class. No production change was required; the existing lazy resources and long-lived JDK transports already satisfied the trust-reuse behavior.
+- 2026-04-02: Reworked the external-call integration harness in `ExternalCallIntegrationTestBase` so section 12 can run on the shared dev-protocol fixtures. The blocker-resolution red-green driver for the shared harness was `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 -- -z "execute a single external call and return the result"'`. It first failed with `FAILED_PRECONDITION/PARTICIPANT_IS_NOT_ACTIVE`, which was fixed by bootstrapping the synchronizer manually with `topologyChangeDelay = 0` under `SimClock`/`RemoteClock`, plus disabling extension startup validation in the harness so startup does not depend on extension reachability.
+- 2026-04-02: The same basic integration red-green driver then exposed a product bug in the ledger-api submission path: submission failed with `External call result not available (status=500, extensionId=test-ext, functionId=echo)` because `StoreBackedCommandInterpreter` was not wired to `ExternalCallHandler`. The minimal production fix threaded an optional `ExternalCallHandler` through `LedgerApiServer`, `ApiServiceOwner`, `ApiServices`, and `StoreBackedCommandInterpreter` so submission can materialize the external-call result before replay. The same targeted command then passed.
+- 2026-04-02: `OAuthExternalCallIntegrationTest` now covers HTTPS success for both resource and token endpoints, cached-token reuse across business requests, explicit custom-trust configuration, and successful submission-plus-validation execution under OAuth. The explicit TDD command was `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`: after the shared harness and submission-path fixes above, the only remaining red was test-side because the resource call count must account for both submission and validation execution on the confirming participant. The suite went green after correcting that expectation from `2` to `4` resource calls while keeping `verifyTokenCallCount(1)`.
+- 2026-04-02: Reverified the touched external-call integration suites with `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, which passed with 6 tests across 2 suites.
+- 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers expiry-driven token reacquisition on the next business request. The explicit TDD command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`: the first red was test-side because `SharedEnvironment` retained the previous example's warm cache, which made the new slice start with `0` token calls. After isolating the slice on its own extension ID, the second red exposed the real product bug: advancing the integration sim clock still left the token cache warm because the participant path was using `System.currentTimeMillis()` instead of the participant clock. The slice went green after wiring `ParticipantNode` to construct `ExtensionServiceManager` with a clock-backed `HttpExtensionClientRuntime`.
+- 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers a single resource-server `401` causing one token refresh and one exact replay. The explicit command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, and this slice went green immediately once it was isolated on its own extension ID: one business request produced `2` token calls and `3` resource calls (`401`, replay success, validation success).
+- 2026-04-02: Reverified the touched external-call integration suites again with `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, which passed with 8 tests across 2 suites.
+- 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers malformed token responses surfacing as final `502` failures before any resource request is sent. The explicit TDD command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`: every red in this slice was test-side, first because `CommandFailure.toString` drops the detailed engine error, then because `LogEntry.commandFailureMessage` only applies to the environment-level error entry and not the OAuth WARN entries emitted by `HttpExtensionServiceClient`. The slice went green after asserting against the rendered warning/error log text instead. The final observable contract is: `3` token-endpoint calls (`maxRetries = 2`), `0` resource calls, and surfaced log/error text containing both `Malformed OAuth token response` and `status=502`.
+- 2026-04-02: Reverified the touched external-call integration suites once more with `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, which passed with 9 tests across 2 suites.
 - 2026-03-30: `HttpExtensionServiceClientTest` covers the currently verified auth-none `401` behavior and terminal classification for resource `400`, `401`, `403`, and `404`.
 - 2026-03-30: Reverified the touched OAuth helper and service-client suites, plus the existing auth-none `HttpExtensionServiceClientTest`, with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenRequestBuilderTest com.digitalasset.canton.participant.extension.HttpExtensionOAuthClientAssertionFactoryTest com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenResponseParserTest com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenClientTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`.
 - 2026-03-30: Verified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.config.ExtensionServiceConfigOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionRequestBuilderOAuthTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.ExtensionServiceManagerTest com.digitalasset.canton.participant.extension.JdkHttpExtensionClientResourcesFactoryTest com.digitalasset.canton.participant.extension.ExtensionServiceExternalCallHandlerTest'`.

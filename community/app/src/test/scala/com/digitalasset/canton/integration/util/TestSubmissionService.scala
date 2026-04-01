@@ -61,6 +61,7 @@ import com.digitalasset.daml.lf.engine.{
   ResultError,
   ResultInterruption,
   ResultNeedContract,
+  ResultNeedExternalCall,
   ResultNeedKey,
   ResultNeedPackage,
   ResultPrefetch,
@@ -384,6 +385,21 @@ class TestSubmissionService(
 
       case ResultInterruption(continue, _) =>
         resolve(iterateOverInterrupts(continue))
+
+      case ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
+        storedResult match {
+          case Some(storedOutput) => resolve(resume(Right(storedOutput)))
+          case None =>
+            resolve(
+              resume(Left(
+                com.digitalasset.daml.lf.engine.ExternalCallError(
+                  500,
+                  "External call result not available",
+                  None,
+                )
+              ))
+            )
+        }
 
       case ResultPrefetch(_, _, resume) => resolve(resume())
     }

@@ -30,6 +30,7 @@ import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandProgressTracker,
   DynamicSynchronizerParameterGetter,
+  ExternalCallHandler,
 }
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
@@ -106,6 +107,7 @@ object ApiServiceOwner {
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
       contractAuthenticator: ContractAuthenticatorFn,
+      externalCallHandler: Option[ExternalCallHandler] = None,
       dynParamGetter: DynamicSynchronizerParameterGetter,
       interactiveSubmissionServiceConfig: InteractiveSubmissionServiceConfig,
       interactiveSubmissionEnricher: InteractiveSubmissionEnricher,
@@ -200,6 +202,7 @@ object ApiServiceOwner {
         userManagementServiceConfig = userManagement,
         partyManagementServiceConfig = partyManagementServiceConfig,
         packageServiceConfig = packageServiceConfig,
+        externalCallHandler = externalCallHandler,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractAuthenticator,

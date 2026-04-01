@@ -40,7 +40,10 @@ class HttpExtensionOAuthClientAssertionFactoryTest extends AnyWordSpec with Base
     file
   }
 
-  private def makeConfig(keyId: Option[String] = Some("participant1-key")): ExtensionServiceConfig =
+  private def makeConfig(
+      keyId: Option[String] = Some("participant1-key"),
+      privateKeyPath: Path = privateKeyFile,
+  ): ExtensionServiceConfig =
     ExtensionServiceConfig(
       name = "test-ext",
       host = "resource.example.internal",
@@ -53,7 +56,7 @@ class HttpExtensionOAuthClientAssertionFactoryTest extends AnyWordSpec with Base
           path = "/oauth2/token",
         ),
         clientId = "participant1",
-        privateKeyFile = privateKeyFile,
+        privateKeyFile = privateKeyPath,
         keyId = keyId,
       ),
     )
@@ -127,6 +130,31 @@ class HttpExtensionOAuthClientAssertionFactoryTest extends AnyWordSpec with Base
       val (_, secondPayload) = parseAssertionJson(second)
       firstPayload.hcursor.get[String]("jti").valueOrFail("first jti") shouldBe "jti-1"
       secondPayload.hcursor.get[String]("jti").valueOrFail("second jti") shouldBe "jti-2"
+    }
+
+    "reuse the loaded signing key across successive assertions without rereading the key file" in {
+      val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+      val jtis = mutable.Queue("jti-1", "jti-2")
+      val ephemeralPrivateKeyFile = Files.createTempFile("external-call-oauth-client-ephemeral", ".der")
+      Files.write(ephemeralPrivateKeyFile, rsaKeyPair.getPrivate.getEncoded)
+      ephemeralPrivateKeyFile.toFile.deleteOnExit()
+
+      val factory = new HttpExtensionOAuthClientAssertionFactory(
+        config = makeConfig(privateKeyPath = ephemeralPrivateKeyFile),
+        nowMillis = () => now.toEpochMilli,
+        newJti = () => jtis.dequeue(),
+      )
+
+      val first = factory.buildClientAssertion()
+      Files.delete(ephemeralPrivateKeyFile)
+      val second = factory.buildClientAssertion()
+
+      RSA256Verifier(rsaPublicKey).valueOrFail("create verifier").verify(Jwt(first)).valueOrFail(
+        "verify first assertion"
+      )
+      RSA256Verifier(rsaPublicKey).valueOrFail("create verifier").verify(Jwt(second)).valueOrFail(
+        "verify second assertion"
+      )
     }
   }
 }

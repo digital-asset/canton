@@ -34,7 +34,7 @@ sealed trait MultiViewExternalCallIntegrationTest
     with MockServerSetup {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
+    externalCallEnvironmentDefinition(EnvironmentDefinition.P3S1M1_Manual)
       .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,

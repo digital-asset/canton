@@ -3,14 +3,23 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer, HttpsConfigurator, HttpsServer}
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths}
+import java.security.cert.{CertificateFactory, X509Certificate}
+import java.security.spec.PKCS8EncodedKeySpec
+import java.security.{KeyFactory, KeyStore, SecureRandom}
+import java.util.Base64
 import java.util.concurrent.Executors
+import javax.net.ssl.{KeyManagerFactory, SSLContext}
+import scala.jdk.CollectionConverters.*
 import scala.collection.concurrent.TrieMap
+import scala.util.Using
 import scala.util.{Failure, Success, Try}
 
 /** Request data for external call handlers */
@@ -21,6 +30,15 @@ final case class ExternalCallRequest(
     input: Array[Byte],
     mode: String, // "submission" or "validation"
     participantId: Option[String],
+    requestId: Option[String],
+)
+
+/** Request data for OAuth token-endpoint handlers */
+final case class TokenEndpointRequest(
+    method: String,
+    path: String,
+    body: String,
+    headers: Map[String, Seq[String]],
     requestId: Option[String],
 )
 
@@ -46,6 +64,8 @@ object ExternalCallResponse {
 class MockExternalCallServer(
     port: Int,
     override protected val loggerFactory: NamedLoggerFactory,
+    useTls: Boolean = false,
+    tokenEndpointPath: Option[String] = None,
 ) extends NamedLogging {
 
   // Implicit trace context for logging in test infrastructure
@@ -55,6 +75,11 @@ class MockExternalCallServer(
   private val handlers = TrieMap[String, ExternalCallRequest => ExternalCallResponse]()
   private val callCounts = TrieMap[String, Int]().withDefaultValue(0)
   private val lastRequests = TrieMap[String, ExternalCallRequest]()
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var tokenHandler: Option[TokenEndpointRequest => ExternalCallResponse] = None
+  private val tokenCallCount = new java.util.concurrent.atomic.AtomicInteger(0)
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var lastTokenRequest: Option[TokenEndpointRequest] = None
 
   /** Set a handler for a specific function ID */
   def setHandler(functionId: String)(handler: ExternalCallRequest => ExternalCallResponse): Unit = {
@@ -94,13 +119,58 @@ class MockExternalCallServer(
     }
   }
 
+  /** Set a handler for the OAuth token endpoint */
+  def setTokenHandler(handler: TokenEndpointRequest => ExternalCallResponse): Unit = {
+    tokenHandler = Some(handler)
+    logger.debug("Set token handler")
+  }
+
+  /** Set a token handler that returns a successful OAuth access token response */
+  def setTokenSuccessHandler(
+      accessToken: String,
+      expiresIn: Long = 120L,
+      tokenType: String = "Bearer",
+  ): Unit =
+    setTokenHandler { _ =>
+      ExternalCallResponse(
+        statusCode = 200,
+        body =
+          s"""{"access_token":"$accessToken","token_type":"$tokenType","expires_in":$expiresIn}"""
+            .getBytes(StandardCharsets.UTF_8),
+        headers = Map("Content-Type" -> "application/json"),
+      )
+    }
+
+  /** Set a token handler that returns a fixed error response */
+  def setTokenErrorHandler(
+      statusCode: Int,
+      message: String,
+      headers: Map[String, String] = Map.empty,
+  ): Unit =
+    setTokenHandler { _ =>
+      ExternalCallResponse(
+        statusCode = statusCode,
+        body = message.getBytes(StandardCharsets.UTF_8),
+        headers = headers,
+      )
+    }
+
   /** Start the mock server */
   def start(): Unit = {
-    server = HttpServer.create(new InetSocketAddress(port), 0)
+    server =
+      if (useTls) {
+        val httpsServer = HttpsServer.create(new InetSocketAddress(port), 0)
+        httpsServer.setHttpsConfigurator(new HttpsConfigurator(buildServerSslContext()))
+        httpsServer
+      } else {
+        HttpServer.create(new InetSocketAddress(port), 0)
+      }
     server.setExecutor(Executors.newFixedThreadPool(4))
     server.createContext("/", new MockHandler)
     server.start()
-    logger.info(s"Mock external call server started on port $port")
+    logger.info(
+      s"Mock external call server started on port $port (${if (useTls) "https" else "http"})"
+    )
   }
 
   /** Stop the mock server */
@@ -116,6 +186,9 @@ class MockExternalCallServer(
     handlers.clear()
     callCounts.clear()
     lastRequests.clear()
+    tokenHandler = None
+    tokenCallCount.set(0)
+    lastTokenRequest = None
     logger.debug("Mock server reset")
   }
 
@@ -128,37 +201,108 @@ class MockExternalCallServer(
   /** Get total call count across all functions */
   def getTotalCallCount: Int = callCounts.values.sum
 
+  /** Get the number of OAuth token-endpoint calls */
+  def getTokenCallCount: Int = tokenCallCount.get()
+
+  /** Get the last OAuth token-endpoint request */
+  def getLastTokenRequest: Option[TokenEndpointRequest] = lastTokenRequest
+
+  private def buildServerSslContext(): SSLContext = {
+    val certificateFactory = CertificateFactory.getInstance("X.509")
+    val serverCertificate = Using.resource(
+      Files.newInputStream(Paths.get(BaseTest.getResourcePath("tls/public-api.crt")))
+    ) { inputStream =>
+      certificateFactory.generateCertificate(inputStream).asInstanceOf[X509Certificate]
+    }
+    val privateKey = loadPkcs8PrivateKey(Paths.get(BaseTest.getResourcePath("tls/public-api.pem")))
+    val keyStore = KeyStore.getInstance("PKCS12")
+    keyStore.load(null, null)
+    keyStore.setKeyEntry("server", privateKey, Array.emptyCharArray, Array(serverCertificate))
+
+    val keyManagerFactory = KeyManagerFactory.getInstance("SunX509")
+    keyManagerFactory.init(keyStore, Array.emptyCharArray)
+
+    val sslContext = SSLContext.getInstance("TLS")
+    sslContext.init(keyManagerFactory.getKeyManagers, null, new SecureRandom())
+    sslContext
+  }
+
+  private def loadPkcs8PrivateKey(path: java.nio.file.Path) = {
+    val pem = Files.readString(path, StandardCharsets.US_ASCII)
+    val encoded = pem.linesIterator
+      .filterNot(line => line.startsWith("-----BEGIN") || line.startsWith("-----END"))
+      .mkString
+    val keySpec = new PKCS8EncodedKeySpec(Base64.getMimeDecoder.decode(encoded))
+    KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+  }
+
   private class MockHandler extends HttpHandler {
     override def handle(exchange: HttpExchange): Unit = {
       Try {
-        // Canton sends all external calls to /api/v1/external-call with metadata in headers:
-        //   X-Daml-External-Function-Id: the function identifier
-        //   X-Daml-External-Config-Hash: the config hash
-        //   X-Daml-External-Mode: "submission" or "validation"
-        //   Body: hex-encoded input as text
+        if (tokenEndpointPath.contains(exchange.getRequestURI.getPath)) {
+          handleTokenRequest(exchange)
+        } else {
+          handleExternalCallRequest(exchange)
+        }
+      } match {
+        case Success(_) => // Response already sent
+        case Failure(ex) =>
+          logger.error(s"Error handling request: ${ex.getMessage}", ex)
+          Try(sendResponse(exchange, 500, s"Internal error: ${ex.getMessage}"))
+      }
+    }
 
-        // Extract headers
-        val headers = exchange.getRequestHeaders
-        val functionIdOpt = Option(headers.getFirst("X-Daml-External-Function-Id"))
-        val configHashOpt = Option(headers.getFirst("X-Daml-External-Config-Hash"))
+    private def handleTokenRequest(exchange: HttpExchange): Unit = {
+      val body = Using.resource(exchange.getRequestBody)(_.readAllBytes())
+      val headers = exchange.getRequestHeaders.asScala.iterator.map { case (name, values) =>
+        name -> values.asScala.toSeq
+      }.toMap
+      val request = TokenEndpointRequest(
+        method = exchange.getRequestMethod,
+        path = exchange.getRequestURI.getPath,
+        body = new String(body, StandardCharsets.UTF_8),
+        headers = headers,
+        requestId = Option(exchange.getRequestHeaders.getFirst("X-Request-Id")),
+      )
 
-        functionIdOpt match {
-          case None =>
-            sendResponse(exchange, 400, "Missing X-Daml-External-Function-Id header")
-          case Some(functionId) =>
-          val extensionId = "test-ext" // Extension ID is determined by config, not sent in request
+      tokenCallCount.incrementAndGet()
+      lastTokenRequest = Some(request)
+      logger.debug(
+        s"Received token request: method=${request.method}, path=${request.path}, requestId=${request.requestId.getOrElse("none")}"
+      )
 
-          // Read request body
-          val inputStream = exchange.getRequestBody
-          val input = inputStream.readAllBytes()
-          inputStream.close()
+      tokenHandler match {
+        case Some(handler) =>
+          val response = handler(request)
+          sendResponse(exchange, response.statusCode, response.body, response.headers)
+        case None =>
+          logger.warn(s"No token handler configured for path ${request.path}")
+          sendResponse(exchange, 404, s"Unknown token endpoint: ${request.path}")
+      }
+    }
 
+    private def handleExternalCallRequest(exchange: HttpExchange): Unit = {
+      // Canton sends all external calls to /api/v1/external-call with metadata in headers:
+      //   X-Daml-External-Function-Id: the function identifier
+      //   X-Daml-External-Config-Hash: the config hash
+      //   X-Daml-External-Mode: "submission" or "validation"
+      //   Body: hex-encoded input as text
+      val headers = exchange.getRequestHeaders
+      val functionIdOpt = Option(headers.getFirst("X-Daml-External-Function-Id"))
+      val configHashOpt = Option(headers.getFirst("X-Daml-External-Config-Hash"))
+
+      functionIdOpt match {
+        case None =>
+          sendResponse(exchange, 400, "Missing X-Daml-External-Function-Id header")
+
+        case Some(functionId) =>
+          val extensionId = "test-ext"
+          val input = Using.resource(exchange.getRequestBody)(_.readAllBytes())
           val mode = Option(headers.getFirst("X-Daml-External-Mode")).getOrElse("submission")
           val participantId = Option(headers.getFirst("X-Participant-Id"))
           val requestId = Option(headers.getFirst("X-Request-Id"))
-
-          // Config hash from header
-          val config = configHashOpt.map(_.getBytes(StandardCharsets.UTF_8)).getOrElse(Array.emptyByteArray)
+          val config =
+            configHashOpt.map(_.getBytes(StandardCharsets.UTF_8)).getOrElse(Array.emptyByteArray)
 
           val request = ExternalCallRequest(
             extensionId = extensionId,
@@ -170,7 +314,6 @@ class MockExternalCallServer(
             requestId = requestId,
           )
 
-          // Track the call
           callCounts.updateWith(functionId) {
             case Some(count) => Some(count + 1)
             case None => Some(1)
@@ -178,29 +321,18 @@ class MockExternalCallServer(
           lastRequests.put(functionId, request)
 
           logger.debug(
-            s"Received request: extensionId=$extensionId, functionId=$functionId, " +
-              s"mode=$mode, participantId=$participantId, inputSize=${input.length}"
+            s"Received request: extensionId=$extensionId, functionId=$functionId, mode=$mode, participantId=$participantId, inputSize=${input.length}"
           )
 
-          // Find and invoke handler
           handlers.get(functionId) match {
             case Some(handler) =>
               val response = handler(request)
-              response.headers.foreach { case (k, v) =>
-                exchange.getResponseHeaders.add(k, v)
-              }
-              sendResponse(exchange, response.statusCode, response.body)
+              sendResponse(exchange, response.statusCode, response.body, response.headers)
 
             case None =>
               logger.warn(s"No handler for function: $functionId")
               sendResponse(exchange, 404, s"Unknown function: $functionId")
           }
-        }
-      } match {
-        case Success(_) => // Response already sent
-        case Failure(ex) =>
-          logger.error(s"Error handling request: ${ex.getMessage}", ex)
-          Try(sendResponse(exchange, 500, s"Internal error: ${ex.getMessage}"))
       }
     }
 
@@ -209,6 +341,18 @@ class MockExternalCallServer(
     }
 
     private def sendResponse(exchange: HttpExchange, statusCode: Int, body: Array[Byte]): Unit = {
+      sendResponse(exchange, statusCode, body, Map.empty)
+    }
+
+    private def sendResponse(
+        exchange: HttpExchange,
+        statusCode: Int,
+        body: Array[Byte],
+        headers: Map[String, String],
+    ): Unit = {
+      headers.foreach { case (name, value) =>
+        exchange.getResponseHeaders.add(name, value)
+      }
       exchange.sendResponseHeaders(statusCode, body.length.toLong)
       val os = exchange.getResponseBody
       os.write(body)

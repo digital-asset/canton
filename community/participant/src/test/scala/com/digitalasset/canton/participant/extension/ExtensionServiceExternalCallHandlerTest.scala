@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.config.{
   EngineExtensionsConfig,
   ExtensionServiceAuthConfig,
@@ -103,6 +104,46 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
           val error = result.swap.getOrElse(fail("Expected Left"))
           error.statusCode shouldBe 404
           error.requestId shouldBe None
+        }
+    }
+
+    "preserve only statusCode, message, and requestId at the external-call handler boundary" in {
+      val manager = new ExtensionServiceManager(
+        Map.empty,
+        EngineExtensionsConfig.default,
+        loggerFactory,
+      ) {
+        override def handleExternalCall(
+            extensionId: String,
+            functionId: String,
+            configHash: String,
+            input: String,
+            mode: String,
+        )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] =
+          FutureUnlessShutdown.pure(
+            Left(
+              ExtensionCallErrorWithRetry(
+                statusCode = 503,
+                message = "Service unavailable: retry later",
+                requestId = Some("req-retry"),
+                retryAfterSeconds = Some(7),
+              )
+            )
+          )
+      }
+      val handler = new ExtensionServiceExternalCallHandler(manager)
+
+      handler
+        .handleExternalCall("retry-ext", "test-func", "00000000", "deadbeef", "submission")
+        .failOnShutdown
+        .map { result =>
+          result shouldBe Left(
+            com.digitalasset.daml.lf.engine.ExternalCallError(
+              statusCode = 503,
+              message = "Service unavailable: retry later",
+              requestId = Some("req-retry"),
+            )
+          )
         }
     }
 

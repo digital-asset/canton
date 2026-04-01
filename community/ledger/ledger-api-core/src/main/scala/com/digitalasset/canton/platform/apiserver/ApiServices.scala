@@ -117,6 +117,7 @@ object ApiServices {
       partyManagementServiceConfig: PartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig,
       contractAuthenticator: ContractAuthenticatorFn,
+      externalCallHandler: Option[ExternalCallHandler] = None,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
       dynParamGetter: DynamicSynchronizerParameterGetter,
@@ -293,6 +294,7 @@ object ApiServices {
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
           timeProvider = timeProvider,
+          externalCallHandler = externalCallHandler,
         )
 
       val commandExecutor =

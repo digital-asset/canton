@@ -5,29 +5,39 @@ package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.config.ExtensionServiceConfig
+import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
+import com.digitalasset.canton.time.Clock
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
+import java.nio.file.{Files, Path}
+import java.security.{KeyStore, SecureRandom}
+import java.security.cert.{CertificateFactory, X509Certificate}
 import java.time.Duration
 import java.util.UUID
-import javax.net.ssl.{SSLContext, TrustManager, X509TrustManager}
+import javax.net.ssl.{SSLContext, TrustManager, TrustManagerFactory, X509TrustManager}
 import scala.annotation.unused
 import scala.jdk.CollectionConverters.*
+import scala.util.Using
 import scala.util.Random
 
-private[extension] trait HttpExtensionClientRuntime {
+private[participant] trait HttpExtensionClientRuntime {
   def nowMillis(): Long
   def sleepMillis(ms: Long): Unit
   def newRequestId(): String
   def nextRetryJitterDouble(): Double
 }
 
-private[extension] object HttpExtensionClientRuntime {
+private[participant] object HttpExtensionClientRuntime {
   val system: HttpExtensionClientRuntime = new HttpExtensionClientRuntime {
     override def nowMillis(): Long = System.currentTimeMillis()
+    override def sleepMillis(ms: Long): Unit = Threading.sleep(ms)
+    override def newRequestId(): String = UUID.randomUUID().toString
+    override def nextRetryJitterDouble(): Double = Random.nextDouble()
+  }
+
+  def fromClock(clock: Clock): HttpExtensionClientRuntime = new HttpExtensionClientRuntime {
+    override def nowMillis(): Long = clock.now.toInstant.toEpochMilli
     override def sleepMillis(ms: Long): Unit = Threading.sleep(ms)
     override def newRequestId(): String = UUID.randomUUID().toString
     override def nextRetryJitterDouble(): Double = Random.nextDouble()
@@ -64,6 +74,7 @@ private[extension] final case class JdkHttpExtensionClientSettings(
     version: HttpClient.Version,
     connectTimeout: Duration,
     insecureTls: Boolean,
+    trustCollectionFile: Option[Path],
 )
 
 private[extension] object JdkHttpExtensionClientResourcesFactory {
@@ -73,7 +84,77 @@ private[extension] object JdkHttpExtensionClientResourcesFactory {
       version = HttpClient.Version.HTTP_1_1,
       connectTimeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
       insecureTls = config.useTls && config.tlsInsecure,
+      trustCollectionFile = if (config.useTls) config.trustCollectionFile else None,
     )
+
+  def tokenSettingsFor(config: ExtensionServiceConfig): Option[JdkHttpExtensionClientSettings] =
+    config.auth match {
+      case auth: ExtensionServiceAuthConfig.OAuth =>
+        Some(
+          JdkHttpExtensionClientSettings(
+            version = HttpClient.Version.HTTP_1_1,
+            connectTimeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
+            insecureTls = auth.tokenEndpoint.tlsInsecure,
+            trustCollectionFile = auth.tokenEndpoint.trustCollectionFile,
+          )
+        )
+      case _ =>
+        None
+    }
+
+  def buildClient(settings: JdkHttpExtensionClientSettings): HttpClient = {
+    val builder = HttpClient
+      .newBuilder()
+      .version(settings.version)
+      .connectTimeout(settings.connectTimeout)
+
+    if (settings.insecureTls) {
+      builder.sslContext(JdkHttpExtensionClientResourcesFactory.createInsecureSSLContext())
+    } else {
+      settings.trustCollectionFile.foreach { trustCollectionFile =>
+        builder.sslContext(
+          JdkHttpExtensionClientResourcesFactory.createTrustCollectionSSLContext(trustCollectionFile)
+        )
+      }
+    }
+
+    builder.build()
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  def createTrustCollectionSSLContext(trustCollectionFile: Path): SSLContext = {
+    val trustStore = KeyStore.getInstance(KeyStore.getDefaultType)
+    trustStore.load(null, null)
+
+    val certificateFactory = CertificateFactory.getInstance("X.509")
+    val certificates = Using.resource(Files.newInputStream(trustCollectionFile)) { inputStream =>
+      certificateFactory.generateCertificates(inputStream).asScala.toSeq.map {
+        case certificate: X509Certificate => certificate
+        case certificate =>
+          throw new IllegalArgumentException(
+            s"Unsupported certificate type in trust collection: ${certificate.getType}"
+          )
+      }
+    }
+
+    if (certificates.isEmpty) {
+      throw new IllegalArgumentException(
+        s"No certificates found in trust collection file: $trustCollectionFile"
+      )
+    }
+
+    certificates.zipWithIndex.foreach { case (certificate, index) =>
+      trustStore.setCertificateEntry(s"trusted-$index", certificate)
+    }
+
+    val trustManagerFactory =
+      TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
+    trustManagerFactory.init(trustStore)
+
+    val sslContext = SSLContext.getInstance("TLS")
+    sslContext.init(null, trustManagerFactory.getTrustManagers, new SecureRandom())
+    sslContext
+  }
 
   /** Create an insecure SSL context for development (trusts all certificates) */
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
@@ -95,18 +176,17 @@ private[extension] final class JdkHttpExtensionClientResourcesFactory(
 ) extends HttpExtensionClientResourcesFactory {
 
   override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
-    val settings = JdkHttpExtensionClientResourcesFactory.settingsFor(config)
-    val builder = HttpClient
-      .newBuilder()
-      .version(settings.version)
-      .connectTimeout(settings.connectTimeout)
-
-    if (settings.insecureTls) {
-      builder.sslContext(JdkHttpExtensionClientResourcesFactory.createInsecureSSLContext())
-    }
+    val resourceSettings = JdkHttpExtensionClientResourcesFactory.settingsFor(config)
+    val resourceTransport = new JdkHttpExtensionClientTransport(
+      JdkHttpExtensionClientResourcesFactory.buildClient(resourceSettings)
+    )
+    val tokenTransport = JdkHttpExtensionClientResourcesFactory
+      .tokenSettingsFor(config)
+      .map(settings => new JdkHttpExtensionClientTransport(JdkHttpExtensionClientResourcesFactory.buildClient(settings)))
 
     HttpExtensionClientResources(
-      resourceTransport = new JdkHttpExtensionClientTransport(builder.build())
+      resourceTransport = resourceTransport,
+      tokenTransport = tokenTransport,
     )
   }
 }
