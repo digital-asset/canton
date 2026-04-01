@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -30,6 +31,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P5S4M4_Manual
+      .addConfigTransform(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
 
   protected val sequencerGroups: MultiSynchronizer = MultiSynchronizer(
     Seq(

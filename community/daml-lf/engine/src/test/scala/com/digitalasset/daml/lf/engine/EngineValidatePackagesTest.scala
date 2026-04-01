@@ -23,8 +23,8 @@ class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside w
 
   // TODO(#30144): extend with a (set of) compat dar(s), script-test-v2.dev.dar is
   // tested here as placeholder https://github.com/digital-asset/daml/pull/22101
-  val stream = getClass.getClassLoader.getResourceAsStream("Exceptions-v2dev.dar")
-  val dar: Dar[(Ref.PackageId, Package)] = DarDecoder.readArchive("Exceptions-v2dev.dar", new ZipInputStream(stream)).toOption.get
+  val stream = getClass.getClassLoader.getResourceAsStream("Exceptions-v23.dar")
+  val dar: Dar[(Ref.PackageId, Package)] = DarDecoder.readArchive("Exceptions-v23.dar", new ZipInputStream(stream)).toOption.get
 
   val langVersion = LanguageVersion.latestStableLfVersion
 

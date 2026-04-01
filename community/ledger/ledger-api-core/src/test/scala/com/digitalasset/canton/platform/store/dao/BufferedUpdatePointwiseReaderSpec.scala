@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
@@ -132,6 +133,7 @@ class BufferedUpdatePointwiseReaderSpec extends AsyncFlatSpec with MockitoSugar 
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
       externalTransactionHash = None,
+      paidTrafficCost = NonNegativeLong.zero,
     )
 
   protected implicit def toLedgerString(s: String): Ref.LedgerString =

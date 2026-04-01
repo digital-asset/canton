@@ -215,7 +215,15 @@ trait Sequencer
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit
 
-  def getLsuTrafficControlState(implicit
+  /** Get the traffic state for LSU.
+    *
+    * @param trafficTsOverride
+    *   MUST be empty for regular LSUs. For regular LSUs, traffic should be taken at upgrade time
+    *   and an error should be returned if no LSU is announced. However, in the context of roll
+    *   forward (DR), the caller might want to get the traffic state at a given timestamp even if no
+    *   LSU is announced.
+    */
+  def getLsuTrafficControlState(trafficTsOverride: Option[CantonTimestamp] = None)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState]
 

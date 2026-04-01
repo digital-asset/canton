@@ -20,6 +20,7 @@ import com.digitalasset.canton.console.{
   MediatorReference,
   SequencerReference,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.{
   SynchronizerNodes,
   UpgradeDataFiles,
@@ -45,6 +46,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
   protected def exportNodesData(
       nodes: SynchronizerNodes,
       successorPsid: PhysicalSynchronizerId,
+      sequencerLsuStateTsOverride: Option[CantonTimestamp] = None,
   ): File = {
     val exportDirectory: File = File.newTemporaryDirectory(s"$testName-$successorPsid")
 
@@ -107,7 +109,8 @@ trait LogicalUpgradeUtils extends FutureHelpers {
 
     def writeSequencerGenesisState(sequencer: SequencerReference): Unit =
       sequencer.topology.transactions.sequencer_lsu_state(
-        outputFile = s"${exportDirectory / sequencer.name}-genesis-state"
+        outputFile = s"${exportDirectory / sequencer.name}-genesis-state",
+        timestamp = sequencerLsuStateTsOverride,
       )
 
     exportDirectory

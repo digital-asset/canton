@@ -31,7 +31,8 @@ sealed trait RollbackUnassignmentIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair)
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

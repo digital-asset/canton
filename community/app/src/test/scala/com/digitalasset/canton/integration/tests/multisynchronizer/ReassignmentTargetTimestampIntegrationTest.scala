@@ -11,6 +11,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -41,35 +42,39 @@ class ReassignmentTargetTimestampIntegrationTest
     with EntitySyntax {
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
-  override def environmentDefinition: EnvironmentDefinition = EnvironmentDefinition.P2_S1M1_S1M1
-    .withSetup { implicit env =>
-      import env.*
-
-      participants.all.synchronizers.connect_local(sequencer1, alias = daName)
-      participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
-      participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
-      participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
-
-      val allParticipants = participants.all.toSet
-      PartiesAllocator(allParticipants)(
-        newParties = Seq("alice" -> participant1),
-        targetTopology = Map(
-          "alice" -> Map(
-            daId -> (PositiveInt.one, allParticipants.map(_.id -> Submission)),
-            acmeId -> (PositiveInt.one, allParticipants.map(_.id -> Submission)),
-          )
-        ),
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransforms(
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
       )
-      alice = "alice".toPartyId(participant1)
+      .withSetup { implicit env =>
+        import env.*
 
-      maliciousP1 = MaliciousParticipantNode(
-        participant1,
-        daId,
-        testedProtocolVersion,
-        timeouts,
-        loggerFactory,
-      )
-    }
+        participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+        participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
+
+        val allParticipants = participants.all.toSet
+        PartiesAllocator(allParticipants)(
+          newParties = Seq("alice" -> participant1),
+          targetTopology = Map(
+            "alice" -> Map(
+              daId -> (PositiveInt.one, allParticipants.map(_.id -> Submission)),
+              acmeId -> (PositiveInt.one, allParticipants.map(_.id -> Submission)),
+            )
+          ),
+        )
+        alice = "alice".toPartyId(participant1)
+
+        maliciousP1 = MaliciousParticipantNode(
+          participant1,
+          daId,
+          testedProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
+      }
 
   private var alice: PartyId = _
   private var maliciousP1: MaliciousParticipantNode = _

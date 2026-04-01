@@ -17,6 +17,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
   SequencerReference,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
@@ -134,11 +135,12 @@ private[lsu] trait LsuTrafficManagement {
       oldSequencers: Seq[LocalSequencerReference],
       newSequencers: Seq[LocalSequencerReference],
       suppressLogs: Boolean,
+      trafficTsOverride: Option[CantonTimestamp],
   ): Unit = {
     val trafficStates = if (suppressLogs) {
       loggerFactory.assertLogsUnorderedOptional(
         eventually(retryOnTestFailuresOnly = false) {
-          oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state()))
+          oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state(trafficTsOverride)))
         }.toMap,
         (
           LogEntryOptionality.OptionalMany,
@@ -147,7 +149,7 @@ private[lsu] trait LsuTrafficManagement {
       )
     } else {
       eventually(retryOnTestFailuresOnly = false) {
-        oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state()))
+        oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state(trafficTsOverride)))
       }.toMap
     }
 

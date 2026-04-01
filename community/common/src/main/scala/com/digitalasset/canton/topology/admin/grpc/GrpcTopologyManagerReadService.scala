@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
   TimeQuery,
+  TopologyStore,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
@@ -876,8 +877,7 @@ class GrpcTopologyManagerReadService(
       )
       synchronizerTopologyStore <- collectSynchronizerStore(topologyStoreO)
       timestampO <- wrapErrUS(
-        timestamp
-          .traverse(CantonTimestamp.fromProtoTimestamp)
+        timestamp.traverse(CantonTimestamp.fromProtoTimestamp)
       )
 
       sequencedTimestamp <- timestampO match {
@@ -886,8 +886,7 @@ class GrpcTopologyManagerReadService(
           val sequencedTimeF = synchronizerTopologyStore
             .maxTimestamp(SequencedTime.MaxValue, includeRejected = true)
             .map {
-              case Some((sequencedTime, _)) =>
-                Right(sequencedTime.value)
+              case Some((sequencedTime, _)) => Right(sequencedTime.value)
 
               case None =>
                 Left(TopologyManagerError.TopologyTransactionNotFound.EmptyStore(): RpcError)
@@ -919,7 +918,8 @@ class GrpcTopologyManagerReadService(
       request: SequencerLsuStateRequest,
       responseObserver: StreamObserver[SequencerLsuStateResponse],
   ): Unit = GrpcStreamingUtils.streamToClient(
-    (out: OutputStream) => getLogicalUpgradeState(request.synchronizerStore, out),
+    (out: OutputStream) =>
+      getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
     responseObserver,
     byteString => SequencerLsuStateResponse(byteString),
     processingTimeout.unbounded.duration,
@@ -927,10 +927,11 @@ class GrpcTopologyManagerReadService(
 
   private def getLogicalUpgradeState(
       synchronizerStore: Option[StoreId],
+      tsOverride: Option[Timestamp],
       out: OutputStream,
   ): Future[Unit] =
     for {
-      (protocolVersion, source) <- getLogicalUpgradeStateSource(synchronizerStore)
+      (protocolVersion, source) <- getLogicalUpgradeStateSource(synchronizerStore, tsOverride)
       _ <- source.runWith(
         Sink.foreachAsync(1) { stored =>
           val result = stored.writeDelimitedTo(protocolVersion, out)
@@ -939,8 +940,67 @@ class GrpcTopologyManagerReadService(
       )
     } yield ()
 
+  /** Gets the effective time of the LSU announcement
+    */
+  private def getLsuAnnouncementEffectiveTime(
+      synchronizerTopologyStore: TopologyStore[
+        com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+      ],
+      topologyClient: SynchronizerTopologyClient,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RpcError, EffectiveTime] = {
+    val psid = synchronizerTopologyStore.storeId.psid
+
+    for {
+      // Find announcements in the store in the head state
+      announcements <- EitherT.right(
+        synchronizerTopologyStore
+          .findPositiveTransactions(
+            asOf = CantonTimestamp.MaxValue,
+            asOfInclusive = false,
+            isProposal = false,
+            types = Seq(LsuAnnouncement.code),
+            filterUid = Some(NonEmpty(Seq, psid.uid)),
+            filterNamespace = None,
+            pagination = None,
+          )
+          .map(_.collectOfMapping[LsuAnnouncement].result)
+      )
+
+      // Extract the effective time of the single effective announcement or raise an error accordingly.
+      referenceEffectiveTime <- (announcements match {
+        case Seq(single) =>
+          EitherT.rightT[FutureUnlessShutdown, RpcError](single.validFrom)
+        case Seq() =>
+          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
+            TopologyManagerError.NoLsuAnnounced.Failure()
+          )
+        case multiple =>
+          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
+            TopologyManagerError.InternalError.Unexpected(
+              s"Found multiple LsuAnnouncement mappings, but only expected one: $multiple"
+            )
+          )
+      })
+
+      // Check for an announced LSU with the topology snapshot logic at the reference time.
+      // This check is somewhat redundant, with the lookup above, however:
+      // the topology snapshot likely contains additional validation logic that we don't want to copy
+      // here but rather make use of.
+      topologySnapshot <- EitherT.liftF(
+        // Use the immediateSuccessor of the reference effective time, as that is the first
+        // timestamp at which the transaction is effective in the topology state.
+        topologyClient.awaitSnapshot(referenceEffectiveTime.immediateSuccessor.value)
+      )
+      _ <- EitherT.fromOptionF(
+        fopt = topologySnapshot.announcedLsu(),
+        ifNone = TopologyManagerError.NoLsuAnnounced.Failure(): RpcError,
+      )
+    } yield referenceEffectiveTime
+  }
+
   private def getLogicalUpgradeStateSource(
-      synchronizerStore: Option[StoreId]
+      synchronizerStore: Option[StoreId],
+      tsOverrideP: Option[Timestamp],
   ): Future[(ProtocolVersion, Source[GenericStoredTopologyTransaction, NotUsed])] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
@@ -973,49 +1033,15 @@ class GrpcTopologyManagerReadService(
         )
       )
 
-      // Find announcments in the store in the head state
-      announcements <- EitherT.right(
-        synchronizerTopologyStore
-          .findPositiveTransactions(
-            asOf = CantonTimestamp.MaxValue,
-            asOfInclusive = false,
-            isProposal = false,
-            types = Seq(LsuAnnouncement.code),
-            filterUid = Some(NonEmpty(Seq, psid.uid)),
-            filterNamespace = None,
-            pagination = None,
-          )
-          .map(_.collectOfMapping[LsuAnnouncement].result)
-      )
-
       // Extract the effective time of the single effective announcement or raise an error accordingly.
-      referenceEffectiveTime <- (announcements match {
-        case Seq(single) => EitherT.rightT[FutureUnlessShutdown, RpcError](single.validFrom)
-        case Seq() =>
-          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
-            TopologyManagerError.NoLsuAnnounced.Failure()
-          )
-        case multiple =>
-          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
-            TopologyManagerError.InternalError.Unexpected(
-              s"Found multiple LsuAnnouncement mappings, but only expected one: $multiple"
-            )
-          )
-      })
+      tsOverrideO <- wrapErrUS(tsOverrideP.traverse(CantonTimestamp.fromProtoTimestamp))
+      referenceEffectiveTime <- tsOverrideO match {
+        case Some(tsOverride) =>
+          EitherT.pure[FutureUnlessShutdown, RpcError](EffectiveTime(tsOverride))
+        case None => getLsuAnnouncementEffectiveTime(synchronizerTopologyStore, topologyClient)
+      }
 
-      // Check for an announced LSU with the topology snapshot logic at the reference time.
-      // This check is somewhat redundant, with the lookup above, however:
-      // the topology snapshot likely contains additional validation logic that we don't want to copy
-      // here but rather make use of.
-      topologySnapshot <- EitherT.liftF(
-        // Use the immediateSuccessor of the reference effective time, as that is the first
-        // timestamp at which the transaction is effective in the topology state.
-        topologyClient.awaitSnapshot(referenceEffectiveTime.immediateSuccessor.value)
-      )
-      _ <- EitherT.fromOptionF(
-        fopt = topologySnapshot.announcedLsu(),
-        ifNone = TopologyManagerError.NoLsuAnnounced.Failure(): RpcError,
-      )
+      _ = logger.info(s"Computing sequencer LSU state at $referenceEffectiveTime")
 
       // Wait for effective time to be observed on the synchronizer (and optionally request a time tick).
       // We need to wait for all transactions with a sequencedTime <= referenceEffectiveTime, otherwise we would

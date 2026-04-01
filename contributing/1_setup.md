@@ -15,6 +15,11 @@ Set up git with your full name:
 git config --global user.name <yourFullName>
 ```
 
+Configure "reuse recorded resolution" for better conflict resolution:
+```shell
+git config --global rerere.enabled true
+```
+
 Clone the repository:
 ```shell
 git clone git@github.com:DACH-NY/canton.git

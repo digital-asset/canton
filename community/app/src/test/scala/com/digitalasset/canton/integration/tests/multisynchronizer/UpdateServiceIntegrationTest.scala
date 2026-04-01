@@ -23,6 +23,7 @@ import com.digitalasset.canton.integration.util.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -44,20 +45,24 @@ abstract class UpdateServiceIntegrationTest
   private var otherParty: PartyId = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S2M1_S2M1.withSetup { implicit env =>
-      import env.*
+    EnvironmentDefinition.P1_S2M1_S2M1
+      .addConfigTransforms(
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
+      )
+      .withSetup { implicit env =>
+        import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
-      participant1.synchronizers.connect_local(sequencer3, alias = acmeName)
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+        participant1.synchronizers.connect_local(sequencer3, alias = acmeName)
 
-      participant1.dars.upload(CantonExamplesPath, synchronizerId = daId)
-      participant1.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+        participant1.dars.upload(CantonExamplesPath, synchronizerId = daId)
+        participant1.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
 
-      // Allocate parties
-      otherParty = participant1.parties.enable(otherPartyName, synchronizer = daName)
-      participant1.parties.enable(otherPartyName, synchronizer = acmeName)
+        // Allocate parties
+        otherParty = participant1.parties.enable(otherPartyName, synchronizer = daName)
+        participant1.parties.enable(otherPartyName, synchronizer = acmeName)
 
-    }
+      }
 
   private lazy val plugin =
     new UseBftSequencer(

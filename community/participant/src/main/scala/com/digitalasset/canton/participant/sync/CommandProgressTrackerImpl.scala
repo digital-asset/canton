@@ -343,6 +343,7 @@ class CommandProgressTrackerImpl(
           deduplicationOffset = None,
           deduplicationDurationSeconds = None,
           deduplicationDurationNanos = None,
+          trafficCost = 0L,
         ),
         updateId = "",
         optStatus = None,

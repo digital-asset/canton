@@ -5,17 +5,18 @@ package com.digitalasset.canton.platform
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.base.error.utils.ErrorDetails
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.pekkostreams.dispatcher.{Dispatcher, SubSource}
 import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.stream.scaladsl.Source
 import org.mockito.MockitoSugar
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.{Failure, Success}
@@ -24,6 +25,7 @@ class DispatcherStateSpec
     extends AsyncFlatSpec
     with MockitoSugar
     with PekkoBeforeAndAfterAll
+    with HasExecutorService
     with BaseTest {
   private val className = classOf[DispatcherState].getSimpleName
 
@@ -32,6 +34,8 @@ class DispatcherStateSpec
   private val nextOffset = initializationOffset.map(_.increment)
 
   private val thirdOffset = nextOffset.map(_.increment)
+
+  private implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
   s"$className.{startDispatcher, stopDispatcher}" should "handle correctly the Dispatcher lifecycle" in {
     for {

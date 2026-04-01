@@ -74,12 +74,12 @@ Typically users may use a crypto custody provider or other cryptographic key man
 In the simplest case, a single key pair with a threshold of ``1`` enables the submission of transactions through a single signature.
 More complex processes may require multiple signatures; in that case submission key holders can register several (unique) key pairs with a higher threshold.
 The Canton protocol guarantees that at least a threshold number of valid signatures from different keys must be provided with the transaction in order to authorize it on the ledger.
-Those keys and associated threshold are defined in the ``PartyToKeyMapping`` topology transaction.
+Those keys and associated threshold are defined in the ``PartyToParticipant`` topology transaction.
 
 .. literalinclude:: CANTON/community/base/src/main/protobuf/com/digitalasset/canton/protocol/v30/topology.proto
    :language: protobuf
-   :start-after: [doc-entry-start: PartyToKeyMapping]
-   :end-before: [doc-entry-end: PartyToKeyMapping]
+   :start-after: [doc-entry-start: PartyToParticipant]
+   :end-before: [doc-entry-end: PartyToParticipant]
 
 Namespace
 *********
@@ -103,7 +103,7 @@ External party
 
 An external party is defined as a submission key holder, with **no** SPN, and with its own unique namespace,
 controlled by its own signing key (as opposed to local parties who exist under their SPN's namespace).
-The ``PartyToKeyMapping`` topology transaction allows the party to submit transactions to the ledger using its own keys.
+The signing keys in the ``PartyToParticipant`` topology transaction allows the party to submit transactions to the ledger using its own keys.
 Crucially, it does **not** grant **submission permission** to any node.
 This removes potential regulatory burdens from a Participant Node by removing the Participant Node's ability to act on the ledger without the party's explicit approval.
 An external party still requires **at least one CPN** to confirm transactions on its behalf and record its ledger state.
@@ -332,6 +332,5 @@ Additional resources
 ********************
 
 - :externalref:`SDK External Signing Overview <sdk_external_signing_overview>`
-- :externalref:`External Party Onboarding Tutorial <tutorial_onboard_external_party>`
 - :externalref:`External Party Transaction Submission Tutorial <tutorial_externally_signed_transactions>`
 - :externalref:`External Signing Transaction Hash <external_signing_hashing_algo>`

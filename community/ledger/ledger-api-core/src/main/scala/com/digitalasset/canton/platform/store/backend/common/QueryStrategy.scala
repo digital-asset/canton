@@ -5,13 +5,13 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
   SqlStringInterpolation,
 }
 import com.digitalasset.canton.util.ResourceUtil
+import com.typesafe.scalalogging.Logger
 
 import java.sql.{Connection, ResultSet}
 
@@ -136,7 +136,7 @@ object QueryStrategy {
 
   def withoutNetworkTimeout[T](
       f: Connection => T
-  )(implicit connection: Connection, logger: TracedLogger): T = {
+  )(implicit connection: Connection, logger: Logger): T = {
     // The postgres jdbc driver ignores the execution context for the network timeout setting and uses its internal
     // query executor https://github.com/pgjdbc/pgjdbc/blob/release/42.7.x/pgjdbc/src/main/java/org/postgresql/jdbc/PgConnection.java#L1692 .
     // Even if it is not ignored in the future, it is beneficial to use a direct execution context since the thread which

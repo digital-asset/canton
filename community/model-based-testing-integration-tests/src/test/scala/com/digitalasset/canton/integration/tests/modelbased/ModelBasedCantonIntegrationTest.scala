@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.modelbased
 import com.digitalasset.canton.integration.util.PartiesAllocator
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -36,9 +35,6 @@ final class ModelBasedCantonIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
-      .addConfigTransforms(
-        ConfigTransforms.enableAlphaVersionSupport*
-      )
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
@@ -50,14 +46,16 @@ final class ModelBasedCantonIntegrationTest
 
   private val generators =
     new ConcreteGenerators(
-      languageVersion = LanguageVersion.v2_dev,
-      readOnlyRollbacks = ProtocolVersion.dev.isDev,
-      // TODO(#30398): change to NUCK once NUCK state machine is implemented
+      languageVersion = LanguageVersion.v2_3,
+      readOnlyRollbacks = true,
+      // TODO(#30398): change to NUCK once NUCK is supported by the protocol
       keyMode = KeyMode.UniqueContractKeys,
+      // TODO(#30398): change to true once NUCK is supported by the protocol
+      generateQueryByKey = false,
     )
 
   "The canton interpreter" should {
-    "produce projections consistent with the reference interpreter" onlyRunWith ProtocolVersion.dev in {
+    "produce projections consistent with the reference interpreter" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       implicit env =>
         import env.*
 
@@ -77,14 +75,14 @@ final class ModelBasedCantonIntegrationTest
             shrink = Shrinker.shrinkScenario,
             property = (scenario: Concrete.Scenario, cancelled: AtomicBoolean) =>
               runAndCompare(cantonInterpreter, scenario, cancelled),
-            // The CI nightly job has a 60 minutes timeout, we leave a 10 minutes buffer
             timeout = 50.minutes,
             // We evaluate as many samples as possible within the allotted time.
             maxSamples = Int.MaxValue,
             // scenarios of size 50 take long to generate so we generate them in parallel
             // but only use two cores as we want to leave some CPU to the property evaluation.
             sampleBufferSize = 100,
-            generatorParallelism = 2,
+            generatorParallelism = 3,
+            evaluatorParallelism = 5,
           )
         logger.info(result.summary)
         result.assertPassed(Pretty.prettyScenario)

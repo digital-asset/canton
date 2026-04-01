@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
 import com.digitalasset.canton.platform.store.dao.events.QueryValidRange
 import com.digitalasset.canton.platform.{Party, UserId}
@@ -77,6 +78,6 @@ private[dao] final class CommandCompletionsReader(
       ) { (subRange: QueryRange[Offset]) =>
         pruneSafeQuery(subRange)
       }
-    source.map(response => offsetFor(response) -> response)
+    source.map(response => offsetFor(response) -> response.withPrecomputedSerializedSize())
   }
 }

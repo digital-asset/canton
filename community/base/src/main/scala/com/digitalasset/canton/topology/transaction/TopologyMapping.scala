@@ -373,6 +373,7 @@ object TopologyMapping {
 
   }
 
+  @nowarn("cat=deprecation")
   def fromProtoV30(proto: v30.TopologyMapping): ParsingResult[TopologyMapping] =
     proto.mapping match {
       case Mapping.Empty =>
@@ -952,6 +953,7 @@ object OwnerToKeyMapping extends TopologyMappingCompanion {
   * the transaction outside of the node with a party key. This mapping is used to map the party to a
   * set of public keys authorized to sign submissions.
   */
+@nowarn("cat=deprecation")
 final case class PartyToKeyMapping private (
     party: PartyId,
     signingKeysWithThreshold: SigningKeysWithThreshold,
@@ -1035,6 +1037,7 @@ final case class PartyToKeyMapping private (
     )
 }
 
+@nowarn("cat=deprecation")
 object PartyToKeyMapping extends TopologyMappingCompanion {
 
   val MaxKeys: Int = KeyMapping.MaxKeys
@@ -1159,8 +1162,18 @@ object SynchronizerTrustCertificate extends TopologyMappingCompanion {
         v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_PV33_EXTERNAL_SIGNING_LOCAL_CONTRACT_IN_SUBVIEW.value
       )(Some("ExternalSigningLocalContractsInSubview"))
 
+    /** When this feature flag is enabled, the participant will allow to reassign contracts between
+      * synchronizers. Note that this feature is still under development and thus unsafe. Should not
+      * be used in production.
+      */
+    val EnableUnsafeMultiSynchronizer: ParticipantTopologyFeatureFlag =
+      ParticipantTopologyFeatureFlag(
+        v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER.value
+      )(Some("EnableUnsafeMultiSynchronizer"))
+
     val knownTopologyFeatureFlags: Seq[ParticipantTopologyFeatureFlag] = Seq(
-      ExternalSigningLocalContractsInSubview
+      ExternalSigningLocalContractsInSubview,
+      EnableUnsafeMultiSynchronizer,
     )
 
     def fromProtoV30(

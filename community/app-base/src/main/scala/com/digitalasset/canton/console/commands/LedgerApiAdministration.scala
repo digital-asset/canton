@@ -197,6 +197,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
           resultFilter: UpdateWrapper => Boolean = _ => true,
           synchronizerFilter: Option[SynchronizerId] = None,
+          descendingOrder: Boolean = false,
       ): Seq[UpdateWrapper] = {
 
         val resultFilterWithSynchronizer = synchronizerFilter match {
@@ -215,6 +216,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             updateFormat,
             beginOffsetExclusive,
             endOffsetInclusive,
+            descendingOrder,
           ),
           "getUpdates",
           observer,
@@ -522,6 +524,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |the pruning offset, this command fails with a `NOT_FOUND` error.
           |If the beginOffset is zero then the participant begin is taken as beginning offset.
           |If the endOffset is None then a continuous stream is returned.
+          |If the descendingOrder is true, then the updates are streamed from the most recent
+          |(endOffsetInclusive) to the oldest. In such case endOffsetInclusive must be defined.
           """
       )
       def subscribe_updates(
@@ -529,6 +533,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           updateFormat: UpdateFormat,
           beginOffsetExclusive: Long = 0L,
           endOffsetInclusive: Option[Long] = None,
+          descendingOrder: Boolean = false,
       ): AutoCloseable =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -537,6 +542,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               beginExclusive = beginOffsetExclusive,
               endInclusive = endOffsetInclusive,
               updateFormat = updateFormat,
+              descendingOrder = descendingOrder,
             )
           )
         }

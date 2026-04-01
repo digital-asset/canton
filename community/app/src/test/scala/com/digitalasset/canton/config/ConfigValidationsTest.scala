@@ -835,20 +835,26 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           s"(${SessionSigningKeysConfig.default.cutOffDuration})."
       )
 
-      val maxSequencingTimeOffset =
-        participantNodeConfig.sequencerClient.defaultMaxSequencingTimeOffset
-      val invalidTolerance = maxSequencingTimeOffset
-
       assertErrors(
-        changeSessionSigningKeyParams(
-          keyValidityDuration = None,
-          toleranceShiftDuration = Some(invalidTolerance),
-        )
+        config
+          .focus(_.participants)
+          .replace(
+            Map(
+              InstanceName.tryCreate("p1") ->
+                participantNodeConfig
+                  .focus(_.sequencerClient.defaultMaxSequencingTimeOffset)
+                  .replace(
+                    NonNegativeFiniteDuration.ofMinutes(
+                      SessionSigningKeysConfig.default.keyValidityDuration.duration.toMinutes
+                    )
+                  )
+            )
+          )
       )(
         s"participant p1: The selected session signing key validity parameters do not align with " +
-          s"the current default max sequencing time offset ($maxSequencingTimeOffset). " +
+          s"the current default max sequencing time offset (${SessionSigningKeysConfig.default.keyValidityDuration}). " +
           s"Parameters must be chosen so that " +
-          s"`keyValidityDuration` - `toleranceShiftDuration` - `cutOffDuration` >= `defaultMaxSequencingTimeOffset`."
+          s"`keyValidityDuration` - `cutOffDuration` > `defaultMaxSequencingTimeOffset`."
       )
 
       val invalidKeyEvictionPeriod = defaultKeyValidityDuration

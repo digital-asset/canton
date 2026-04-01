@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 }
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, Stakeholders}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
@@ -55,6 +55,14 @@ object ReassignmentValidationError {
     override def message: String =
       s"For `$reassignmentRef`: stakeholders mismatch. " +
         s"Expected $expectedStakeholders, found $declaredViewStakeholders"
+  }
+
+  final case class MultiSynchronizerIsNotEnabled(
+      participants: Set[ParticipantId],
+      synchronizerId: PhysicalSynchronizerId,
+  ) extends ReassignmentValidationError {
+    override def message: String =
+      s"Multi-synchronizer feature flag is not enabled for synchronizer $synchronizerId on the following participants: $participants"
   }
 
   final case class ContractValidationError(

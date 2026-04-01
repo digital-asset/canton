@@ -63,5 +63,5 @@ package object speedy {
     }
   }
 
-  type CSMState = ContractStateMachine.LLState[NodeId]
+  type CSMState = ContractStateMachine.LLState
 }

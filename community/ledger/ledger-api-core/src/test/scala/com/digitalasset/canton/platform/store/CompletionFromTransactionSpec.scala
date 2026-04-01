@@ -86,6 +86,7 @@ class CompletionFromTransactionSpec
                 deduplicationOffset = deduplicationOffset,
                 deduplicationDurationSeconds = deduplicationDurationSeconds,
                 deduplicationDurationNanos = deduplicationDurationNanos,
+                trafficCost = 4324L,
               ),
             TestUpdateId("updateId"),
           )
@@ -100,6 +101,7 @@ class CompletionFromTransactionSpec
           completion.submissionId shouldBe expectedSubmissionId
           completion.deduplicationPeriod shouldBe expectedDeduplicationPeriod
           completion.actAs.toSet shouldBe Set("party1", "party2")
+          completion.paidTrafficCost shouldBe 4324L
       }
     }
 
@@ -122,6 +124,7 @@ class CompletionFromTransactionSpec
               submissionId = Some("submissionId"),
               synchronizerId = "synchronizer id",
               traceContext = SerializableTraceContext(traceContext).toDamlProto,
+              trafficCost = 4234L,
               deduplicationOffset = None,
               deduplicationDurationSeconds = deduplicationDurationSeconds,
               deduplicationDurationNanos = deduplicationDurationNanos,
@@ -145,6 +148,7 @@ class CompletionFromTransactionSpec
             submissionId = Some("submissionId"),
             synchronizerId = "synchronizer id",
             traceContext = SerializableTraceContext(traceContext).toDamlProto,
+            trafficCost = 4324L,
             deduplicationOffset = None,
             deduplicationDurationSeconds = None,
             deduplicationDurationNanos = None,
@@ -161,6 +165,7 @@ class CompletionFromTransactionSpec
       completion.submissionId shouldBe "submissionId"
       completion.status shouldBe Some(status)
       completion.actAs shouldBe Seq("party")
+      completion.paidTrafficCost shouldBe 4324
     }
   }
 }

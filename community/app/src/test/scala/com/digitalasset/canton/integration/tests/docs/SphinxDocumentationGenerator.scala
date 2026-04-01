@@ -487,14 +487,6 @@ class ExternalSigningTopologyTransactionIntegrationTest
       ),
     )
 
-class ExternalSigningOnboardingIntegrationTest
-    extends SnippetGenerator(
-      File("docs-open/src/sphinx/sdk/tutorials/app-dev/external_signing_onboarding.rst"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
-    )
-
 class ExternalSigningOnboardingLapiIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/sdk/tutorials/app-dev/external_signing_onboarding_lapi.rst"),

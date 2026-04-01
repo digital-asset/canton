@@ -6,20 +6,11 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
-import java.io.{PrintWriter, StringWriter}
 import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.control.NonFatal
 
 object ErrorUtil {
-
-  /** Yields a string representation of a throwable (including stack trace and causes).
-    */
-  def messageWithStacktrace(t: Throwable): String = {
-    val result = new StringWriter()
-    t.printStackTrace(new PrintWriter(result))
-    result.toString
-  }
 
   /** Logs and rethrows any throwable.
     */

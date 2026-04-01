@@ -46,7 +46,7 @@ class GrpcRequestLoggingInterceptor(
 
     val (transport, clientAddr) = GrpcAddressHelper.extractTransportFromHeaders(call, headers)
     val callMetadata = CallMetadata(
-      apiEndpoint = show"${method.readableLoggerName(config.maxMethodLength)}",
+      apiEndpoint = show"${method.readableQualifiedName(config.maxMethodLength)}",
       transport = transport,
       remoteAddress = clientAddr,
     )

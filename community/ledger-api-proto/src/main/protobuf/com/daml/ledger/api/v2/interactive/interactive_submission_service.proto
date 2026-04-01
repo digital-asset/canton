@@ -86,7 +86,7 @@ message CostEstimationHints {
   // Details on the keys that will be used to sign the transaction (how many and of which type).
   // Signature size impacts the cost of the transaction.
   // If empty, the signature sizes will be approximated with threshold-many signatures (where threshold is defined
-  // in the PartyToKeyMapping of the external party), using keys in the order they are registered.
+  // in the PartyToParticipant of the external party), using keys in the order they are registered.
   // Empty list is equivalent to not providing this field
   //
   // Optional: can be empty

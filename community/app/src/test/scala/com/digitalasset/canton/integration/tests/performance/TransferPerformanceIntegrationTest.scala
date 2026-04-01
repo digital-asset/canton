@@ -52,6 +52,7 @@ class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
           _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
             .replace(config.NonNegativeFiniteDuration.ofSeconds(60))
         ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
 
   registerPlugin(new UsePostgres(loggerFactory))

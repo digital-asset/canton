@@ -221,12 +221,7 @@ object TransactionProcessor {
 
       // TODO(i5990) properly set `definiteAnswer` where appropriate when sub-categories are created
       final case class Error(message: String, reason: TransactionConfirmationRequestCreationError)
-          extends TransactionErrorImpl(cause = "Malformed request") {
-//        remy.log("")
-//        remy.log(message)
-//        remy.log(reason)
-//        remy.log(reason.show)
-      }
+          extends TransactionErrorImpl(cause = "Malformed request") {}
     }
 
     @Explanation(

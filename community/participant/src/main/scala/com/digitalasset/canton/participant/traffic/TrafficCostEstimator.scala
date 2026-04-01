@@ -368,7 +368,7 @@ class TrafficCostEstimator(
     if (costHints.signingAlgorithmSpec.nonEmpty) {
       costHints.signingAlgorithmSpec.map(mockSignature(_, None))
     } else {
-      // Otherwise mock threshold-many signatures from the first keys in the party to key mapping
+      // Otherwise mock threshold-many signatures from the first keys in the party signing keys
       partyAuth.keys.forgetNE
         .flatMap { key =>
           synchronizerCrypto.pureCrypto.signingAlgorithmSpecs.allowed

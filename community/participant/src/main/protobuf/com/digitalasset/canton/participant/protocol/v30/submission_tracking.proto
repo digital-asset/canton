@@ -15,6 +15,8 @@ message CompletionInfo {
   string command_id = 3;
   com.digitalasset.canton.protocol.v30.DeduplicationPeriod opt_deduplication_period = 4;
   string submission_id = 5;
+  // Traffic cost paid by this node for the ordering of the corresponding event
+  int64 paid_traffic_cost = 6;
 }
 
 message CommandRejected {

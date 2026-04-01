@@ -111,7 +111,11 @@ class SequencerConnectionXPoolImplTest
         clue("Threshold is no longer reachable") {
           inside(initializedF.futureValueUS) {
             case Left(SequencerConnectionXPoolError.ThresholdUnreachableError(message)) =>
-              message shouldBe s"Trust threshold of 2 is no longer reachable"
+              message should (
+                include(s"Trust threshold of 2 is no longer reachable") and
+                  include("test-0: test") and
+                  include("test-1: test")
+              )
           }
         }
 
@@ -280,7 +284,7 @@ class SequencerConnectionXPoolImplTest
             }
 
             // The 8 connections must be represented
-            val rx = raw"(?s).* internal-sequencer-connection-test-(\d+) .*".r
+            val rx = raw"(?s).* internal-sequencer-connection-test-(\d+): .*".r
             logEntries.collect {
               _.warningMessage match { case rx(number) => number }
             }.distinct should have size 8
@@ -718,7 +722,7 @@ class SequencerConnectionXPoolImplTest
   ): LogEntry => Assertion =
     (logEntry: LogEntry) =>
       logEntry.warningMessage should fullyMatch regex
-        raw"(?s)Connection internal-sequencer-connection-test-\d+ has invalid bootstrap info:" +
+        raw"(?s)Connection internal-sequencer-connection-test-\d+: Invalid bootstrap info:" +
         raw" expected BootstrapInfo\(test-synchronizer-$goodSynchronizerId::namespace.*," +
         raw" got BootstrapInfo\(test-synchronizer-$badSynchronizerId::namespace.*"
 
@@ -728,7 +732,7 @@ class SequencerConnectionXPoolImplTest
   ): LogEntry => Assertion =
     (logEntry: LogEntry) =>
       logEntry.warningMessage should fullyMatch regex
-        raw"(?s)Connection internal-sequencer-connection-test-\d+ is not on expected synchronizer:" +
+        raw"(?s)Connection internal-sequencer-connection-test-\d+: Invalid synchronizer:" +
         raw" expected Some\(test-synchronizer-$goodSynchronizerId::namespace::$testedProtocolVersion-0\)," +
         raw" got test-synchronizer-$badSynchronizerId::namespace.*"
 

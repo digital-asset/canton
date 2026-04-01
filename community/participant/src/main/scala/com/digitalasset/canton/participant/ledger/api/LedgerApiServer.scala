@@ -26,6 +26,7 @@ import com.digitalasset.canton.http.{HttpApiServer, JsonApiConfig}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.{
+  AcsContinuationToken,
   CumulativeFilter,
   EventFormat,
   IdentityProviderId,
@@ -300,8 +301,8 @@ class LedgerApiServer(
               ),
               activeAt = validAt,
               continuationToken = None,
+              checksum = AcsContinuationToken.emptyChecksum,
             )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
-            .map(_.withEmptyChecksum)
 
         override def topologyTransactions(
             partyId: LfPartyId,

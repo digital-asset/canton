@@ -665,6 +665,7 @@ object BuildCommon {
       `mock-kms-driver`,
       `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
+      `ledger-common-dars-lf-v2-3`,
       `ledger-common-dars-lf-v2-dev`,
       `transcode-schema`,
       `transcode-daml-lf`,
@@ -682,8 +683,10 @@ object BuildCommon {
       `conformance-testing`,
       `ledger-api-bench-tool`,
       `ledger-test-tool-suites-2-1`,
+      `ledger-test-tool-suites-2-3`,
       `ledger-test-tool-suites-2-dev`,
       `ledger-test-tool-2-1`,
+      `ledger-test-tool-2-3`,
       `ledger-test-tool-2-dev`,
       `upgrading-integration-tests`,
       `model-based-testing-generators`,
@@ -740,11 +743,13 @@ object BuildCommon {
       .in(file("community/util-observability"))
       .dependsOn(
         `daml-grpc-utils`,
+        DamlProjects.executors,
         DamlProjects.`nonempty`,
         DamlProjects.`contextualized-logging`,
         DamlProjects.`observability-metrics`,
         DamlProjects.`observability-tracing`,
         `base-errors`,
+        `util-external`,
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
@@ -791,7 +796,6 @@ object BuildCommon {
           "com.google.protobuf" % "protobuf-java-util" % "4.31.0" % Test,
         ),
         libraryDependencies ++= Seq(
-          scala_logging,
           janino, // not used at compile time, but required for conditionals in logback configuration
           logstash, // not used at compile time, but required for the logback json encoder
           scalatest % Test,
@@ -851,9 +855,9 @@ object BuildCommon {
             "com.digitalasset.canton.damltests",
           ),
           (
-            (Test / sourceDirectory).value / "daml" / "CantonTestDev",
-            (Test / damlDarOutput).value / "CantonTestsDev-1.0.0.dar",
-            "com.digitalasset.canton.damltestsdev",
+            (Test / sourceDirectory).value / "daml" / "CantonTestLF23",
+            (Test / damlDarOutput).value / "CantonTestsLF23-1.0.0.dar",
+            "com.digitalasset.canton.damltestslf23",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfDev",
@@ -1265,6 +1269,7 @@ object BuildCommon {
         DamlProjects.`observability-metrics` % "compile->test",
         `community-base`,
         `magnolify-addon` % "compile->test",
+        `util-observability` % "compile->test",
       )
       .settings(
         sharedCommunitySettings,
@@ -1717,8 +1722,8 @@ object BuildCommon {
 
     def createLedgerCommonDarsProject(lfVersion: String) =
       Project(
-        s"ledger-common-dars-lf-v$lfVersion".replace('.', '-'),
-        file(s"community/ledger/ledger-common-dars/lf-v$lfVersion"),
+        s"ledger-common-dars-lf-v$lfVersion".replace('.', '-').replace("-staging", ""),
+        file(s"community/ledger/ledger-common-dars/lf-v$lfVersion".replace("-staging", "")),
       )
         .dependsOn(
           DamlProjects.`bindings-java`
@@ -1729,6 +1734,13 @@ object BuildCommon {
           Compile / damlDarLfVersions := Seq(lfVersion),
           ledgerCommonDarsSharedSettings(lfVersion),
         )
+
+    private def lfSpecificModels(lfVersion: String): Seq[String] =
+      lfVersion match {
+        case "2.1" => Seq.empty
+        case "2.3" => Seq("keys")
+        case _ => Seq("keys", "experimental")
+      }
 
     def ledgerCommonDarsSharedSettings(lfVersion: String) = Seq(
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
@@ -1743,7 +1755,7 @@ object BuildCommon {
           "carbonv1",
           "carbonv2",
           "upgrade_iface",
-        ) ++ (if (lfVersion == "2.dev") Seq("experimental") else Seq.empty)
+        ) ++ lfSpecificModels(lfVersion)
       )
         yield (
           (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
@@ -1819,6 +1831,7 @@ object BuildCommon {
     )
 
     lazy val `ledger-common-dars-lf-v2-1` = createLedgerCommonDarsProject(lfVersion = "2.1")
+    lazy val `ledger-common-dars-lf-v2-3` = createLedgerCommonDarsProject(lfVersion = "2.3-staging")
     lazy val `ledger-common-dars-lf-v2-dev` = createLedgerCommonDarsProject(lfVersion = "2.dev")
 
     // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
@@ -2050,9 +2063,9 @@ object BuildCommon {
               "com.digitalasset.canton.http.json.encoding",
             ),
             (
-              (Test / sourceDirectory).value / "daml" / "v2_dev",
-              (Test / damlDarOutput).value / "JsonEncodingTestDev.dar",
-              "com.digitalasset.canton.http.json.encoding.dev",
+              (Test / sourceDirectory).value / "daml" / "v2_3",
+              (Test / damlDarOutput).value / "JsonEncodingTestLF23.dar",
+              "com.digitalasset.canton.http.json.encoding.lf23",
             ),
             (
               (Test / sourceDirectory).value / "daml" / "damldefinitionsservice" / "dep",
@@ -2182,7 +2195,7 @@ object BuildCommon {
         sharedCantonCommunitySettings,
         coverageEnabled := false,
         HouseRules.damlRepoHeaderSettings,
-        Compile / damlDarLfVersions := Seq("2.dev"),
+        Compile / damlDarLfVersions := Seq("2.3-staging"),
         Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "benchtool",
@@ -2228,16 +2241,27 @@ object BuildCommon {
           Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
           // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
-          if (lfVersion != "2.dev")
+          if (lfVersion == "2.1")
             Seq(
               Compile / unmanagedSources / excludeFilter := "*NamesSpec.scala" || ((_: File).getAbsolutePath
-                .contains("v2_dev"))
+                .contains("v2_dev")) || ((_: File).getAbsolutePath
+                .contains("v2_3"))
             )
           else Seq.empty,
         )
 
     lazy val `ledger-test-tool-suites-2-1` =
       ledgerTestToolSuitesProject("2.1", `ledger-common-dars-lf-v2-1`)
+    lazy val `ledger-test-tool-suites-2-3` =
+      ledgerTestToolSuitesProject(
+        "2.3",
+        `ledger-common-dars-lf-v2-3`,
+        // Suites sources are identical between test tool versions
+        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
+        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
+        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
+        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
+      )
     lazy val `ledger-test-tool-suites-2-dev` =
       ledgerTestToolSuitesProject(
         "2.dev",
@@ -2245,8 +2269,14 @@ object BuildCommon {
         // Suites sources are identical between test tool versions
         // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
         // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
-        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
+        Compile / unmanagedSourceDirectories ++= Seq(
+          baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
+          baseDirectory.value / ".." / "lf-v2.3" / "src" / "main",
+        ),
+        Test / unmanagedSourceDirectories ++= Seq(
+          baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
+          baseDirectory.value / ".." / "lf-v2.3" / "src" / "test",
+        ),
       )
 
     def ledgerTestToolProject(lfVersion: String, ledgerTestToolSuites: Project): Project =
@@ -2277,6 +2307,7 @@ object BuildCommon {
         )
 
     lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-test-tool-suites-2-1`)
+    lazy val `ledger-test-tool-2-3` = ledgerTestToolProject("2.3", `ledger-test-tool-suites-2-3`)
     lazy val `ledger-test-tool-2-dev` =
       ledgerTestToolProject("2.dev", `ledger-test-tool-suites-2-dev`)
 
@@ -2285,6 +2316,7 @@ object BuildCommon {
       .dependsOn(
         `community-app` % "compile->compile;test->test",
         `ledger-test-tool-2-1` % Test,
+        `ledger-test-tool-2-3` % Test,
         `ledger-test-tool-2-dev` % Test,
       )
       .settings(
@@ -2293,13 +2325,25 @@ object BuildCommon {
         // Allow to exit the systematic testing generator app
         (Test / run / trapExit) := false,
         Test / run := (Test / run)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(
+            `ledger-test-tool-2-1` / assembly,
+            `ledger-test-tool-2-3` / assembly,
+            `ledger-test-tool-2-dev` / assembly,
+          )
           .evaluated,
         Test / test := (Test / test)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(
+            `ledger-test-tool-2-1` / assembly,
+            `ledger-test-tool-2-3` / assembly,
+            `ledger-test-tool-2-dev` / assembly,
+          )
           .value,
         Test / testOnly := (Test / testOnly)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(
+            `ledger-test-tool-2-1` / assembly,
+            `ledger-test-tool-2-3` / assembly,
+            `ledger-test-tool-2-dev` / assembly,
+          )
           .evaluated,
         Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
       )
@@ -2980,12 +3024,15 @@ object BuildCommon {
 
     lazy val `executors` = project
       .in(file("base/executors"))
-      .dependsOn(
-        `scala-utils`
-      )
+      .dependsOn(`scala-utils`)
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
+        libraryDependencies ++= Seq(
+          grpc_api,
+          scala_logging,
+          slf4j_api,
+        ),
         publish / skip := false,
       )
 
@@ -3402,13 +3449,22 @@ object BuildCommon {
         WartRemover
       )
       .settings(
-        buildInfoKeys ++= Seq[BuildInfoKey](
-          BuildInfoKey("explicitVersions" -> DamlLfPlugin.LfVersions.explicitVersions),
-          BuildInfoKey("namedVersions" -> DamlLfPlugin.LfVersions.namedVersions),
-          BuildInfoKey("versionLists" -> DamlLfPlugin.LfVersions.versionLists),
-        ),
+        buildInfoKeys ++= {
+          import DamlLfPlugin.LfVersionsDTO.*
+          Seq[BuildInfoKey](
+            BuildInfoKey("explicitVersionsDTO" -> explicitVersions.map { case (k, v) =>
+              k -> v.toJson
+            }),
+            BuildInfoKey("namedVersionsDTO" -> namedVersions.map { case (k, v) => k -> v.toJson }),
+            BuildInfoKey("versionListsDTO" -> versionLists.map { case (k, v) =>
+              k -> v.map(_.toJson)
+            }),
+          )
+        },
         generateLfVersionJson := DamlLfPlugin.generateJsonLogic.value,
         Compile / resourceGenerators += generateLfVersionJson.taskValue,
+        generateDTOLfVersionJson := DamlLfPlugin.generateDTOJsonLogic.value,
+        Compile / resourceGenerators += generateDTOLfVersionJson.taskValue,
         sharedCommunitySettings,
         organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
@@ -3417,6 +3473,8 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
+          circe_core,
+          circe_parser,
           google_protobuf_java,
           scalatest % Test,
         ),
@@ -3802,7 +3860,7 @@ object BuildCommon {
         `scala-utils`,
         CommunityProjects.`util-observability`,
         `daml-lf-transaction-test-lib` % "test->test",
-        CommunityProjects.`community-testing` % "test->test",
+        CommunityProjects.`util-observability` % "test->test",
       )
 
     lazy val `daml-lf-interpreter-bench` = project
@@ -3882,7 +3940,7 @@ object BuildCommon {
         `daml-lf-parser` % Test,
         `daml-lf-encoder` % Test,
         `daml-lf-tests` % Test,
-        CommunityProjects.`community-testing` % "test->test",
+        CommunityProjects.`util-observability` % "test->test",
       )
 
     lazy val `daml-lf-upgrades-matrix` = project
@@ -3928,7 +3986,7 @@ object BuildCommon {
         `daml-lf-parser`,
         `daml-lf-encoder`,
         `daml-lf-tests`,
-        CommunityProjects.`community-testing` % "test->test",
+        CommunityProjects.`util-observability` % "test->test",
       )
 
     lazy val `daml-lf-api-type-signature` = project

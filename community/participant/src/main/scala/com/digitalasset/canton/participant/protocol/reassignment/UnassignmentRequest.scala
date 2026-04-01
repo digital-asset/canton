@@ -128,6 +128,20 @@ object UnassignmentRequest {
         targetTopology,
       ).compute
 
+      _ <- ReassignmentValidation.checkMultiSynchronizerEnabled(
+        sourceTopology.unwrap,
+        unassignmentRequestRecipients,
+        sourcePsid.unwrap,
+      )
+
+      // validate that all participants hosting a stakeholder have the multi-synchronizer enabled on the target synchronizer,
+      // otherwise the assignment will fail later on
+      _ <- ReassignmentValidation.checkMultiSynchronizerEnabled(
+        targetTopology.unwrap,
+        stakeholders,
+        targetPsid.unwrap,
+      )
+
       _ <- UsableSynchronizers
         .checkPackagesVetted(
           sourcePsid.unwrap,

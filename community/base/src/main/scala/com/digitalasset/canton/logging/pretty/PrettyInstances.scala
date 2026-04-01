@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{TraceContext, Traced, W3CTraceContext}
 import com.digitalasset.canton.util.ShowUtil.HashLength
-import com.digitalasset.canton.util.{ErrorUtil, HexString}
+import com.digitalasset.canton.util.{HexString, ThrowableUtil}
 import com.digitalasset.canton.{LedgerUserId, LfPartyId, LfTimestamp, LfVersioned, Uninhabited}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
@@ -95,7 +95,9 @@ trait PrettyInstances {
     case Right(x) => Tree.Apply("Right", Iterator(x.toTree))
   }
 
-  implicit def prettyThrowable: Pretty[Throwable] = prettyOfString(ErrorUtil.messageWithStacktrace)
+  implicit def prettyThrowable: Pretty[Throwable] = prettyOfString(
+    ThrowableUtil.messageWithStacktrace
+  )
 
   implicit def prettyMap[K: Pretty, V: Pretty]: Pretty[collection.Map[K, V]] =
     elements =>

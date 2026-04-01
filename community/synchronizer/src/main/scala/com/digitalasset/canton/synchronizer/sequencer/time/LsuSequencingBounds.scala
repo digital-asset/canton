@@ -28,13 +28,27 @@ import scala.concurrent.ExecutionContext
   *
   * LSUAnnouncement.effective <= lowerBoundSequencingTimeExclusive < upgradeTime
   */
-final case class LsuSequencingBounds(
-    upgradeTime: CantonTimestamp,
+final case class LsuSequencingBounds private (
     lowerBoundSequencingTimeExclusive: CantonTimestamp,
-)
+    upgradeTime: CantonTimestamp,
+) {
+  require(
+    lowerBoundSequencingTimeExclusive <= upgradeTime,
+    s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime",
+  )
+}
 
 object LsuSequencingBounds {
-  // TODO(#31526) We should allow to override this
+  def create(
+      lowerBoundSequencingTimeExclusive: CantonTimestamp,
+      upgradeTime: CantonTimestamp,
+  ): Either[String, LsuSequencingBounds] =
+    Either.cond(
+      lowerBoundSequencingTimeExclusive <= upgradeTime,
+      LsuSequencingBounds(lowerBoundSequencingTimeExclusive, upgradeTime),
+      s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime",
+    )
+
   def create(
       store: TopologyStore[SynchronizerStore]
   )(implicit
@@ -52,6 +66,10 @@ object LsuSequencingBounds {
             .maxTimestamp(sequencedTime = SequencedTime(upgradeTime), includeRejected = true)
             .map {
               case Some((_, latestEffectiveTime)) =>
+                /*
+                Note: the require in the LsuSequencingBounds might throw if the invariant is not respected.
+                This is fine because it means that something went terribly wrong: a topology change is effective after ugprade time.
+                 */
                 LsuSequencingBounds(
                   upgradeTime = upgradeTime,
                   lowerBoundSequencingTimeExclusive = latestEffectiveTime.value,

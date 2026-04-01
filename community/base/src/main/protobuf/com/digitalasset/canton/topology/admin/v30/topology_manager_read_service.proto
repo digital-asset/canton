@@ -16,6 +16,7 @@ service TopologyManagerReadService {
   rpc ListDecentralizedNamespaceDefinition(ListDecentralizedNamespaceDefinitionRequest) returns (ListDecentralizedNamespaceDefinitionResponse);
 
   rpc ListOwnerToKeyMapping(ListOwnerToKeyMappingRequest) returns (ListOwnerToKeyMappingResponse);
+  // Note that PartyToKeyMapping is deprecated in favor of PartyToParticipant
   rpc ListPartyToKeyMapping(ListPartyToKeyMappingRequest) returns (ListPartyToKeyMappingResponse);
 
   rpc ListSynchronizerTrustCertificate(ListSynchronizerTrustCertificateRequest) returns (ListSynchronizerTrustCertificateResponse);
@@ -331,6 +332,12 @@ message GenesisStateV2Response {
 message SequencerLsuStateRequest {
   // Must be specified if the node is configured with more than one active synchronizer.
   optional StoreId synchronizer_store = 1;
+
+  // The effective time used to fetch the topology transactions
+  // MUST be empty for regular LSUs.
+  // SHOULD be defined in a disaster recovery scenario when requesting the topology from a synchronizer
+  // without an announced LSU.
+  optional google.protobuf.Timestamp timestamp = 2;
 }
 
 message SequencerLsuStateResponse {

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.multisynchronizer
 
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.{AcsContinuationToken, CumulativeFilter, EventFormat}
@@ -29,6 +30,7 @@ import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.collection.mutable
+import scala.concurrent.Future
 
 class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
   behavior of "MultiSynchronizer contract lookup"
@@ -188,7 +190,10 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     (txn, contracts.toVector)
   }
 
-  private def getAcsF(eventFormat: EventFormat, continuationToken: Option[AcsContinuationToken]) =
+  private def getAcsF(
+      eventFormat: EventFormat,
+      continuationToken: Option[AcsContinuationToken],
+  ): Future[Vector[GetActiveContractsResponse]] =
     for {
       ledgerEnd <- index.currentLedgerEnd()
       contracts <- index
@@ -196,8 +201,8 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           eventFormat,
           ledgerEnd,
           continuationToken,
+          AcsContinuationToken.emptyChecksum,
         )
-        .map(_.withEmptyChecksum)
         .runWith(Sink.collection)
     } yield contracts.toVector
 

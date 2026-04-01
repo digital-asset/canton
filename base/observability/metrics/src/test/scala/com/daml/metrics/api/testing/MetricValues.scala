@@ -67,6 +67,13 @@ trait MetricValues {
       case other =>
         throw new IllegalArgumentException(s"Value not supported for $other")
     }
+
+    def valuesWithContext: Map[MetricsContext, Long] = counter match {
+      case counter: InMemoryCounter =>
+        counter.markers.view.mapValues(_.get()).toMap
+      case other =>
+        throw new IllegalArgumentException(s"Value not supported by $other")
+    }
   }
 
   class MeterValues(meter: Meter) {

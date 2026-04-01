@@ -90,8 +90,8 @@ final class ApiStateService(
               eventFormat = eventFormat,
               activeAt = activeAt,
               continuationToken = continuationToken,
+              checksum = checksum,
             )
-            .map(_.apply(checksum))
         }
       }
       result

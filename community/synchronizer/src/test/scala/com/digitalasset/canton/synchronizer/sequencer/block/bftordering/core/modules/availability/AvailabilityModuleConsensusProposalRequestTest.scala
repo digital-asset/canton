@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeModuleExpectingSilence,
   fakeRecordingModule,
 }
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.Traced
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
@@ -67,7 +68,9 @@ class AvailabilityModuleConsensusProposalRequestTest
               : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
             new ProgrammableUnitTestContext()
 
-          val disseminationProtocolState = new DisseminationProtocolState()
+          val clock = new SimClock(loggerFactory = loggerFactory)
+          val disseminationProtocolState =
+            new DisseminationProtocolState(lastProposalRequestTime = Some(clock.now))
           val mempoolCell = new AtomicReference[Option[Mempool.Message]](None)
           val consensusCell = new AtomicReference[Option[Consensus.ProtocolMessage]](None)
 
@@ -76,6 +79,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               disseminationProtocolState = disseminationProtocolState,
               mempool = fakeCellModule(mempoolCell),
               consensus = fakeCellModule(consensusCell),
+              clock = clock,
             )
           mempoolCell.get() should contain(
             Mempool.CreateLocalBatches(
@@ -487,7 +491,9 @@ class AvailabilityModuleConsensusProposalRequestTest
 
         "send a non-empty but not fully-sized proposal to local consensus and " +
           "have no batches left ready for ordering" in {
-            val disseminationProtocolState = new DisseminationProtocolState()
+            val clock = new SimClock(loggerFactory = loggerFactory)
+            val disseminationProtocolState =
+              new DisseminationProtocolState(lastProposalRequestTime = Some(clock.now))
             val consensusCell = new AtomicReference[Option[Consensus.ProtocolMessage]](None)
             implicit val ctx
                 : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
@@ -541,7 +547,9 @@ class AvailabilityModuleConsensusProposalRequestTest
 
         "send fully-sized proposal to local consensus if dissemination adds enough" +
           "extra batches before end of delayed response " in {
-            val disseminationProtocolState = new DisseminationProtocolState()
+            val clock = new SimClock(loggerFactory = loggerFactory)
+            val disseminationProtocolState =
+              new DisseminationProtocolState(lastProposalRequestTime = Some(clock.now))
             val consensusCell = new AtomicReference[Option[Consensus.ProtocolMessage]](None)
             implicit val ctx
                 : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
@@ -652,8 +660,6 @@ class AvailabilityModuleConsensusProposalRequestTest
             )
 
             disseminationProtocolState.disseminationInProgressView should be(empty)
-            disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe defined
-            disseminationProtocolState.disseminationCompleteView should not be empty
 
             val poa =
               ADisseminationProgressNode0To6WithNonQuorumVotes
@@ -663,10 +669,6 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .getOrElse(fail("PoA should be ready in new topology but isn't"))
                 .tracedProofOfAvailability
                 .value
-
-            consensusCell.get() shouldBe empty
-            ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-            availability.receive(Availability.DelayedProposalResponse)
 
             disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
             consensusCell.get() should contain(
@@ -787,8 +789,6 @@ class AvailabilityModuleConsensusProposalRequestTest
                   failingCryptoProvider,
                 )
             )
-            ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-            availability.receive(Availability.DelayedProposalResponse)
 
             val reviewedProgress =
               AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
@@ -882,8 +882,6 @@ class AvailabilityModuleConsensusProposalRequestTest
                 failingCryptoProvider,
               )
           )
-          ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-          availability.receive(Availability.DelayedProposalResponse)
           val acksAfter = acksBefore.filterNot(_.from == "node6")
 
           val poa = ProofOfAvailability(ABatchId, acks = acksAfter, anEpochNumber)
@@ -962,8 +960,6 @@ class AvailabilityModuleConsensusProposalRequestTest
                 failingCryptoProvider,
               )
           )
-          ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-          availability.receive(Availability.DelayedProposalResponse)
 
           val reviewedProgress =
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
@@ -1055,8 +1051,6 @@ class AvailabilityModuleConsensusProposalRequestTest
                 spiedNoSignatureCryptoProvider,
               )
           )
-          ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-          availability.receive(Availability.DelayedProposalResponse)
 
           disseminationProtocolState.disseminationInProgressView should contain only (AnotherBatchId ->
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
@@ -1200,8 +1194,6 @@ class AvailabilityModuleConsensusProposalRequestTest
             log.message should include("discarding expired batches")
           },
         )
-        ctx.lastDelayedMessage.map(_._2) should contain(Availability.DelayedProposalResponse)
-        availability.receive(Availability.DelayedProposalResponse)
 
         inside(consensusCell.get()) {
           case Some(

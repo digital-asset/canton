@@ -56,6 +56,8 @@ object GlobalKey {
   private[lf] def unapply(globalKey: GlobalKey): Some[(TypeConId, Value)] =
     Some((globalKey.templateId, globalKey.key))
 
+  implicit val globalKeyOrdering: Ordering[GlobalKey] = Ordering.by(_.hash)
+
 }
 
 final case class GlobalKeyWithMaintainers(

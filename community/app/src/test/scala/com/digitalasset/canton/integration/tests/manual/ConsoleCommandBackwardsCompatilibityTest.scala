@@ -255,8 +255,6 @@ object ConsoleCommandBackwardsCompatibilityReaderTest {
         Set(
           "remote-participant.repair.add",
           "local-participant.repair.add",
-          "remote-participant.repair.import_acs_old",
-          "local-participant.repair.import_acs_old",
           "remote-participant.repair.import_acs",
           "local-participant.repair.import_acs",
         ).map(
@@ -277,8 +275,6 @@ object ConsoleCommandBackwardsCompatibilityReaderTest {
         Set(
           "remote-participant.repair.add",
           "local-participant.repair.add",
-          "remote-participant.repair.import_acs_old",
-          "local-participant.repair.import_acs_old",
           "remote-participant.repair.import_acs",
           "local-participant.repair.import_acs",
         ).map((_, "allowContractIdSuffixRecomputation"))

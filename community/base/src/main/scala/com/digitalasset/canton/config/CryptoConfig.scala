@@ -83,7 +83,6 @@ final case class CryptoConfig(
     hash: CryptoSchemeConfig[HashAlgorithm] = CryptoSchemeConfig(),
     pbkdf: CryptoSchemeConfig[PbkdfScheme] = CryptoSchemeConfig(),
     kms: Option[KmsConfig] = None,
-    // TODO(#27529): Enable after the topology snapshot problem has been fixed
     sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled,
     privateKeyStore: PrivateKeyStoreConfig = PrivateKeyStoreConfig(),
 )

@@ -40,6 +40,7 @@ import com.digitalasset.canton.version.{
 import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 import scala.concurrent.ExecutionContext
 
@@ -176,6 +177,11 @@ final case class ClosedUncompressedEnvelope private[protocol] (
 }
 
 object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressedEnvelope] {
+  val recipientsLens: Lens[ClosedUncompressedEnvelope, Recipients] =
+    Lens[ClosedUncompressedEnvelope, Recipients](_.recipients)(newRecipients =>
+      envelope => envelope.withRecipients(newRecipients)
+    )
+
   override def name: String = "ClosedUncompressedEnvelope"
 
   override val versioningTable: VersioningTable = VersioningTable(

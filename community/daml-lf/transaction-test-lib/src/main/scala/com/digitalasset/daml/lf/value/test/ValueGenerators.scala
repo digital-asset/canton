@@ -468,20 +468,26 @@ object ValueGenerators {
       version = version,
     )
 
-  val lookupNodeGen: Gen[Node.LookupByKey] =
+  val queryByKeyNodeGen: Gen[Node.QueryByKey] =
     for {
       version <- SerializationVersionGen()
-      targetCoid <- coidGen
+      node <- queryByKeyNodeGenWithVersion(version)
+    } yield node
+
+  def queryByKeyNodeGenWithVersion(version: SerializationVersion): Gen[Node.QueryByKey] =
+    for {
       pkgName <- pkgNameGen
       templateId <- idGen
       key <- keyWithMaintainersGen(templateId, pkgName)
-      result <- Gen.option(targetCoid)
-    } yield Node.LookupByKey(
+      contractIds <- Gen.listOf(coidGen).map(_.toVector)
+      exhaustive <- Gen.oneOf(true, contractIds.isEmpty)
+    } yield Node.QueryByKey(
       packageName = pkgName,
-      templateId,
-      key,
-      result,
-      version,
+      templateId = templateId,
+      exhaustive = exhaustive,
+      key = key,
+      result = contractIds,
+      version = version,
     )
 
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
@@ -494,7 +500,8 @@ object ValueGenerators {
       create = malformedCreateNodeGenWithVersion(version)
       exe = danglingRefExerciseNodeGenWithVersion(version)
       fetch = fetchNodeGenWithVersion(version)
-      node <- Gen.oneOf(create, exe, fetch)
+      queryByKey = queryByKeyNodeGenWithVersion(version)
+      node <- Gen.oneOf(create, exe, fetch, queryByKey)
     } yield (id, node)
 
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
@@ -521,6 +528,7 @@ object ValueGenerators {
         malformedCreateNodeGenWithVersion(version),
         danglingRefExerciseNodeGenWithVersion(version),
         fetchNodeGenWithVersion(version),
+        queryByKeyNodeGenWithVersion(version),
       )
     )
 
@@ -574,6 +582,7 @@ object ValueGenerators {
             rollbackFreq -> danglingRefRollbackNodeGen,
             1 -> malformedCreateNodeGen(),
             2 -> fetchNodeGen,
+            1 -> queryByKeyNodeGen,
           )
           nodeWithChildren <- node match {
             case node: Node.Exercise =>

@@ -23,7 +23,7 @@ import scala.concurrent.ExecutionContext
 class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest {
 
   // Direct execution context is crucial for the tests to verify entire code paths.
-  implicit private val executionContext: ExecutionContext = DirectExecutionContext(logger)
+  implicit private val executionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   "P2PGrpcStreamingReceiver" should {
     "throw an exception if received gRPC message before authentication was completed" in {

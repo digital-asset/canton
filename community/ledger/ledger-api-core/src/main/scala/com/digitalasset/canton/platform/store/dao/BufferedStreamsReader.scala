@@ -154,7 +154,6 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
               )
 
               bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
-              noTracingLogger.debug(s"Got buffer slice: $bufferSlice")
               bufferSlice match {
                 case BufferSlice.Inclusive(slice) =>
                   val apiResponseSource = toApiResponseStream(slice)

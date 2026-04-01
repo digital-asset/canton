@@ -22,10 +22,10 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.tests.acs.commitment.util.ContractsAndCommitment.IouCommitmentWithContracts
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
   IntervalDuration,
-  IouContractsAndCommitment,
 }
 import com.digitalasset.canton.integration.util.AcsInspection.assertInAcsSync
 import com.digitalasset.canton.integration.{
@@ -102,6 +102,7 @@ trait AcsCommitmentToolingIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
         ConfigTransforms.updateTargetTimestampForwardTolerance(24.hours),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(
@@ -182,9 +183,9 @@ trait AcsCommitmentToolingIntegrationTest
         }
 
         logger.debug(s"P1 sends two commitments to P2")
-        val IouContractsAndCommitment(cids1da, commitmentPeriod1da, commitment1da) =
+        val IouCommitmentWithContracts(cids1da, commitmentPeriod1da, commitment1da, _) =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-        val IouContractsAndCommitment(_, commitmentPeriod2da, commitment2da) =
+        val IouCommitmentWithContracts(_, commitmentPeriod2da, commitment2da, _) =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
         logger.debug(
@@ -426,7 +427,7 @@ trait AcsCommitmentToolingIntegrationTest
             logger.debug(
               "Now have P1 and P2 exchange commitments again, so that P1 can see the mismatch."
             )
-            val IouContractsAndCommitment(_, commitmentPeriod3da, commitment3da) =
+            val IouCommitmentWithContracts(_, commitmentPeriod3da, commitment3da, _) =
               deployThreeContractsAndCheck(
                 daId,
                 alreadyDeployedContracts,
@@ -652,7 +653,7 @@ trait AcsCommitmentToolingIntegrationTest
         implicit env =>
           import env.*
 
-          val IouContractsAndCommitment(_, commitmentPeriod, commitment) =
+          val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
             deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
           // give wrong timestamp but a computed commitment and correct counter-participant
@@ -681,7 +682,7 @@ trait AcsCommitmentToolingIntegrationTest
       "the given counter-participant is incorrect" in { implicit env =>
         import env.*
 
-        val IouContractsAndCommitment(_, commitmentPeriod, commitment) =
+        val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
         // give wrong counter-participant but a computed commitment and its correct timestamp
@@ -706,7 +707,7 @@ trait AcsCommitmentToolingIntegrationTest
       "the given timestamp is not a reconciliation interval tick" in { implicit env =>
         import env.*
 
-        val IouContractsAndCommitment(_, commitmentPeriod, commitment) =
+        val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
         // this test assumes that the reconciliation interval is not 1 second for the given opening commitment
@@ -741,7 +742,7 @@ trait AcsCommitmentToolingIntegrationTest
 
       val simClock = environment.simClock.value
 
-      val IouContractsAndCommitment(_, commitmentPeriod, commitment) =
+      val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
         deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
       logger.info(

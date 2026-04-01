@@ -5,14 +5,7 @@ package com.digitalasset.canton.integration.tests.traffic
 
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
-import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{
-  NonNegativeLong,
-  NonNegativeNumeric,
-  PositiveInt,
-  PositiveLong,
-}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
@@ -24,9 +17,9 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
+  TrafficTestUtils,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 
 /** Test the traffic inspection service on the sequencer Specifically that it can be used to
@@ -39,56 +32,22 @@ trait TrafficSummariesTest
     with HasCycleUtils
     with TrafficBalanceSupport {
 
-  // Free confirmation responses and no base cost
-  // This means essentially only topology transactions and confirmation requests cost traffic
-  // which makes it easier to make assertion on traffic spent by nodes
-  // It does require topping them up though, which is done in the setup of the environment in this test
-  private val trafficControlParameters = TrafficControlParameters(
-    maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20 * 1000L),
-    readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
-    maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
-    setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
-    enforceRateLimiting = true,
-    baseEventCost = NonNegativeLong.zero,
-    freeConfirmationResponses = true,
-  )
-
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .withSetup { implicit env =>
         import env.*
-
-        sequencer1.topology.synchronizer_parameters.propose_update(
-          synchronizerId = daId,
-          _.update(trafficControl = Some(trafficControlParameters)),
-        )
-
-        // "Deactivate" ACS commitments to not consume traffic in the background
-        sequencer1.topology.synchronizer_parameters.propose_update(
-          synchronizerId = daId,
-          _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(365)),
-        )
-        sequencer1.topology.synchronisation.await_idle()
-
         participants.local.foreach { participant =>
           participant.start()
           participant.health.wait_for_running()
           participant.synchronizers.connect_local(sequencer1, daName)
           participant.dars.upload(CantonExamplesPath)
-          updateBalanceForMember(participant, PositiveLong.MaxValue, () => ())
         }
-
-        updateBalanceForMember(mediator1, PositiveLong.MaxValue, () => ())
-
-        sequencer1.topology.synchronizer_parameters.propose_update(
-          synchronizerId = daId,
-          // Update the traffic parameters to remove base traffic, making it easier to assert on traffic spent
-          _.update(trafficControl =
-            Some(trafficControlParameters.copy(maxBaseTrafficAmount = NonNegativeLong.zero))
-          ),
-        )
-
       }
+      .withTrafficControl(
+        trafficControlParameters = TrafficTestUtils.predictableTraffic,
+        topUpAllMembers = true,
+        disableCommitments = true,
+      )
 
   private var createRecordTime: CantonTimestamp = _
 
@@ -147,9 +106,7 @@ trait TrafficSummariesTest
 
       // Find the corresponding verdicts
       val verdicts =
-        mediator1.inspection
-          .verdicts_until_complete(createRecordTime.immediatePredecessor, PositiveInt.two)
-          .flatMap(_.verdict)
+        mediator1.inspection.verdicts(createRecordTime.immediatePredecessor, PositiveInt.two)
 
       // Correlate traffic data with verdict data
       summaries.zip(verdicts).zip(List(trafficCostCreate, trafficCostExercise)).foreach {
@@ -190,7 +147,7 @@ trait TrafficSummariesTest
         import env.*
 
         loggerFactory.assertThrowsAndLogs[CommandFailure](
-          // Try with 2 timestamps, one valid, one just before which has no event, but is still below the synchronizer time
+          // Try with 2 timestamps, one valid, and one below the synchronizer time but with no event
           sequencer1.traffic_control.traffic_summaries(
             Seq(createRecordTime, CantonTimestamp.MinValue)
           ),

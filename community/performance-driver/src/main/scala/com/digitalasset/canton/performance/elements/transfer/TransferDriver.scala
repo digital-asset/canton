@@ -16,7 +16,6 @@ import com.digitalasset.canton.performance.Connectivity
 import com.digitalasset.canton.performance.PartyRole.Transfer
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.acs.ContractStore
-import com.digitalasset.canton.performance.control.RandomBalancer
 import com.digitalasset.canton.performance.elements.DriverStatus.{
   StepStatus,
   TraderStatus,
@@ -37,8 +36,10 @@ import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import org.apache.pekko.actor.ActorSystem
 
 import java.time.Instant
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
+import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.Ordered.orderingToOrdered
+import scala.annotation.tailrec
 import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.*
 import scala.util.Success
@@ -73,9 +74,6 @@ class TransferDriver(
     with AssetUserDriver
     with StatsUpdater {
 
-  private val transferCounter = new AtomicLong(0)
-  private val allAssetsInPlace = new AtomicBoolean(false)
-
   private val transferMetric =
     metricsFactory.gauge[Long](
       MetricInfo(
@@ -104,6 +102,7 @@ class TransferDriver(
     override protected def contractCreated(
         create: TransferPreapproval.Contract,
         index: (String, String, String),
+        synchronizer: String,
     ): Unit = ()
 
     override protected def contractArchived(
@@ -118,15 +117,20 @@ class TransferDriver(
   private val transferStats = new TraderStats(transferMetric)
   listeners.appendAll(Seq(assets, assetRequests, preapprovals))
 
-  private def createTransferPreapprovals(traders: Seq[String]): Unit =
-    generator.one(()).foreach { case (_, gen) =>
+  private def createTransferPreapprovals(traders: Seq[String]): Boolean =
+    generator.one(()).exists { case (_, gen) =>
       val missing = traders.filter { trader =>
-        preapprovals.one((partyLf, trader, locations.head1)).isEmpty && trader != party.getValue
+        preapprovals
+          .one((partyLf, trader, synchronizers.head1.uid.identifier.str))
+          .isEmpty && trader != party.getValue
       }
-      if (missing.nonEmpty) {
+      if (missing.nonEmpty && rate.available > 0) {
         logger.info(s"Creating preapprovals for $missing")
         val cmd = gen.id
-          .exerciseGeneratePreapproval(missing.asJava, locations.forgetNE.asJava)
+          .exerciseGeneratePreapproval(
+            missing.asJava,
+            synchronizers.map(_.uid.identifier.str).forgetNE.asJava,
+          )
           .commands
           .asScala
           .toSeq
@@ -143,7 +147,9 @@ class TransferDriver(
           case x =>
             logger.warn(s"Creating preapprovals for $missing failed, retrying $x")
         }
-      }
+        false
+      } else if (missing.nonEmpty) false
+      else true
     }
 
   private def determineAvailable() = {
@@ -180,91 +186,252 @@ class TransferDriver(
       submit1,
       Math.max(submit1 * settings.factorOfMaxSubmissionsPerIteration, 1).toInt,
     )
-    (submit1, submit2)
+    submit2
   }
 
-  private def determineTargetSynchronizer() = {
-    val index = transferCounter.incrementAndGet()
-    val synchronizer = synchronizers((index % synchronizers.length).toInt)
-    val location = locations((index % locations.length).toInt)
-    (synchronizer, location)
-  }
-
-  private val referenceAssetQuantity = new AtomicInteger(0)
-  private val traderBalancer = new RandomBalancer()
-  private val issuerBalancer = new RandomBalancer()
+  private val ready = new AtomicBoolean(false)
+  private val masterChanged = new AtomicBoolean(false)
+  private val referenceAssetQuantity = new AtomicInteger(1)
+  private val reassignIssuers = new AtomicReference[Set[Party]](Set.empty)
+  private val traderBalancer = new AtomicReference[IndexedSeq[Party]](IndexedSeq.empty)
 
   override def masterCreated(master: TestRun.Contract): Unit = {
     super.masterCreated(master)
-    traderBalancer.updateMembers(
-      master.data.traders.asScala.toSeq.map(new Party(_)).filter(_ != party)
+    traderBalancer.set(
+      master.data.traders.asScala.map(new Party(_)).filter(_ != party).toIndexedSeq
     )
-    issuerBalancer.updateMembers(master.data.issuers.asScala.toSeq.map(new Party(_)))
-    master.data.runType match {
-      case run: TransferRun =>
-        referenceAssetQuantity.set(
-          synchronizers.size * master.data.issuers.size() * run.numAssetsPerIssuer.toInt
-        )
-      case _ =>
+    masterChanged.set(true)
+  }
+
+  override protected def assetCreated(create: Asset.Contract, synchronizerId: String): Unit =
+    // keep track of issuers with assets not on the right synchronizer
+    if (!synchronizerId.startsWith(create.data.location + ":")) {
+      reassignIssuers.updateAndGet(_ + (new Party(create.data.issuer))).discard
     }
-  }
 
-  /** Preferably picks assets not yet in place such that we only have reassignments in the beginning
-    */
-  private def pickAssets(issuer: Party, num: Int, location: String) = {
-    def pick(filter: (String, Asset.Contract) => Boolean) = assets
-      .take(
-        issuer,
-        num,
-        // only pick assets of a matching synchronizer
-        filter = { case (synchronizer, asset) =>
-          filter(synchronizer, asset)
-        },
-      )
-      .map(_._2)
-    def defaultPick = pick { case (_, asset) => asset.data.location == location }
-    if (!allAssetsInPlace.get()) {
-      val notInPlace = pick { case (synchronizer, asset) =>
-        asset.data.location == location && !synchronizer.startsWith(location + "::")
-      }
-      if (notInPlace.isEmpty) {
-        // try to update all assets in place
-        val haveOne = assets.all.exists { case (synchronizer, _, asset) =>
-          !synchronizer.startsWith(asset.data.location + "::")
-        }
-        if (!haveOne) {
-          logger.info("All assets are now in place")
-          allAssetsInPlace.set(true)
-        }
-        defaultPick
-      } else {
-        notInPlace
-      }
-    } else defaultPick
-  }
-
-  private def signalReadyIfTransferDriverIs(
+  private def updateParticipantFlagAndReturnReady(
+      master: M.orchestration.TestRun.Contract,
       processedAllIssuers: Boolean,
-      numAssetsPerIssuer: Int,
   ): Boolean =
     testResult
       .one(())
       .exists { case (_, res) =>
-        if (res.data.flag == M.orchestration.ParticipantFlag.READY)
+        // we are done if we submitted enough transfers
+        if (
+          res.data.flag == M.orchestration.ParticipantFlag.READY && transferStats.observed >= master.data.totalCycles
+        ) {
+          updateFlag(res, M.orchestration.ParticipantFlag.FINISHED)
+          false
+        } else if (res.data.flag == M.orchestration.ParticipantFlag.READY) {
           true
-        else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
-          if (assets.totalNum >= numAssetsPerIssuer && processedAllIssuers) {
+        } else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
+          if (assets.totalNum > 0 && processedAllIssuers) {
             // signal that we are ready if we have enough assets
             updateFlag(res, M.orchestration.ParticipantFlag.READY)
           } else {
             val numAssets = assets.totalNum
             logger.info(
-              s"Driver is not yet read. Num assets=$numAssets, processed-all=$processedAllIssuers"
+              s"Driver is not yet ready. Num assets=$numAssets, processed-all=$processedAllIssuers"
             )
           }
           false
-        } else false
+        } else false // we are finished
       }
+
+  private def buildAssetTransfer(
+      toTransfer: Seq[Asset.Contract],
+      issuer: Party,
+      newOwner: Party,
+      synchronizerId: SynchronizerId,
+  ) = preapprovals
+    .one((newOwner.getValue, party.getValue, synchronizerId.uid.identifier.str))
+    .map { case (preapprovalSync, preapproval) =>
+      val cmd =
+        preapproval.id
+          .exerciseSend(toTransfer.map(_.id).toList.asJava, issuer.getValue)
+          .commands
+          .asScala
+          .headOption
+          .getOrElse(sys.error("must exist"))
+      val cnt = transferStats.updateSubmittedCount(toTransfer.size)
+      val issuerParty = PartyId.tryFromProtoPrimitive(issuer.getValue)
+      val nextParty = PartyId.tryFromProtoPrimitive(newOwner.getValue)
+      SubCommand(
+        s"xfer-$cnt",
+        s"Sending ${toTransfer.size} contracts of issuer $issuerParty to $nextParty",
+        Command.fromJavaProto(cmd.toProtoCommand),
+        synchronizerId,
+        submissionF => {
+          // mark assets as pending
+          toTransfer.foreach { asset =>
+            setPending(assets, asset.id, submissionF)
+          }
+          // mark preapproval as pending if we need to reassign it
+          if (!preapprovalSync.startsWith(preapproval.data.location + ":")) {
+            setPending(preapprovals, preapproval.id, submissionF)
+            // preapproval is non-consuming which means we have to mark it as non-pending on success
+            submissionF.onComplete {
+              case Success(true) =>
+                logger.debug(s"Marking ${preapproval.id} as no longer pending")
+                preapprovals.setPending(preapproval.id, isPending = false).discard
+              case _ =>
+            }
+          }
+        },
+        () => {
+          // on command failure, update accounting
+          val res = transferStats.updateSubmittedCount(-toTransfer.size)
+          logger.debug(s"Decrementing submitted to=$res after batch failure")
+        },
+      )
+    }
+
+  private def prepareAndDetermineIfWeAreReady(
+      master: TestRun.Contract,
+      params: TransferRun,
+  ): Boolean = if (ready.get() && !masterChanged.get())
+    updateParticipantFlagAndReturnReady(master, processedAllIssuers = true)
+  else {
+    initExisting()
+    val havePreapprovals = createTransferPreapprovals(master.data.traders.asScala.toSeq)
+    val haveAssets =
+      acquireAssets(master, params.payloadSize, params.numAssetsPerActor, params.transferBatchSize)
+    val res = updateParticipantFlagAndReturnReady(master, havePreapprovals && haveAssets)
+    ready.set(res)
+    masterChanged.set(false)
+    res
+  }
+
+  protected def acquireAssets(
+      master: M.orchestration.TestRun.Contract,
+      payloadSize: Long,
+      numAssetsPerActor: Long,
+      transferBatchSize: Long,
+  ): Boolean =
+    generator
+      .one(())
+      .exists {
+        case (_, res) if rate.available > 0 =>
+          val baseFilter = role.issuers.map(_ + "::")
+          // if there is a new issuer that we haven't seen before
+          val issuers =
+            master.data.issuers.asScala.toSeq
+              .filterNot(res.data.processedIssuers.contains)
+              .filter(issuerUid => baseFilter.isEmpty || baseFilter.exists(issuerUid.startsWith))
+          if (issuers.isEmpty)
+            true // all processed, so we are done here
+          else {
+            val numRequest =
+              if (baseFilter.isEmpty) numAssetsPerActor
+              else {
+                (Math.max(
+                  1,
+                  Math
+                    .ceil(
+                      (numAssetsPerActor.toDouble / (baseFilter.size.toDouble * synchronizers.size.toDouble * transferBatchSize.toDouble))
+                    )
+                    .toLong,
+                ) * transferBatchSize)
+              }
+            sendAssetRequest(res, numRequest, issuers, payloadSize)
+            false
+          }
+        case _ => false
+      }
+
+  private def pickRandom[T](seq: Seq[T]): T =
+    seq(ThreadLocalRandom.current().nextInt(seq.length))
+
+  @tailrec
+  private def computeCommands(
+      available: Int,
+      numAssets: Int,
+      cmds: List[SubCommand],
+      usedIssuer: Set[Party],
+      possibleReceiver: IndexedSeq[Party],
+  ): List[SubCommand] = if (available == 0 || possibleReceiver.isEmpty) cmds
+  else {
+    val pickedIssuer =
+      // get issuer that needs reassignment
+      reassignIssuers.get().find(c => !usedIssuer.contains(c)).map((_, true)).orElse {
+        // otherwise get issuer we haven't processed yet (assets are only marked pending afterwards)
+        val availableIssuers = assets.keys().filterNot(usedIssuer.contains).toList
+        if (availableIssuers.nonEmpty) {
+          Some(
+            (pickRandom(availableIssuers), false)
+          )
+        } else None
+      }
+    // determine target sync
+    def pickSynchronizer(issuer: Party, reassign: Boolean) = if (reassign) {
+      // if we need to reassign
+      val misplaced = assets
+        .take(
+          issuer,
+          1,
+          { case (syncId, asset) =>
+            !syncId.startsWith(asset.data.location + "::")
+          },
+        )
+        .headOption
+      misplaced
+        .flatMap { case (_, asset) =>
+          synchronizers.find(_.uid.identifier.str == asset.data.location)
+        }
+        .getOrElse {
+          logger.info(s"All assets of $issuer have been reassigned to the right synchronizer")
+          reassignIssuers.updateAndGet(_ - issuer).discard
+          pickRandom(synchronizers)
+        }
+    } else pickRandom(synchronizers)
+
+    def pickAssets(issuer: Party, synchronizerId: SynchronizerId, reassign: Boolean) =
+      assets.take(
+        issuer,
+        numAssets,
+        {
+          // pick assets for this target sync
+          case (syncId, asset) if synchronizerId.uid.identifier.str == asset.data.location =>
+            // if we are in reassignment mode, pick assets not yet in place
+            if (reassign) syncId != synchronizerId.uid.toProtoPrimitive
+            else true
+          case _ => false
+        },
+      )
+
+    pickedIssuer match {
+      case None => cmds // no more issuer, we are done
+      case Some((issuer, reassign)) =>
+        val synchronizer = pickSynchronizer(issuer, reassign)
+        val toTransfer = pickAssets(issuer, synchronizer, reassign).map(_._2)
+        if (toTransfer.nonEmpty) {
+          val next = possibleReceiver(ThreadLocalRandom.current().nextInt(possibleReceiver.length))
+          val cmd = buildAssetTransfer(
+            toTransfer = toTransfer,
+            issuer = issuer,
+            newOwner = next,
+            synchronizerId = synchronizer,
+          )
+
+          val (newAvailable, newUsedIssuers, newCommands) = cmd
+            .map { cmd =>
+              (available - 1, usedIssuer + issuer, cmd +: cmds)
+            }
+            .getOrElse((available, usedIssuer, cmds))
+
+          computeCommands(
+            newAvailable,
+            numAssets,
+            newCommands,
+            newUsedIssuers,
+            possibleReceiver.filterNot(_ == next),
+          )
+
+        } else {
+          computeCommands(available, numAssets, cmds, usedIssuer + issuer, possibleReceiver)
+        }
+    }
+  }
 
   override def flush(): Boolean = if (running.get()) {
     val reflush = masterContract
@@ -286,89 +453,34 @@ class TransferDriver(
         master.data.mode match {
           case Mode.PREPAREISSUER => false
           case Mode.PREPARETRADER =>
-            initExisting()
-            createTransferPreapprovals(master.data.traders.asScala.toSeq)
-            val ready = acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer)
-            signalReadyIfTransferDriverIs(ready, params.numAssetsPerIssuer.toInt).discard
+            prepareAndDetermineIfWeAreReady(master, params).discard
             false
           case Mode.THROUGHPUT =>
-            initExisting()
-            createTransferPreapprovals(master.data.traders.asScala.toSeq)
-            val ready = acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer)
-            if (!signalReadyIfTransferDriverIs(ready, params.numAssetsPerIssuer.toInt)) {
+            val ready = prepareAndDetermineIfWeAreReady(master, params)
+            updateStats(master)
+            if (!ready) {
               false
             } else {
               rate.updateRate(CantonTimestamp.now())
-              val (submit1, submit2) = determineAvailable()
-              val cmds = (0 until submit2).flatMap { submissionIdx =>
-                val next = traderBalancer.next()
-                val (synchronizer, location) = determineTargetSynchronizer()
-                preapprovals.one((next.getValue, party.getValue, location)).toList.flatMap {
-                  case (preapprovalSynchronizer, value) =>
-                    val preapprovalReassignment =
-                      !preapprovalSynchronizer.startsWith(value.data.location + "::")
-                    val issuer = issuerBalancer.next()
-                    val toTransfer = pickAssets(issuer, params.transferBatchSize.toInt, location)
-                    val transferSize = toTransfer.size
-                    if (toTransfer.nonEmpty) {
-                      val cmd =
-                        value.id
-                          .exerciseSend(toTransfer.map(_.id).toList.asJava, issuer.getValue)
-                          .commands
-                          .asScala
-                          .headOption
-                          .getOrElse(sys.error("must exist"))
-                      val cnt = transferStats.updateSubmittedCount(transferSize)
-                      val issuerParty = PartyId.tryFromProtoPrimitive(issuer.getValue)
-                      val nextParty = PartyId.tryFromProtoPrimitive(next.getValue)
-                      logger.info(
-                        s"Sending ${toTransfer.size} of issuer ${issuerParty.partyId.toString} via sync $location, movesync=$preapprovalReassignment, it=${submissionIdx + 1}/$submit2, available=$submit1"
-                      )
-                      List(
-                        SubCommand(
-                          s"xfer-$cnt",
-                          s"Sending $transferSize} contracts of issuer $issuerParty to $nextParty",
-                          Command.fromJavaProto(cmd.toProtoCommand),
-                          synchronizer,
-                          submissionF => {
-                            toTransfer.foreach { asset =>
-                              setPending(assets, asset.id, submissionF)
-                            }
-                            // if the preapproval will be reassigned, we mark it as pending
-                            // so we don't get reassignment conflicts
-                            if (preapprovalReassignment) {
-                              logger.debug(s"Preapproval needs reassignment ${value.id}")
-                              submissionF.onComplete {
-                                case Success(true) =>
-                                  logger.debug(s"Marking ${value.id} as no longer pending")
-                                  preapprovals.setPending(value.id, isPending = false).discard
-                                case _ => ()
-                              }.discard
-                              setPending(preapprovals, value.id, submissionF).discard
-                            }
-                          },
-                          () => {
-                            // on command failure, update accounting
-                            val res = transferStats.updateSubmittedCount(-transferSize)
-                            logger.debug(s"Decrementing submitted to=$res after batch failure")
-                          },
-                        )
-                      )
-                    } else {
-                      List.empty
-                    }
-                }
+              val available = determineAvailable()
+              if (available > 0) {
+                val cmds = computeCommands(
+                  available,
+                  params.transferBatchSize.toInt,
+                  List.empty,
+                  Set.empty,
+                  this.traderBalancer.get(),
+                )
+                // submit batches
+                submitBatched(
+                  cmds,
+                  settings.batchSize,
+                  rate,
+                  settings.duplicateSubmissionDelay,
+                )
               }
-              // submit batches
-              submitBatched(
-                cmds,
-                settings.batchSize,
-                rate,
-                settings.duplicateSubmissionDelay,
-              )
-              updateStats(master)
-              signalFinishedIfWeAre(master)
-              submit2 > 0
+
+              available > 0
             }
 
           case Mode.DONE =>
@@ -380,16 +492,6 @@ class TransferDriver(
   } else {
     false
   }
-
-  private def signalFinishedIfWeAre(master: M.orchestration.TestRun.Contract): Unit =
-    testResult.one(()).foreach { case (_, res) =>
-      // we are done if we submitted enough proposals and all proposals we are involved in vanished
-      if (
-        res.data.flag == M.orchestration.ParticipantFlag.READY && transferStats.observed >= master.data.totalCycles
-      ) {
-        updateFlag(res, M.orchestration.ParticipantFlag.FINISHED)
-      }
-    }
 
   private def updateStats(master: M.orchestration.TestRun.Contract): Unit =
     // update statistics if necessary

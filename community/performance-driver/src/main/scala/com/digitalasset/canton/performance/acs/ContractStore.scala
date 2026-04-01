@@ -68,12 +68,14 @@ class ContractStore[TC <: Contract[TCid, T], TCid <: ContractId[T], T, L](
   /** return one contract that is not pending and that matches the query argument */
   def one(item: L): Option[(String, TC)] =
     lookup.get(item).flatMap { case (_, contracts) =>
-      contracts
+      contracts.iterator
         .flatMap(y => store.get(y).toList)
         .filterNot(_.pending)
         .map(c => (c.synchronizer, c.contract))
-        .headOption
+        .nextOption()
     }
+
+  def keys(): Seq[L] = lookup.keys.toSeq
 
   def take(
       item: L,
@@ -101,12 +103,13 @@ class ContractStore[TC <: Contract[TCid, T], TCid <: ContractId[T], T, L](
     lookup
       .get(item)
       .toList
-      .flatMap(x =>
-        x._2
+      .flatMap { case (_, contracts) =>
+        contracts.iterator
           .flatMap(y => store.get(y).toList)
           .filterNot(_.pending)
           .map(c => (c.synchronizer, c.contract))
-      )
+          .toSeq
+      }
 
   /** return number of contracts matching the query argument excluding pending contracts */
   def num(item: L): Int = lookup.get(item).map(x => x._2.size - x._1).getOrElse(0)
@@ -148,7 +151,7 @@ class ContractStore[TC <: Contract[TCid, T], TCid <: ContractId[T], T, L](
     current.isDefined
   })
 
-  protected def contractCreated(create: TC, index: L): Unit = {}
+  protected def contractCreated(create: TC, index: L, synchronizerId: String): Unit = {}
   protected def contractArchived(archive: TC, index: L): Unit = {}
 
   override def reset(): Unit = {
@@ -195,7 +198,7 @@ class ContractStore[TC <: Contract[TCid, T], TCid <: ContractId[T], T, L](
             s"Observed create ${name.unquoted}, index=${idx.toString.unquoted}, cid=${create.id},$NL" +
               s"args=${create.data})"
           )
-          contractCreated(create, idx)
+          contractCreated(create, idx, synchronizerId)
         }
       })
     }

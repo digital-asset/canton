@@ -55,7 +55,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.{Crypto, SyncCryptoApiParticipantProvider, SynchronizerCrypto}
 import com.digitalasset.canton.damltests.java.conflicttest
-import com.digitalasset.canton.damltestsdev.java.basickeys.KeyOps
+import com.digitalasset.canton.damltestslf23.java.basickeys.KeyOps
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -579,7 +579,10 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4S2M2_Manual
-      .addConfigTransforms(ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds))
+      .addConfigTransforms(
+        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+      )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
           .bootstrap()
@@ -942,6 +945,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
+      .addConfigTransform(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
       .addConfigTransforms(ProgrammableSequencer.configOverride(getClass.toString, loggerFactory))
 
   private def startSynchronizers(synchronizers: Seq[NetworkTopologyDescription])(implicit
@@ -2197,7 +2201,7 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
       connectToDa(participant1, noAutoReconnect = true)
       participant2.synchronizers.connect_local(sequencer1, alias = daName)
 
-      participants.all.dars.upload(CantonTestsDevPath)
+      participants.all.dars.upload(CantonTestsLF23Path)
 
       val alice = participant1.parties.testing.enable(
         "Alice",

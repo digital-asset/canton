@@ -21,9 +21,9 @@ sealed trait TransactionContractError extends TransactionError
   */
 object TransactionError {
 
-  final case class AlreadyConsumed[Nid](
+  final case class AlreadyConsumed(
       cid: ContractId,
-      nid: Nid
+      nid: NodeId
   ) extends TransactionContractError
 
   /** Signals that the transaction tried to create two contracts with the same

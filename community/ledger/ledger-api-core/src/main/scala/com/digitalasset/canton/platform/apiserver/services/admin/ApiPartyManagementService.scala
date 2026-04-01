@@ -886,6 +886,13 @@ private[apiserver] final class ApiPartyManagementService private (
           .leftMap(ValidationErrors.invalidArgument(_))
       } yield (synchronizerId, externalPartyDetails, identityProviderId, userId)
     } { case (synchronizerId, externalPartyOnboardingDetails, identityProviderId, userId) =>
+      if (externalPartyOnboardingDetails.signedPartyToKeyMappingTransaction.isDefined) {
+        logger.info(
+          "PartyToKeyMapping has been deprecated. Please use PartyToParticipant directly to configure" +
+            " the party's protocol signing keys and threshold instead."
+        )
+      }
+
       val hostingParticipantsString = externalPartyOnboardingDetails.hostingParticipants
         .map { case HostingParticipant(participantId, permission, _onboarding) =>
           s"$participantId -> $permission"

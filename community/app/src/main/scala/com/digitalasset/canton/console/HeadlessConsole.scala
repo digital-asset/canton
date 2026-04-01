@@ -18,7 +18,7 @@ import com.digitalasset.canton.console.HeadlessConsole.{
 }
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ThrowableUtil
 import os.PathConvertible.*
 
 import java.io.File
@@ -108,7 +108,7 @@ object HeadlessConsole extends NoTracing {
   final case class RuntimeError(message: String, cause: Throwable) extends HeadlessConsoleError {
     override def toString: String = {
       val messageWithSeparator = if (message.isEmpty) "" else message + " "
-      val exceptionInfo = ErrorUtil.messageWithStacktrace(cause)
+      val exceptionInfo = ThrowableUtil.messageWithStacktrace(cause)
       messageWithSeparator + exceptionInfo
     }
   }

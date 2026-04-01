@@ -27,6 +27,7 @@ import com.digitalasset.canton.{
   BaseTest,
   HasActorSystem,
   HasExecutionContext,
+  HasExecutorService,
   LedgerSubmissionId,
   LfPackageId,
   LfPackageName,
@@ -40,11 +41,14 @@ import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.ScheduledExecutorService
+
 class PackageUploaderTest
     extends AnyWordSpec
     with BaseTest
     with HasActorSystem
-    with HasExecutionContext {
+    with HasExecutionContext
+    with HasExecutorService {
 
   "validateDar" should {
     "succeed on valid DAR" in withTestEnv() { env =>
@@ -267,6 +271,7 @@ class PackageUploaderTest
   ) extends AutoCloseable {
     val clockNow: CantonTimestamp = CantonTimestamp.ofEpochMilli(1337L)
     private val clock = new SimClock(start = clockNow, loggerFactory = loggerFactory)
+    implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
     val mutablePackageMetadataViewImpl = new MutablePackageMetadataViewImpl(
       clock = clock,
       packageStore = packageStore,

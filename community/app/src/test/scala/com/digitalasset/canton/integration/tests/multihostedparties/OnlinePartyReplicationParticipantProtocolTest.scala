@@ -85,6 +85,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         ConfigTransforms
           .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
       )
+      .addConfigTransform(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
         // More frequent ACS commitments by configuring a smaller reconciliation interval.

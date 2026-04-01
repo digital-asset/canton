@@ -6,7 +6,7 @@ package com.digitalasset.canton.driver.v1
 import cats.syntax.either.*
 import com.digitalasset.canton.driver.api
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ThrowableUtil
 import com.typesafe.config.ConfigValue
 
 import java.util.ServiceLoader
@@ -65,7 +65,7 @@ object DriverLoader {
           )
         }
         .leftMap { err =>
-          s"Failed to load driver $driverName: ${ErrorUtil.messageWithStacktrace(err)}"
+          s"Failed to load driver $driverName: ${ThrowableUtil.messageWithStacktrace(err)}"
         }
     } yield driver
   }

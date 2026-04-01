@@ -15,7 +15,6 @@ import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction._
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value
 
 // Provide methods to add missing information in values (and value containers):
@@ -123,13 +122,14 @@ object Enricher {
           interfaceId = interfaceId,
           version = version,
         )
-      case lookup: Node.LookupByKey =>
+      case lookup: Node.QueryByKey =>
         import lookup._
-        Node.LookupByKey(
+        Node.QueryByKey(
           packageName = packageName,
           templateId = templateId,
           key = impoverish(key),
-          result = result.asCidOption,
+          result = result,
+          exhaustive = exhaustive,
           version = version,
         )
       case exe: Node.Exercise =>
@@ -489,10 +489,10 @@ final class Enricher(
         for {
           key <- enrichContractKey(fetch.keyOpt)
         } yield fetch.copy(keyOpt = key)
-      case lookup: Node.LookupByKey =>
+      case query: Node.QueryByKey =>
         for {
-          key <- enrichContractKey(lookup.key)
-        } yield lookup.copy(key = key)
+          key <- enrichContractKey(query.key)
+        } yield query.copy(key = key)
       case exe: Node.Exercise =>
         for {
           choiceArg <- enrichChoiceArgument(

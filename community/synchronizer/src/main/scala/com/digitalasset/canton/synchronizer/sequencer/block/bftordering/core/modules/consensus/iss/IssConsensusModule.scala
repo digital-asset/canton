@@ -67,7 +67,6 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 import java.time.Instant
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Random, Success}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -908,8 +907,6 @@ object IssConsensusModule {
       latestCompletedEpoch: EpochStore.Epoch,
       sequencerSnapshotAdditionalInfo: Option[SequencerSnapshotAdditionalInfo],
   )
-
-  val DefaultDatabaseReadTimeout: FiniteDuration = 10.seconds
 
   def parseNetworkMessage(
       protoSignedMessage: v30.SignedMessage,

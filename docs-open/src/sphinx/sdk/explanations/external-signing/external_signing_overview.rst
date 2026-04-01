@@ -110,4 +110,4 @@ Additional resources
 Tutorials
 ^^^^^^^^^
 
-Refer to the :ref:`external party onboarding tutorial <tutorial_onboard_external_party>` for a hands-on demonstration of onboarding an external party.
+Refer to the :ref:`external party onboarding tutorial <tutorial_onboard_external_party_lapi>` for a hands-on demonstration of onboarding an external party.

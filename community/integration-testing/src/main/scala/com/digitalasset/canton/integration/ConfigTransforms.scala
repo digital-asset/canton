@@ -230,21 +230,11 @@ object ConfigTransforms {
 
   lazy val enableAlphaVersionSupport: Seq[ConfigTransform] = setAlphaVersionSupport(true)
 
-  val updateLedgerApiSlowProcessWarning: Seq[ConfigTransform] =
-    Seq(
-      ConfigTransforms.updateAllParticipantConfigs_(
-        // extending the timeout for the warning about uninitialised in-memory package metadata view
-        // the default for this value is set to 1 second which is not enough for the canton integration tests
-        _.focus(_.ledgerApi.indexService.preparePackageMetadataTimeOutWarning)
-          .replace(config.NonNegativeFiniteDuration.ofSeconds(10L))
-      )
-    )
-
   /** Default transforms to apply to tests using a [[EnvironmentDefinition]]. Covers the primary
     * ways that distinct concurrent environments may unintentionally collide.
     */
   val defaults: Seq[ConfigTransform] =
-    heavyTestDefaults ++ updateLedgerApiSlowProcessWarning ++
+    heavyTestDefaults ++
       setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++ Seq(
         // make unbounded duration bounded for our test
         _.focus(_.parameters.timeouts.console.unbounded)
@@ -926,6 +916,16 @@ object ConfigTransforms {
         )
       )
     )
+
+  def enableUnsafeMutiSynchronizerTopologyFeatureFlag: ConfigTransform = {
+    (cantonConfig: CantonConfig) =>
+      cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
+  }.compose(
+    updateAllParticipantConfigs_(
+      _.focus(_.alphaDynamic.enableMultiSynchronizerTopologyFeatureFlag)
+        .replace(true)
+    )
+  )
 
   val disableOnboardingTopologyValidation: ConfigTransform =
     updateAllMediatorConfigs_(

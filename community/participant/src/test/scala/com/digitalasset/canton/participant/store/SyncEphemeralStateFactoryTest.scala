@@ -546,7 +546,7 @@ final class SyncEphemeralStateFactoryTest
           nextRequestCounter = RequestCounter.Genesis,
           nextSequencerCounter = SequencerCounter.Genesis,
           lastSequencerTimestamp = upgradeTime,
-          currentRecordTime = upgradeTime,
+          currentRecordTime = upgradeTime.immediateSuccessor,
           nextRepairCounter = RepairCounter(repairCounter),
         ),
       )

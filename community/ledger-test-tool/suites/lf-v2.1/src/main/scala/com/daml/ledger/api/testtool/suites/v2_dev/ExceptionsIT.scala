@@ -441,6 +441,7 @@ object ExceptionsIT {
     implicit val fetcherCompanion
         : ContractCompanion.WithoutKey[Fetcher.Contract, Fetcher.ContractId, Fetcher] =
       Fetcher.COMPANION
+
     implicit val rollbackNestingHelperCompanion: ContractCompanion.WithoutKey[
       RollbackNestingHelper.Contract,
       RollbackNestingHelper.ContractId,

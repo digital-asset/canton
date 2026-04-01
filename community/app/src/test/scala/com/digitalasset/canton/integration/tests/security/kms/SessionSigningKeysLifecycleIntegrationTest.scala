@@ -17,14 +17,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.version.ProtocolVersion
 
-/** TODO(#27529): In some scenarios clock advances still fails due to the current snapshot
-  * approximation problems. For example, since participants rely on the current snapshot
-  * approximation and can sign a message arbitrarily in the past, the verification by the sequencer
-  * will fail if the nodes remain idle for a long time.
-  *
-  * Once everything is working, this test should be merged into
-  * [[SessionSigningKeysIntegrationTest]], and session signing keys should be set as default again.
-  */
 trait SessionSigningKeysLifecycleIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment

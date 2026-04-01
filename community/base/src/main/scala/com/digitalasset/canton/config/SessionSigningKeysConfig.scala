@@ -18,8 +18,8 @@ import com.google.common.annotations.VisibleForTesting
   *   short, so that a session signing key can be reused across, for example, multiple submission
   *   requests.
   * @param toleranceShiftDuration
-  *   This defines a value that that is used to shift the validity interval from '[ts,
-  *   ts+keyValidityDuration]' to '[ts-tolerance, ts+keyValidityDuration-tolerance]'. It MUST
+  *   This defines the maximum value we will attempt to use when shifting the validity interval from
+  *   '[ts, ts+keyValidityDuration]' to '[ts-tolerance, ts+keyValidityDuration-tolerance]'. It MUST
   *   respect the following constraints: (1) keyValidityDuration - toleranceShiftDuration >=
   *   cutoffDuration; (2) toleranceShiftDuration >= cutoffDuration. What we are trying to solve with
   *   this shift is the following: Given a sequence of timestamps `tss`, find a set of intervals of
@@ -31,20 +31,25 @@ import com.google.common.annotations.VisibleForTesting
   *   session signing key) would be created for each of these slightly different timestamps.
   *   Shifting the interval allows us to cover multiple timestamps with a single interval, reducing
   *   the number of session keys created. This value can be adjusted: reduced if timestamps are
-  *   mostly increasing, or increased if timestamps are mostly decreasing.
+  *   mostly increasing, or increased if timestamps are mostly decreasing. A small note: if we know
+  *   exactly until when our key must be valid (e.g., the maximum sequencing time), then we do not
+  *   shift the validity interval centered on ts. Instead, we select a key validity period that
+  *   takes this end validity time into account.
   * @param cutOffDuration
   *   A cut-off duration is applied only when we need to sign something without knowing the exact
   *   topology timestamp that will later be used for verification (e.g., when using a
-  *   currentSnapshotApproximation). The cutoff measures the level of this uncertainty. The
-  *   participant makes a guess t0 at the topology timestamp for verification and will use an
-  *   existing session signing key k only if the interval [t0 - cutoff, t0 + cutoff] lies fully
-  *   within k’s validity period. As a result, newly created session signing keys must have a
-  *   validity period that starts at least cutoffDuration before ts, which is ensured if
-  *   toleranceShiftDuration ≥ cutoffDuration. A typical example of this uncertainty is signing
-  *   submission requests, where the sequencer-assigned timestamp is unknown in advance. If a new
-  *   session key is created only after the previous key’s validity interval ends, multiple
-  *   submissions may fail verification because their sequencing timestamps fall outside that
-  *   interval.
+  *   currentSnapshotApproximation). The cutoff measures the amount of clock skew that can be
+  *   tolerated and therefore should be longer than our `ledgerRecordTimeTolerance`. The participant
+  *   makes a guess t0 at the topology timestamp for verification and will use an existing session
+  *   signing key k only if the interval [t0 - cutoff, t0 + cutoff] lies fully within k’s validity
+  *   period. If the full validity interval is known a priori (e.g., we know the maximum sequencing
+  *   time for the message we want to sign), we need to ensure that we use an existing session
+  *   signing key k only if the interval [t0 - cutoff, endValidityPeriod] is fully covered. As a
+  *   result, newly created session signing keys must have a validity period that starts at least
+  *   cutoffDuration before ts. A typical example of this uncertainty is signing submission
+  *   requests, where the sequencer-assigned timestamp is unknown in advance. If a new session key
+  *   is created only after the previous key’s validity interval ends, multiple submissions may fail
+  *   verification if any clock skew exists between the nodes.
   * @param keyEvictionPeriod
   *   This defines how long the private session signing key remains in memory. This is distinct from
   *   the validity period in the sense that we can be asked to sign arbitrarily old timestamps, and
@@ -68,10 +73,10 @@ import com.google.common.annotations.VisibleForTesting
   */
 final case class SessionSigningKeysConfig(
     enabled: Boolean,
-    keyValidityDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(8),
+    keyValidityDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
     toleranceShiftDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(2),
     cutOffDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(1),
-    keyEvictionPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(15),
+    keyEvictionPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(10),
     // TODO(#13649): be sure these are supported by all the synchronizers the participant will connect to
     signingAlgorithmSpec: SigningAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
     signingKeySpec: SigningKeySpec = SigningKeySpec.EcCurve25519,

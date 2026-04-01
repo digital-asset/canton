@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.digitalasset.canton.ledger.api.AcsContinuationToken
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.{
@@ -50,8 +51,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       activeContractsAfter <- activeContractsOf(
         ledgerDao.updateReader
@@ -62,8 +63,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = activeContractsAfter.toSet.diff(activeContractsBefore.toSet)
@@ -89,8 +90,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       (_, _) <- store(singleCreate)
       (_, c) <- store(singleCreate)
@@ -107,8 +108,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       activeContractsAfter.toSet.diff(activeContractsBefore.toSet) should have size 0
@@ -144,8 +145,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Map(Some(party1) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection())),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val create = result.loneElement
@@ -187,8 +188,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -237,8 +238,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -288,8 +289,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -335,8 +336,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = false
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -384,8 +385,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -433,8 +434,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -490,8 +491,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       resultUnknownParty <- activeContractsOf(
         ledgerDao.updateReader
@@ -510,8 +511,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       resultUnknownTemplate <- activeContractsOf(
         ledgerDao.updateReader
@@ -534,8 +535,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       resultUnknownTemplatePartyWildcard <- activeContractsOf(
         ledgerDao.updateReader
@@ -560,8 +561,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       resultUnknownPartyAndTemplate <- activeContractsOf(
         ledgerDao.updateReader
@@ -584,8 +585,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       resultUnknownsOnly <- activeContractsOf(
         ledgerDao.updateReader
@@ -606,8 +607,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       result should have length 2
@@ -633,8 +634,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             verbose = true
           )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
           continuationToken = None,
+          checksum = AcsContinuationToken.emptyChecksum,
         )
-        .map(_.withEmptyChecksum)
         .runWith(Sink.seq)
 
     } yield {
@@ -656,8 +657,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
       activeContractsAfter <- activeContractsOf(
         ledgerDao.updateReader
@@ -668,8 +669,8 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             continuationToken = None,
+            checksum = AcsContinuationToken.emptyChecksum,
           )
-          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContract = activeContractsAfter.toSet.diff(activeContractsBefore.toSet).loneElement

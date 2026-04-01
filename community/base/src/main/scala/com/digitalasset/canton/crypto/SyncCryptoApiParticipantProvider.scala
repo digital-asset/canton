@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.KmsMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.*
@@ -54,6 +55,7 @@ class SyncCryptoApiParticipantProvider(
     val ips: IdentityProvidingServiceClient,
     val crypto: Crypto,
     cryptoConfig: CryptoConfig,
+    kmsMetrics: Option[KmsMetrics],
     verificationParallelismLimit: PositiveInt,
     publicKeyConversionCacheConfig: CacheConfig,
     timeouts: ProcessingTimeout,
@@ -93,6 +95,7 @@ class SyncCryptoApiParticipantProvider(
       staticSynchronizerParameters,
       SynchronizerCrypto(crypto, staticSynchronizerParameters),
       cryptoConfig,
+      kmsMetrics,
       verificationParallelismLimit,
       publicKeyConversionCacheConfig,
       timeouts,
@@ -428,6 +431,7 @@ object SynchronizerCryptoClient {
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerCrypto: SynchronizerCrypto,
       cryptoConfig: CryptoConfig,
+      kmsMetrics: Option[KmsMetrics],
       verificationParallelismLimit: PositiveInt,
       publicKeyConversionCacheConfig: CacheConfig,
       timeouts: ProcessingTimeout,
@@ -442,6 +446,7 @@ object SynchronizerCryptoClient {
       member,
       synchronizerCrypto,
       cryptoConfig,
+      kmsMetrics,
       publicKeyConversionCacheConfig,
       futureSupervisor,
       timeouts,

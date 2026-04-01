@@ -42,7 +42,8 @@ private[reassignment] trait ReassignmentValidationResult {
       reassigningParticipantValidationResult.errors.isEmpty &&
       contractAuthenticationResult.isRight &&
       commonValidationResult.submitterCheckResult.isEmpty &&
-      commonValidationResult.reassignmentIdResult.isEmpty
+      commonValidationResult.reassignmentIdResult.isEmpty &&
+      commonValidationResult.multiSynchronizerFeatureFlagCheckResult.isEmpty
 
 }
 
@@ -63,6 +64,7 @@ private[reassignment] object ReassignmentValidationResult {
         : EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit]
     def submitterCheckResult: Option[ReassignmentValidationError]
     def reassignmentIdResult: Option[ReassignmentValidationError]
+    def multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError]
   }
 
   private[reassignment] trait ReassigningParticipantValidationResult {

@@ -72,6 +72,7 @@ import com.digitalasset.canton.topology.{
   PartyId,
   PhysicalSynchronizerId,
   SequencerId,
+  Synchronizer,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -706,7 +707,7 @@ object ParticipantAdminCommands {
 
     final case class ImportPartyAcs(
         file: File,
-        synchronizerId: SynchronizerId,
+        synchronizer: Synchronizer,
         workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
@@ -739,7 +740,7 @@ object ParticipantAdminCommands {
             val isFirst = isFirstChunk.getAndSet(false)
             v30.ImportPartyAcsRequest(
               ByteString.copyFrom(bytes),
-              synchronizerId = Option.when(isFirst)(synchronizerId.toProtoPrimitive),
+              synchronizerId = Option.when(isFirst)(synchronizer.toProtoPrimitive),
               workflowIdPrefix =
                 if (isFirst) OptionUtil.emptyStringAsNone(workflowIdPrefix) else None,
               contractImportMode = Option.when(isFirst)(contractImportMode.toProtoV30),

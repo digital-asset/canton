@@ -83,7 +83,10 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       // We want to trigger time out
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+      )
       .withSetup { implicit env =>
         import env.*
 

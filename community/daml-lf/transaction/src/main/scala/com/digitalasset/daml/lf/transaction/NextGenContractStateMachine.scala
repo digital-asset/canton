@@ -4,18 +4,19 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
 
-import scala.collection.View
+import scala.collection.{View, immutable}
 
 case class NeedContract[+X](resume: Option[GlobalKey] => ErrOr[X])
 
-sealed trait NeedKeyProgression
+sealed abstract class NeedKeyProgression
 
 object NeedKeyProgression {
+  trait Token
+
   // States: Unstarted -> InProgress -> Finished
   //
   // CanContinue = { Unstarted, InProgress }  — progression not yet exhausted
@@ -24,33 +25,43 @@ object NeedKeyProgression {
   /** The progression can yield more results. */
   sealed trait CanContinue extends NeedKeyProgression
 
-  object CanContinue {
-    def unapply(progression: CanContinue): Some[Option[NeedKeyContinuationToken]] =
-      progression match {
-        case InProgress(token: NeedKeyContinuationToken) => Some(Some(token))
-        case Unstarted => Some(None)
-        case InProgress(token) =>
-          throw new IllegalArgumentException(
-            s"Unexpected continuation token of type ${token.getClass} in InProgress state"
-          )
-      }
-  }
-
   /** The progression has been started; valid as a resume argument. */
   sealed trait HasStarted extends NeedKeyProgression
-  object HasStarted {
-    def apply(option: Option[NeedKeyContinuationToken]): HasStarted =
-      option match {
-        case None => Finished
-        case Some(token) => InProgress(token)
-      }
-  }
 
   case object Unstarted extends CanContinue
-  final case class InProgress(token: Any) extends CanContinue with HasStarted
+  final case class InProgress(token: Token) extends CanContinue with HasStarted
   case object Finished extends HasStarted
+
+  private final case class VectorToken[T](values: Vector[T]) extends Token
+
+  /** Convenience for consumers that have all results available upfront. */
+  private[lf] def takeN[T](
+      canContinue: CanContinue,
+      n: Int,
+      initial: => Vector[T],
+  ): (Vector[T], HasStarted) = {
+    val all = canContinue match {
+      case Unstarted => initial
+      case InProgress(VectorToken(xs)) => xs.asInstanceOf[Vector[T]]
+      case InProgress(other) =>
+        throw new IllegalStateException(
+          s"unexpected continuation token of type ${other.getClass}"
+        )
+    }
+    val (result, rest) = all.splitAt(n)
+    val next = if (result.length == n) InProgress(VectorToken(rest)) else Finished
+    (result, next)
+  }
 }
 
+/*
+  Question to ask the caller for more contracts that match a key. The caller can resume the query with more candidates
+  until it is satisfied that it has seen all matching contracts, at which point the state machine will check that the
+  provided candidates are consistent with the previous query results.
+  There are two important invariants the caller must respect
+  1. the number of return contracts should be less or equal to n
+  2. the continuation token can be [[Finish]] only if the number of returned contracts is strictly less than n
+ */
 case class NeedKey[+X](
     n: Int,
     progression: NeedKeyProgression.CanContinue,
@@ -84,7 +95,7 @@ object NextGenContractStateMachine {
   }
 
   private[transaction] object KeyInput {
-    def Unknown: KeyInput = KeyInput(
+    val Unknown: KeyInput = KeyInput(
       queriedByKey = Vector.empty,
       overflowPreviousQuery = List.empty,
       onlyQueriedById = Set.empty,
@@ -137,34 +148,30 @@ object NextGenContractStateMachine {
     )
   }
 
-  sealed abstract class LLState[Nid] {
+  sealed abstract class LLState {
     private[lf] def create(
-        nid: Nid,
+        nid: NodeId,
         cid: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState[Nid]]
+    ): ErrOr[LLState]
 
     private[lf] def queryById(
         cid: ContractId
-    ): Either[NeedContract[LLState[Nid]], ErrOr[LLState[Nid]]]
+    ): Either[NeedContract[LLState], ErrOr[LLState]]
 
     private[lf] def queryNByKey(
         key: GlobalKey,
         n: Int,
-    ): Either[NeedKey[LLState[Nid]], ErrOr[(KeyMapping, LLState[Nid])]]
+    ): Either[NeedKey[LLState], ErrOr[(KeyMapping, LLState)]]
 
     // return None if cid is unknown
-    private[lf] def archive(cid: ContractId, nid: Nid): Option[ErrOr[State[Nid]]]
+    private[lf] def archive(cid: ContractId, nid: NodeId): Option[ErrOr[State]]
 
-    private[lf] def beginTry: LLState[Nid]
+    private[lf] def beginTry: LLState
 
-    // TODO(#31454)
-    // This must return a Nid for now until we make EffectfulRollback
-    // polymorphic in Nid, which would require all use sites of TransactionError
-    // to become polymorphic in Nid also.
-    private[lf] def rollbackTry: Either[Set[Nid], LLState[Nid]]
+    private[lf] def rollbackTry: Either[Set[NodeId], LLState]
 
-    private[lf] def endTry: LLState[Nid]
+    private[lf] def endTry: LLState
 
     private[lf] def onlyQueriedById(gkey: GlobalKey): Set[ContractId]
 
@@ -189,32 +196,39 @@ object NextGenContractStateMachine {
     private[transaction] def toStateMachineResult: StateMachineResult
 
     //  TODO(#30913): remove this method
-    def consumedByOrInactive(cid: ContractId): Option[Either[Nid, Unit]]
+    def consumedByOrInactive(cid: ContractId): Option[Either[NodeId, Unit]]
 
     //  TODO(#30913): remove this method
-    def localContracts: Map[ContractId, ?]
+    def localContracts: immutable.VectorMap[ContractId, ?]
+
+    /** A deterministic total order over all contracts known to the state machine.
+      * The only guarantee is that if two contracts appearing in the same
+      * queryByKey result, their relative order in `contractOrder` matches their
+      * order in that query result.
+      */
+    def contractOrder: List[ContractId]
   }
 
   object HHState {
-    private case object ContinuationToken
+    private case object ContinuationToken extends NeedKeyProgression.Token
     private val InProgress = NeedKeyProgression.InProgress(ContinuationToken)
   }
 
-  implicit class HHState[Nid](val llState: LLState[Nid]) extends AnyVal {
+  implicit class HHState(val llState: LLState) extends AnyVal {
 
     import HHState.*
 
     def visitCreate(
-        nid: Nid,
+        nid: NodeId,
         contractId: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState[Nid]] =
+    ): ErrOr[LLState] =
       llState.create(nid, contractId, mbKey)
 
     def visitFetchById(
         contractId: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState[Nid]] =
+    ): ErrOr[LLState] =
       llState.queryById(contractId) match {
         case Left(needContract) =>
           needContract.resume(mbKey)
@@ -226,7 +240,7 @@ object NextGenContractStateMachine {
         key: GlobalKey,
         result: Vector[ContractId],
         exhaustive: Boolean,
-    ): ErrOr[LLState[Nid]] = {
+    ): ErrOr[LLState] = {
       if (result.isEmpty && !exhaustive)
         throw new IllegalArgumentException(
           s"visitQueryByKey: result cannot be empty when exhaustive is false"
@@ -266,19 +280,19 @@ object NextGenContractStateMachine {
         contractId: ContractId,
         mbKey: Option[GlobalKey],
         byKey: Boolean,
-    ): ErrOr[LLState[Nid]] =
+    ): ErrOr[LLState] =
       if (byKey)
         visitQueryByKey(mbKey.get, Vector(contractId), exhaustive = false)
       else
         visitFetchById(contractId, mbKey)
 
     def visitExercise(
-        nodeId: Nid,
+        nodeId: NodeId,
         targetId: ContractId,
         mbKey: Option[GlobalKey],
         byKey: Boolean,
         consuming: Boolean,
-    ): ErrOr[LLState[Nid]] =
+    ): ErrOr[LLState] =
       for {
         state <- this.visitFetch(targetId, mbKey, byKey)
         state <-
@@ -295,16 +309,16 @@ object NextGenContractStateMachine {
             Right(state)
       } yield state
 
-    def handleCreate(nid: Nid, node: Node.Create): ErrOr[LLState[Nid]] =
+    def handleCreate(nid: NodeId, node: Node.Create): ErrOr[LLState] =
       visitCreate(nid, node.coid, node.gkeyOpt)
 
-    def handleFetch(node: Node.Fetch): ErrOr[LLState[Nid]] =
+    def handleFetch(node: Node.Fetch): ErrOr[LLState] =
       visitFetch(node.coid, node.gkeyOpt, node.byKey)
 
-    def handleQueryByKey(node: Node.QueryByKey): ErrOr[LLState[Nid]] =
+    def handleQueryByKey(node: Node.QueryByKey): ErrOr[LLState] =
       visitQueryByKey(node.gkey, node.result, node.exhaustive)
 
-    def handleExercise(nid: Nid, exe: Node.Exercise): ErrOr[LLState[Nid]] =
+    def handleExercise(nid: NodeId, exe: Node.Exercise): ErrOr[LLState] =
       visitExercise(
         nid,
         exe.targetCoid,
@@ -314,9 +328,9 @@ object NextGenContractStateMachine {
       )
 
     def handleNode(
-        id: Nid,
+        id: NodeId,
         node: Node.Action,
-    ): ErrOr[LLState[Nid]] =
+    ): ErrOr[LLState] =
       node match {
         case create: Node.Create =>
           handleCreate(id, create)
@@ -328,23 +342,23 @@ object NextGenContractStateMachine {
           handleExercise(id, exercise)
       }
 
-    def beginRollback: LLState[Nid] =
+    def beginRollback: LLState =
       llState.beginTry
 
-    def endRollback: Either[Set[Nid], LLState[Nid]] =
+    def endRollback: Either[Set[NodeId], LLState] =
       llState.rollbackTry
   }
 
-  private[transaction] case class State[Nid](
+  private[transaction] case class State(
       authorizeRollback: Boolean,
-      localContracts: Map[ContractId, Option[GlobalKey]],
+      localContracts: immutable.VectorMap[ContractId, Option[GlobalKey]],
       override val inputContracts: Set[ContractId],
       val internalKeyInputs: Map[GlobalKey, KeyInput],
-      activeLedgerState: ActiveLedgerState[Nid],
-      rollbackStack: List[ActiveLedgerState[Nid]],
-  ) extends LLState[Nid] {
+      activeLedgerState: ActiveLedgerState,
+      rollbackStack: List[ActiveLedgerState],
+  ) extends LLState {
 
-    private def createdInThisTimeline: Map[ContractId, Nid] =
+    private def createdInThisTimeline: Map[ContractId, NodeId] =
       activeLedgerState.createdInThisTimeline
 
     def localKeys: Map[GlobalKey, Vector[ContractId]] =
@@ -358,7 +372,7 @@ object NextGenContractStateMachine {
         }
       }
 
-    def consumedBy: Map[ContractId, Nid] =
+    def consumedBy: Map[ContractId, NodeId] =
       activeLedgerState.consumedBy
 
     def onlyQueriedById(gkey: GlobalKey): Set[ContractId] =
@@ -379,7 +393,7 @@ object NextGenContractStateMachine {
       consumed = consumedBy.keySet,
     )
 
-    def create(nid: Nid, cid: ContractId, mbKey: Option[GlobalKey]): ErrOr[State[Nid]] =
+    def create(nid: NodeId, cid: ContractId, mbKey: Option[GlobalKey]): ErrOr[State] =
       Either.cond(
         !knownContract(cid),
         this.copy(
@@ -398,7 +412,7 @@ object NextGenContractStateMachine {
 
     private def continueQueryById(
         cid: Value.ContractId
-    ): Option[GlobalKey] => ErrOr[State[Nid]] = {
+    ): Option[GlobalKey] => ErrOr[State] = {
       case None =>
         Right(copy(inputContracts = inputContracts + cid))
       case Some(key) =>
@@ -422,7 +436,7 @@ object NextGenContractStateMachine {
 
     def queryById(
         cid: ContractId
-    ): Either[NeedContract[State[Nid]], ErrOr[State[Nid]]] =
+    ): Either[NeedContract[State], ErrOr[State]] =
       Either.cond(
         knownContract(cid),
         consumedBy.get(cid).map(TransactionError.AlreadyConsumed(cid, _)).toLeft(this),
@@ -438,7 +452,7 @@ object NextGenContractStateMachine {
         onlyQueryById: Set[ContractId],
         progression: NeedKeyProgression,
         acc: KeyMappingBuilder,
-    ): Either[NeedKey[State[Nid]], ErrOr[(KeyMapping, State[Nid])]] =
+    ): Either[NeedKey[State], ErrOr[(KeyMapping, State)]] =
       if (acc.missing == 0) {
         Right(
           Right(
@@ -515,7 +529,7 @@ object NextGenContractStateMachine {
     ): (
         View[ContractId],
         NeedKeyProgression.HasStarted,
-    ) => Either[NeedKey[State[Nid]], ErrOr[(KeyMapping, State[Nid])]] =
+    ) => Either[NeedKey[State], ErrOr[(KeyMapping, State)]] =
       (contracts: View[ContractId], progression: NeedKeyProgression.HasStarted) =>
         continueQueryNByKeyWithCandidates(
           key,
@@ -542,7 +556,7 @@ object NextGenContractStateMachine {
     def queryNByKey(
         key: GlobalKey,
         n: Int,
-    ): Either[NeedKey[State[Nid]], ErrOr[(KeyMapping, LLState[Nid])]] = {
+    ): Either[NeedKey[State], ErrOr[(KeyMapping, LLState)]] = {
       if (n <= 0)
         throw new IllegalArgumentException(s"queryNByKey: n must be strictly positive, got $n")
       val mapping = activeKeyMapping(key, n)
@@ -558,7 +572,7 @@ object NextGenContractStateMachine {
       )
     }
 
-    def archive(cid: ContractId, nid: Nid): Option[ErrOr[State[Nid]]] =
+    def archive(cid: ContractId, nid: NodeId): Option[ErrOr[State]] =
       queryById(cid).toOption.map(
         _.map(state =>
           state.copy(
@@ -569,10 +583,10 @@ object NextGenContractStateMachine {
         )
       )
 
-    def beginTry: State[Nid] =
+    def beginTry: State =
       this.copy(rollbackStack = activeLedgerState :: rollbackStack)
 
-    def rollbackTry: Either[Set[Nid], State[Nid]] =
+    def rollbackTry: Either[Set[NodeId], State] =
       rollbackStack match {
         case Nil =>
           throw new IllegalStateException("Not inside a rollback scope")
@@ -608,12 +622,12 @@ object NextGenContractStateMachine {
           }
       }
 
-    private[lf] def endTry: State[Nid] = rollbackStack match {
+    private[lf] def endTry: State = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
     }
 
-    override def consumedByOrInactive(cid: Value.ContractId): Option[Either[Nid, Unit]] =
+    override def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
       activeLedgerState.consumedBy.get(cid) match {
         case Some(nid) => Some(Left(nid)) // consumed
         case None =>
@@ -625,11 +639,37 @@ object NextGenContractStateMachine {
             None // neither
           }
       }
+
+    // Implementation detail (not guaranteed to be stable across versions, documented
+    // for maintenance purposes only): the current ordering is
+    //  1. Local contracts, ordered by recency (most recent first).
+    //  2. Input contracts without key, ordered by ID.
+    //  3. Input contracts with key, grouped by key (keys ordered by hash); within
+    //     each key group, contracts queried by key come first (in query order),
+    //     followed by contracts only queried by ID (ordered by ID).
+    override def contractOrder: List[ContractId] = {
+
+      // 1. Local contracts, most recent first
+      val locals = localContracts.keys.reverseIterator
+
+      // 3. Input contracts with key, grouped by key in sorted order
+      //    Computed before step 2 so we can derive the "without key" set.
+      val inputsWithKey =
+        internalKeyInputs.toArray.sortBy(_._1).toList.flatMap { case (_, keyInput) =>
+          keyInput.queriedByKey ++ keyInput.onlyQueriedById.toArray.sorted
+        }
+
+      // 2. Input contracts without key, ordered by ID
+      val inputsWithoutKey = (inputContracts -- inputsWithKey).toArray.sorted
+
+      // 3. Append input contracts with key
+      (locals ++ inputsWithoutKey ++ inputsWithKey).toList
+    }
   }
 
-  case class ActiveLedgerState[Nid](
-      createdInThisTimeline: Map[ContractId, Nid],
-      consumedBy: Map[ContractId, Nid],
+  case class ActiveLedgerState(
+      createdInThisTimeline: Map[ContractId, NodeId],
+      consumedBy: Map[ContractId, NodeId],
       localKeys: Map[GlobalKey, Vector[ContractId]],
   )
 
@@ -662,13 +702,13 @@ object NextGenContractStateMachine {
     }
   }
 
-  def empty[Nid](mode: Mode): State[Nid] =
-    empty[Nid](mode == Mode.NoKey)
+  def empty(mode: Mode): State =
+    empty(mode == Mode.NoKey)
 
-  def empty[Nid](authorizeRollBack: Boolean = true): State[Nid] =
+  def empty(authorizeRollBack: Boolean = true): State =
     State(
       authorizeRollback = authorizeRollBack,
-      localContracts = Map.empty,
+      localContracts = immutable.VectorMap.empty,
       inputContracts = Set.empty,
       internalKeyInputs = Map.empty,
       activeLedgerState = ActiveLedgerState(

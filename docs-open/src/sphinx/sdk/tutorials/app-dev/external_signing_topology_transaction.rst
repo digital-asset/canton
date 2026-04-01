@@ -408,10 +408,6 @@ To obtain the serial of an existing transaction, use the ``TopologyManagerReadSe
 In this tutorial, it is assumed that the ``NamespaceDelegation`` created is new, in particular there is no pre-existing root namespace delegation with the key created in step 1.
 The serial is therefore set to 1.
 
-.. tip::
-
-    For an example of how to read and increment the serial, see the :ref:`external party onboarding tutorial <external_signing_onboarding_serial_update>`
-
 Operation
 ---------
 
@@ -549,10 +545,6 @@ or because the authorization rules of the mapping require signatures from severa
 All transactions, however, require a signature either from the root namespace key of the namespace the transaction is targeting or from a delegated key of that namespace
 registered via a (non-root) ``NamespaceDelegation``.
 The authorization rules vary by mapping and are out of the scope of this tutorial, but can be found on their protobuf definition.
-
-.. tip::
-
-    The topology API allows authenticating several transactions with a single hash. This is illustrated in the :ref:`external signing onboarding tutorial <tutorial_onboard_external_party>`.
 
 Sign the hash with the private key:
 

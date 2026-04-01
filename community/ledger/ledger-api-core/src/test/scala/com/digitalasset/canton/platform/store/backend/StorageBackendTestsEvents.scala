@@ -1246,6 +1246,7 @@ private[backend] trait StorageBackendTestsEvents
           backend.event.lastSynchronizerOffsetBeforeOrAtRecordTime(
             synchronizerId = someSynchronizerId2,
             beforeOrAtRecordTimeInclusive = beforeOrAtRecordTime,
+            beforeOrAtLedgerEndOffsetInclusive = offset(12),
           )
         ) shouldBe expectation
       }

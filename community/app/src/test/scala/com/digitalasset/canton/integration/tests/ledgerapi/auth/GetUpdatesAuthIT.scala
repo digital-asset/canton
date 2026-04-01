@@ -38,6 +38,7 @@ final class GetUpdatesAuthIT
       beginExclusive = participantBegin,
       endInclusive = None,
       updateFormat = updateFormat,
+      descendingOrder = false,
     )
 
   override protected def stream(

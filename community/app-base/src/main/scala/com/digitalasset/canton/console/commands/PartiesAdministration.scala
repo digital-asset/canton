@@ -704,8 +704,8 @@ class ParticipantPartiesAdministrationGroup(
 
   @Help.Summary("Find highest ledger offset by timestamp")
   @Help.Description(
-    """This command attempts to find the highest ledger offset among all events belonging to a
-      |synchronizer that have a record time before or at the given timestamp.
+    """This command attempts to find the highest ledger offset among all events belonging
+      |to a synchronizer that have a record time before or at the given timestamp.
       |
       |Returns the highest ledger offset, or an error.
       |
@@ -715,16 +715,21 @@ class ParticipantPartiesAdministrationGroup(
       |- Not all events have been processed fully and/or published to the Ledger API DB
       |  until the requested timestamp.
       |
-      |Depending on the failure cause, this command can be tried to get a ledger offset.
-      |For example, if not all events have been processed fully and/or published to the
-      |Ledger API DB, a retry makes sense.
+      |Depending on the failure cause, this command can be tried again to get a ledger
+      |offset. For example, if not all events have been processed fully and/or published
+      |to the Ledger API DB, a retry makes sense.
       |
       |Parameters:
       |- synchronizerId: Restricts the query to a particular synchronizer.
       |- timestamp: A point in time.
-      |- force: Defaults to false. If true, returns the highest currently known ledger offset
-      |  with a record time before or at the given timestamp.
-      """
+      |- force: Defaults to false. When set, returns the highest known ledger offset with
+      |  a record time before or at the given timestamp. Additionally, if the requested
+      |  timestamp is in the future, it safely returns the current ledger end.
+      |
+      |Note: This command includes a synchronization barrier. It will wait briefly
+      |(up to 10 seconds) to ensure the returned offset is fully visible to the node's
+      |local Ledger API cache before returning.
+    """
   )
   def find_highest_offset_by_timestamp(
       synchronizerId: SynchronizerId,
@@ -849,7 +854,7 @@ class ParticipantPartiesAdministrationGroup(
       """
   )
   def import_party_acs(
-      synchronizerId: SynchronizerId,
+      synchronizerId: Synchronizer,
       party: Option[PartyId] = None,
       importFilePath: String = "canton-acs-export.gz",
       workflowIdPrefix: String = "",
@@ -857,6 +862,7 @@ class ParticipantPartiesAdministrationGroup(
       representativePackageIdOverride: RepresentativePackageIdOverride =
         RepresentativePackageIdOverride.NoOverride,
   ): Unit =
+    // TODO(#30096): May want to swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
     consoleEnvironment.run {
       reference.adminCommand(
         ParticipantAdminCommands.PartyManagement.ImportPartyAcs(

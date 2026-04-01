@@ -12,6 +12,7 @@ import cats.syntax.parallel.*
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.ViewType.{
   AssignmentViewType,
   TransactionViewType,
@@ -309,6 +310,7 @@ trait MessageDispatcher { this: NamedLogging =>
           sc = sc,
           ts = ts,
           isReceipt = isReceipt,
+          trafficCost = event.event.content.trafficCost,
         )
     }
   }
@@ -320,6 +322,7 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       isReceipt: Boolean,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): ProcessingResult = {
     def withNewRequestCounter(
         body: RequestCounter => ProcessingResult
@@ -355,7 +358,7 @@ trait MessageDispatcher { this: NamedLogging =>
               val event = eventO.getOrElse(sequencerIndexMovedEvent(ts))
               EventPublicationData(event, rc)
             },
-            () => processor.processRequest(ts, rc, sc, batch, publishUpdateHandle),
+            () => processor.processRequest(ts, rc, sc, batch, publishUpdateHandle, trafficCost),
           )
         )
       }

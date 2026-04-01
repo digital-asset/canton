@@ -698,14 +698,14 @@ object SequencerAdminCommands {
     }
   }
 
-  final case object GetLsuTrafficControlState
+  final case class GetLsuTrafficControlState(ts: Option[CantonTimestamp])
       extends BaseSequencerAdministrationCommand[
         proto.GetLsuTrafficControlStateRequest,
         proto.GetLsuTrafficControlStateResponse,
         ByteString,
       ] {
     override protected def createRequest(): Either[String, proto.GetLsuTrafficControlStateRequest] =
-      Right(proto.GetLsuTrafficControlStateRequest())
+      Right(proto.GetLsuTrafficControlStateRequest(ts.map(_.toProtoTimestamp)))
 
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,

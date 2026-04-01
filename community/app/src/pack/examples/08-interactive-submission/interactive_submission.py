@@ -13,7 +13,7 @@ from google.protobuf.json_format import MessageToJson
 from com.daml.ledger.api.v2.interactive import interactive_submission_service_pb2_grpc
 from com.daml.ledger.api.v2.interactive import interactive_submission_service_pb2
 from com.daml.ledger.api.v2 import commands_pb2, value_pb2, completion_pb2, crypto_pb2
-from external_party_onboarding_admin_api import onboard_external_party
+from external_party_onboarding import onboard_external_party
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -61,7 +61,6 @@ except json.JSONDecodeError:
 
 # Get ports from environment variables, fallback to default values (from JSON) if not set
 lapi_port = os.environ.get("CANTON_LAPI_PORT", default_lapi_port)
-admin_port = os.environ.get("CANTON_ADMIN_PORT", default_admin_port)
 
 # [Create LAPI gRPC Channel]
 lapi_channel = grpc.insecure_channel(f"localhost:{lapi_port}")
@@ -80,11 +79,6 @@ state_client = state_service_pb2_grpc.StateServiceStub(lapi_channel)
 # Event query service client - used to retrieve event information of a completed transaction
 eqs_client = event_query_service_pb2_grpc.EventQueryServiceStub(lapi_channel)
 # [Created LAPI gRPC Channel]
-
-# [Create Admin API gRPC Channel]
-admin_channel = grpc.insecure_channel(f"localhost:{admin_port}")
-# [Created Admin API gRPC Channel]
-
 
 # [Define ping template]
 ping_template_id = value_pb2.Identifier(
@@ -402,12 +396,12 @@ def demo_interactive_submissions(
     participant_id: str, synchronizer_id: str, auto_accept: bool
 ):
     alice_pk, alice_pub_fingerprint = onboard_external_party(
-        "alice", [participant_id], 1, synchronizer_id, admin_channel
+        "alice", [participant_id], 1, synchronizer_id, lapi_channel
     )
     print("Alice onboarded successfully")
     alice = "alice::" + alice_pub_fingerprint
     bob_pk, bob_pub_fingerprint = onboard_external_party(
-        "bob", [participant_id], 1, synchronizer_id, admin_channel
+        "bob", [participant_id], 1, synchronizer_id, lapi_channel
     )
     print("Bob onboarded successfully")
     bob = "bob::" + bob_pub_fingerprint
@@ -495,7 +489,7 @@ if __name__ == "__main__":
         )
     elif args.subcommand == "create-party":
         party_private_key, party_fingerprint = onboard_external_party(
-            args.name, [args.participant_id], 1, args.synchronizer_id, admin_channel
+            args.name, [args.participant_id], 1, args.synchronizer_id, lapi_channel
         )
         private_key_file = (
             args.private_key_file or f"{args.name}::{party_fingerprint}-private-key.der"

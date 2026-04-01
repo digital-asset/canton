@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.digitalasset.canton.RepairCounter
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.Update.{
@@ -41,6 +42,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
   private val cantonTime1 = CantonTimestamp.now()
   private val cantonTime2 = CantonTimestamp.now()
   private val commandId = Ref.CommandId.assertFromString(UUID.randomUUID().toString)
+  private val paidTrafficCost = NonNegativeLong.tryCreate(465)
   private val offset = Offset.tryFromLong(15)
   private val submissionId = Some(Ref.SubmissionId.assertFromString(UUID.randomUUID().toString))
   private val updateId = TestUpdateId("15000")
@@ -71,6 +73,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
           commandId = commandId,
           optDeduplicationPeriod = None,
           submissionId = submissionId,
+          paidTrafficCost = paidTrafficCost,
         )
       ),
       transactionMeta = transactionMeta,
@@ -136,6 +139,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         commandId = commandId,
         optDeduplicationPeriod = None,
         submissionId = submissionId,
+        paidTrafficCost = NonNegativeLong.zero,
       ),
       reasonTemplate = FinalReason(status),
       synchronizerId = synchronizerId,
@@ -179,6 +183,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         commandId = commandId,
         optDeduplicationPeriod = None,
         submissionId = submissionId,
+        paidTrafficCost = paidTrafficCost,
       ),
       reasonTemplate = FinalReason(status),
       synchronizerId = synchronizerId,

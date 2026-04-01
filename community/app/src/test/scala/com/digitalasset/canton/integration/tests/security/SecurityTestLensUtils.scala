@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.integration.tests.security
 
+import cats.instances.list.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.NonEmptyUtil.instances.*
+import com.daml.nonempty.catsinstances.*
+import com.daml.nonempty.{NonEmpty, NonEmptyF}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApi}
@@ -12,13 +15,19 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   ClosedEnvelope,
+  MediatorGroupRecipient,
   OpenEnvelope,
+  Recipient,
   Recipients,
+  RecipientsTree,
   SubmissionRequest,
 }
+import com.digitalasset.canton.util.SetsUtil.instances.*
 import com.digitalasset.canton.version.ProtocolVersion
-import monocle.macros.GenLens
+import monocle.function.Each
+import monocle.macros.{GenLens, GenPrism}
 import monocle.{Lens, Traversal}
 import org.scalactic.source.Position
 
@@ -132,4 +141,17 @@ trait SecurityTestLensUtils {
         throw new IllegalArgumentException(s"Failed to open envelope: $err")
       )
     )(newOpenEnvelope => _ => newOpenEnvelope.toClosedUncompressedEnvelope)
+
+  def submissionRequestRecipients: Traversal[SubmissionRequest, Recipients] =
+    GenLens[SubmissionRequest](_.batch)
+      .andThen(GenLens[Batch[ClosedEnvelope]](_.envelopes))
+      .andThen(Traversal.fromTraverse[List, ClosedEnvelope])
+      .andThen(ClosedEnvelope.recipientsLens)
+
+  def mediatorGroupRecipient: Traversal[Recipients, MediatorGroupRecipient] =
+    GenLens[Recipients](_.trees).toNEF
+      .andThen(Traversal.fromTraverse[NonEmptyF[Seq, *], RecipientsTree])
+      .andThen(GenLens[RecipientsTree](_.recipientGroup))
+      .andThen(Each.each[NonEmpty[Set[Recipient]], Recipient])
+      .andThen(GenPrism[Recipient, MediatorGroupRecipient])
 }

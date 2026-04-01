@@ -223,7 +223,7 @@ class DbOutputMetadataStore(
           }
           .map(_._1)
         blocksUntilFirstGap
-      }(DirectExecutionContext(logger))
+      }(DirectExecutionContext(noTracingLogger))
     val future = () => storage.query(query, functionFullName)
     PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
   }

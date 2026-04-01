@@ -25,6 +25,7 @@ import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   HasLoggerName,
   NamedLoggerFactory,
+  NamedLogging,
   NamedLoggingContext,
 }
 import com.digitalasset.canton.util.BatchN.{CatchUpMode, MaximizeConcurrency}
@@ -194,7 +195,8 @@ object PekkoUtil extends HasLoggerName {
   def statefulMapAsync[Out, Mat, S, T](graph: FlowOps[Out, Mat], initial: S)(
       f: (S, Out) => Future[(S, T)]
   )(implicit loggingContext: NamedLoggingContext): graph.Repr[T] = {
-    val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
+    val directExecutionContext =
+      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
     graph
       .scanAsync((initial, Option.empty[T])) { case ((state, _), next) =>
         f(state, next)
@@ -224,7 +226,8 @@ object PekkoUtil extends HasLoggerName {
     // where the future may have been started before the first one aborted.
     // So we just need to throw away the results of the futures and convert them into aborts.
     if (parallelism == 1) {
-      val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
+      val directExecutionContext =
+        DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
       statefulMapAsync(graph, initial = false) { (aborted, next) =>
         if (aborted) Future.successful(true -> AbortedDueToShutdown)
         else f(next).unwrap.map(us => !us.isOutcome -> us)(directExecutionContext)
@@ -334,7 +337,7 @@ object PekkoUtil extends HasLoggerName {
       Context: SingletonTraverse.Aux[Context, C],
   ): graph.Repr[Context[UnlessShutdown[T]]] = {
     implicit val directExecutionContext: ExecutionContext =
-      DirectExecutionContext(loggingContext.tracedLogger)
+      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
     statefulMapAsync(graph, initial = Option(initial)) {
       case (oldState @ Some(s), next) =>
         // Since the context contains at most one element, it is fine to use traverse with futures here
@@ -460,7 +463,8 @@ object PekkoUtil extends HasLoggerName {
       loggingContext: NamedLoggingContext,
       materializer: Materializer,
   ): Source[WithKillSwitch[A], (KillSwitch, Future[Done])] = {
-    val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
+    val directExecutionContext =
+      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
 
     // Use immediate acknowledgements and buffer size 1 to minimize the risk that
     // several materializations of the returned source concurrently restart stuff.

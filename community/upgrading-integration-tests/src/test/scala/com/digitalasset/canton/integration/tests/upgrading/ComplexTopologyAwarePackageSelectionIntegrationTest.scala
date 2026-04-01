@@ -75,10 +75,11 @@ final class ComplexTopologyAwarePackageSelectionIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
-      .addConfigTransform(
+      .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.ledgerApi.topologyAwarePackageSelection.enabled).replace(true)
-        )
+        ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

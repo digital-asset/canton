@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.participant.state
 
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.LfTimestamp
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
@@ -54,13 +55,14 @@ final case class SubmitterInfo(
   /** The ID for the ledger change */
   val changeId: ChangeId = ChangeId(userId, commandId, actAs.toSet)
 
-  def toCompletionInfo: CompletionInfo =
+  def toCompletionInfo(paidTrafficCost: NonNegativeLong): CompletionInfo =
     CompletionInfo(
       actAs,
       userId,
       commandId,
       Some(deduplicationPeriod),
       submissionId,
+      paidTrafficCost,
     )
 
 }

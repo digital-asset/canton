@@ -98,6 +98,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AsyncWriterConfig,
+  LsuRepair,
+  LsuSequencingBoundsOverride,
   RemoteSequencerConfig,
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
@@ -979,7 +981,20 @@ object CantonConfig {
           : ConfigReader[TopologyAwarePackageSelectionConfig] =
         deriveReader[TopologyAwarePackageSelectionConfig]
 
-      deriveReader[LedgerApiServerConfig]
+      implicit val deprecatedFields: DeprecatedFieldsFor[LedgerApiServerConfig] =
+        new DeprecatedFieldsFor[LedgerApiServerConfig] {
+
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath(
+                "index-service.prepare-package-metadata-time-out-warning",
+                since = "3.5.0",
+                valueFilter = None: Option[NonNegativeFiniteDuration],
+              )
+            )
+        }
+
+      deriveReader[LedgerApiServerConfig].applyDeprecations
     }
 
     lazy implicit final val httpApiServerConfigReader: ConfigReader[JsonApiConfig] = {
@@ -1181,6 +1196,12 @@ object CantonConfig {
     lazy implicit final val timeAdvancingTopologyConfigReader
         : ConfigReader[TimeAdvancingTopologyConfig] =
       deriveReader[TimeAdvancingTopologyConfig]
+
+    lazy implicit final val lsuRepairConfigReader: ConfigReader[LsuRepair] = deriveReader[LsuRepair]
+
+    lazy implicit final val lsuSequencingBoundsOverrideConfigReader
+        : ConfigReader[LsuSequencingBoundsOverride] =
+      deriveReader[LsuSequencingBoundsOverride]
 
     lazy implicit final val sequencerNodeParametersConfigReader
         : ConfigReader[SequencerNodeParameterConfig] = {
@@ -1398,8 +1419,24 @@ object CantonConfig {
         deriveReader[AdminWorkflowConfig]
       implicit val commandProgressTrackerConfigReader: ConfigReader[CommandProgressTrackerConfig] =
         deriveReader[CommandProgressTrackerConfig]
-      implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
-        deriveReader[PackageMetadataViewConfig]
+
+      implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] = {
+        implicit val deprecatedFields: DeprecatedFieldsFor[PackageMetadataViewConfig] =
+          new DeprecatedFieldsFor[PackageMetadataViewConfig] {
+
+            override def deprecatePath: List[DeprecatedConfigPath[?]] =
+              List(
+                DeprecatedConfigPath(
+                  "init-takes-too-long-interval",
+                  since = "3.5.0",
+                  valueFilter = None: Option[FiniteDuration],
+                )
+              )
+          }
+
+        deriveReader[PackageMetadataViewConfig].applyDeprecations
+      }
+
       implicit val partyReplicatorTestInterceptorReader
           : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
         (_: ConfigCursor) =>
@@ -1947,6 +1984,11 @@ object CantonConfig {
         deriveWriter[AsyncWriterConfig]
       implicit val timeAdvancingTopologyConfigWriter: ConfigWriter[TimeAdvancingTopologyConfig] =
         deriveWriter[TimeAdvancingTopologyConfig]
+      implicit val lsuSequencingBoundsOverrideConfigWriter
+          : ConfigWriter[LsuSequencingBoundsOverride] =
+        deriveWriter[LsuSequencingBoundsOverride]
+      implicit val lsuRepairConfigWriter: ConfigWriter[LsuRepair] = deriveWriter[LsuRepair]
+
       deriveWriter[SequencerNodeParameterConfig]
     }
     lazy implicit final val SequencerHealthConfigWriter: ConfigWriter[SequencerHealthConfig] =

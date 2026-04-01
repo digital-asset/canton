@@ -569,6 +569,9 @@ object Value {
         }(fallback = false)
     }
 
+    implicit val contractIdOrdering: Ordering[ContractId] =
+      `Cid Order`.toScalaOrdering
+
     implicit val equalInstance: Equal[ContractId] = Equal.equalA
   }
 

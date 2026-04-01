@@ -45,7 +45,7 @@ object BinaryFileUtil {
           Left(s"No such file [$inputFile].")
         else
           Left(
-            s"File exists but cannot be read [$inputFile]. ${ErrorUtil.messageWithStacktrace(e)}"
+            s"File exists but cannot be read [$inputFile]. ${ThrowableUtil.messageWithStacktrace(e)}"
           )
     } finally {
       bis.foreach(_.close())

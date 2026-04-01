@@ -9,7 +9,7 @@ import com.digitalasset.canton.logging.pretty.Pretty.{
   DefaultShowFieldNames,
   DefaultWidth,
 }
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ThrowableUtil
 import com.google.protobuf.ByteString
 import pprint.{PPrinter, Tree}
 
@@ -26,7 +26,7 @@ class CantonPrettyPrinter(maxStringLength: Int, maxMessageLines: Int) {
         try {
           pprinter(product).toString
         } catch {
-          case err: IllegalArgumentException => ErrorUtil.messageWithStacktrace(err)
+          case err: IllegalArgumentException => ThrowableUtil.messageWithStacktrace(err)
         }
       case _: Any =>
         import com.digitalasset.canton.logging.pretty.Pretty.*

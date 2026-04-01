@@ -30,6 +30,7 @@ object CompletionFromTransaction {
       userId: String,
       submissionId: Option[String],
       traceContext: Option[com.daml.ledger.api.v2.trace_context.TraceContext],
+      trafficCost: Long,
       deduplicationOffset: Option[Long],
       deduplicationDurationSeconds: Option[Long],
       deduplicationDurationNanos: Option[Int],
@@ -45,6 +46,7 @@ object CompletionFromTransaction {
         submissionId: Option[String],
         synchronizerId: String,
         traceContext: Option[com.daml.ledger.api.v2.trace_context.TraceContext],
+        trafficCost: Long,
         deduplicationOffset: Option[Long],
         deduplicationDurationSeconds: Option[Long],
         deduplicationDurationNanos: Option[Int],
@@ -56,6 +58,7 @@ object CompletionFromTransaction {
       userId = userId,
       submissionId = submissionId,
       traceContext = traceContext,
+      trafficCost = trafficCost,
       deduplicationOffset = deduplicationOffset,
       deduplicationDurationSeconds = deduplicationDurationSeconds,
       deduplicationDurationNanos = deduplicationDurationNanos,
@@ -121,6 +124,7 @@ object CompletionFromTransaction {
       traceContext = commonCompletionProperties.traceContext,
       offset = commonCompletionProperties.completionOffset,
       synchronizerTime = commonCompletionProperties.synchronizerTime,
+      paidTrafficCost = commonCompletionProperties.trafficCost,
     )
   }
 

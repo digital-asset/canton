@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -104,7 +105,9 @@ class DirectSequencerConnectionXPool(
       threshold: PositiveInt,
       ignored: Set[ConnectionXConfig],
       extraUndecided: NonNegativeInt,
-  )(implicit traceContext: TraceContext): Boolean = true
+  )(implicit
+      traceContext: TraceContext
+  ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit] = Either.unit
 }
 
 object DirectSequencerConnectionXPool {

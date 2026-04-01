@@ -214,6 +214,14 @@ private[reassignment] class AssignmentProcessingSteps(
         staticSynchronizerParameters.map(_.protocolVersion),
       )
       recipientsSet <- activeParticipantsOfParty(stakeholders.all.toSeq)
+      _ <- ReassignmentValidation
+        .checkMultiSynchronizerEnabled(
+          topologySnapshot.unwrap,
+          recipientsSet,
+          psid.unwrap,
+        )
+        .leftMap(_.toSubmissionValidationError)
+
       contractIds = unassignmentData.contractsBatch.contractIds.toSeq
       recipients <- EitherT.fromEither[FutureUnlessShutdown](
         Recipients

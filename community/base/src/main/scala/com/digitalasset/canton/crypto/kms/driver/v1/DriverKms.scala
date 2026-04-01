@@ -75,7 +75,7 @@ class DriverKms(
 
     val mapErr: Throwable => KmsError = {
       case api.v1.KmsDriverException(cause, retryable) =>
-        errFn(ErrorUtil.messageWithStacktrace(cause), retryable)
+        errFn(ThrowableUtil.messageWithStacktrace(cause), retryable)
       case ex =>
         throw ex
     }
@@ -353,7 +353,7 @@ class DriverKms(
               }
             case Failure(exception) =>
               reportHealthState(
-                ComponentHealthState.failed(ErrorUtil.messageWithStacktrace(exception))
+                ComponentHealthState.failed(ThrowableUtil.messageWithStacktrace(exception))
               )
           }
 

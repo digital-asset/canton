@@ -123,14 +123,31 @@ final class GeneratorsInteractiveSubmission(
 
   private val nodeIdGen = Arbitrary.arbInt.arbitrary.map(NodeId(_))
 
+  final def normalizeTxForV1(tx: Transaction) = {
+    // We remove QueryByKey nodes because they are not supported by V1.
+    val removedNodes: Set[NodeId] =
+      tx.nodes.collect { case (nid, _: Node.LookupByKey) => nid }.toSet
+
+    def filter(nodeIds: ImmArray[NodeId]): ImmArray[NodeId] =
+      nodeIds.filter(cid => !removedNodes.contains(cid))
+
+    val keptNodes: Map[NodeId, Node] = tx.nodes.view
+      .mapValues(normalizeNodeForV1)
+      .collect {
+        case (nid, exe: Node.Exercise) =>
+          nid -> exe.copy(children = filter(exe.children))
+        case (nid, rb: Node.Rollback) =>
+          nid -> rb.copy(children = filter(rb.children))
+        case (nid, node) if !removedNodes.contains(nid) =>
+          nid -> node
+      }
+      .toMap
+
+    Transaction(keptNodes, filter(tx.roots))
+  }
+
   val noDanglingRefGenTransaction: Gen[Transaction] =
-    ValueGenerators.noDanglingRefGenTransaction.map { tx =>
-      tx.copy(
-        nodes = tx.nodes.map { case (nodeId, node) =>
-          nodeId -> normalizeNodeForV1(node)
-        }
-      )
-    }
+    ValueGenerators.noDanglingRefGenTransaction.map(normalizeTxForV1(_))
 
   private val versionedTransactionGenerator = for {
     transaction <- noDanglingRefGenTransaction

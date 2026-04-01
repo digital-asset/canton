@@ -13,11 +13,11 @@ A decentralized party combines three different features:
 
 * Decentralization of topology management of the party: A `decentralized namespace` to ensure that any topology transaction
   for that party requires signatures from a threshold of keys.
-* Decentralization of transaction confirmations for the party: A `party to participant mapping` containing multiple confirming
+* Decentralization of transaction confirmations for the party: A `party to participant` containing multiple confirming
   participants and a threshold to ensure that transactions requiring
   confirmations from that party also require confirmation from a
   threshold of participant nodes.
-* Decentralization of transaction submissions for the party: Optionally, a `party to key mapping` to support submitting
+* Decentralization of transaction submissions for the party: Optionally, protocol signing keys in the `party to participant` to support submitting
   transactions that require direct authorization of the external
   party, for example creating a contract that the party is a signatory on by
   signing the prepared transaction with a threshold of keys. If no party-to-key mapping
@@ -28,10 +28,9 @@ A decentralized party combines three different features:
 Setup a decentralized party
 ===========================
 
-While the decentralized namespace, the party to participant mapping,
-and the party to key mapping can be configured fully independently, a
-common scenario is that a set of entities jointly control all three
-i.e. all three have the same number of members and the same
+While the decentralized namespace and the party to participant mapping can be configured fully independently, a
+common scenario is that a set of entities jointly control both
+i.e. both have the same number of members and the same
 threshold. The instructions here describe that setup with the three members being `alice`, `bob`, and `charlie`, who use `participant1`, `participant2`, and `participant3` respectively.
 
 First generate the keys used for the decentralized namespace:
@@ -94,18 +93,10 @@ with ``Observation`` permissions), and a threshold. The threshold
 determines how many confirmations are required for the decentralized
 party. This example uses the same threshold of two used
 for the decentralized namespace. As for the decentralized
-namespace, each node independently publishes the transaction; once
-all of them publish their transactions it becomes valid and shows up in ``list``:
+namespace, each node independently publishes the transaction.
 
-.. snippet:: decentralized_parties
-     .. success:: val partyId = PartyId(UniqueIdentifier.tryCreate("decentralized-party", namespaceDef.namespace))
-     .. success:: participant1.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), store = synchronizerId)
-     .. success:: participant2.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), store = synchronizerId)
-     .. success:: participant3.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), store = synchronizerId)
-     .. success:: utils.retry_until_true(participant3.topology.party_to_participant_mappings.list(synchronizerId, filterParty = partyId.filterString).nonEmpty)
-
-The last (optional) step is to set up the party to key mapping. This
-allows submitting transactions directly as the decentralized party
+Optionally, protocol signing keys can be added to the ``PartyToParticipant``.
+This allows submitting transactions directly as the decentralized party
 through aggregating signatures offline. It is possible to reuse the
 same keys here that are used for the decentralized namespace (provided
 you change the SigningKeyUsage to be less restrictive) but we use
@@ -115,14 +106,16 @@ separate keys here:
      .. success:: val aliceDamlKey = participant1.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
      .. success:: val bobDamlKey = participant2.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
      .. success:: val charlieDamlKey = participant3.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
+     .. success:: val partySigningKeysWithThreshold = Some(SigningKeysWithThreshold(com.daml.nonempty.NonEmpty(Set, aliceDamlKey, bobDamlKey, charlieDamlKey), PositiveInt.tryCreate(2)))
 
-With the keys set up, you can now create the ``PartyToKey`` topology transaction. Use a threshold of two signatures again:
+Once all of them publish their transactions it becomes valid and shows up in ``list``:
 
 .. snippet:: decentralized_parties
-     .. success:: participant1.topology.party_to_key_mappings.propose(partyId, PositiveInt.tryCreate(2), com.daml.nonempty.NonEmpty(Seq, aliceDamlKey, bobDamlKey, charlieDamlKey), store = synchronizerId, mustFullyAuthorize = false)
-     .. success:: participant2.topology.party_to_key_mappings.propose(partyId, PositiveInt.tryCreate(2), com.daml.nonempty.NonEmpty(Seq, aliceDamlKey, bobDamlKey, charlieDamlKey), store = synchronizerId, mustFullyAuthorize = false)
-     .. success:: participant3.topology.party_to_key_mappings.propose(partyId, PositiveInt.tryCreate(2), com.daml.nonempty.NonEmpty(Seq, aliceDamlKey, bobDamlKey, charlieDamlKey), store = synchronizerId, mustFullyAuthorize = false)
-     .. success:: utils.retry_until_true(participant3.topology.party_to_key_mappings.list(store = synchronizerId, filterParty = partyId.filterString).nonEmpty)
+     .. success:: val partyId = PartyId(UniqueIdentifier.tryCreate("decentralized-party", namespaceDef.namespace))
+     .. success:: participant1.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), partySigningKeys = partySigningKeysWithThreshold, store = synchronizerId)
+     .. success:: participant2.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), partySigningKeys = partySigningKeysWithThreshold, store = synchronizerId)
+     .. success:: participant3.topology.party_to_participant_mappings.propose(partyId, Seq((participant1, ParticipantPermission.Confirmation), (participant2, ParticipantPermission.Confirmation), (participant3, ParticipantPermission.Confirmation)), PositiveInt.tryCreate(2), partySigningKeys = partySigningKeysWithThreshold, store = synchronizerId)
+     .. success:: utils.retry_until_true(participant3.topology.party_to_participant_mappings.list(synchronizerId, filterParty = partyId.filterString).nonEmpty)
 
 With that, the party is fully set up and can be used.
 
@@ -143,9 +136,9 @@ this topic.
 Next steps
 ==========
 
-For details on how to submit an externally signed Daml transaction enabled by the ``PartyToKey`` mapping, refer to the :externalref:`external submission docs <tutorial_externally_signed_transactions_part_2>`.
+For details on how to submit an externally signed Daml transaction enabled by the signing keys in the ``PartyToParticipant`` mapping, refer to the :externalref:`external submission docs <tutorial_externally_signed_transactions>`.
 
-In this tutorial, both the namespace and protocol keys are held by the participant itself. It is also possible to hold them outside of the participant. The actual flow stays the same, but each submission of a topology transaction must be signed externally. Refer to the :externalref:`external topology signing docs <tutorial_onboard_external_party>` for details on how to do this.
+In this tutorial, both the namespace and protocol keys are held by the participant itself. It is also possible to hold them outside of the participant. The actual flow stays the same, but each submission of a topology transaction must be signed externally. Refer to the :externalref:`external topology signing docs <externally_signed_topology_transaction>` for details on how to do this.
 
 Decentralized namespace computation
 ===================================

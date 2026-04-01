@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.{
@@ -234,6 +235,7 @@ class TestProcessingSteps(
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[TestParsedRequest] =
     FutureUnlessShutdown.pure(
       TestParsedRequest(
@@ -245,6 +247,7 @@ class TestProcessingSteps(
         mediator,
         isFreshOwnTimelyRequest,
         synchronizerParameters,
+        trafficCost,
       )
     )
 
@@ -304,6 +307,7 @@ class TestProcessingSteps(
       rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) =
@@ -379,6 +383,7 @@ object TestProcessingSteps {
       override val mediator: MediatorGroupRecipient,
       override val isFreshOwnTimelyRequest: Boolean,
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      override val trafficCost: NonNegativeLong,
   ) extends ParsedRequest[TestViewType.ViewSubmitterMetadata] {
     override def submitterMetadataO: None.type = None
     override def rootHash: RootHash = TestHash.dummyRootHash

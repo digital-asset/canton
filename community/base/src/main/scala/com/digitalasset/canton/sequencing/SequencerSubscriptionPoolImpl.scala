@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.SequencerConnectionXState
+import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConnectionXPoolError
 import com.digitalasset.canton.sequencing.SequencerSubscriptionPool.{
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
@@ -259,7 +260,9 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   private def closeWithSubscriptionReason(manager: SubscriptionManager)(
       subscriptionCloseReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
   )(implicit traceContext: TraceContext): Unit = {
-    def isThresholdStillReachable(ignoreCurrent: Boolean): Boolean = lock.exclusive {
+    def isThresholdStillReachable(
+        ignoreCurrent: Boolean
+    ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit] = lock.exclusive {
       val ignored: Set[ConnectionX.ConnectionXConfig] =
         if (ignoreCurrent) Set(manager.connection.config) else Set.empty
       val trustThreshold = currentConfigWithThreshold.trustThreshold
@@ -294,11 +297,11 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
         )
 
       case Success(permissionDenied: SubscriptionCloseReason.PermissionDeniedError) =>
-        if (!isThresholdStillReachable(ignoreCurrent = true))
+        if (isThresholdStillReachable(ignoreCurrent = true).isLeft)
           complete(Success(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied")))
 
       case Success(subscriptionError: SubscriptionCloseReason.SubscriptionError) =>
-        if (!isThresholdStillReachable(ignoreCurrent = true))
+        if (isThresholdStillReachable(ignoreCurrent = true).isLeft)
           complete(
             Success(
               SequencerClient.CloseReason.UnrecoverableError(
@@ -308,7 +311,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
           )
 
       case Success(SubscriptionCloseReason.Closed) =>
-        if (!isThresholdStillReachable(ignoreCurrent = false))
+        if (isThresholdStillReachable(ignoreCurrent = false).isLeft)
           complete(Success(SequencerClient.CloseReason.ClientShutdown))
 
       case Success(SubscriptionCloseReason.Shutdown) =>
@@ -375,17 +378,19 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
           s"below liveness margin: $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}," +
             s" liveness margin = ${currentConfig.livenessMargin}"
         )
-      case _
-          if !isClosing && !pool.isThresholdStillReachable(
-            currentConfig.trustThreshold,
-            Set.empty,
-          ) =>
-        val reason = s"Trust threshold ${currentConfig.trustThreshold} is no longer reachable"
-        completeWithReason(Success(UnrecoverableError(reason)), _.fatalOccurred(_))
       case nb =>
-        health.failureOccurred(
-          s"only $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}"
-        )
+        if (!isClosing) {
+          pool
+            .isThresholdStillReachable(currentConfig.trustThreshold, Set.empty)
+            .fold(
+              error =>
+                completeWithReason(Success(UnrecoverableError(error.toString)), _.fatalOccurred(_)),
+              _ =>
+                health.failureOccurred(
+                  s"only $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}"
+                ),
+            )
+        } else health.failureOccurred("closing")
     }
   }
 

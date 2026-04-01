@@ -38,7 +38,8 @@ trait ImportContractsIntegrationTestBase
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaMultiSynchronizerSupport)
             .replace(enableAlphaMultiSynchronizerSupport)
-        )
+        ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

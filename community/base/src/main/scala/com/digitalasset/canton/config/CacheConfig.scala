@@ -209,14 +209,14 @@ object CachingConfigs {
   */
 class FallbackExecutor(context: ExecutionContext, loggerFactory: NamedLoggerFactory)
     extends Executor {
-  private val tracedLogger = loggerFactory.getTracedLogger(getClass)
+  private val logger = loggerFactory.getLogger(getClass)
   override def execute(command: Runnable): Unit =
     try {
       context.execute(command)
     } catch {
       case _: RejectedExecutionException =>
-        tracedLogger.underlying.info(s"Falling back to direct execution for $command")
-        DirectExecutionContext(tracedLogger).execute(command)
-        tracedLogger.underlying.info(s"Execution complete for: $command")
+        logger.info(s"Falling back to direct execution for $command")
+        DirectExecutionContext(logger).execute(command)
+        logger.info(s"Execution complete for: $command")
     }
 }

@@ -8,7 +8,6 @@ import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
-import com.digitalasset.canton.annotations.NuckTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, FeatureFlag}
@@ -71,7 +70,8 @@ sealed trait RepairServiceIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair)
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
 
   override val defaultParticipant: String = "participant1"
@@ -821,12 +821,12 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
   }
 }
 
-sealed trait RepairServiceIntegrationTestDevLf extends RepairServiceIntegrationTest {
-  override def cantonTestsPath: String = CantonTestsDevPath
+sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTest {
+  override def cantonTestsPath: String = CantonTestsLF23Path
 
   "RepairService.addContract" should {
     "not add contract" when {
-      "contract has empty maintainers" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "contract has empty maintainers" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
         implicit env =>
           withParticipantsInitialized { (alice, _) =>
             import env.*
@@ -850,7 +850,7 @@ sealed trait RepairServiceIntegrationTestDevLf extends RepairServiceIntegrationT
                 Ref.PackageId.assertFromString(pkg),
                 Ref.QualifiedName.assertFromString(s"$module:$template"),
               )
-            val lfPackageName = Ref.PackageName.assertFromString("CantonTestsDev")
+            val lfPackageName = Ref.PackageName.assertFromString("CantonTestsLF23")
             val keyWithMaintainers = ExampleTransactionFactory.globalKeyWithMaintainers(
               LfGlobalKey
                 .build(
@@ -957,6 +957,7 @@ sealed trait WithMultiSynchronizerSupport extends RepairServiceIntegrationTest {
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(true)
         ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
 }
 
@@ -1057,7 +1058,6 @@ class RepairServiceIntegrationTestPostgresStableLf_MultiSync
     with WithMultiSynchronizerSupport
     with RepairServiceMultiSynchronizerTests
 
-@NuckTest
-class RepairServiceIntegrationTestPostgresDevLf
-    extends RepairServiceIntegrationTestDevLf
+class RepairServiceIntegrationTestPostgresLF23
+    extends RepairServiceIntegrationTestLF23
     with RepairServiceBftSequencerPostgresTest

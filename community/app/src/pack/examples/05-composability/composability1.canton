@@ -40,6 +40,14 @@ participant3.synchronizers.connect_local(iou_sequencer, alias = iouAlias)
 participant2.synchronizers.connect_local(paint_sequencer, alias = paintAlias)
 participant3.synchronizers.connect_local(paint_sequencer, alias = paintAlias)
 
+// enable multi-synchronizer topology feature flag for all participants for both synchronizers
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+participant1.topology.synchronizer_trust_certificates.propose(participant1, iouId, featureFlags = featureFlag)
+participant2.topology.synchronizer_trust_certificates.propose(participant2, iouId, featureFlags = featureFlag)
+participant3.topology.synchronizer_trust_certificates.propose(participant3, iouId, featureFlags = featureFlag)
+participant2.topology.synchronizer_trust_certificates.propose(participant2, paintId, featureFlags = featureFlag)
+participant3.topology.synchronizer_trust_certificates.propose(participant3, paintId, featureFlags = featureFlag)
+
 // create the parties
 val Bank = participant1.parties.enable("Bank")
 val HouseOwner = participant2.parties.enable("House Owner", synchronizer = Some(SynchronizerAlias.tryCreate(iouAlias)))

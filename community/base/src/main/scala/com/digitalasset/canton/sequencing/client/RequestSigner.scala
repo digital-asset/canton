@@ -15,9 +15,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.ExecutionContext
 
 trait RequestSigner {
-  // TODO(#31060): Ensure that if `maxSequencingTime` falls outside the usable validity window of a
-  // session signing key, we fall back to signing with the long-term
-  // key (even if the session key is newly generated).
   def signRequest[A <: HasCryptographicEvidence](
       request: A,
       hashPurpose: HashPurpose,

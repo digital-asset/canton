@@ -105,6 +105,8 @@ class RandomBalancer {
 
   private val pool = new AtomicReference[IndexedSeq[Party]](IndexedSeq.empty)
 
+  def num: Int = pool.get().length
+
   def updateMembers(current: Seq[Party]): Unit =
     pool.updateAndGet(_ => IndexedSeq.from(current)).discard
 

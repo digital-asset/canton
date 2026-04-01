@@ -96,6 +96,7 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
         ),
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

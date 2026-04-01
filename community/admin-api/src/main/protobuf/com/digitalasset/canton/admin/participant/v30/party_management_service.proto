@@ -76,8 +76,11 @@ service PartyManagementService {
   //
   // Returns a ledger offset, or an error otherwise. Depending on the error cause, a retry may make sense.
   // Retryable errors are defined as: OUT_OF_RANGE/INVALID_TIMESTAMP_PARTY_MANAGEMENT_ERROR.
-  // Further, a returned offset is guaranteed to be "clean", meaning all events have been processed fully and
-  // published to the Ledger API DB until the requested timestamp.
+  //
+  // The returned offset is guaranteed to be "clean", meaning all events have been processed fully and
+  // published to the Ledger API DB until the requested timestamp. Furthermore, the endpoint synchronizes
+  // with the participant's local cache, ensuring the returned offset is immediately queryable via
+  // subsequent Ledger API calls.
   rpc GetHighestOffsetByTimestamp(GetHighestOffsetByTimestampRequest) returns (GetHighestOffsetByTimestampResponse);
 
   // Offline party replication endpoint.
@@ -319,7 +322,13 @@ message ImportPartyAcsRequest {
   // Required
   bytes acs_snapshot = 1;
 
-  // The identifier of the synchronizer managing the contract to be imported. If a contract has a different synchronizer, import will fail.
+  // TODO(#30096) – The synchronizer_id contains either a logical or a physical synchronizer ID; required for LSU test scenarios currently
+  // We may want to revert this to logical synchronizer ID again once the topology state copy happens with the initial handshake with the
+  // new synchronizer.
+  //
+  // The identifier of the synchronizer managing the contracts to be imported.
+  // Only contracts in the snapshot assigned to this exact synchronizer ID will be imported.
+  // Any contract that is assigned to another synchronizer will be ignored.
   // Required in the first request, ignored in all subsequent request messages.
   optional string synchronizer_id = 2;
 
@@ -353,10 +362,11 @@ message ImportPartyAcsRequest {
 
 message ImportPartyAcsResponse {}
 
-// Requests the highest ledger offset among all events belonging to the synchronizer (`synchronizer_id`)
-// that have a record time before or at the given `timestamp`.
+// Requests the highest ledger offset among all events belonging to the synchronizer
+// (`synchronizer_id`) that have a record time before or at the given `timestamp`.
 //
-// This endpoint features a `force` message field. This is intended for disaster recovery scenarios only.
+// This endpoint features a `force` message field. This is intended for disaster
+// recovery scenarios only.
 message GetHighestOffsetByTimestampRequest {
   // The identifier of the synchronizer.
   // Required
@@ -366,15 +376,17 @@ message GetHighestOffsetByTimestampRequest {
   // Required
   google.protobuf.Timestamp timestamp = 2;
 
-  // If true, return the highest known ledger offset with a record time before or at the specified `timestamp`
-  // even if higher offsets with a record time before or at `timestamp` can be created in the future.
+  // When set, returns the highest known ledger offset with a record time before or at
+  // the specified `timestamp`, even if higher offsets with a record time before or at
+  // `timestamp` can be created in the future. Additionally, if the requested timestamp
+  // is in the future, the current ledger end is safely returned.
   // Required, defaults to false.
   bool force = 3;
 }
 
 message GetHighestOffsetByTimestampResponse {
-  // The highest ledger offset among events that have their record time before or at the requested timestamp.
-  // An error when no such offset (yet) exists.
+  // The highest ledger offset among events that have their record time before or at
+  // the requested timestamp. Returns an error when no such offset (yet) exists.
   // Required
   int64 ledger_offset = 1;
 }

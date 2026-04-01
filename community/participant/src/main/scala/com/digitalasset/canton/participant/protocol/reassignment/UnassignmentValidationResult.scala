@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   ContractsReassignmentBatch,
@@ -90,6 +91,8 @@ final case class UnassignmentValidationResult(
           commandId = submitterMetadata.commandId,
           optDeduplicationPeriod = None,
           submissionId = submitterMetadata.submissionId,
+          // TODO(i31036): support traffic cost for re-assignments
+          paidTrafficCost = NonNegativeLong.zero,
         )
       )
     (acsChangeFactory: AcsChangeFactory) =>
@@ -134,6 +137,7 @@ object UnassignmentValidationResult {
         Unit,
       ],
       submitterCheckResult: Option[ReassignmentValidationError],
+      multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.CommonValidationResult {
 
     // During unassignment the reassignment id is computed, rather than being passed in

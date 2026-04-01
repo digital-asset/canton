@@ -21,7 +21,7 @@ import com.digitalasset.canton.connection.v30.{ApiInfoServiceGrpc, GetApiInfoReq
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.GrpcErrorGroup
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, UnlessShutdown}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
@@ -115,7 +115,9 @@ object CantonGrpcUtil {
       logPolicy: GrpcLogPolicy = DefaultGrpcLogPolicy,
       retryPolicy: GrpcError => Boolean = _.retry,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, GrpcError, Res] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(
+      NamedLogging.loggerWithoutTracing(logger)
+    )
 
     // depending on the desired timeout, use a deadline or not
     val (clientWithDeadline, calcEffectiveBackoff) = timeout match {
@@ -263,7 +265,9 @@ object CantonGrpcUtil {
       retryPolicy,
     )
 
-    implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(
+      NamedLogging.loggerWithoutTracing(logger)
+    )
     managedChannel.handle -> res.thereafter { _ =>
       managedChannel.close()
     }

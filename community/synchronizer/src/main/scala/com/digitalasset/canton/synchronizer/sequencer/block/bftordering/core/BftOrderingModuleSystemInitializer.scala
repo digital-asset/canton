@@ -237,6 +237,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             dependencies,
             loggerFactory,
             timeouts,
+            config.blockingDbReadTimeout,
           )
           (p2pNetworkOutModule, p2pNetworkOutModule.p2pNetworkManager)
         },

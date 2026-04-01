@@ -148,7 +148,7 @@ class EpochState[E <: Env[E]](
       }
     }.onShutdown {
       logger.info(
-        s"At epoch ${epoch.info.number} received message after shutdown, so discarding retransmission request from ${epochStatus.from}"
+        s"At epoch ${epoch.info.number} received message after closing, so discarding retransmission request from ${epochStatus.from}"
       )
     }
 
@@ -163,7 +163,7 @@ class EpochState[E <: Env[E]](
       }
     }.onShutdown {
       logger.info(
-        s"At epoch ${epoch.info.number} received message after shutdown, so discarding retransmission response from $from"
+        s"At epoch ${epoch.info.number} received message after closing, so discarding retransmission response from $from"
       )
     }
 
@@ -242,7 +242,7 @@ class EpochState[E <: Env[E]](
           .foreach(_.asyncSend(msg))
     }).onShutdown {
       logger.info(
-        s"At epoch ${epoch.info.number} received message after shutdown, so discarding $msg"
+        s"At epoch ${epoch.info.number} received message after closing, so discarding $msg"
       )
     }
 }

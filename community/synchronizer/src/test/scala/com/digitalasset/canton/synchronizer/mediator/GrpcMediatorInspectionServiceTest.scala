@@ -99,7 +99,6 @@ class GrpcMediatorInspectionServiceTest
       finalizedResponseStore,
       timeAwaiter,
       batchSize = PositiveInt.tryCreate(batchSize),
-      getActiveLsuSuccessor = Mediator.GetActiveLsuSuccessor.Never,
       loggerFactory = loggerFactory,
     )
     implicit val cc: CloseContext = CloseContext(new FlagCloseable {
@@ -159,7 +158,7 @@ class GrpcMediatorInspectionServiceTest
         _ <- FutureUnlessShutdown.outcomeF(future)
       } yield {
         val timestamps1 = observer.values
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
         timestamps1 should have size responses.size.toLong
         timestamps1 shouldBe sorted
@@ -196,7 +195,7 @@ class GrpcMediatorInspectionServiceTest
         // wait for the future to complete after numExpected verdicts have been emitted
         _ <- FutureUnlessShutdown.outcomeF(future1)
 
-        lastVerdict = observer1.values.last.payload.verdict.value
+        lastVerdict = observer1.values.last.verdict.value
         nextFromRequest = CantonTimestamp
           .fromProtoTimestamp(lastVerdict.recordTime.value)
           .value
@@ -209,13 +208,13 @@ class GrpcMediatorInspectionServiceTest
         _ <- FutureUnlessShutdown.outcomeF(future2)
       } yield {
         val timestamps1 = observer1.values
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
         timestamps1 should have size responses.size.toLong / 2
         timestamps1 shouldBe sorted
 
         val timestamps2 = observer2.values
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
         timestamps2 should have size responses.size.toLong - timestamps1.size.toLong
         timestamps2 shouldBe sorted
@@ -265,7 +264,7 @@ class GrpcMediatorInspectionServiceTest
         _ <- FutureUnlessShutdown.outcomeF(future)
       } yield {
         val receivedTimestamps = observer.values
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
 
         receivedTimestamps should contain theSameElementsInOrderAs responses
@@ -295,7 +294,7 @@ class GrpcMediatorInspectionServiceTest
         // wait for the future to complete after numExpected verdicts have been emitted
         verdicts1 <- FutureUnlessShutdown.outcomeF(future1)
 
-        lastVerdict = verdicts1.last.payload.verdict.value
+        lastVerdict = verdicts1.last.verdict.value
         nextFromRequest = CantonTimestamp
           .fromProtoTimestamp(lastVerdict.recordTime.value)
           .value
@@ -308,13 +307,13 @@ class GrpcMediatorInspectionServiceTest
         verdicts2 <- FutureUnlessShutdown.outcomeF(future2)
       } yield {
         val timestamps1 = verdicts1
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
         timestamps1 should have size 5
         timestamps1 shouldBe sorted
 
         val timestamps2 = verdicts2
-          .flatMap(_.payload.verdict)
+          .flatMap(_.verdict)
           .map(r => r.recordTime.value)
         timestamps2 should have size responses.size.toLong - timestamps1.size.toLong
         timestamps2 shouldBe sorted

@@ -1755,7 +1755,9 @@ final class SequencerClientTest
         threshold: PositiveInt,
         ignored: Set[ConnectionXConfig],
         extraUndecided: NonNegativeInt,
-    )(implicit traceContext: TraceContext): Boolean = true
+    )(implicit
+        traceContext: TraceContext
+    ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit] = Either.unit
   }
 
   private object MockPool {

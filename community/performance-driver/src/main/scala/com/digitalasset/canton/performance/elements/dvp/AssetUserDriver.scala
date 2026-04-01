@@ -8,11 +8,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.performance.acs.ContractStore
 import com.digitalasset.canton.performance.elements.ParticipantDriver
 import com.digitalasset.canton.performance.model.java as M
+import com.digitalasset.canton.performance.model.java.dvp.asset.Asset
+import com.digitalasset.canton.performance.model.java.generator.Generator
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ErrorUtil
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.*
 import scala.util.{Random, Success}
@@ -51,13 +52,20 @@ trait AssetUserDriver {
         before.observers,
       )
 
+    override protected def contractCreated(
+        create: Asset.Contract,
+        index: Party,
+        synchronizerId: String,
+    ): Unit =
+      assetCreated(create, synchronizerId)
+
     override protected def contractArchived(
         archive: M.dvp.asset.Asset.Contract,
         owner: Party,
     ): Unit = assetArchived()
 
   }
-
+  protected def assetCreated(create: Asset.Contract, synchronizerId: String): Unit = ()
   protected def assetArchived(): Unit = ()
 
   protected val assetRequests = new ContractStore[
@@ -76,19 +84,14 @@ trait AssetUserDriver {
   protected def baseSynchronizerId: SynchronizerId
   protected def otherSynchronizers: Seq[SynchronizerId]
 
-  protected val synchronizers: NonEmpty[Seq[SynchronizerId]] =
-    NonEmpty.mk(Seq, baseSynchronizerId, otherSynchronizers*)
-
-  protected val locations: NonEmpty[Seq[String]] = {
-    val prefixes = synchronizers.map(_.uid.identifier.str)
+  protected val synchronizers: NonEmpty[Seq[SynchronizerId]] = {
+    val tmp = NonEmpty.mk(Seq, baseSynchronizerId, otherSynchronizers*)
     ErrorUtil.requireState(
-      prefixes.sizeIs == prefixes.distinct.length,
-      "I NEED UNIQUE SYNCHRONIZER PREFIX NAMES BUT HAVE " + synchronizers,
+      tmp.sizeIs == tmp.distinct.length,
+      "I NEED UNIQUE SYNCHRONIZER PREFIX NAMES BUT HAVE " + tmp,
     )
-    prefixes
+    tmp
   }
-
-  protected val shouldBeConsistent = new AtomicBoolean(false)
 
   override protected def subscribeToTemplates: Seq[Identifier] =
     Seq(
@@ -99,72 +102,42 @@ trait AssetUserDriver {
       M.dvp.asset.TransferPreapproval.TEMPLATE_ID,
     )
 
-  protected def acquireAssets(
-      master: M.orchestration.TestRun.Contract,
+  protected def sendAssetRequest(
+      res: Generator.Contract,
+      numAssetsToRequest: Long,
+      issuers: Seq[String],
       payloadSize: Long,
-      numAssetsPerIssuer: Long,
-  ): Boolean =
-    generator.one(()).exists { case (_, res) =>
-      // if there is a new issuer that we haven't seen before
-      val issuers = master.data.issuers.asScala.toSeq.filterNot(res.data.processedIssuers.contains)
-      if (issuers.nonEmpty) {
-        logger.info(s"Acquiring assets from ${issuers.length} issuers $issuers")
-        val ids = issuers.map(_ => UUID.randomUUID().toString)
-        val payload = Random.alphanumeric.take(payloadSize.toInt).mkString
-        // the exercise will add the issuer to the generator, ensuring we don't request twice
-        val cmd =
-          res.id
-            .exerciseRequestAssets(
-              numAssetsPerIssuer,
-              issuers.asJava,
-              ids.asJava,
-              payload,
-              locations.forgetNE.asJava,
-            )
-            .commands
-            .asScala
-            .toSeq
-        val submissionF =
-          submitCommand(
-            "request-assets",
-            cmd,
-            s"acquiring $numAssetsPerIssuer assets from $issuers",
-          )
-        setPending(generator, res.id, submissionF)
-        shouldBeConsistent.set(false)
-        // unmark if command fails (we will retry)
-        submissionF.onComplete {
-          case Success(true) =>
-          case x =>
-            logger.warn(s"Requesting assets failed with $x, retrying")
-        }
-        false
-      } else true
+  ): Unit = {
+    logger.info(s"Acquiring $numAssetsToRequest assets from ${issuers.length} issuers $issuers")
+    val ids = issuers.map(_ => UUID.randomUUID().toString)
+    val payload = Random.alphanumeric.take(payloadSize.toInt).mkString
+    // the exercise will add the issuer to the generator, ensuring we don't request twice
+    val cmd =
+      res.id
+        .exerciseRequestAssets(
+          numAssetsToRequest,
+          issuers.asJava,
+          ids.asJava,
+          payload,
+          synchronizers.map(_.uid.identifier.str).forgetNE.asJava,
+        )
+        .commands
+        .asScala
+        .toSeq
+    val submissionF =
+      submitCommand(
+        "request-assets",
+        cmd,
+        s"acquiring $numAssetsToRequest assets from $issuers",
+      )
+    setPending(generator, res.id, submissionF)
+    rate.newSubmission(submissionF)
+    // unmark if command fails (we will retry)
+    submissionF.onComplete {
+      case Success(true) =>
+      case x =>
+        logger.warn(s"Requesting assets failed with $x, retrying")
     }
-
-  protected def signalReadyIfWeAre(
-      master: M.orchestration.TestRun.Contract,
-      numAssetsPerIssuer: Long,
-      numInTransfer: Int,
-  ): Boolean =
-    testResult
-      .one(())
-      .exists { case (_, res) =>
-        if (res.data.flag == M.orchestration.ParticipantFlag.READY)
-          true
-        else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
-          val expected = locations.size * numAssetsPerIssuer * master.data.issuers.size
-          val actual = assets.allAvailable.size + numInTransfer
-          if (actual == expected) {
-            // signal that we are ready if we have enough assets
-            updateFlag(res, M.orchestration.ParticipantFlag.READY)
-          } else {
-            logger.info(
-              s"Driver does not yet have the required number of assets (expected: $expected, actual: $actual)."
-            )
-          }
-          false
-        } else false
-      }
+  }
 
 }

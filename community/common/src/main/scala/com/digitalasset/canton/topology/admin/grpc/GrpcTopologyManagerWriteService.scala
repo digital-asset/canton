@@ -124,6 +124,8 @@ class GrpcTopologyManagerWriteService(
           forceFlags <- ForceFlags.fromProtoV30(forceChanges)
           validatedMapping <- TopologyMapping.fromProtoV30(mapping)
         } yield {
+          if (mapping.mapping.isPartyToKeyMapping)
+            logger.info("PartyToKeyMapping is deprecated. Please use PartyToParticipant instead.")
           (op, serial, validatedMapping, signingKeys, forceFlags)
         }
 
@@ -229,6 +231,9 @@ class GrpcTopologyManagerWriteService(
           .traverse(tx => SignedTopologyTransaction.fromProtoV30(protocolVersionValidation, tx))
           .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
       )
+      _ = if (signedTxs.exists(_.selectMapping[PartyToKeyMapping].isDefined)) {
+        logger.info("PartyToKeyMapping is deprecated. Please use PartyToParticipant instead.")
+      }
       waitToBecomeEffectiveO <- EitherT
         .fromEither[FutureUnlessShutdown](
           request.waitToBecomeEffective

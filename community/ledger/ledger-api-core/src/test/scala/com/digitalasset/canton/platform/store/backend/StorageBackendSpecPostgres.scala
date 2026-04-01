@@ -107,7 +107,7 @@ final class StorageBackendSpecPostgres
     val connection2 = dataSource.getConnection
     withoutNetworkTimeout { connection =>
       SQL"SELECT pg_sleep(5);".execute()(connection)
-    }(connection2, logger)
+    }(connection2, noTracingLogger)
 
     // and when re-enabling the network timeout, it should again throw after the specified time
     val thrown2 = intercept[SQLException] {

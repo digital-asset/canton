@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -45,6 +46,7 @@ trait Phase37Processor[RequestBatch, Event] {
       sc: SequencerCounter,
       batch: RequestBatch,
       publishUpdate: PublishUpdateViaRecordOrderPublisher[Event],
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): HandlerResult

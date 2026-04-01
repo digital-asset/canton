@@ -562,7 +562,7 @@ class DatabaseSequencer(
 
   override private[canton] def orderer: Option[BlockOrderer] = None
 
-  override def getLsuTrafficControlState(implicit
+  override def getLsuTrafficControlState(trafficTsOverride: Option[CantonTimestamp] = None)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
     throw new UnsupportedOperationException(

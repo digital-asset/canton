@@ -5,10 +5,9 @@ package com.digitalasset.canton.integration.tests.security
 
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
-import com.digitalasset.canton.annotations.NuckTest
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.java.refs.Refs
-import com.digitalasset.canton.damltestsdev.java.basickeys.{BasicKey, KeyOps}
+import com.digitalasset.canton.damltestslf23.java.basickeys.{BasicKey, KeyOps}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -56,7 +55,8 @@ trait ModelConformanceIntegrationTest
       import env.*
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
-      if (testedProtocolVersion.isDev) participant1.dars.upload(CantonTestsDevPath)
+      if (testedProtocolVersion >= ProtocolVersion.v35)
+        participant1.dars.upload(CantonTestsLF23Path)
       participant1.dars.upload(CantonTestsPath)
 
       maliciousP1 = MaliciousParticipantNode(
@@ -181,7 +181,7 @@ trait ModelConformanceIntegrationTest
       assertPingSucceeds(participant1, participant1)
     }
 
-    "validate LookupByKey call" onlyRunWithOrGreaterThan ProtocolVersion.dev in { implicit env =>
+    "validate LookupByKey call" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
       import env.*
 
       val alice = allocateUniqueParty
@@ -241,7 +241,6 @@ trait ModelConformanceIntegrationTest
 
 }
 
-@NuckTest
 class ModelConformanceIntegrationTestPostgres extends ModelConformanceIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

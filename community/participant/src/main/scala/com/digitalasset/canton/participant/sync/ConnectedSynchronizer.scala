@@ -123,6 +123,7 @@ import com.digitalasset.canton.version.{EngineMode, ParticipantProtocolFeatureFl
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
+import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -687,8 +688,8 @@ class ConnectedSynchronizer(
         val protocolVersion =
           synchronizerHandle.staticParameters.protocolVersion
 
-        val featureFlagsForPV: Set[ParticipantTopologyFeatureFlag] =
-          ParticipantProtocolFeatureFlags.supportedFeatureFlagsByPV.getOrElse(
+        val requiredFlagsForPV: Set[ParticipantTopologyFeatureFlag] =
+          ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV.getOrElse(
             protocolVersion,
             Set.empty,
           )
@@ -702,9 +703,9 @@ class ConnectedSynchronizer(
           synchronizeWithClosing("updating STC for feature flags auto sync")(
             topologyManager.proposeAndAuthorize(
               op = TopologyChangeOp.Replace,
-              mapping = existingSynchronizerTrustCertificate.mapping.copy(
-                featureFlags = featureFlagsForPV.toSeq
-              ),
+              mapping = existingSynchronizerTrustCertificate.mapping
+                .focus(_.featureFlags)
+                .modify(_ ++ requiredFlagsForPV),
               serial = Some(existingSynchronizerTrustCertificate.serial.increment),
               signingKeys = Seq.empty,
               protocolVersion = protocolVersion,
@@ -739,17 +740,18 @@ class ConnectedSynchronizer(
                 .select[TopologyChangeOp.Replace, SynchronizerTrustCertificate]
             )
           _ <- currentStcO match {
-            // There should already be an STC present, so we only update if the feature flags differ
-            case Some(currentStc) if currentStc.mapping.featureFlags.toSet != featureFlagsForPV =>
+            // There should already be an STC present, so we only update if the feature flags doesn't contain the required flags for the protocol version.
+            case Some(currentStc)
+                if !requiredFlagsForPV.subsetOf(currentStc.mapping.featureFlags.toSet) =>
               logger.info(
-                s"Synchronizer Trust Certificate in the synchronizer store $synchronizerId for $participantId does not have the expected set of feature flags, they will be updated. " +
-                  s"Current: ${currentStc.mapping.featureFlags.toSet}. Expected: $featureFlagsForPV"
+                s"Synchronizer Trust Certificate in the synchronizer store $synchronizerId for $participantId does not have the required set of feature flags, they will be updated. " +
+                  s"Current: ${currentStc.mapping.featureFlags.toSet}. Expected: ${requiredFlagsForPV ++ currentStc.mapping.featureFlags.toSet}"
               )
               updateSTCWithFeatureFlags(currentStc.transaction)
             case Some(_) =>
               EitherT.pure[FutureUnlessShutdown, TopologyManagerError](
                 logger.debug(
-                  s"Synchronizer Trust Certificate in the synchronizer store $synchronizerId for $participantId already has the correct feature flags $featureFlagsForPV. No update necessary."
+                  s"Synchronizer Trust Certificate in the synchronizer store $synchronizerId for $participantId already has the correct feature flags $requiredFlagsForPV. No update necessary."
                 )
               )
             // This is unexpected as the node is connected to the synchronizer, so it should have an STC in the synchronizer store

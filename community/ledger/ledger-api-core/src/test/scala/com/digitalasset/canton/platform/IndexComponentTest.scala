@@ -80,6 +80,7 @@ import com.google.protobuf.ByteString
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
@@ -245,6 +246,8 @@ trait IndexComponentTest
           traceContext: TraceContext
       ): Future[Option[Offset]] = Future.successful(None)
     }
+
+    implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
     val indexResourceOwner =
       for {

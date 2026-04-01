@@ -622,6 +622,7 @@ private[lf] object Speedy {
         ptx.locationInfo(),
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
         ptx.contractState.keyInputs.transform((_, v) => v.queue),
+        ptx.contractState.contractOrder
       )
     }
 
@@ -738,6 +739,7 @@ private[lf] object Speedy {
         locationInfo: Map[NodeId, Location],
         seeds: NodeSeeds,
         globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
+        contractOrder: List[V.ContractId],
     )
   }
 

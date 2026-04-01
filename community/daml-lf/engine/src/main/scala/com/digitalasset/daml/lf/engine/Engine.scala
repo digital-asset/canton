@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.archive.Dar
 import com.digitalasset.daml.lf.command._
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
 import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{NeedKeyContinuationToken, Error => IError}
+import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language._
 import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
@@ -525,7 +525,7 @@ class Engine(
     def finish: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
       machine.finish match {
         case Right(
-              UpdateMachine.Result(tx, _, nodeSeeds, globalKeyMapping)
+              UpdateMachine.Result(tx, _, nodeSeeds, globalKeyMapping, contractOrder)
             ) =>
           deps(tx).flatMap { deps =>
             if (config.paranoid) {
@@ -573,6 +573,7 @@ class Engine(
               timeBoundaries = machine.getTimeBoundaries,
               nodeSeeds = nodeSeeds,
               globalKeyMapping = globalKeyMapping,
+              contractOrder = contractOrder,
             )
 
             config.profileDir.foreach { dir =>
@@ -665,23 +666,84 @@ class Engine(
             case Question.Update.NeedKey(
                   gk,
                   n,
-                  NeedKeyProgression.CanContinue(tokenOpt),
+                  canContinue,
                   _,
                   callback,
                 ) =>
-              ResultNeedKey(
-                gk,
-                n,
-                tokenOpt,
-                {
-                  (
-                      contracts: Vector[FatContractInstance],
-                      continuationToken: Option[NeedKeyContinuationToken],
-                  ) =>
-                    callback(contracts, NeedKeyProgression.HasStarted(continuationToken))
+              // Adapt between the caller (who may return more than n contracts, or
+              // signal Finished while returning n contracts) and the interpreter (which expects at most
+              // n contracts and Finished only when fewer than n are returned).
+              // When the caller returns more than n contracts, the excess is stored in a
+              // BufferedKeyContracts token (an immutable NeedKeyProgression.Token) that is threaded
+              // through subsequent iterations. On the next iteration the engine serves from this
+              // token's buffer before going back to the caller.
+
+              def wrapHasStarted(
+                  overflow: Vector[FatContractInstance],
+                  callerProgression: NeedKeyProgression.HasStarted,
+              ): NeedKeyProgression.HasStarted =
+                if (overflow.nonEmpty)
+                  NeedKeyProgression.InProgress(
+                    Engine.BufferedKeyContracts(overflow, callerProgression)
+                  )
+                else
+                  callerProgression match {
+                    case inProgress: NeedKeyProgression.InProgress =>
+                      NeedKeyProgression.InProgress(
+                        Engine.BufferedKeyContracts(Vector.empty, inProgress)
+                      )
+                    case NeedKeyProgression.Finished =>
+                      NeedKeyProgression.Finished
+                  }
+
+              def askCaller(callerToken: NeedKeyProgression.CanContinue) =
+                ResultNeedKey(
+                  gk,
+                  n,
+                  callerToken,
+                  {
+                    (
+                        callerContracts: Vector[FatContractInstance],
+                        callerHasStarted: NeedKeyProgression.HasStarted,
+                    ) =>
+                      val (enginePage, engineRest) = callerContracts.splitAt(n)
+                      callback(enginePage, wrapHasStarted(engineRest, callerHasStarted))
+                      interpretLoop(machine, time, submissionInfo)
+                  },
+                )
+
+              canContinue match {
+                case NeedKeyProgression.InProgress(
+                      Engine.BufferedKeyContracts(overflow, callerProgression)
+                    ) =>
+                  if (overflow.nonEmpty) {
+                    // We have buffered contracts from a previous caller response.
+                    // Serve from the buffer without asking the caller.
+                    val (page, rest) = overflow.splitAt(n)
+                    callback(page, wrapHasStarted(rest, callerProgression))
                     interpretLoop(machine, time, submissionInfo)
-                },
-              )
+                  } else {
+                    // Empty buffer — unwrap the caller progression.
+                    callerProgression match {
+                      case callerCanContinue: NeedKeyProgression.CanContinue =>
+                        askCaller(callerCanContinue)
+                      case NeedKeyProgression.Finished =>
+                        callback(Vector.empty, NeedKeyProgression.Finished)
+                        interpretLoop(machine, time, submissionInfo)
+                    }
+                  }
+                case NeedKeyProgression.Unstarted =>
+                  // No buffer — ask the caller directly.
+                  askCaller(NeedKeyProgression.Unstarted)
+                case NeedKeyProgression.InProgress(_) =>
+                  ResultError(
+                    Error.Interpretation.Internal(
+                      NameOf.qualifiedNameOfCurrentFunc,
+                      "Invalid NeedKeyProgression token",
+                      None,
+                    )
+                  )
+              }
           }
 
         case SResultInterruption =>
@@ -1019,6 +1081,11 @@ object Engine {
 
   private def mkInterpretationError(error: IError) =
     Error.Interpretation(Error.Interpretation.DamlException(error), None)
+
+  private final case class BufferedKeyContracts(
+      overflow: Vector[FatContractInstance],
+      callerProgression: NeedKeyProgression.HasStarted,
+  ) extends NeedKeyProgression.Token
 
   private object Syntax {
     implicit class EitherOps[A](val e: Either[Error, A]) extends AnyVal {

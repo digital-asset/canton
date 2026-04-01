@@ -24,7 +24,7 @@ class ProtocolFeatureFlagTest extends CommunityIntegrationTest with SharedEnviro
     "be re-issued regardless of the state of the authorized store" in { implicit env =>
       import env.*
 
-      val flags = ParticipantProtocolFeatureFlags.supportedFeatureFlagsByPV.getOrElse(
+      val flags = ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV.getOrElse(
         testedProtocolVersion,
         Set.empty,
       )

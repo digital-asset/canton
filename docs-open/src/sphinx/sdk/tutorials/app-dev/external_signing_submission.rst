@@ -34,7 +34,7 @@ For simplicity, this tutorial assumes a minimal Canton setup consisting of one p
 
 .. tip::
 
-    If you already have such an instance running or have completed the :ref:`onboarding tutorial <tutorial_onboard_external_party>`, proceed to the :ref:`Setup <canton_external_signing_tutorial_setup>` section.
+    If you already have such an instance running or have completed the :ref:`onboarding tutorial <tutorial_onboard_external_party_lapi>`, proceed to the :ref:`Setup <canton_external_signing_tutorial_setup>` section.
 
 Start Canton
 ------------
@@ -62,7 +62,7 @@ Setup
 Navigate to the interactive submission example folder located at ``examples/08-interactive-submission`` in the Canton release artifact.
 
 This tutorial demonstrates external signing with two external parties: Alice and Bob.
-If you haven't onboarded an external party yet, refer to the :ref:`onboarding tutorial <tutorial_onboard_external_party>`.
+If you haven't onboarded an external party yet, refer to the :ref:`onboarding tutorial <tutorial_onboard_external_party_lapi>`.
 
 To proceed, gather the following information:
 
@@ -452,7 +452,7 @@ Using ``Alice``'s protocol signing private key, sign the hash.
 
     Technically what is needed is the ability to sign with ``Alice``'s key, not the key itself.
     The management of the key can be delegated to a wallet, HSM or crypto custody provider. In this tutorial the
-    key is managed locally and explicitly to demonstrate the signing process. Refer to the :ref:`onboarding tutorial <tutorial_onboard_external_party>`
+    key is managed locally and explicitly to demonstrate the signing process. Refer to the :ref:`onboarding tutorial <tutorial_onboard_external_party_lapi>`
     for details on how to generate a key for this tutorial.
 
 .. tabs::
@@ -476,7 +476,6 @@ Using ``Alice``'s protocol signing private key, sign the hash.
 
       The Python example demo includes an implementation of the transaction hashing algorithm.
       In this example, ``party_private_key`` is assumed to be an ``EllipticCurvePrivateKey`` Python object containing Alice's private key.
-      If the :ref:`onboarding tutorial <tutorial_onboard_external_party>` was followed, this key should already be available.
 
       .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/interactive_submission.py
         :dedent: 4
@@ -536,7 +535,7 @@ In the request, note the presence of:
 - ``signatures``: Object containing the signature of the transaction hash, along with metadata. In particular:
 
     - ``signing_algorithm_spec``: Will vary depending on the key used during onboarding.
-    - ``signed_by``: Fingerprint of the protocol signing *public* key of ``Alice``. This tutorial assumes the same key was used to create ``Alice``'s namespace and her protocol signing key. This is why the fingerprint of the signing key matches the second part of her Party Id (after ``::``). For more details check out the :ref:`onboarding tutorial <tutorial_onboard_external_party>` and the `parties documentation <https://docs.daml.com/app-dev/parties-users.html#party-id-hints-and-display-names>`_.
+    - ``signed_by``: Fingerprint of the protocol signing *public* key of ``Alice``. This tutorial assumes the same key was used to create ``Alice``'s namespace and her protocol signing key. This is why the fingerprint of the signing key matches the second part of her Party Id (after ``::``). For more details check out the :ref:`onboarding tutorial <tutorial_onboard_external_party_lapi>` and the `parties documentation <https://docs.daml.com/app-dev/parties-users.html#party-id-hints-and-display-names>`_.
 
 .. note::
 

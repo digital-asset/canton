@@ -29,7 +29,7 @@ import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
-import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, retry}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, ThrowableUtil, retry}
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 import slick.jdbc.JdbcBackend.Database
@@ -299,7 +299,7 @@ trait DbLock extends NamedLogging with FlagCloseable with HasCloseContext {
                 Left(
                   FailedToCheckLock(
                     lockId,
-                    s"Lock check failed due to an exception: ${ErrorUtil.messageWithStacktrace(e)}",
+                    s"Lock check failed due to an exception: ${ThrowableUtil.messageWithStacktrace(e)}",
                   )
                 )
               )

@@ -362,6 +362,7 @@ private[backend] object AppendOnlySchema {
         "message_uuid" -> fieldStrategy.stringOptional(_ => _.message_uuid),
         "is_transaction" -> fieldStrategy.boolean(_ => _.is_transaction),
         "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
+        "traffic_cost" -> fieldStrategy.bigint(_ => _.traffic_cost),
       )
 
     val stringInterningTable: Table[DbDto.StringInterningDto] =

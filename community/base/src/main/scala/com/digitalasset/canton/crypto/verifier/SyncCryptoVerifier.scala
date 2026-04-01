@@ -355,13 +355,13 @@ class SyncCryptoVerifier(
       case Some(signatureDelegation) =>
         verifySignatureWithSessionKey(
           signatureDelegation,
-          topologySnapshot: TopologySnapshot,
-          validKeysO: Option[Map[Fingerprint, SigningPublicKey]],
-          hash: Hash,
-          signature: Signature,
-          signers: Seq[Member],
-          signerStr: String,
-          usage: NonEmpty[Set[SigningKeyUsage]],
+          topologySnapshot,
+          validKeysO,
+          hash,
+          signature,
+          signers,
+          signerStr,
+          usage,
         )
       // a signature with no session key delegation, so we run the verification with the long-term key
       case None =>

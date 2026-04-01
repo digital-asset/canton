@@ -179,7 +179,8 @@ class ParticipantRepairAdministration(
       |
       |Parameters:
       |- parties: Identifies contracts having at least one stakeholder from the given
-      |  set.
+      |  set. If the set is empty, the command exports the ACS for all parties hosted
+      |  by the participant.
       |- ledgerOffset: The offset at which the ACS snapshot is exported.
       |- exportFilePath: The path denoting the file where the ACS snapshot will be
       |  stored. Defaults to "canton-acs-export.gz" when undefined.

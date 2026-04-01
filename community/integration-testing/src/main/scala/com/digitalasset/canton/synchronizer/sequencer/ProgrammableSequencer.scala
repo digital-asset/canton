@@ -24,6 +24,8 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNode
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponses,
   SignedProtocolMessage,
@@ -53,8 +55,8 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -462,10 +464,10 @@ class ProgrammableSequencer(
   ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] =
     baseSequencer.getTrafficSummaries(timestamps)
 
-  override def getLsuTrafficControlState(implicit
+  override def getLsuTrafficControlState(trafficTsOverride: Option[CantonTimestamp] = None)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
-    baseSequencer.getLsuTrafficControlState
+    baseSequencer.getLsuTrafficControlState(trafficTsOverride)
 
   override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
       traceContext: TraceContext
@@ -496,6 +498,19 @@ trait HasProgrammableSequencer {
         )
       }
   }
+
+  def signModifiedSubmissionRequestForParticipant(
+      request: SubmissionRequest,
+      node: ParticipantNode,
+      psid: PhysicalSynchronizerId,
+      staticSynchronizerParameters: StaticSynchronizerParameters,
+      approximateTimestampOverride: Option[CantonTimestamp] = None,
+  )(implicit executionContext: ExecutionContext): SignedContent[SubmissionRequest] =
+    signModifiedSubmissionRequest(
+      request,
+      node.sync.syncCrypto.tryForSynchronizer(psid, staticSynchronizerParameters),
+      approximateTimestampOverride,
+    )
 
   // Sign a (modified) submission request
   def signModifiedSubmissionRequest(

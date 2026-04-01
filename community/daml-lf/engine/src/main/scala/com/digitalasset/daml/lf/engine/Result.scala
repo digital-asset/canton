@@ -9,12 +9,12 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{BackStack, FrontStack, ImmArray}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
-import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
+  NeedKeyProgression,
 }
 import com.digitalasset.daml.lf.value.Value._
 import scalaz.Monad
@@ -70,8 +70,6 @@ sealed trait Result[+A] extends Product with Serializable {
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
   ): Either[Error, A] = {
 
-    case class ContinuationToken(rest: Vector[FatContractInstance]) extends NeedKeyContinuationToken
-
     @tailrec
     def go(res: Result[A]): Either[Error, A] =
       res match {
@@ -85,14 +83,8 @@ sealed trait Result[+A] extends Product with Serializable {
               Response.ContractFound(coInst, hashingMethod(acoid), idValidator(acoid, _))
           }))
         case ResultNeedPackage(pkgId, resume) => go(resume(pkgs.lift(pkgId)))
-        case ResultNeedKey(key, n, mbToken, resume) =>
-          val contracts = mbToken match {
-            case Some(ContinuationToken(rest)) => rest
-            case None => keys.lift(key).getOrElse(Vector.empty)
-            case Some(_) => throw new IllegalStateException("unexpected continuation token")
-          }
-          val (result, rest) = contracts.splitAt(n)
-          go(resume(result, Option.when(rest.nonEmpty)(ContinuationToken(rest))))
+        case ResultNeedKey(key, _, _, resume) =>
+          go(resume(keys.lift(key).getOrElse(Vector.empty), NeedKeyProgression.Finished))
         case ResultPrefetch(_, _, result) => go(result())
       }
     go(this)
@@ -180,21 +172,25 @@ final case class ResultNeedPackage[A](packageId: PackageId, resume: Option[Packa
 /** Intermediate result indicating that contracts matching a key are required to complete the computation.
   * To resume the computation, the caller must invoke `resume` with the following arguments:
   * <ul>
-  * <li>`contracts`: a vector of fat contract instances whose key matches `key`, up to `limit` entries.
+  * <li>`contracts`: a vector of fat contract instances whose key matches `key`.
+  *   `limit` is a hint for the preferred page size; the caller may return more than `limit` entries
+  *   and the engine will buffer the overflow internally.
   *   If no contracts match, an empty vector should be provided.</li>
-  * <li>`continuationToken`: `Some(token)` if there are more results beyond `limit`, where `token`
-  *   can be passed back in a subsequent `ResultNeedKey` to fetch the next page.
-  *   `None` if all matching contracts have been returned.</li>
+  * <li>`hasStarted`: a [[transaction.NeedKeyProgression.HasStarted]] token indicating the progression state.
+  *   Use [[transaction.NeedKeyProgression.Finished]] if all matching contracts have been returned.
+  *   Use [[transaction.NeedKeyProgression.InProgress]] if there may be more results; the token will be passed
+  *   back as `continuationToken` in a subsequent `ResultNeedKey` to fetch the next page.</li>
   * </ul>
   *
-  * When `continuationToken` is `Some(token)`, the caller should resume from where the previous query left off.
-  * When it is `None`, this is the initial query for the given key.
+  * When `continuationToken` is [[transaction.NeedKeyProgression.InProgress]], the caller should resume from
+  * where the previous query left off.
+  * When it is [[transaction.NeedKeyProgression.Unstarted]], this is the initial query for the given key.
   */
 final case class ResultNeedKey[A](
     key: GlobalKeyWithMaintainers,
     limit: Int,
-    continuationToken: Option[NeedKeyContinuationToken],
-    resume: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Result[A],
+    continuationToken: NeedKeyProgression.CanContinue,
+    resume: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Result[A],
 ) extends Result[A]
 
 /** Indicates that the interpretation will likely need to resolve the given contract keys.

@@ -28,7 +28,7 @@ import com.digitalasset.canton.integration.tests.*
 import com.digitalasset.canton.integration.tests.benchmarks.BongTestScenarios
 import com.digitalasset.canton.integration.tests.manual.DataContinuityTest.*
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization.ContinuityDumpRef
-import com.digitalasset.canton.integration.util.EntitySyntax
+import com.digitalasset.canton.integration.util.{EntitySyntax, MultiSynchronizerFeatureFlag}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -644,6 +644,9 @@ trait SynchronizerChangeDataContinuityTest extends SynchronizerChangeDataContinu
               S1M1_S1M1.map(updateNetworkTopologyDescription(_, protocolVersion)),
               dumpDirectory.localDownloadPath,
             )
+
+            MultiSynchronizerFeatureFlag.enable(participants, iouSynchronizerId)
+            MultiSynchronizerFeatureFlag.enable(Seq(P4, P5), paintSynchronizerId)
 
             // initialize needed state - sadly unable to decouple this from implementation details of the workflow
             val incompleteUnassignedEvents =

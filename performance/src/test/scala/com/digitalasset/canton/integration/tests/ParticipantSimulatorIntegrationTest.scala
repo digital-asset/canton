@@ -4,7 +4,12 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{DbConfig, PositiveDurationSeconds, StorageConfig}
+import com.digitalasset.canton.config.{
+  DbConfig,
+  NonNegativeFiniteDuration,
+  PositiveDurationSeconds,
+  StorageConfig,
+}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -46,6 +51,12 @@ sealed trait ParticipantSimulatorIntegrationTest
         ),
       )
       .addConfigTransform(ConfigTransforms.disableAdditionalConsistencyChecks)
+      // required such that late message processing warning isn't emitted
+      .addConfigTransform(cfg =>
+        cfg
+          .focus(_.monitoring.logging.delayLoggingThreshold)
+          .replace(NonNegativeFiniteDuration.ofDays(100))
+      )
 
   "we can run a trivial ping" in { implicit env =>
     import env.*

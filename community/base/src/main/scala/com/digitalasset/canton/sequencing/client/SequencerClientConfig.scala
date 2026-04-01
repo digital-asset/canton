@@ -75,8 +75,16 @@ final case class SequencerClientConfig(
     maxConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(30),
     handshakeRetryAttempts: NonNegativeInt = NonNegativeInt.tryCreate(50),
     handshakeRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
+    // The `defaultMaxSequencingTimeOffset` defines the default window added to `now`
+    // to compute the maximum sequencing time, used for example in confirmation requests.
+    // If it exceeds or equals what a session signing key can cover
+    // (i.e., `keyValidityDuration` - `cutOffDuration`), we fall back to
+    // signing with the long-term key. This does not break correctness, but may require extra
+    // KMS calls, impacting performance. The closer this parameter is to `keyValidityDuration`,
+    // the fewer opportunities we have to reuse a session signing key, as it leaves a smaller
+    // margin in the future for the validity period of a newly created session signing key.
     defaultMaxSequencingTimeOffset: NonNegativeFiniteDuration =
-      NonNegativeFiniteDuration.ofMinutes(5),
+      NonNegativeFiniteDuration.ofMinutes(2),
     acknowledgementInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(1),
     keepAliveClient: Option[KeepAliveClientConfig] = Some(KeepAliveClientConfig()),
     authToken: AuthenticationTokenManagerConfig = AuthenticationTokenManagerConfig(),

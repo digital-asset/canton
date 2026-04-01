@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.ParticipantReference
+import com.digitalasset.canton.console.{LocalSequencerReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
@@ -78,6 +78,12 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
 
       migrateSynchronizerNodes(fixture)
 
+      def unexpectedSequencerError(
+          expected: LocalSequencerReference,
+          got: LocalSequencerReference,
+      ): String =
+        s"Validation failure: Connection is not on expected sequencer: expected Some(${expected.id}), got ${got.id}"
+
       loggerFactory.assertLogsUnorderedOptional(
         {
           sequencer1.topology.lsu.sequencer_successors.propose_successor(
@@ -107,27 +113,23 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
         },
         (
           LogEntryOptionality.OptionalMany,
-          _.warningMessage should include(
-            s"Connection is not on expected sequencer: expected Some(${sequencer1.id}), got ${sequencer2.id}"
-          ),
+          _.warningMessage should include(unexpectedSequencerError(sequencer1, sequencer2)),
         ),
         (
           LogEntryOptionality.OptionalMany,
-          _.warningMessage should include(
-            s"Connection is not on expected sequencer: expected Some(${sequencer2.id}), got ${sequencer1.id}"
-          ),
+          _.warningMessage should include(unexpectedSequencerError(sequencer2, sequencer1)),
         ),
-        // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
         (
           LogEntryOptionality.Required,
-          _.errorMessage should (include(
-            s"Unable to perform handshake with ${fixture.newPsid}"
-          ) and include("Trust threshold of 2 is no longer reachable")),
+          _.errorMessage should (include(s"Unable to perform handshake with ${fixture.newPsid}")
+            and (include(unexpectedSequencerError(sequencer1, sequencer2))
+              or include(unexpectedSequencerError(sequencer2, sequencer1)))),
         ),
-        // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
         (
           LogEntryOptionality.Required,
-          _.errorMessage should include(s"Upgrade to ${fixture.newPsid} failed"),
+          _.errorMessage should (include(s"Upgrade to ${fixture.newPsid} failed")
+            and (include(unexpectedSequencerError(sequencer1, sequencer2))
+              or include(unexpectedSequencerError(sequencer2, sequencer1)))),
         ),
         (
           LogEntryOptionality.OptionalMany,
@@ -206,18 +208,19 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
 
       migrateSynchronizerNodes(fixture)
 
-      // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
+      val invalidSynchronizerError =
+        s"Invalid synchronizer: expected Some(${fixture.newPsid}), got ${fixture.currentPsid}"
+
       def failedHandshakeLogLine(entry: LogEntry, p: ParticipantReference): Assertion = {
         entry.errorMessage should (include(
           s"Unable to perform handshake with ${fixture.newPsid}"
-        ) and include("Trust threshold of 1 is no longer reachable"))
+        ) and include(invalidSynchronizerError))
+
         entry.loggerName should include(s"participant=${p.name}")
       }
 
       def incorrectSequencerPsid(entry: LogEntry, p: ParticipantReference): Assertion = {
-        entry.warningMessage should (include("connection") and include(
-          s"is not on expected synchronizer: expected Some(${fixture.newPsid}), got ${fixture.currentPsid}"
-        ))
+        entry.warningMessage should (include("connection") and include(invalidSynchronizerError))
 
         entry.loggerName should include(s"participant=${p.name}")
       }
@@ -276,10 +279,10 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
         (LogEntryOptionality.Required, incorrectSequencerPsid(_, participant2)),
         (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant1)),
         (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant2)),
-        // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
         (
           LogEntryOptionality.Required,
-          _.errorMessage should include(s"Upgrade to ${fixture.newPsid} failed"),
+          _.errorMessage should (include(s"Upgrade to ${fixture.newPsid} failed")
+            and include(invalidSynchronizerError)),
         ),
         (
           LogEntryOptionality.OptionalMany,

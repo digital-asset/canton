@@ -31,21 +31,7 @@ message VerdictsRequest {
 }
 
 message VerdictsResponse {
-  oneof payload {
-    Verdict verdict = 1;
-    Complete complete = 2; // No further verdicts will be sent after this message.
-  }
-
-  message Complete {
-    oneof reason {
-      PassedLsuTime passed_lsu_time = 1;
-    }
-
-    message PassedLsuTime {
-      google.protobuf.Timestamp upgrade_time = 1;
-      string successor_physical_synchronizer_id = 2;
-    }
-  }
+  Verdict verdict = 1;
 }
 
 message Verdict {

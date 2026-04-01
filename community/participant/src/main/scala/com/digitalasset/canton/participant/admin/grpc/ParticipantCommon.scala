@@ -4,25 +4,14 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.either.*
-import com.digitalasset.canton.ReassignmentCounter
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.participant.admin.data.{
-  ContractImportMode,
-  RepairContract,
-  RepresentativePackageIdOverride,
-}
 import com.digitalasset.canton.participant.admin.party.LapiAcsHelper
-import com.digitalasset.canton.participant.admin.repair.RepairServiceError.ImportAcsError
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{MonadUtil, ResourceUtil}
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.util.ResourceUtil
 import org.apache.pekko.actor.ActorSystem
 
 import java.io.OutputStream
@@ -98,131 +87,5 @@ private[participant] object ParticipantCommon {
         )
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
-
-  private[grpc] def importAcsNewSnapshot(
-      acsSnapshot: ByteString,
-      batching: BatchingConfig,
-      contractImportMode: ContractImportMode,
-      excludedStakeholders: Set[PartyId],
-      representativePackageIdOverride: RepresentativePackageIdOverride,
-      sync: CantonSyncService,
-      workflowIdPrefix: String,
-      alphaMultiSynchronizerSupport: Boolean,
-  )(implicit
-      ec: ExecutionContext,
-      elc: ErrorLoggingContext,
-      traceContext: TraceContext,
-  ): Future[Unit] =
-    new AcsImporter(
-      sync,
-      batching,
-      workflowIdPrefix,
-      contractImportMode,
-      representativePackageIdOverride,
-      alphaMultiSynchronizerSupport,
-    ).runImport(acsSnapshot, excludedStakeholders)
-
-  private final class AcsImporter(
-      sync: CantonSyncService,
-      batching: BatchingConfig,
-      workflowIdPrefix: String,
-      contractImportMode: ContractImportMode,
-      representativePackageIdOverride: RepresentativePackageIdOverride,
-      alphaMultiSynchronizerSupport: Boolean,
-  )(implicit
-      ec: ExecutionContext,
-      elc: ErrorLoggingContext,
-      traceContext: TraceContext,
-  ) {
-
-    private val workflowIdPrefixO: Option[String] =
-      Option.when(workflowIdPrefix.nonEmpty)(workflowIdPrefix)
-
-    def runImport(
-        acsSnapshot: ByteString,
-        excludedStakeholders: Set[PartyId],
-    ): Future[Unit] = {
-
-      val contractsE = if (excludedStakeholders.isEmpty) {
-        RepairContract.loadAcsSnapshot(acsSnapshot)
-      } else {
-        RepairContract
-          .loadAcsSnapshot(acsSnapshot)
-          .map(
-            _.filter(_.contract.stakeholders.intersect(excludedStakeholders.map(_.toLf)).isEmpty)
-          )
-      }
-
-      importAcsContracts(contractsE, contractImportMode, alphaMultiSynchronizerSupport)
-    }
-
-    private def importAcsContracts(
-        contracts: Either[String, List[RepairContract]],
-        contractImportMode: ContractImportMode,
-        alphaMultiSynchronizerSupport: Boolean,
-    ): Future[Unit] = {
-      val resultET = for {
-        repairContracts <- contracts
-          .toEitherT[FutureUnlessShutdown]
-          .ensure(
-            "Found at least one contract with a non-zero reassignment counter. ACS import does not yet support it unless `alpha-multi-synchronizer-support` is enabled."
-          )(contracts =>
-            alphaMultiSynchronizerSupport || contracts.forall(
-              _.reassignmentCounter == ReassignmentCounter.Genesis
-            )
-          )
-
-        _ <- MonadUtil.sequentialTraverse_(
-          repairContracts
-            .groupBy(_.synchronizerId)
-            .toSeq
-        ) { case (synchronizerId, contracts) =>
-          MonadUtil.batchedSequentialTraverse_(
-            batching.parallelism,
-            batching.maxAcsImportBatchSize,
-          )(contracts)(
-            writeContractsBatch(
-              synchronizerId,
-              _,
-              contractImportMode,
-              representativePackageIdOverride,
-            )
-              .mapK(FutureUnlessShutdown.outcomeK)
-          )
-        }
-      } yield ()
-
-      resultET.value.flatMap {
-        case Left(error) => FutureUnlessShutdown.failed(ImportAcsError.Error(error).asGrpcError)
-        case Right(()) => FutureUnlessShutdown.unit
-      }.asGrpcFuture
-    }
-
-    private def writeContractsBatch(
-        synchronizerId: SynchronizerId,
-        contracts: Seq[RepairContract],
-        contractImportMode: ContractImportMode,
-        representativePackageIdOverride: RepresentativePackageIdOverride,
-    ): EitherT[Future, String, Unit] =
-      for {
-        alias <- EitherT.fromEither[Future](
-          sync.aliasManager
-            .aliasForSynchronizerId(synchronizerId)
-            .toRight(s"Not able to find synchronizer alias for ${synchronizerId.toString}")
-        )
-
-        _ <- EitherT.fromEither[Future](
-          sync.repairService.addContracts(
-            alias,
-            contracts,
-            contractImportMode,
-            sync.getPackageMetadataSnapshot,
-            representativePackageIdOverride,
-            workflowIdPrefix = workflowIdPrefixO,
-          )
-        )
-      } yield ()
-
-  }
 
 }

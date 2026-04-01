@@ -11,7 +11,7 @@ import com.digitalasset.canton.lifecycle.{
   HasSynchronizeWithClosing,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryWithDelay.{RetryOutcome, RetryTermination}
@@ -65,7 +65,8 @@ object PolicyEffect {
   */
 abstract class Policy(logger: TracedLogger) {
 
-  protected val directExecutionContext: DirectExecutionContext = DirectExecutionContext(logger)
+  protected val directExecutionContext: DirectExecutionContext =
+    DirectExecutionContext(NamedLogging.loggerWithoutTracing(logger))
 
   def apply[F[_], T](task: => F[T], retryOk: ExceptionRetryPolicy)(implicit
       success: Success[T],

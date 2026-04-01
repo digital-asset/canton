@@ -61,7 +61,10 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+      )
       .withSetup { implicit env =>
         import env.*
 

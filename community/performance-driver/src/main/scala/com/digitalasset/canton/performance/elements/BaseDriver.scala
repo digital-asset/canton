@@ -175,6 +175,7 @@ abstract class BaseDriver(
       override protected def contractCreated(
           create: M.orchestration.TestRun.Contract,
           index: Unit,
+          synchronizerId: String,
       ): Unit =
         masterCreated(create)
     }
@@ -267,7 +268,7 @@ abstract class BaseDriver(
     recentlyCreatedTransactionsRecordTimes.asMap().keySet().asScala.toSet
 
   private def processReassignment(reassignment: Reassignment): Boolean = {
-    logger.info(
+    logger.debug(
       s"Observed reassignment with commandId=${reassignment.commandId} and updateId=${reassignment.updateId} and offset=${reassignment.offset}"
     )
     reassignment.events
@@ -294,7 +295,7 @@ abstract class BaseDriver(
   }
 
   private def processUpdates(transaction: Transaction): Boolean = {
-    logger.info(
+    logger.debug(
       s"Observed transaction with commandId=${transaction.commandId} and updateId=${transaction.updateId} and offset=${transaction.offset}"
     )
     if (transaction.commandId.nonEmpty) {

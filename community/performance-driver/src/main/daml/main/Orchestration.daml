@@ -20,7 +20,7 @@ data RunType =
       partyGrowth: PartyGrowth |
   TransferRun
     with
-      numAssetsPerIssuer: Int
+      numAssetsPerActor: Int
       transferBatchSize: Int
       payloadSize: Int |
     NoRun
@@ -35,7 +35,7 @@ validPartyGrowth a = case a of
 validRunType : RunType -> Bool
 validRunType a = case a of
   DvpRun numAssets acsGrowth payloadSize partyGrowth -> numAssets > 0 && acsGrowth > -1 && payloadSize >= 0 && validPartyGrowth partyGrowth
-  TransferRun numAssetsPerIssuer transferBatchSize payloadSize -> numAssetsPerIssuer > 0 && transferBatchSize > 0 && payloadSize >= 0
+  TransferRun numAssetsPerActor transferBatchSize payloadSize -> numAssetsPerActor > 0 && transferBatchSize > 0 && payloadSize >= 0
   NoRun -> False
 
 runTypeCode : RunType -> Int

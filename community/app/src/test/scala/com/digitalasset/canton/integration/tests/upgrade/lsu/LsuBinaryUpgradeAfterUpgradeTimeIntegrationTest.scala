@@ -126,6 +126,9 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
           synchronizeParticipants = Seq(participant1, participant2), // p3 is offline
         )
 
+        val failedHandshakeError = "Validation failure: Failed handshake: "
+          + "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+
         loggerFactory.assertLogsUnorderedOptional(
           {
             performSynchronizerNodesLsu(fixture)
@@ -181,28 +184,21 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
           // Logged twice: once during handshake and once during connect attempt
           (
             LogEntryOptionality.Required,
-            _.warningMessage should include(
-              "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
-            ),
+            _.warningMessage should include(failedHandshakeError),
           ),
           (
             LogEntryOptionality.Required,
-            _.warningMessage should include(
-              "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
-            ),
-          ),
-          // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
-          (
-            LogEntryOptionality.Required,
-            _.errorMessage should (include(
-              s"Unable to perform handshake with ${fixture.newPsid}"
-            ) and include("Trust threshold of 1 is no longer reachable")),
+            _.warningMessage should include(failedHandshakeError),
           ),
           (
             LogEntryOptionality.Required,
-            _.errorMessage should (include(s"Upgrade to ${fixture.newPsid} failed") and include(
-              "Trust threshold of 1 is no longer reachable"
-            )),
+            _.errorMessage should (include(s"Unable to perform handshake with ${fixture.newPsid}")
+              and include(failedHandshakeError)),
+          ),
+          (
+            LogEntryOptionality.Required,
+            _.errorMessage should (include(s"Upgrade to ${fixture.newPsid} failed")
+              and include(failedHandshakeError)),
           ),
           (
             LogEntryOptionality.OptionalMany,

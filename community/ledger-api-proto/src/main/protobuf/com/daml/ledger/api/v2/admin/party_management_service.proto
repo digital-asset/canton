@@ -238,7 +238,7 @@ message AllocateExternalPartyRequest {
     bytes transaction = 1;
     // Additional signatures for this transaction specifically
     // Use for transactions that require additional signatures beyond the namespace key signatures
-    // e.g: PartyToKeyMapping must be signed by all registered keys
+    // e.g: PartyToParticipant must be signed by all registered keys
     //
     // Optional: can be empty
     repeated Signature signatures = 2;
@@ -256,9 +256,7 @@ message AllocateExternalPartyRequest {
   // This can be either a single NamespaceDelegation,
   // or DecentralizedNamespaceDefinition along with its authorized namespace owners in the form of NamespaceDelegations.
   // May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-  // - A PartyToKeyMapping to register the party's signing keys.
-  // May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
-  // - A PartyToParticipant to register the hosting relationship of the party.
+  // - A PartyToParticipant to register the hosting relationship of the party, and the party's signing keys and threshold.
   // Must be provided.
   //
   // Required: must be non-empty

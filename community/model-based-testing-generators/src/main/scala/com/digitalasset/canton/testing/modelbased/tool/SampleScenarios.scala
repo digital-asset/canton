@@ -56,14 +56,8 @@ object SampleScenarios {
           c.copy(languageVersion =
             LanguageVersion
               .fromString(v)
-              .left
-              .map(err => LanguageVersion.fromStringUnchecked(v).left.map(_ => err))
               .fold(
-                errOrLv =>
-                  errOrLv.fold(
-                    err => throw new IllegalArgumentException(err),
-                    identity,
-                  ),
+                err => throw new IllegalArgumentException(err),
                 identity,
               )
           )

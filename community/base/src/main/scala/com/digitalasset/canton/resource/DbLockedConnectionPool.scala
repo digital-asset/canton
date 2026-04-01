@@ -5,7 +5,6 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functorFilter.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -234,7 +233,7 @@ class DbLockedConnectionPool private (
       }
 
       // Run health check scheduling on the direct execution context to avoid rejected execution exceptions
-      result.map(_ => scheduleHealthCheck(clock.now))(DirectExecutionContext(logger))
+      result.map(_ => scheduleHealthCheck(clock.now))(DirectExecutionContext(noTracingLogger))
     }
 
     // Run the health check and becoming active/passive through the queue to ensure there's only one attempt at a time.
@@ -258,14 +257,15 @@ class DbLockedConnectionPool private (
     clock.scheduleAt(runScheduledHealthCheck, now.add(config.healthCheckPeriod.asJava)).discard
 
   private def findActiveConnection(pool: Seq[DbLockedConnection]): Option[KeepAliveConnection] = {
-    val availableConnectionOpt = pool.mapFilter(_.get.toOption).find(_.markInUse())
+    val availableConnectionOpt = pool.find(_.get.exists(_.markInUse()))
 
     if (availableConnectionOpt.isEmpty) {
       logger.debug(s"Did not find any available connection in the pool. Connection states: ${pool
           .map(_.get.map(c => if (c.inUse.get()) "In use" else "Not in use"))
           .mkString(", ")}")(TraceContext.empty)
     }
-    availableConnectionOpt
+
+    availableConnectionOpt.flatMap(_.get.toOption)
   }
 
   // Run and wait for the initial health check

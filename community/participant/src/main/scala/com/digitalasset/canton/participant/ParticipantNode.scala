@@ -397,6 +397,7 @@ class ParticipantNodeBootstrap(
           ips,
           crypto,
           cryptoConfig,
+          Some(arguments.metrics.kmsMetrics),
           parameters.batchingConfig.parallelism,
           parameters.cachingConfigs.publicKeyConversionCache,
           timeouts,

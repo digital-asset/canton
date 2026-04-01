@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.config
 
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
 import io.scalaland.chimney.dsl.*
 
@@ -41,6 +42,9 @@ final case class AsyncWriterConfig(
   * @param producePostOrderingTopologyTicks
   *   temporary flag to enable topology ticks produced post-ordering by sequencers (feature in
   *   development)
+  * @param lsuRepair
+  *   Config values that are used in disaster recovery scenarios after LSU. Those values SHOULD be
+  *   set only in very specific cases and MUST be synchronized across sequencers.
   */
 final case class SequencerNodeParameterConfig(
     override val alphaVersionSupport: Boolean = false,
@@ -55,5 +59,33 @@ final case class SequencerNodeParameterConfig(
     timeAdvancingTopology: TimeAdvancingTopologyConfig = TimeAdvancingTopologyConfig(),
     // TODO(#30769) remove this flag once the feature is complete
     producePostOrderingTopologyTicks: Boolean = false,
+    lsuRepair: LsuRepair = LsuRepair(),
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
+
+/** @param lsuSequencingBoundsOverride
+  *   Override the LSU sequencing bounds computed from the topology store. Should be used ONLY in a
+  *   disaster recovery scenario (roll forward) and the value MUST be identical across sequencer
+  *   nodes.
+  */
+final case class LsuRepair(
+    lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None
+)
+
+/** Used to override values usually derived from the LSU announcement. MUST be used only for roll
+  * forward in DR scenarios.
+  *
+  * @param lowerBoundSequencingTimeExclusive
+  *   Defined as the highest effective time of the topology store on the broken synchronizer.
+  * @param upgradeTime
+  *   The value should be chosen as follows:
+  *   - At least lowerBoundSequencingTimeExclusive
+  *   - At least the latest sequencing time on the broken synchronizer
+  *   - At least the latest effective time of the latest fully authorized topology transaction on
+  *     the broken synchronizer
+  *   - Not too far in the future, as it acts as a strict lower bound on the new synchronizer.
+  */
+final case class LsuSequencingBoundsOverride(
+    lowerBoundSequencingTimeExclusive: CantonTimestamp,
+    upgradeTime: CantonTimestamp,
+)

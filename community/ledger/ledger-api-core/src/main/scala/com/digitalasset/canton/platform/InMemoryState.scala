@@ -27,6 +27,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -137,11 +138,17 @@ object InMemoryState {
   )(
       mutableLedgerEndCache: MutableLedgerEndCache,
       stringInterningView: StringInterningView,
-  )(implicit traceContext: TraceContext): ResourceOwner[InMemoryState] = {
+  )(implicit
+      traceContext: TraceContext,
+      scheduler: ScheduledExecutorService,
+  ): ResourceOwner[InMemoryState] = {
     val initialLedgerEnd = LedgerEnd.beforeBegin
 
     for {
-      dispatcherState <- DispatcherState.owner(apiStreamShutdownTimeout, loggerFactory)
+      dispatcherState <- DispatcherState.owner(
+        apiStreamShutdownTimeout,
+        loggerFactory,
+      )
       transactionSubmissionTracker <- SubmissionTracker.owner(
         maxCommandsInFlight,
         metrics,

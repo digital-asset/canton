@@ -6,15 +6,17 @@ package com.digitalasset.canton.participant.ledger.api
 import cats.Eval
 import cats.data.EitherT
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.concurrent.{
+  ExecutionContextIdlenessExecutorService,
+  FutureSupervisor,
+}
+import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.health.{HealthStatus, Healthy, ReportsHealth, Unhealthy}
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.NoLogging.logger
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -50,9 +52,11 @@ import com.digitalasset.canton.util.PekkoUtil.{
 }
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
+import org.slf4j.event.Level
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Success
 
@@ -101,8 +105,7 @@ final case class LedgerApiIndexerConfig(
 object LedgerApiIndexer {
 
   private object FirstSuccessfulIndexerStartupDeadlines {
-    val InfoInitialDelay = Duration(20, "seconds")
-    val InfoPeriod = Duration(10, "seconds")
+    val InfoDelay = Duration(20, "seconds")
     val WarnDelay = Duration(60, "seconds")
     val indexerInitializing = "Indexer initialization still in progress"
     val deadlineExceededWarnMessage =
@@ -125,6 +128,7 @@ object LedgerApiIndexer {
       materializer: Materializer,
       traceContext: TraceContext,
       tracer: Tracer,
+      scheduler: ScheduledExecutorService,
   ): Future[LedgerApiIndexer] = {
     import com.digitalasset.canton.platform.ResourceOwnerOps
     val initializationLogger = loggerFactory.getTracedLogger(LedgerApiIndexer.getClass)
@@ -220,20 +224,26 @@ object LedgerApiIndexer {
         repairIndexerFactory = () => repairIndexerCreateFunction().map(new IndexingFutureQueue(_)),
         loggerFactory = loggerFactory,
       )
-      _ <- ResourceOwner.forFuture(() =>
-        indexerState.waitForFirstSuccessfulIndexerInitialization
-          .checkIfComplete(
-            delay = FirstSuccessfulIndexerStartupDeadlines.InfoInitialDelay,
-            period = FirstSuccessfulIndexerStartupDeadlines.InfoPeriod,
+      _ <- ResourceOwner.forFuture { () =>
+        implicit val errorLoggingContext = ErrorLoggingContext(logger, Map.empty, traceContext)
+        val localSupervisor = new FutureSupervisor.Impl(
+          NonNegativeDuration(FirstSuccessfulIndexerStartupDeadlines.InfoDelay + 1.seconds),
+          loggerFactory,
+        )
+        localSupervisor
+          .supervised(
+            description = FirstSuccessfulIndexerStartupDeadlines.deadlineExceededWarnMessage,
+            warnAfter = FirstSuccessfulIndexerStartupDeadlines.WarnDelay,
           )(
-            logger.info(FirstSuccessfulIndexerStartupDeadlines.indexerInitializing)
+            localSupervisor.supervised(
+              description = FirstSuccessfulIndexerStartupDeadlines.indexerInitializing,
+              warnAfter = FirstSuccessfulIndexerStartupDeadlines.InfoDelay,
+              logLevel = Level.INFO,
+            )(
+              indexerState.waitForFirstSuccessfulIndexerInitialization
+            )
           )
-          .checkIfComplete(
-            delay = FirstSuccessfulIndexerStartupDeadlines.WarnDelay
-          )(
-            logger.warn(FirstSuccessfulIndexerStartupDeadlines.deadlineExceededWarnMessage)
-          )
-      )
+      }
       _ <- ResourceOwner.forReleasable(() => indexerState)(_.shutdown())
     } yield {
       initializationLogger.info("Ledger API Indexer started, initializing recoverable indexing.")

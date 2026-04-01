@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.{CacheConfig, CachingConfigs}
 import com.digitalasset.canton.crypto.CryptoPureApiError.KeyParseAndValidateError
 import com.digitalasset.canton.crypto.SigningKeyUsage.compatibleUsageForSignAndVerify
 import com.digitalasset.canton.crypto.provider.jce.{JceJavaKeyConverter, JceSecurityProvider}
-import com.digitalasset.canton.util.{EitherUtil, ErrorUtil}
+import com.digitalasset.canton.util.{EitherUtil, ThrowableUtil}
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -156,7 +156,7 @@ object CryptoKeyValidation {
         .map(_ => ())
         .leftMap(err =>
           KeyParseAndValidateError(
-            s"Ed25519 public key validation failed: ${ErrorUtil.messageWithStacktrace(err)}"
+            s"Ed25519 public key validation failed: ${ThrowableUtil.messageWithStacktrace(err)}"
           )
         )
     } yield ()
@@ -251,7 +251,7 @@ object CryptoKeyValidation {
         .catchOnly[GeneralSecurityException](curve.createPoint(x, y))
         .leftMap(err =>
           KeyParseAndValidateError(
-            s"Failed to create point on curve '${ecKeySpec.jcaCurveName}': ${ErrorUtil.messageWithStacktrace(err)}"
+            s"Failed to create point on curve '${ecKeySpec.jcaCurveName}': ${ThrowableUtil.messageWithStacktrace(err)}"
           )
         )
       _ <- EitherUtil.condUnit(

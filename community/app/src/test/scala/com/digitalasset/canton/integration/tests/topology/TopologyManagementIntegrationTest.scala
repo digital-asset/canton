@@ -57,6 +57,8 @@ import scala.concurrent.{Await, ExecutionContext, Future, blocking}
 import scala.jdk.CollectionConverters.*
 
 @nowarn("msg=match may not be exhaustive")
+// Needed because of PartyToKeyMapping deprecation
+@nowarn("cat=deprecation")
 trait TopologyManagementIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment

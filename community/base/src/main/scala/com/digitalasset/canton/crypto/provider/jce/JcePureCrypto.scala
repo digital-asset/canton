@@ -27,7 +27,7 @@ import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherUtil, ErrorUtil, ShowUtil}
+import com.digitalasset.canton.util.{EitherUtil, ShowUtil, ThrowableUtil}
 import com.digitalasset.canton.version.HasToByteString
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
@@ -522,12 +522,14 @@ class JcePureCrypto(
           )
           cipher
         }
-        .leftMap(err => EncryptionError.InvalidEncryptionKey(ErrorUtil.messageWithStacktrace(err)))
+        .leftMap(err =>
+          EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
+        )
       ciphertext <- Either
         .catchOnly[GeneralSecurityException](
           encrypter.doFinal(message.toByteString.toByteArray)
         )
-        .leftMap(err => EncryptionError.FailedToEncrypt(ErrorUtil.messageWithStacktrace(err)))
+        .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
     } yield new AsymmetricEncrypted[M](
       /* Prepend our IV to the ciphertext. BouncyCastle's ECIES encryption does not deal with the AES IV by itself, and we have to randomly generate it and
        * manually prepend it to the ciphertext.
@@ -558,12 +560,14 @@ class JcePureCrypto(
           cipher.init(Cipher.ENCRYPT_MODE, rsaPublicKey, random)
           cipher
         }
-        .leftMap(err => EncryptionError.InvalidEncryptionKey(ErrorUtil.messageWithStacktrace(err)))
+        .leftMap(err =>
+          EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
+        )
       ciphertext <- Either
         .catchOnly[GeneralSecurityException](
           encrypter.doFinal(message.toByteString.toByteArray)
         )
-        .leftMap(err => EncryptionError.FailedToEncrypt(ErrorUtil.messageWithStacktrace(err)))
+        .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
     } yield new AsymmetricEncrypted[M](
       ByteString.copyFrom(ciphertext),
       EncryptionAlgorithmSpec.RsaOaepSha256,
@@ -702,14 +706,14 @@ class JcePureCrypto(
                   cipher
                 }
                 .leftMap(err =>
-                  DecryptionError.InvalidEncryptionKey(ErrorUtil.messageWithStacktrace(err))
+                  DecryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
                 )
               plaintext <- Either
                 .catchOnly[GeneralSecurityException](
                   decrypter.doFinal(ciphertext.toByteArray)
                 )
                 .leftMap(err =>
-                  DecryptionError.FailedToDecrypt(ErrorUtil.messageWithStacktrace(err))
+                  DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
                 )
               message <- deserialize(ByteString.copyFrom(plaintext))
                 .leftMap(DecryptionError.FailedToDeserialize.apply)
@@ -744,7 +748,7 @@ class JcePureCrypto(
                       s"Most probably using a wrong secret key to decrypt the ciphertext: ${err.toString}"
                     )
                 case err =>
-                  DecryptionError.FailedToDecrypt(ErrorUtil.messageWithStacktrace(err))
+                  DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
               }
               message <- deserialize(ByteString.copyFrom(plaintext))
                 .leftMap(DecryptionError.FailedToDeserialize.apply)

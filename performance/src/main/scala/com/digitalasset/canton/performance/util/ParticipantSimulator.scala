@@ -342,7 +342,7 @@ class ParticipantSimulator(
               SynchronizerTrustCertificate(
                 pid,
                 synchronizerId,
-                ParticipantProtocolFeatureFlags.supportedFeatureFlagsByPV
+                ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV
                   .getOrElse(pv, Set.empty)
                   .toSeq,
               ),

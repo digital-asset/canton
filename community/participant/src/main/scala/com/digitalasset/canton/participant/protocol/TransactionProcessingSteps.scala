@@ -11,6 +11,7 @@ import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.LightTransactionViewTree.ToFullViewTreesResult
@@ -329,7 +330,11 @@ class TransactionProcessingSteps(
       }
       mkTransactionSubmissionTrackingData(
         error,
-        submitterInfo.toCompletionInfo.copy(optDeduplicationPeriod = dedupInfo.some),
+        // Traffic cost is 0 because we failed during command deduplication,
+        // therefore the request has not been sent to the sequencer
+        submitterInfo
+          .toCompletionInfo(NonNegativeLong.zero)
+          .copy(optDeduplicationPeriod = dedupInfo.some),
       )
     }
 
@@ -426,7 +431,9 @@ class TransactionProcessingSteps(
         new PreparedTransactionBatch(
           batch,
           request.rootHash,
-          submitterInfoWithDedupPeriod.toCompletionInfo,
+          // At this stage we're still preparing the batch to be sent,
+          // so no traffic cost has been charged
+          submitterInfoWithDedupPeriod.toCompletionInfo(paidTrafficCost = NonNegativeLong.zero),
         ): PreparedBatch
       }
 
@@ -434,7 +441,9 @@ class TransactionProcessingSteps(
           rejectionCause: TransactionSubmissionTrackingData.RejectionCause
       ): Success[Outcome[Either[SubmissionTrackingData, PreparedBatch]]] = {
         val trackingData = TransactionSubmissionTrackingData(
-          submitterInfoWithDedupPeriod.toCompletionInfo,
+          // At this stage we're still preparing the batch to be sent,
+          // so no traffic cost has been charged
+          submitterInfoWithDedupPeriod.toCompletionInfo(paidTrafficCost = NonNegativeLong.zero),
           rejectionCause,
           psid,
         )
@@ -464,7 +473,9 @@ class TransactionProcessingSteps(
 
     override def submissionTimeoutTrackingData: SubmissionTrackingData =
       TransactionSubmissionTrackingData(
-        submitterInfo.toCompletionInfo.copy(optDeduplicationPeriod = None),
+        // Since we're timing out, we have to assume here the event has not been ordered and therefore
+        // no traffic was charged
+        submitterInfo.toCompletionInfo(NonNegativeLong.zero).copy(optDeduplicationPeriod = None),
         TransactionSubmissionTrackingData.TimeoutCause,
         psid,
       )
@@ -501,7 +512,11 @@ class TransactionProcessingSteps(
         case UnlessShutdown.Outcome(exception) =>
           SubmissionInternalError.Failure(exception)
       }): TransactionError
-      mkTransactionSubmissionTrackingData(error, submitterInfo.toCompletionInfo)
+      mkTransactionSubmissionTrackingData(
+        error,
+        // Traffic cost is 0 here because this is called when the request failed before being sent to the sequencer
+        submitterInfo.toCompletionInfo(NonNegativeLong.zero),
+      )
     }
 
     override def onPotentialFailure(
@@ -678,6 +693,7 @@ class TransactionProcessingSteps(
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ParsedTransactionRequest] = {
     val workflowId = rootViewsWithMetadata.head1._1.unwrap.workflowIdO
     val effects = rootViewsWithMetadata.forgetNE.flatMap { case (_, _, effects) =>
@@ -703,6 +719,7 @@ class TransactionProcessingSteps(
       workflowId,
       snapshot,
       synchronizerParameters,
+      trafficCost,
     )
   }
 
@@ -742,6 +759,7 @@ class TransactionProcessingSteps(
       _,
       snapshot,
       _,
+      trafficCost,
     ) = parsedRequest
 
     val ipsSnapshot = snapshot.ipsSnapshot
@@ -964,6 +982,7 @@ class TransactionProcessingSteps(
             engineController,
             decisionTimeTickRequest,
             publishUpdate,
+            trafficCost,
           )
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
@@ -999,11 +1018,12 @@ class TransactionProcessingSteps(
       _rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
-    completionInfoFromSubmitterMetadataO(submitterMetadata, freshOwnTimelyTx).map {
+    completionInfoFromSubmitterMetadataO(submitterMetadata, freshOwnTimelyTx, trafficCost).map {
       completionInfo =>
         Update.SequencedCommandRejected(
           completionInfo,
@@ -1039,10 +1059,11 @@ class TransactionProcessingSteps(
       _abortedF,
       _decisionTimeTickRequest,
       _publishUpdate,
+      trafficCost,
     ) = pendingTransaction
     val submitterMetaO = transactionValidationResult.submitterMetadataO
     val completionInfoO =
-      submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx))
+      submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx, trafficCost))
 
     errorDetails.logRejection(
       Map("requestId" -> pendingTransaction.requestId.toString)
@@ -1064,6 +1085,7 @@ class TransactionProcessingSteps(
   private def completionInfoFromSubmitterMetadataO(
       meta: SubmitterMetadata,
       freshOwnTimelyTx: Boolean,
+      trafficCost: NonNegativeLong,
   ): Option[CompletionInfo] = {
     lazy val completionInfo = CompletionInfo(
       meta.actAs.toList,
@@ -1071,6 +1093,7 @@ class TransactionProcessingSteps(
       meta.commandId.unwrap,
       Some(meta.dedupPeriod),
       meta.submissionId,
+      trafficCost,
     )
 
     Option.when(freshOwnTimelyTx)(completionInfo)
@@ -1087,6 +1110,7 @@ class TransactionProcessingSteps(
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
       publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): PendingTransaction = {
@@ -1113,6 +1137,7 @@ class TransactionProcessingSteps(
       engineAbortStatusF,
       decisionTimeTickRequest,
       publishUpdate,
+      trafficCost,
     )
   }
 
@@ -1289,7 +1314,11 @@ class TransactionProcessingSteps(
     val ts = event.event.content.timestamp
     val submitterMetaO = pendingRequestData.transactionValidationResult.submitterMetadataO
     val completionInfoO = submitterMetaO.flatMap(
-      completionInfoFromSubmitterMetadataO(_, pendingRequestData.freshOwnTimelyTx)
+      completionInfoFromSubmitterMetadataO(
+        _,
+        pendingRequestData.freshOwnTimelyTx,
+        pendingRequestData.trafficCost,
+      )
     )
 
     def getCommitSetAndContractsToBeStoredAndEvent(
@@ -1508,6 +1537,7 @@ object TransactionProcessingSteps {
       workflowIdO: Option[WorkflowId],
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      override val trafficCost: NonNegativeLong,
   ) extends ParsedRequest[SubmitterMetadata] {
 
     lazy val rootViewTreesWithEffects

@@ -5,12 +5,12 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
   Signature,
   SyncCryptoError,
@@ -261,6 +261,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[ParsedReassignmentRequest[FullView]] = {
@@ -295,6 +296,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         snapshot,
         synchronizerParameters,
         reassignmentId(viewTree, ts),
+        trafficCost,
       )
     )
   }
@@ -327,6 +329,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
@@ -339,6 +342,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       commandId = submitterMetadata.commandId,
       optDeduplicationPeriod = None,
       submissionId = None,
+      paidTrafficCost = trafficCost,
     )
     val updateO = Option.when(isSubmittingParticipant)(
       Update.SequencedCommandRejected(
@@ -367,6 +371,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
         commandId = pendingReassignment.submitterMetadata.commandId,
         optDeduplicationPeriod = None,
         submissionId = pendingReassignment.submitterMetadata.submissionId,
+        // TODO(i31036): support traffic cost for re-assignments
+        paidTrafficCost = NonNegativeLong.zero,
       )
     )
     errorDetails.logRejection(Map("requestId" -> pendingReassignment.requestId.toString))
@@ -555,6 +561,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *     - Is the submitter a stakeholder?
     *     - Is the submitter hosted on the participant?
     *   - Is the reassignment id consistent with the reassignment data?
+    *   - the multi-synchronizer topology feature flag should be set on all participants hosting a
+    *     stakeholder.
     */
   def checkPhase7Validations(
       reassignmentValidationResult: ReassignmentValidationResult
@@ -586,10 +594,15 @@ private[reassignment] trait ReassignmentProcessingSteps[
             LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
           )
 
+        val multiSynchronizerIsNotEnabled =
+          reassignmentValidationResult.commonValidationResult.multiSynchronizerFeatureFlagCheckResult
+            .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
+
         modelConformanceRejection
           .orElse(authenticationRejection)
           .orElse(submitterCheckRejection)
           .orElse(reassignmentIdResult)
+          .orElse(multiSynchronizerIsNotEnabled)
     }
 
 }
@@ -619,6 +632,7 @@ object ReassignmentProcessingSteps {
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
       reassignmentId: ReassignmentId,
+      override val trafficCost: NonNegativeLong,
   ) extends ParsedRequest[ReassignmentSubmitterMetadata] {
     override def rootHash: RootHash = fullViewTree.rootHash
   }

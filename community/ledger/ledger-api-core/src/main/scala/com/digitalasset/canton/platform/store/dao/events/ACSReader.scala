@@ -14,11 +14,11 @@ import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
 import com.digitalasset.canton.ledger.api.{
   AcsContinuationToken,
   AcsContinuationTokenActive,
   AcsContinuationTokenIncomplete,
-  GetActiveContractsResponseFactory,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -27,6 +27,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
@@ -102,9 +103,10 @@ class ACSReader(
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
       continuationToken: Option[AcsContinuationToken],
+      checksum: Checksum,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponseFactory, NotUsed] = {
+  ): Source[GetActiveContractsResponse, NotUsed] = {
     val (activeAtOffset, activeAtLong) = activeAt
     val span =
       Telemetry.Updates.createSpan(tracer, activeAtOffset)(qualifiedNameOfCurrentFunc)
@@ -119,6 +121,7 @@ class ACSReader(
       activeAt,
       eventProjectionProperties,
       continuationToken,
+      checksum,
     )
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -128,9 +131,10 @@ class ACSReader(
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
       continuationToken: Option[AcsContinuationToken],
+      checksum: Checksum,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponseFactory, NotUsed] = {
+  ): Source[GetActiveContractsResponse, NotUsed] = {
     val (activeAtOffset, activeAtEventSeqId) = activeAt
     def withValidatedActiveAt[T](query: => Future[T]) =
       queryValidRange.withOffsetNotBeforePruning(
@@ -434,7 +438,7 @@ class ACSReader(
       .mapAsync(config.maxParallelPayloadCreateQueries)(fetchActivePayloads)
       .mapConcat(identity)
       .mapAsync(config.contractProcessingParallelism)(
-        toApiResponseActiveContract(eventProjectionProperties)
+        toApiResponseActiveContract(eventProjectionProperties, checksum)
       )
 
     val activeContracts = continuationToken match {
@@ -458,7 +462,7 @@ class ACSReader(
         def incompleteOffsetPages: () => Iterator[Vector[Offset]] =
           () => offsets.sliding(config.maxIncompletePageSize, config.maxIncompletePageSize)
 
-        val incompleteAssigned: Source[(Long, GetActiveContractsResponseFactory), NotUsed] =
+        val incompleteAssigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
           Source
             .fromIterator(incompleteOffsetPages)
             .mapAsync(config.maxParallelActiveIdQueries)(
@@ -472,10 +476,10 @@ class ACSReader(
             )
             .mapConcat(_.filter(assignMeetsConstraints))
             .mapAsync(config.contractProcessingParallelism)(
-              toApiResponseIncompleteAssigned(eventProjectionProperties)
+              toApiResponseIncompleteAssigned(eventProjectionProperties, checksum)
             )
 
-        val incompleteUnassigned: Source[(Long, GetActiveContractsResponseFactory), NotUsed] =
+        val incompleteUnassigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
           Source
             .fromIterator(incompleteOffsetPages)
             .mapAsync(config.maxParallelActiveIdQueries)(
@@ -494,7 +498,7 @@ class ACSReader(
             )
             .mapConcat(identity)
             .mapAsync(config.contractProcessingParallelism)(
-              toApiResponseIncompleteUnassigned(eventProjectionProperties)
+              toApiResponseIncompleteUnassigned(eventProjectionProperties, checksum)
             )
 
         incompleteAssigned
@@ -510,9 +514,12 @@ class ACSReader(
     activeContracts.concatLazy(incompleteReassignments)
   }
 
-  private def toApiResponseActiveContract(eventProjectionProperties: EventProjectionProperties)(
+  private def toApiResponseActiveContract(
+      eventProjectionProperties: EventProjectionProperties,
+      checksum: Checksum,
+  )(
       rawActiveContract: RawFatActiveContract
-  )(implicit lc: LoggingContextWithTrace): Future[GetActiveContractsResponseFactory] =
+  )(implicit lc: LoggingContextWithTrace): Future[GetActiveContractsResponse] =
     Timed.future(
       future = Future.delegate(
         lfValueTranslation
@@ -528,7 +535,7 @@ class ACSReader(
             acsDelta = true,
           )
           .map(createdEvent =>
-            AcsContinuationToken.activeContractsFactory(
+            GetActiveContractsResponse(
               workflowId = rawActiveContract.commonEventProperties.workflowId.getOrElse(""),
               contractEntry = GetActiveContractsResponse.ContractEntry.ActiveContract(
                 ActiveContract(
@@ -538,16 +545,20 @@ class ACSReader(
                     rawActiveContract.fatCreatedEventProperties.thinCreatedEventProperties.reassignmentCounter,
                 )
               ),
-              sequentialId = rawActiveContract.eventSeqId,
-            )
+              streamContinuationToken =
+                AcsContinuationTokenActive(checksum, rawActiveContract.eventSeqId).encode,
+            ).withPrecomputedSerializedSize()
           )
       ),
       timer = dbMetrics.getActiveContracts.translationTimer,
     )
 
-  private def toApiResponseIncompleteAssigned(eventProjectionProperties: EventProjectionProperties)(
+  private def toApiResponseIncompleteAssigned(
+      eventProjectionProperties: EventProjectionProperties,
+      checksum: Checksum,
+  )(
       rawFatAssign: RawFatAssignEvent
-  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponseFactory)] =
+  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponse)] =
     Timed.future(
       future = Future.delegate(
         lfValueTranslation
@@ -563,28 +574,31 @@ class ACSReader(
             acsDelta = true,
           )
           .map(createdEvent =>
-            rawFatAssign.reassignmentProperties.commonEventProperties.offset -> AcsContinuationToken
-              .incompleteReassignmentsFactory(
-                workflowId = rawFatAssign.reassignmentProperties.commonEventProperties.workflowId
-                  .getOrElse(""),
-                contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteAssigned(
-                  IncompleteAssigned(
-                    Some(UpdateReader.toAssignedEvent(rawFatAssign, createdEvent))
-                  )
-                ),
-                sequentialId = rawFatAssign.eventSeqId,
-                offset = rawFatAssign.offset,
-              )
+            rawFatAssign.reassignmentProperties.commonEventProperties.offset -> GetActiveContractsResponse(
+              workflowId = rawFatAssign.reassignmentProperties.commonEventProperties.workflowId
+                .getOrElse(""),
+              contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteAssigned(
+                IncompleteAssigned(
+                  Some(UpdateReader.toAssignedEvent(rawFatAssign, createdEvent))
+                )
+              ),
+              streamContinuationToken = AcsContinuationTokenIncomplete(
+                checksum,
+                rawFatAssign.eventSeqId,
+                rawFatAssign.offset,
+              ).encode,
+            ).withPrecomputedSerializedSize()
           )
       ),
       timer = dbMetrics.getActiveContracts.translationTimer,
     )
 
   private def toApiResponseIncompleteUnassigned(
-      eventProjectionProperties: EventProjectionProperties
+      eventProjectionProperties: EventProjectionProperties,
+      checksum: Checksum,
   )(
       rawUnassignEventWithActive: (RawUnassignEvent, RawFatActiveContract)
-  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponseFactory)] = {
+  )(implicit lc: LoggingContextWithTrace): Future[(Long, GetActiveContractsResponse)] = {
     val (rawUnassignEvent, rawFatActiveContract) = rawUnassignEventWithActive
     Timed.future(
       future = lfValueTranslation
@@ -600,21 +614,23 @@ class ACSReader(
           acsDelta = true,
         )
         .map(createdEvent =>
-          rawUnassignEvent.reassignmentProperties.commonEventProperties.offset -> AcsContinuationToken
-            .incompleteReassignmentsFactory(
-              workflowId = rawUnassignEvent.reassignmentProperties.commonEventProperties.workflowId
-                .getOrElse(""),
-              contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteUnassigned(
-                IncompleteUnassigned(
-                  createdEvent = Some(createdEvent),
-                  unassignedEvent = Some(
-                    UpdateReader.toUnassignedEvent(rawUnassignEvent)
-                  ),
-                )
-              ),
+          rawUnassignEvent.reassignmentProperties.commonEventProperties.offset -> GetActiveContractsResponse(
+            workflowId = rawUnassignEvent.reassignmentProperties.commonEventProperties.workflowId
+              .getOrElse(""),
+            contractEntry = GetActiveContractsResponse.ContractEntry.IncompleteUnassigned(
+              IncompleteUnassigned(
+                createdEvent = Some(createdEvent),
+                unassignedEvent = Some(
+                  UpdateReader.toUnassignedEvent(rawUnassignEvent)
+                ),
+              )
+            ),
+            streamContinuationToken = AcsContinuationTokenIncomplete(
+              checksum,
               rawUnassignEvent.eventSeqId,
               rawUnassignEvent.offset,
-            )
+            ).encode,
+          ).withPrecomputedSerializedSize()
         ),
       timer = dbMetrics.getActiveContracts.translationTimer,
     )

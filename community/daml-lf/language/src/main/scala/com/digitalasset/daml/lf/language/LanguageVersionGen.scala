@@ -22,7 +22,7 @@ trait LanguageVersionGenerated {
   val allLegacyLfVersions: List[LanguageVersion] = allStableLegacyLfVersions.appended(v1_dev)
 
   lazy val explicitVersions: MapView[String, LanguageVersion] =
-    BuildInfo.explicitVersions.view.mapValues(LanguageVersion.assertFromStringUnchecked)
+    BuildInfo.explicitVersionsDTO.view.mapValues(LanguageVersion.assertFromDTOJson)
 
   lazy val v2_1: LanguageVersion = explicitVersions("v2_1")
   lazy val v2_2: LanguageVersion = explicitVersions("v2_2")
@@ -36,14 +36,14 @@ trait LanguageVersionGenerated {
   lazy val v2_dev: LanguageVersion = explicitVersions("v2_dev")
 
   lazy val namedVersions: MapView[String, LanguageVersion] =
-    BuildInfo.namedVersions.view.mapValues(LanguageVersion.assertFromStringUnchecked)
+    BuildInfo.namedVersionsDTO.view.mapValues(LanguageVersion.assertFromDTOJson)
 
   lazy val defaultLfVersion = namedVersions("defaultLfVersion")
   lazy val devLfVersion = namedVersions("devLfVersion")
   lazy val latestStableLfVersion = namedVersions("latestStableLfVersion")
 
   lazy val versionLists: MapView[String, Seq[LanguageVersion]] =
-    BuildInfo.versionLists.view.mapValues(_.map(LanguageVersion.assertFromStringUnchecked))
+    BuildInfo.versionListsDTO.view.mapValues(_.map(LanguageVersion.assertFromDTOJson))
 
   lazy val allLfVersions = versionLists("allLfVersions")
   lazy val stableLfVersions = versionLists("stableLfVersions")

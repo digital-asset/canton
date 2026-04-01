@@ -34,7 +34,13 @@ import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeV
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.util.{BinaryFileUtil, MonadUtil}
-import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfPackageId}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasActorSystem,
+  HasExecutionContext,
+  HasExecutorService,
+  LfPackageId,
+}
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.archive.testing.Encode
@@ -50,6 +56,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.io.File
 import java.nio.file.{Files, Paths}
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.Future
 import scala.util.Using
 
@@ -94,7 +101,8 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
     extends AsyncWordSpec
     with BaseTest
     with HasActorSystem
-    with HasExecutionContext {
+    with HasExecutionContext
+    with HasExecutorService {
 
   private val examplePackages: List[Archive] = readCantonExamples()
   private val adminWorkflowPackages: List[Archive] = readPingAdminWorkflow()
@@ -106,6 +114,7 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
     private val processingTimeouts = ProcessingTimeout()
     val clock = new SimClock(start = now, loggerFactory = loggerFactory)
+    implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
     val mutablePackageMetadataView = new MutablePackageMetadataViewImpl(
       clock,
       packageStore,

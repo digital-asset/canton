@@ -1076,6 +1076,7 @@ commands:
                         "U020XUXADCP" # Raf
                         "UDDVDCKD0" # Raphael
                         "U04DC4NAK1S" # Yves
+                        "U0AHRL04HPV" #Tbo
                         # LAPI
                         "U08LBV2U75H" # Adrien
                         "U03HVEFHGLU" # Andreas T.
@@ -1920,8 +1921,6 @@ jobs:
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
         steps:
-            - set_canton_protocol_version:
-                protocol_version: dev
             - run_tests:
                 command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: cat
@@ -2437,7 +2436,6 @@ jobs:
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.\*DataContinuityTestPostgres
                 num_parallel_tasks: "1"
                 num_test_buckets: "8"
-                report_to_datadog: false
                 timeout: 1h
             - slack_red_main_with_volunteer
     test_flake_fix_many_times:
@@ -2660,6 +2658,9 @@ jobs:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 4
         parameters:
+            only_for_selected_users:
+                default: false
+                type: boolean
             override_java_version_for_tests:
                 default: ""
                 type: string
@@ -2667,6 +2668,14 @@ jobs:
                 default: ""
                 type: string
         steps:
+            - checkout:
+                method: blobless
+            - when:
+                condition: << parameters.only_for_selected_users >>
+                steps:
+                    - run:
+                        command: .circleci/skip-variations-test.sh
+                        name: Skip test (except for selected users)
             - set_canton_protocol_version:
                 protocol_version: << parameters.protocol_version >>
             - run_variations_tests:
@@ -2955,6 +2964,25 @@ workflows:
                             - /^release-line.*/
                     tags:
                         only: /^v.*/
+                requires:
+                    - compile
+            - variations_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                            - /^release-line.*/
+                            - /^gh-readonly-queue\/main\/.*/
+                name: variation_test_selected_users_only
+                only_for_selected_users: true
                 requires:
                     - compile
             - scalafix:

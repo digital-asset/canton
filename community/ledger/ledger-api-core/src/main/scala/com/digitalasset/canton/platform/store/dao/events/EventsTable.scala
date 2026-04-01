@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationEvent,
   AuthorizationLevel,
 }
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.Conversions
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawParticipantAuthorization
 import com.typesafe.scalalogging.Logger
@@ -93,7 +94,7 @@ object EventsTable {
             synchronizerId = first.synchronizerId,
             traceContext = Conversions.protoTraceContextFrom(logger)(first.traceContext),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
-          )
+          ).withPrecomputedSerializedSize()
       }
   }
 

@@ -37,7 +37,6 @@ Canton documentation
   sdk/tutorials/app-dev/external_signing_overview
   sdk/tutorials/app-dev/external_signing_onboarding_lapi
   sdk/tutorials/app-dev/external_signing_onboarding_multihosted
-  sdk/tutorials/app-dev/external_signing_onboarding
   sdk/tutorials/app-dev/external_signing_topology_transaction
   sdk/tutorials/app-dev/external_signing_submission
   sdk/tutorials/app-dev/external_signing_submission_part_2

@@ -5,17 +5,14 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.HealthStatus
-import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
-  EventFormat,
-  GetActiveContractsResponseFactory,
-  UpdateFormat,
-}
+import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.{AcsContinuationToken, EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -71,12 +68,13 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       eventFormat: EventFormat,
       activeAt: Option[Offset],
       continuationToken: Option[AcsContinuationToken],
+      checksum: Checksum,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponseFactory, NotUsed] =
+  ): Source[GetActiveContractsResponse, NotUsed] =
     Timed.source(
       metrics.services.index.getActiveContracts,
-      delegate.getActiveContracts(eventFormat, activeAt, continuationToken),
+      delegate.getActiveContracts(eventFormat, activeAt, continuationToken, checksum),
     )
 
   override def lookupActiveContract(
