@@ -41,9 +41,7 @@ import pureconfig.{ConfigCursor, ConfigReader, ConfigWriter}
 
 import scala.concurrent.ExecutionContext
 
-sealed trait SequencerConfig {
-  def supportsReplicas: Boolean
-}
+sealed trait SequencerConfig
 
 object SequencerConfig {
 
@@ -66,8 +64,6 @@ object SequencerConfig {
       with DatabaseSequencerConfig
       with UniformCantonConfigValidation {
     override def highAvailabilityEnabled: Boolean = highAvailability.exists(_.isEnabled)
-
-    override def supportsReplicas: Boolean = highAvailabilityEnabled
   }
 
   final case class External(
@@ -75,9 +71,8 @@ object SequencerConfig {
       block: BlockSequencerConfig,
       config: ConfigCursor,
   ) extends SequencerConfig
-      with UniformCantonConfigValidation {
-    override def supportsReplicas: Boolean = false
-  }
+      with UniformCantonConfigValidation
+
   object External {
     implicit val externalCantonConfigValidator: CantonConfigValidator[External] = {
       implicit val configCursorCantonConfigValidator: CantonConfigValidator[ConfigCursor] =
@@ -92,9 +87,8 @@ object SequencerConfig {
       // To avoid having to include an empty "config" node if defaults are fine
       config: BftBlockOrdererConfig = BftBlockOrdererConfig(),
   ) extends SequencerConfig
-      with UniformCantonConfigValidation {
-    override def supportsReplicas: Boolean = false
-  }
+      with UniformCantonConfigValidation
+
   object BftSequencer {
     implicit val bftSequencerCantonConfigValidator: CantonConfigValidator[BftSequencer] =
       CantonConfigValidatorDerivation[BftSequencer]

@@ -445,6 +445,7 @@ final case class ParticipantNodeParameterConfig(
     commitmentMismatchDebugging: Boolean = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt] = None,
     commitmentReduceParallelism: NonNegativeInt = NonNegativeInt.one,
+    commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation

@@ -208,7 +208,9 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           s"Phase 6: Request ${requestId.unwrap}: Timeout in state ${responseAggregation.state} at $timestamp"
         )
 
-        val timedOut = responseAggregation.timeout()
+        val timedOut = responseAggregation.timeout(
+          mediatorState.metrics.timeoutNonResponsiveParticipants
+        )
         MonadUtil.whenM(mediatorState.replace(responseAggregation, timedOut))(
           sendResultIfDone(timedOut, responseAggregation.decisionTime)
         )

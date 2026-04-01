@@ -943,7 +943,7 @@ class ConfirmationRequestAndResponseProcessorTest
               .map(party =>
                 party -> PartyInfo(
                   PositiveInt.one,
-                  Map(ParticipantId("one") -> ParticipantAttributes(Confirmation)),
+                  Map(participant -> ParticipantAttributes(Confirmation)),
                 )
               )
               .toMap
@@ -1032,8 +1032,9 @@ class ConfirmationRequestAndResponseProcessorTest
           }
           val completedView = ResponseAggregation.ViewState(
             Map(
-              submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                Set(ExampleTransactionFactory.submittingParticipant)
+              submitter -> ConsortiumVotingState.withDefaultValues(
+                hostingParticipants = Set(participant),
+                approvals = Set(ExampleTransactionFactory.submittingParticipant),
               )
             ),
             Seq(Quorum.empty),
@@ -1057,27 +1058,37 @@ class ConfirmationRequestAndResponseProcessorTest
               view1Position ->
                 ResponseAggregation.ViewState(
                   Map(
-                    submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                      Set(ExampleTransactionFactory.submittingParticipant)
+                    submitter -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant),
+                      approvals = Set(ExampleTransactionFactory.submittingParticipant),
                     ),
-                    signatory -> ConsortiumVotingState.withDefaultValues(),
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    ),
                   ),
                   Seq(signatoryQuorum),
                   Nil,
                 ),
               view10Position ->
                 ResponseAggregation.ViewState(
-                  Map(signatory -> ConsortiumVotingState.withDefaultValues()),
+                  Map(
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    )
+                  ),
                   Seq(signatoryQuorum),
                   Nil,
                 ),
               view11Position ->
                 ResponseAggregation.ViewState(
                   Map(
-                    submitter -> ConsortiumVotingState.withDefaultValues(approvals =
-                      Set(ExampleTransactionFactory.submittingParticipant)
+                    submitter -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant),
+                      approvals = Set(ExampleTransactionFactory.submittingParticipant),
                     ),
-                    signatory -> ConsortiumVotingState.withDefaultValues(),
+                    signatory -> ConsortiumVotingState.withDefaultValues(
+                      hostingParticipants = Set(participant)
+                    ),
                   ),
                   Seq(signatoryQuorum),
                   Nil,

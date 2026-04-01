@@ -89,11 +89,21 @@ object DbLockedConnectionConfig {
   *   Configuration of the DB locked connection used by the pool.
   * @param activeTimeout
   *   Time to wait until the first connection in the pool becomes active during failover.
+  * @param initialLockedConnectionTimeout
+  *   Time to wait until the initial connection is either active or passive (external sequencer does
+  *   not use this)
+  * @param initialMustRemainActiveConnectionTimeout
+  *   If using an external sequencer we want to make sure it is always active, unless it is closing.
+  *   This timeout is the initial time to wait before first becoming active, otherwise it is
+  *   shutdown.
   */
 final case class DbLockedConnectionPoolConfig(
     healthCheckPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(5),
     connection: DbLockedConnectionConfig = DbLockedConnectionConfig(),
     activeTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(15),
+    initialLockedConnectionTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(15),
+    initialMustRemainActiveConnectionTimeout: PositiveFiniteDuration =
+      PositiveFiniteDuration.ofMinutes(1),
 ) extends EnterpriseOnlyCantonConfigValidation
 
 object DbLockedConnectionPoolConfig {

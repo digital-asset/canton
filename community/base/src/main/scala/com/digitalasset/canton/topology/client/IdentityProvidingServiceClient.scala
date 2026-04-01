@@ -600,9 +600,9 @@ trait SynchronizerGovernanceSnapshotClient {
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[DynamicSynchronizerParameters] =
     findDynamicSynchronizerParameters().map {
       case Right(value) => value.parameters
-      case Left(_) =>
+      case Left(err) =>
         if (warnOnUsingDefault) {
-          logger.warn(s"Unexpectedly using default synchronizer parameters at $timestamp")
+          logger.warn(s"Unexpectedly using default synchronizer parameters at $timestamp: $err")
         }
 
         DynamicSynchronizerParameters.initialValues(

@@ -85,6 +85,14 @@ class JsPackageService(
         status,
       ),
       withServerLogic(
+        JsPackageService.listVettedPackagesEndpoint_deprecated,
+        listVettedPackages,
+      ),
+      withServerLogic(
+        JsPackageService.updateVettedPackagesEndpoint_deprecated,
+        updateVettedPackages,
+      ),
+      withServerLogic(
         JsPackageService.listVettedPackagesEndpoint,
         listVettedPackages,
       ),
@@ -93,6 +101,7 @@ class JsPackageService(
         updateVettedPackages,
       ),
     )
+
   private def list(
       caller: CallerContext
   ): TracedInput[Unit] => Future[Either[JsCantonError, package_service.ListPackagesResponse]] = {
@@ -229,14 +238,37 @@ object JsPackageService extends DocumentationEndpoints {
       .out(jsonBody[package_service.GetPackageStatusResponse])
       .description("Get package status")
 
-  val listVettedPackagesEndpoint =
+  private val listVettedPackagesEndpoint_deprecated =
     packageVetting.get
       .in(jsonBody[package_service.ListVettedPackagesRequest])
       .out(jsonBody[package_service.ListVettedPackagesResponse])
-      .description("List vetted packages")
+      .deprecated()
+      .description(
+        """Lists which participant node vetted what packages on which synchronizer.
+        |This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.""".stripMargin
+      )
+
+  private val updateVettedPackagesEndpoint_deprecated =
+    packageVetting.post
+      .in(jsonBody[package_management_service.UpdateVettedPackagesRequest])
+      .out(jsonBody[package_management_service.UpdateVettedPackagesResponse])
+      .deprecated()
+      .description(
+        """Update the vetted packages of this participant
+        |This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.""".stripMargin
+      )
+
+  val listVettedPackagesEndpoint =
+    packageVetting
+      .in(sttp.tapir.stringToPath("list"))
+      .post
+      .in(jsonBody[package_service.ListVettedPackagesRequest])
+      .out(jsonBody[package_service.ListVettedPackagesResponse])
 
   val updateVettedPackagesEndpoint =
-    packageVetting.post
+    packageVetting
+      .in(sttp.tapir.stringToPath("update"))
+      .post
       .in(jsonBody[package_management_service.UpdateVettedPackagesRequest])
       .out(jsonBody[package_management_service.UpdateVettedPackagesResponse])
       .description("Update vetted packages")
@@ -249,6 +281,8 @@ object JsPackageService extends DocumentationEndpoints {
       listPackagesEndpoint,
       downloadPackageEndpoint,
       packageStatusEndpoint,
+      listVettedPackagesEndpoint_deprecated,
+      updateVettedPackagesEndpoint_deprecated,
       listVettedPackagesEndpoint,
       updateVettedPackagesEndpoint,
     )

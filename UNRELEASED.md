@@ -4,14 +4,30 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
+## Until 2026-04-01
+### Minor Improvements
+- Added a flag that makes the ACS commitment processor to always use a topology snapshot that goes directly to the topology store without any intermediate caching layers:
+```
+canton.participants.<participant>.parameters.commitment-use-db-snapshot-for-participant-lookup = false // default
+```
+- The topology cache lookup was unnecessarily sequential. This caused high latency for bulk lookups for many UIDs (eg. during ACS commitment processing).
+- Fixed the `GetTrafficStateForMember` RPC on the sequencer API to return the traffic state of a member even if it has never consumed any traffic (but may have purchased some - even indirectly)
+  Additionally updates the Participant's initialization logic to:
+    - Initialize its traffic state (using the above endpoint) even if it has never read any message from the sequencer
+    - Not initialize its traffic state if traffic control is disabled on the synchronizer at the time it connects
+
+### Bug Fixes
+- Fix sequencer subscription closing errors `Timeout 10 seconds expired, but readers are still active in Task closing flushing direct-sequencer-subscription`.
+- The sequencer connection pool now cleans up connection/subscription health metrics on initialization (i.e. when connecting to a synchronizer on a participant) or when the pool is reconfigured (on the mediator).
+
 ## Until 2026-03-25
 ### Minor Improvements
 - Fixed the sequencer’s initialization key check to look for a `Protocol` key instead of a `SequencerAuthentication`
   key, because a sequencer does not require a key with `SequencerAuthentication` and the check may fail wrongly.
+- Enterprise block sequencer nodes now use replicated storage access on Postgres by default, in order to prevent a situation where two sequencer nodes accidentally write to the same database. If a block sequencer node does not acquire exclusive database access within a certain time (1 minute by default, configurable via a node's `replication.connection-pool.initial-must-remain-active-connection-timeout`), because another sequencer node already claims exclusive access, then the node will shut down again.
 
 ### Bug Fixes
 - TopologyClient now returns the correct order of dynamic synchronizer parameter changes for the genesis timestamp.
-
 
 ## Until 2026-03-18
 ### Minor Improvements
@@ -38,6 +54,10 @@ INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays
 
   were incorrectly retuning LedgerEffects events (i.e., `CreatedEvent` and `ExercisedEvent`). They are now corrected to return
   AcsDelta (flat) events (i.e., `CreatedEvent` and `ArchivedEvent`).
+- Added a new metric `daml.mediator.timeout-non-responsive-participants` to track participant non-responsiveness during confirmation request timeouts.
+    When a mediator times out a transaction, this counter is incremented once for each party that a participant hosts (with confirmation rights) but did not respond for.
+    The metric includes labels for both the party and the participant to enable detailed analysis of unresponsive parties.
+    This metric is exposed by mediator nodes.
 
 ### JSON Ledger API OpenAPI/AsyncAPI Specification Updates
 We've corrected the OpenAPI and AsyncAPI specification files to properly reflect field requirements as defined in the Ledger API `.proto` files.
@@ -82,12 +102,17 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 - Added `keep-alive-without-calls` and `idle-timeout` config values in the keep alive gRPC client configuration. See https://grpc.io/docs/guides/keepalive/#keepalive-configuration-specification for details.
   Note that when `keep-alive-without-calls` is enabled, `permit-keep-alive-without-calls` must be enabled on the server side, and `permit-keep-alive-time` adjusted to allow for a potentially higher frequency of keep alives coming from the client.
 - Topology-Aware Package Selection (TAPS) refinement for handling inconsistent vetting states:
-  - The algorithm now considers a party's package vetting state only for packages required by that party in the interpreted transaction. 
+  - The algorithm now considers a party's package vetting state only for packages required by that party in the interpreted transaction.
     It starts with a minimal set of restrictions derived from the command's root nodes and progressively accumulates more restrictions over a configurable number of passes.
     This iterative process increases the likelihood of finding a valid package selection set for the routing of the transaction.
   - The maximum number of TAPS passes can be set at the request-level via the optional `taps_max_passes` field in `Commands` or `PrepareSubmissionRequest` messages.
     If not specified, the default value is taken from the participant configuration via `participants.participant.ledger-api.topology-aware-package-selection.max-passes-default` (defaults to `3`).
     A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
+- The Ledger JSON API `v2/package-vetting` endpoint exposes list functionality on the GET method by accepting a request body. This is not recommended by the HTTP specification, hence the endpoint is deprecated.
+  For consistency, the POST method, used for updating the vetting state, of the same endpoint is also deprecated.
+  In turn, two new endpoints are implemented to provide the same functionality:
+    - `v2/package-vetting/list` accepts a POST request with the same body as the deprecated GET `v2/package-vetting` endpoint and returns the list of vetted packages in the same format.
+    - `v2/package-vetting/update` accepts a POST request with the same body as the deprecated POST endpoint `v2/package-vetting` and returns the updated vetting state of the package in the same format.
 
 > [!IMPORTANT]
 > `keep-alive-without-calls` can have a negative performance impact. Be cautious when turning it on, and in general prefer using `idle-timeout` when possible.

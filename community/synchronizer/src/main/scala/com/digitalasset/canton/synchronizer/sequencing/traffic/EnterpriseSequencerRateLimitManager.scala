@@ -796,16 +796,17 @@ class EnterpriseSequencerRateLimitManager(
         .liftF(
           trafficConsumedStore.lookupLatestBeforeInclusiveForMember(member, timestamp)
         )
-      trafficStateO <- trafficConsumedO.traverse(
+      trafficState <-
         getTrafficState(
-          _,
+          trafficConsumedO.getOrElse(TrafficConsumed.init(member, timestamp)),
           member,
           Some(timestamp),
           lastSequencerEventTimestamp,
-          warnIfApproximate = true,
+          // If no lastSequencerEventTimestamp is known, don't warn
+          // This is assumed only to happen when we read the first block
+          warnIfApproximate = lastSequencerEventTimestamp.isDefined,
         )
-      )
-    } yield trafficStateO
+    } yield Some(trafficState)
 
   override def getStates(
       requestedMembers: Set[Member],
