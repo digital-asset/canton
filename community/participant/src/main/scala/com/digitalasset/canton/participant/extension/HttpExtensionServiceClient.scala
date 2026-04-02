@@ -62,6 +62,11 @@ class HttpExtensionServiceClient private[extension] (
   private lazy val resources = resourcesFactory.create(config)
   private lazy val oauthTokenClient: Option[HttpExtensionOAuthTokenClient] = config.auth match {
     case _: ExtensionServiceAuthConfig.OAuth =>
+      val tokenTransport = resources.tokenTransport.getOrElse {
+        throw new IllegalStateException(
+          s"OAuth extension '$extensionId' requires a dedicated token transport"
+        )
+      }
       val buildAssertion = oauthAssertionFactory.getOrElse {
         val assertionFactory = new HttpExtensionOAuthClientAssertionFactory(
           config = config,
@@ -71,7 +76,7 @@ class HttpExtensionServiceClient private[extension] (
       }
       Some(
         new HttpExtensionOAuthTokenClient(
-          transport = resources.tokenTransport.getOrElse(resources.resourceTransport),
+          transport = tokenTransport,
           requestBuilder = new HttpExtensionOAuthTokenRequestBuilder(config),
           buildClientAssertion = buildAssertion,
           responseParser = new HttpExtensionOAuthTokenResponseParser,
@@ -183,7 +188,7 @@ class HttpExtensionServiceClient private[extension] (
 
           case Left(error) if shouldRetry(error) && attempt < config.maxRetries.value =>
             val remainingTimeMs = deadlineMs - runtime.nowMillis()
-            if (!hasTimeForAnotherAttempt(remainingTimeMs)) {
+            if (remainingTimeMs <= 0) {
               logger.warn(
                 s"External call to extension '$extensionId' failed (attempt ${attempt + 1}/${config.maxRetries}): ${error.message} (status=${error.statusCode}). Cannot retry: insufficient time remaining (${remainingTimeMs}ms)"
               )
@@ -451,12 +456,6 @@ class HttpExtensionServiceClient private[extension] (
   private def totalTimeoutExceededError: ExtensionCallError =
     ExtensionCallError(504, "Total timeout exceeded", None)
 
-  private def hasTimeForAnotherAttempt(remainingTimeMs: Long): Boolean =
-    remainingTimeMs >= minimumTimeForAnotherAttemptMs
-
-  private def minimumTimeForAnotherAttemptMs: Long =
-    config.connectTimeout.underlying.toMillis + config.requestTimeout.underlying.toMillis
-
   private def preOutboundLocalFailure(exception: Exception): ExtensionCallError =
     ExtensionCallError(500, s"Unexpected error: ${exception.getMessage}", None)
 
@@ -477,10 +476,7 @@ class HttpExtensionServiceClient private[extension] (
   }
 
   private def calculateBackoff(attempt: Int, retryAfter: Option[Int], remainingTimeMs: Long): Long = {
-    val connectTimeoutMs = config.connectTimeout.underlying.toMillis
-    val requestTimeoutMs = config.requestTimeout.underlying.toMillis
-    val minTimeForNextRequest = connectTimeoutMs + requestTimeoutMs
-    val availableForBackoff = (remainingTimeMs - minTimeForNextRequest).max(0L)
+    val availableForBackoff = (remainingTimeMs - 1L).max(0L)
     val retryInitialDelayMs = config.retryInitialDelay.underlying.toMillis
     val retryMaxDelayMs = config.retryMaxDelay.underlying.toMillis
 

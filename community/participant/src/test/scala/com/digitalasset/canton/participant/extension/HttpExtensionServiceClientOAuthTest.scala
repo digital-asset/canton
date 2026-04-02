@@ -281,6 +281,20 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
     }
   }
 
+  private final class MissingTokenTransportResourcesFactory(
+      resourceTransport: HttpExtensionClientTransport
+  ) extends HttpExtensionClientResourcesFactory {
+    val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
+
+    override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+      createCalls += config
+      HttpExtensionClientResources(
+        resourceTransport = resourceTransport,
+        tokenTransport = None,
+      )
+    }
+  }
+
   private final class ThrowingResourcesFactory(exception: RuntimeException)
       extends HttpExtensionClientResourcesFactory {
     val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
@@ -1340,6 +1354,28 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       succeed
     }
 
+    "fail before outbound HTTP when OAuth resources omit the dedicated token transport" in {
+      val runtime = new FakeRuntime()
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(response(200, tokenResponse(accessToken = "unexpected-token", expiresIn = 120L))),
+          Right(response(200, "unexpected-success")),
+        )
+      )
+      val resourcesFactory = new MissingTokenTransportResourcesFactory(resourceTransport)
+      val client = makeClient(resourcesFactory, runtime, config = makeConfig(maxRetries = 0))
+
+      client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
+        result.isLeft shouldBe true
+        val error = result.left.value
+        error.statusCode shouldBe 500
+        error.requestId shouldBe None
+        error.message should include("requires a dedicated token transport")
+        resourcesFactory.createCalls should have size 1
+        resourceTransport.requests shouldBe empty
+      }
+    }
+
     "defer OAuth trust-material loading until the first OAuth use and map invalid trust collections before outbound HTTP" in {
       val runtime = new FakeRuntime()
       val invalidTrustCollectionFile = Paths.get("/definitely/missing-test-trust.pem")
@@ -1851,9 +1887,10 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
 
       client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
         result shouldBe Right("ok-after-outer-retry")
-        runtime.sleptMillis.toSeq shouldBe Seq(100L)
+        runtime.sleptMillis.toSeq shouldBe Seq(1000L)
         tokenTransport.requests should have size 2
         resourceTransport.requests should have size 3
+        resourceTransport.requests(2).timeout shouldBe Duration.ofMillis(200L)
         resourceTransport.requests.map(_.headers.toMap.apply("Authorization")).toSeq shouldBe Seq(
           "Bearer token-1",
           "Bearer token-2",
@@ -1862,7 +1899,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       }
     }
 
-    "stop retrying when the remaining budget cannot support another outer attempt" in {
+    "retry with a clamped timeout when positive budget remains for another outer attempt" in {
       val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2", "req-3"), jitter = 0.0)
       val tokenTransport = new FakeTransport(
         Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
@@ -1879,20 +1916,18 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
         runtime,
         config = makeConfig(
           requestTimeoutMillis = 600L,
-          maxTotalTimeoutMillis = 1000L,
+          maxTotalTimeoutMillis = 1050L,
           maxRetries = 1,
         ),
       )
 
       client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
-        result.isLeft shouldBe true
-        val error = result.left.value
-        error.statusCode shouldBe 503
-        error.message shouldBe "Service unavailable: service-down"
-        error.requestId shouldBe Some("req-2")
-        runtime.sleptMillis shouldBe empty
+        result shouldBe Right("unexpected-success")
+        runtime.sleptMillis.toSeq shouldBe Seq(1000L)
         tokenTransport.requests should have size 1
-        resourceTransport.requests should have size 1
+        resourceTransport.requests should have size 2
+        resourceTransport.requests.head.timeout shouldBe Duration.ofMillis(600L)
+        resourceTransport.requests(1).timeout shouldBe Duration.ofMillis(50L)
       }
     }
   }

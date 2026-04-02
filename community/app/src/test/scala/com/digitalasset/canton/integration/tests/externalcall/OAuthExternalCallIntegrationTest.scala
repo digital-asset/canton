@@ -23,18 +23,13 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
-sealed trait OAuthExternalCallIntegrationTest
-    extends CommunityIntegrationTest
-    with SharedEnvironment
-    with ExternalCallIntegrationTestBase
-    with MockServerSetup {
+trait OAuthExternalCallTestFiles {
+  protected val tokenEndpointPath: String = "/oauth2/token"
 
-  private val tokenEndpointPath = "/oauth2/token"
-
-  private lazy val trustCollectionFile: Path =
+  protected lazy val trustCollectionFile: Path =
     Paths.get(BaseTest.getResourcePath("tls/root-ca.crt"))
 
-  private lazy val oauthPrivateKeyFile: Path = {
+  protected lazy val oauthPrivateKeyFile: Path = {
     val pemPath = Paths.get(BaseTest.getResourcePath("tls/public-api.pem"))
     val pem = Files.readString(pemPath, StandardCharsets.US_ASCII)
     val encoded = pem.linesIterator
@@ -45,6 +40,26 @@ sealed trait OAuthExternalCallIntegrationTest
     Files.write(derFile, privateKeyBytes)
     derFile.toFile.deleteOnExit()
     derFile
+  }
+}
+
+sealed trait OAuthExternalCallIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with ExternalCallIntegrationTestBase
+    with MockServerSetup
+    with OAuthExternalCallTestFiles {
+
+  private lazy val missingOauthPrivateKeyFile: Path = {
+    val missingFile = Files.createTempFile("external-call-oauth-missing-key", ".der")
+    Files.deleteIfExists(missingFile)
+    missingFile
+  }
+
+  private lazy val missingTrustCollectionFile: Path = {
+    val missingFile = Files.createTempFile("external-call-oauth-missing-trust", ".crt")
+    Files.deleteIfExists(missingFile)
+    missingFile
   }
 
   override def environmentDefinition: EnvironmentDefinition =
@@ -81,6 +96,38 @@ sealed trait OAuthExternalCallIntegrationTest
           port = mockServerPort,
           privateKeyFile = oauthPrivateKeyFile,
           trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
+          extensionId = "retry-token-ext",
+          port = mockServerPort,
+          privateKeyFile = oauthPrivateKeyFile,
+          trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
+          extensionId = "terminal-token-ext",
+          port = mockServerPort,
+          privateKeyFile = oauthPrivateKeyFile,
+          trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
+          extensionId = "missing-key-ext",
+          port = mockServerPort,
+          privateKeyFile = missingOauthPrivateKeyFile,
+          trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
+          extensionId = "missing-trust-ext",
+          port = mockServerPort,
+          privateKeyFile = oauthPrivateKeyFile,
+          trustCollectionFile = missingTrustCollectionFile,
           participantName = "participant1",
           tokenEndpointPath = tokenEndpointPath,
         ),
@@ -252,6 +299,48 @@ sealed trait OAuthExternalCallIntegrationTest
       verifyCallCount("echo", 3)
     }
 
+    "retry the token endpoint through the outer retry loop before reaching the resource server" in {
+      implicit env =>
+        import env.*
+
+        resetMockServer()
+        val tokenAttemptCount = new AtomicInteger(0)
+        mockServer.setTokenHandler { _ =>
+          if (tokenAttemptCount.incrementAndGet() == 1) {
+            ExternalCallResponse(
+              statusCode = 503,
+              body = "Token endpoint temporarily unavailable".getBytes(StandardCharsets.UTF_8),
+              headers = Map("Retry-After" -> "0"),
+            )
+          } else {
+            ExternalCallResponse(
+              statusCode = 200,
+              body =
+                """{"access_token":"retry-token","token_type":"Bearer","expires_in":120}"""
+                  .getBytes(StandardCharsets.UTF_8),
+              headers = Map("Content-Type" -> "application/json"),
+            )
+          }
+        }
+        setupEchoHandler()
+
+        val contractId = createExternalCallContract()
+
+        val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          contractId.exerciseCallExternal(
+            "retry-token-ext",
+            "echo",
+            "00000000",
+            toHex("oauth-token-retry"),
+          ).commands.asScala.toSeq,
+        )
+
+        exerciseTx.getUpdateId should not be empty
+        verifyTokenCallCount(2)
+        verifyCallCount("echo", 2)
+      }
+
     "surface malformed token responses as final 502 errors before any resource call" in {
       implicit env =>
         import env.*
@@ -287,6 +376,93 @@ sealed trait OAuthExternalCallIntegrationTest
         verifyTokenCallCount(3)
         verifyCallCount("echo", 0)
     }
+
+    "surface terminal token-endpoint failures with the preserved HTTP status" in { implicit env =>
+      import env.*
+
+      resetMockServer()
+      mockServer.setTokenErrorHandler(403, "Forbidden by test token endpoint")
+
+      val contractId = createExternalCallContract()
+
+      loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+        participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          contractId.exerciseCallExternal(
+            "terminal-token-ext",
+            "echo",
+            "00000000",
+            toHex("oauth-terminal-token"),
+          ).commands.asScala.toSeq,
+        ),
+        logEntries => {
+          val renderedLogs = logEntries.map(_.toString).mkString("\n")
+          renderedLogs should include("status=403")
+          renderedLogs should include("Forbidden by test token endpoint")
+        }
+      )
+
+      verifyTokenCallCount(1)
+      verifyCallCount("echo", 0)
+    }
+
+    "fail on first use when the OAuth signing key cannot be loaded, before any outbound HTTP" in {
+      implicit env =>
+        import env.*
+
+        resetMockServer()
+
+        val contractId = createExternalCallContract()
+
+        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+          participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallExternal(
+              "missing-key-ext",
+              "echo",
+              "00000000",
+              toHex("oauth-missing-key"),
+            ).commands.asScala.toSeq,
+          ),
+          logEntries => {
+            val renderedLogs = logEntries.map(_.toString).mkString("\n")
+            renderedLogs should include("status=500")
+            renderedLogs should include("requestId=none")
+          }
+        )
+
+        verifyTokenCallCount(0)
+        verifyCallCount("echo", 0)
+      }
+
+    "fail on first use when OAuth trust material cannot be loaded, before any outbound HTTP" in {
+      implicit env =>
+        import env.*
+
+        resetMockServer()
+
+        val contractId = createExternalCallContract()
+
+        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+          participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallExternal(
+              "missing-trust-ext",
+              "echo",
+              "00000000",
+              toHex("oauth-missing-trust"),
+            ).commands.asScala.toSeq,
+          ),
+          logEntries => {
+            val renderedLogs = logEntries.map(_.toString).mkString("\n")
+            renderedLogs should include("status=500")
+            renderedLogs should include("requestId=none")
+          }
+        )
+
+        verifyTokenCallCount(0)
+        verifyCallCount("echo", 0)
+      }
   }
 }
 

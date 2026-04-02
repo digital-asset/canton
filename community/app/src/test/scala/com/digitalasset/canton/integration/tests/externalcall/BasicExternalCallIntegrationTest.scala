@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.externalcall.java.externalcalltest as E
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -239,6 +240,42 @@ sealed trait BasicExternalCallIntegrationTest
       )
       
       exerciseTx.getUpdateId should not be empty
+    }
+
+    "treat a non-OAuth resource 401 as terminal without replaying the request" in { implicit env =>
+      import env.*
+
+      resetMockServer()
+      mockServer.setErrorHandler("echo", 401, "Unauthorized")
+
+      val inputHex = toHex("plain-401")
+
+      val createTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        new E.ExternalCallContract(
+          alice.toProtoPrimitive,
+          java.util.List.of(),
+        ).create.commands.asScala.toSeq,
+      )
+      val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+      loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+        participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          contractId.exerciseCallExternal(
+            "test-ext",
+            "echo",
+            "00000000",
+            inputHex,
+          ).commands.asScala.toSeq,
+        ),
+        logEntries => {
+          val renderedLogs = logEntries.map(_.toString).mkString("\n")
+          renderedLogs should include("status=401")
+        }
+      )
+
+      verifyCallCount("echo", 1)
     }
   }
 }
