@@ -16,6 +16,7 @@ import com.digitalasset.canton.util.Mutex
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
+import scala.util.Try
 
 /** HTTP client implementation for extension services with retry logic,
   * JWT authentication, and TLS support.
@@ -60,6 +61,19 @@ class HttpExtensionServiceClient private[extension] (
     )
 
   private lazy val resources = resourcesFactory.create(config)
+  private lazy val oauthClientAssertionBuilder: Option[() => String] = config.auth match {
+    case _: ExtensionServiceAuthConfig.OAuth =>
+      Some(
+        oauthAssertionFactory.getOrElse {
+          val assertionFactory = new HttpExtensionOAuthClientAssertionFactory(
+            config = config,
+            nowMillis = () => runtime.nowMillis(),
+          )
+          () => assertionFactory.buildClientAssertion()
+        }
+      )
+    case _ => None
+  }
   private lazy val oauthTokenClient: Option[HttpExtensionOAuthTokenClient] = config.auth match {
     case _: ExtensionServiceAuthConfig.OAuth =>
       val tokenTransport = resources.tokenTransport.getOrElse {
@@ -67,12 +81,12 @@ class HttpExtensionServiceClient private[extension] (
           s"OAuth extension '$extensionId' requires a dedicated token transport"
         )
       }
-      val buildAssertion = oauthAssertionFactory.getOrElse {
-        val assertionFactory = new HttpExtensionOAuthClientAssertionFactory(
-          config = config,
-          nowMillis = () => runtime.nowMillis(),
-        )
-        () => assertionFactory.buildClientAssertion()
+      val buildAssertion = oauthClientAssertionBuilder match {
+        case Some(builder) => builder
+        case None =>
+          throw new IllegalStateException(
+            s"OAuth extension '$extensionId' requires an assertion builder"
+          )
       }
       Some(
         new HttpExtensionOAuthTokenClient(
@@ -99,6 +113,14 @@ class HttpExtensionServiceClient private[extension] (
   override def getDeclaredConfigHash(functionId: String): Option[String] =
     declaredConfigHashes.get(functionId)
 
+  private[extension] def startupLocalPreflight(): Either[String, Unit] =
+    Try {
+      val _ = resources.resourceTransport
+      val _ = oauthTokenClient
+      oauthClientAssertionBuilder.foreach(_.apply())
+      ()
+    }.toEither.left.map(error => s"Extension '$extensionId' startup local preflight failed: ${error.getMessage}")
+
   override def call(
       functionId: String,
       configHash: String,
@@ -118,36 +140,93 @@ class HttpExtensionServiceClient private[extension] (
     FutureUnlessShutdown.outcomeF {
       Future {
         blocking {
-          // Try to make a simple health check call
-          // For now, we just verify we can establish a connection
-          try {
-            val requestId = runtime.newRequestId()
-            val request = requestBuilder.buildValidationRequest(
-              timeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis),
-              requestId = requestId,
-            )
-
-            // We don't really care about the response, just that we can connect
-            val resp = resources.resourceTransport.send(request)
-
-            // Any response (even 4xx) means the service is reachable
-            if (resp.statusCode >= 200 && resp.statusCode < 600) {
-              ExtensionValidationResult.Valid
-            } else {
-              ExtensionValidationResult.Invalid(Seq(s"Unexpected response code: ${resp.statusCode}"))
-            }
-          } catch {
-            case e: java.net.ConnectException =>
-              ExtensionValidationResult.Invalid(Seq(s"Cannot connect to extension service: ${e.getMessage}"))
-            case e: java.net.http.HttpTimeoutException =>
-              ExtensionValidationResult.Invalid(Seq(s"Connection timeout: ${e.getMessage}"))
-            case e: Exception =>
-              ExtensionValidationResult.Invalid(Seq(s"Validation failed: ${e.getMessage}"))
-          }
+          validateConfigurationInternal()
         }
       }
     }
   }
+
+  private def validateConfigurationInternal(): ExtensionValidationResult = {
+    val timeout = Duration.ofMillis(config.connectTimeout.underlying.toMillis)
+    config.auth match {
+      case _: ExtensionServiceAuthConfig.OAuth =>
+        validateOAuthConfiguration(timeout)
+      case _ =>
+        validateReachabilityConfiguration(timeout, bearerToken = None, treat401And403AsInvalid = false)
+    }
+  }
+
+  private def validateOAuthConfiguration(timeout: Duration): ExtensionValidationResult =
+    try {
+      val tokenRequestId = runtime.newRequestId()
+      oauthTokenClient match {
+        case Some(tokenClient) =>
+          tokenClient.acquireToken(timeout = timeout, requestId = tokenRequestId) match {
+            case Right(token) =>
+              validateReachabilityConfiguration(
+                timeout = timeout,
+                bearerToken = Some(token.value),
+                treat401And403AsInvalid = true,
+              )
+            case Left(error) =>
+              ExtensionValidationResult.Invalid(
+                Seq(s"OAuth token acquisition failed: ${error.message}")
+              )
+          }
+        case None =>
+          ExtensionValidationResult.Invalid(Seq("OAuth token client not available"))
+      }
+    } catch {
+      case e: Exception =>
+        ExtensionValidationResult.Invalid(Seq(s"Validation failed: ${e.getMessage}"))
+    }
+
+  private def validateReachabilityConfiguration(
+      timeout: Duration,
+      bearerToken: Option[String],
+      treat401And403AsInvalid: Boolean,
+  ): ExtensionValidationResult =
+    try {
+      val requestId = runtime.newRequestId()
+      val request = requestBuilder.buildValidationRequest(
+        timeout = timeout,
+        requestId = requestId,
+        bearerToken = bearerToken,
+      )
+      val response = resources.resourceTransport.send(request)
+
+      response.statusCode match {
+        case 401 if treat401And403AsInvalid =>
+          ExtensionValidationResult.Invalid(
+            Seq(s"OAuth validation request failed with Unauthorized: ${responseBodyOrDefault(response, "Unauthorized")}")
+          )
+        case 403 if treat401And403AsInvalid =>
+          ExtensionValidationResult.Invalid(
+            Seq(s"OAuth validation request failed with Forbidden: ${responseBodyOrDefault(response, "Forbidden")}")
+          )
+        case code if code >= 200 && code < 600 =>
+          ExtensionValidationResult.Valid
+        case code =>
+          ExtensionValidationResult.Invalid(Seq(s"Unexpected response code: $code"))
+      }
+    } catch {
+      case e: java.net.ConnectException =>
+        ExtensionValidationResult.Invalid(Seq(s"Cannot connect to extension service: ${e.getMessage}"))
+      case e: java.net.http.HttpTimeoutException =>
+        ExtensionValidationResult.Invalid(Seq(s"Connection timeout: ${e.getMessage}"))
+      case e: Exception =>
+        ExtensionValidationResult.Invalid(Seq(s"Validation failed: ${e.getMessage}"))
+    }
+
+  private def responseBodyOrDefault(
+      response: HttpExtensionClientResponse,
+      defaultMessage: String,
+  ): String =
+    if (response.body.nonEmpty && response.body.length < 500) {
+      response.body
+    } else {
+      defaultMessage
+    }
 
   /** Make an HTTP call with retry logic */
   private def callWithRetry(

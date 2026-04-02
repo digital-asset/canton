@@ -692,6 +692,11 @@ class ParticipantNodeBootstrap(
           None
         }
 
+        _ <- EitherT(
+          extensionServiceManagerOpt
+            .fold(FutureUnlessShutdown.pure[Either[String, Unit]](Right(())))(_.initializeOnStartup())
+        )
+
         // Create external call handler from extension service manager for use in transaction reinterpretation
         externalCallHandler: Option[ExternalCallHandler] = extensionServiceManagerOpt.map(manager =>
           new ExtensionServiceExternalCallHandler(manager)

@@ -50,18 +50,6 @@ sealed trait OAuthExternalCallIntegrationTest
     with MockServerSetup
     with OAuthExternalCallTestFiles {
 
-  private lazy val missingOauthPrivateKeyFile: Path = {
-    val missingFile = Files.createTempFile("external-call-oauth-missing-key", ".der")
-    Files.deleteIfExists(missingFile)
-    missingFile
-  }
-
-  private lazy val missingTrustCollectionFile: Path = {
-    val missingFile = Files.createTempFile("external-call-oauth-missing-trust", ".crt")
-    Files.deleteIfExists(missingFile)
-    missingFile
-  }
-
   override def environmentDefinition: EnvironmentDefinition =
     externalCallEnvironmentDefinition(EnvironmentDefinition.P2S1M1_Manual)
       .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
@@ -112,22 +100,6 @@ sealed trait OAuthExternalCallIntegrationTest
           port = mockServerPort,
           privateKeyFile = oauthPrivateKeyFile,
           trustCollectionFile = trustCollectionFile,
-          participantName = "participant1",
-          tokenEndpointPath = tokenEndpointPath,
-        ),
-        enableOAuthExternalCallExtension(
-          extensionId = "missing-key-ext",
-          port = mockServerPort,
-          privateKeyFile = missingOauthPrivateKeyFile,
-          trustCollectionFile = trustCollectionFile,
-          participantName = "participant1",
-          tokenEndpointPath = tokenEndpointPath,
-        ),
-        enableOAuthExternalCallExtension(
-          extensionId = "missing-trust-ext",
-          port = mockServerPort,
-          privateKeyFile = oauthPrivateKeyFile,
-          trustCollectionFile = missingTrustCollectionFile,
           participantName = "participant1",
           tokenEndpointPath = tokenEndpointPath,
         ),
@@ -405,64 +377,6 @@ sealed trait OAuthExternalCallIntegrationTest
       verifyTokenCallCount(1)
       verifyCallCount("echo", 0)
     }
-
-    "fail on first use when the OAuth signing key cannot be loaded, before any outbound HTTP" in {
-      implicit env =>
-        import env.*
-
-        resetMockServer()
-
-        val contractId = createExternalCallContract()
-
-        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-          participant1.ledger_api.javaapi.commands.submit(
-            Seq(alice),
-            contractId.exerciseCallExternal(
-              "missing-key-ext",
-              "echo",
-              "00000000",
-              toHex("oauth-missing-key"),
-            ).commands.asScala.toSeq,
-          ),
-          logEntries => {
-            val renderedLogs = logEntries.map(_.toString).mkString("\n")
-            renderedLogs should include("status=500")
-            renderedLogs should include("requestId=none")
-          }
-        )
-
-        verifyTokenCallCount(0)
-        verifyCallCount("echo", 0)
-      }
-
-    "fail on first use when OAuth trust material cannot be loaded, before any outbound HTTP" in {
-      implicit env =>
-        import env.*
-
-        resetMockServer()
-
-        val contractId = createExternalCallContract()
-
-        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-          participant1.ledger_api.javaapi.commands.submit(
-            Seq(alice),
-            contractId.exerciseCallExternal(
-              "missing-trust-ext",
-              "echo",
-              "00000000",
-              toHex("oauth-missing-trust"),
-            ).commands.asScala.toSeq,
-          ),
-          logEntries => {
-            val renderedLogs = logEntries.map(_.toString).mkString("\n")
-            renderedLogs should include("status=500")
-            renderedLogs should include("requestId=none")
-          }
-        )
-
-        verifyTokenCallCount(0)
-        verifyCallCount("echo", 0)
-      }
   }
 }
 

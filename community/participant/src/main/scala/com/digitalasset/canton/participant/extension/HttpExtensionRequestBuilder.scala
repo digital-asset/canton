@@ -42,6 +42,7 @@ private[extension] final class HttpExtensionRequestBuilder(config: ExtensionServ
   def buildValidationRequest(
       timeout: Duration,
       requestId: String,
+      bearerToken: Option[String] = None,
   ): HttpExtensionClientRequest =
     buildCallRequest(
       functionId = "_health",
@@ -50,5 +51,6 @@ private[extension] final class HttpExtensionRequestBuilder(config: ExtensionServ
       mode = "validation",
       timeout = timeout,
       requestId = requestId,
+      bearerToken = bearerToken,
     )
 }

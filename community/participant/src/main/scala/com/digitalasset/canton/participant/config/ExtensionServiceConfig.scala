@@ -168,7 +168,7 @@ object ExtensionServiceAuthConfig {
   * @param echoMode If true, external calls return the input as output (for testing)
   */
 final case class EngineExtensionsConfig(
-    validateExtensionsOnStartup: Boolean = true,
+    validateExtensionsOnStartup: Boolean = false,
     failOnExtensionValidationError: Boolean = true,
     echoMode: Boolean = false,
 )

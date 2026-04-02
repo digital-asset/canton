@@ -63,6 +63,12 @@ class ExtensionServiceConfigOAuthTest extends AnyWordSpec with BaseTest {
 
   "ExtensionServiceConfig OAuth parsing" should {
 
+    "keep remote startup validation opt-in by default in EngineExtensionsConfig" in {
+      EngineExtensionsConfig.default.validateExtensionsOnStartup shouldBe false
+      EngineExtensionsConfig.default.failOnExtensionValidationError shouldBe true
+      EngineExtensionsConfig.default.echoMode shouldBe false
+    }
+
     "parse auth.type = none while preserving top-level resource fields" in {
       val result = load(
         renderExtensionConfig(

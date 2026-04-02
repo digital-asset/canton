@@ -73,12 +73,9 @@ class ExtensionServiceManager private[extension] (
   }
 
   // Extension clients by ID
-  private val clients: Map[String, ExtensionServiceClient] = {
+  private val httpClients: Map[String, HttpExtensionServiceClient] =
     if (engineExtensionsConfig.echoMode) {
-      logger.info("Extension services running in echo mode - external calls will return input as output")(TraceContext.empty)
-      extensionConfigs.map { case (id, _) =>
-        id -> new EchoExtensionServiceClient(id)
-      }
+      Map.empty
     } else {
       extensionConfigs.map { case (id, config) =>
         id -> new HttpExtensionServiceClient(
@@ -90,7 +87,16 @@ class ExtensionServiceManager private[extension] (
         )
       }
     }
-  }
+
+  private val clients: Map[String, ExtensionServiceClient] =
+    if (engineExtensionsConfig.echoMode) {
+      logger.info("Extension services running in echo mode - external calls will return input as output")(TraceContext.empty)
+      extensionConfigs.map { case (id, _) =>
+        id -> new EchoExtensionServiceClient(id)
+      }
+    } else {
+      httpClients
+    }
 
   /** Get a client for the specified extension.
     *
@@ -155,6 +161,46 @@ class ExtensionServiceManager private[extension] (
       ).map(_.toMap)
     }
   }
+
+  def initializeOnStartup()(implicit tc: TraceContext): FutureUnlessShutdown[Either[String, Unit]] =
+    if (engineExtensionsConfig.echoMode) {
+      FutureUnlessShutdown.pure(Right(()))
+    } else {
+      val localPreflightErrors = httpClients.toSeq.flatMap { case (id, client) =>
+        client.startupLocalPreflight().left.toOption.map(error => s"Extension '$id': $error")
+      }
+
+      if (localPreflightErrors.nonEmpty) {
+        val message =
+          s"Extension startup local preflight failed: ${localPreflightErrors.mkString("; ")}"
+        logger.error(message)
+        FutureUnlessShutdown.pure(Left(message))
+      } else if (!engineExtensionsConfig.validateExtensionsOnStartup) {
+        logger.info("Extension remote validation on startup is disabled")
+        FutureUnlessShutdown.pure(Right(()))
+      } else {
+        validateAllExtensions().map { results =>
+          val invalidResults = results.collect {
+            case (id, ExtensionValidationResult.Invalid(errors)) =>
+              s"Extension '$id': ${errors.mkString(", ")}"
+          }
+
+          if (invalidResults.isEmpty) {
+            Right(())
+          } else {
+            val message =
+              s"Extension startup remote validation failed: ${invalidResults.mkString("; ")}"
+            if (engineExtensionsConfig.failOnExtensionValidationError) {
+              logger.error(message)
+              Left(message)
+            } else {
+              logger.warn(message)
+              Right(())
+            }
+          }
+        }
+      }
+    }
 
   /** Check if the manager has any configured extensions. */
   def hasExtensions: Boolean = clients.nonEmpty

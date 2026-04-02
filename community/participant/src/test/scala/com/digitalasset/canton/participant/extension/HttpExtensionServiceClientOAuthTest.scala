@@ -1354,6 +1354,159 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       succeed
     }
 
+    "perform OAuth remote validation by acquiring a token and sending an authenticated _health request" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(Right(response(200, "ok")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      client.validateConfiguration().failOnShutdown.map { result =>
+        result shouldBe ExtensionValidationResult.Valid
+        tokenTransport.requests should have size 1
+        resourceTransport.requests should have size 1
+        resourceTransport.requests.head.headers should contain("Authorization" -> "Bearer token-1")
+        resourceTransport.requests.head.headers should contain("X-Daml-External-Function-Id" -> "_health")
+      }
+    }
+
+    "treat OAuth remote validation as invalid when token acquisition fails" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(401, "bad-client")))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(Right(response(200, "unexpected-success")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      client.validateConfiguration().failOnShutdown.map { result =>
+        result shouldBe ExtensionValidationResult.Invalid(
+          Seq("OAuth token acquisition failed: Unauthorized: bad-client")
+        )
+        tokenTransport.requests should have size 1
+        resourceTransport.requests shouldBe empty
+      }
+    }
+
+    "treat OAuth remote validation resource authorization failures as invalid" in {
+      Future
+        .traverse(Seq(401 -> "Unauthorized", 403 -> "Forbidden")) { case (statusCode, label) =>
+          withClue(s"statusCode=$statusCode") {
+            val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+            val tokenTransport = new FakeTransport(
+              Seq(Right(response(200, tokenResponse(accessToken = s"token-$statusCode", expiresIn = 120L))))
+            )
+            val resourceTransport = new FakeTransport(
+              Seq(Right(response(statusCode, "not-allowed")))
+            )
+            val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+            val client = makeClient(resourcesFactory, runtime)
+
+            client.validateConfiguration().failOnShutdown.map { result =>
+              result shouldBe ExtensionValidationResult.Invalid(
+                Seq(s"OAuth validation request failed with $label: not-allowed")
+              )
+              tokenTransport.requests should have size 1
+              resourceTransport.requests should have size 1
+              resourceTransport.requests.head.headers should contain(
+                "Authorization" -> s"Bearer token-$statusCode"
+              )
+            }
+          }
+        }
+        .map(_ => succeed)
+    }
+
+    "run startup local preflight without outbound HTTP and build one OAuth client assertion" in {
+      val runtime = new FakeRuntime()
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "unexpected-token", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(Right(response(200, "unexpected-success")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val assertionCalls = new AtomicInteger(0)
+      val client = makeClient(
+        resourcesFactory = resourcesFactory,
+        runtime = runtime,
+        oauthAssertionFactory = Some(() => {
+          assertionCalls.incrementAndGet()
+          "startup.jwt.value"
+        }),
+      )
+
+      client.startupLocalPreflight() shouldBe Right(())
+      assertionCalls.get() shouldBe 1
+      resourcesFactory.createCalls should have size 1
+      tokenTransport.requests shouldBe empty
+      resourceTransport.requests shouldBe empty
+    }
+
+    "fail startup local preflight on invalid OAuth signing key material before outbound HTTP" in {
+      val runtime = new FakeRuntime()
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "unexpected-token", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(Right(response(200, "unexpected-success")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(
+        resourcesFactory = resourcesFactory,
+        runtime = runtime,
+        oauthAssertionFactory = None,
+      )
+
+      val result = client.startupLocalPreflight()
+
+      result.left.value should include("Failed to load RSA private key from DER file")
+      resourcesFactory.createCalls should have size 1
+      tokenTransport.requests shouldBe empty
+      resourceTransport.requests shouldBe empty
+    }
+
+    "fail startup local preflight when OAuth resources omit the dedicated token transport" in {
+      val runtime = new FakeRuntime()
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(response(200, tokenResponse(accessToken = "unexpected-token", expiresIn = 120L))),
+          Right(response(200, "unexpected-success")),
+        )
+      )
+      val resourcesFactory = new MissingTokenTransportResourcesFactory(resourceTransport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      val result = client.startupLocalPreflight()
+
+      result.left.value should include("requires a dedicated token transport")
+      resourcesFactory.createCalls should have size 1
+      resourceTransport.requests shouldBe empty
+    }
+
+    "fail startup local preflight on invalid OAuth trust material before outbound HTTP" in {
+      val runtime = new FakeRuntime()
+      val invalidTrustCollectionFile = Paths.get("/definitely/missing-test-trust.pem")
+      val client = makeClient(
+        resourcesFactory = new JdkHttpExtensionClientResourcesFactory(loggerFactory),
+        runtime = runtime,
+        config = makeConfig(
+          tokenTrustCollectionFile = Some(invalidTrustCollectionFile),
+          maxRetries = 0,
+        ),
+      )
+
+      val result = client.startupLocalPreflight()
+
+      result.left.value should include(invalidTrustCollectionFile.toString)
+    }
+
     "fail before outbound HTTP when OAuth resources omit the dedicated token transport" in {
       val runtime = new FakeRuntime()
       val resourceTransport = new FakeTransport(

@@ -31,6 +31,7 @@ final case class ExternalCallRequest(
     mode: String, // "submission" or "validation"
     participantId: Option[String],
     requestId: Option[String],
+    headers: Map[String, Seq[String]],
 )
 
 /** Request data for OAuth token-endpoint handlers */
@@ -312,6 +313,9 @@ class MockExternalCallServer(
             mode = mode,
             participantId = participantId,
             requestId = requestId,
+            headers = headers.asScala.iterator.map { case (name, values) =>
+              name -> values.asScala.toSeq
+            }.toMap,
           )
 
           callCounts.updateWith(functionId) {

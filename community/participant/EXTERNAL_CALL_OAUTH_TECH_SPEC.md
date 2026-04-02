@@ -27,7 +27,8 @@ The implementation MUST NOT introduce:
 
 - a general auth-provider subsystem
 - a general transport abstraction for participant extensions
-- startup validation integration or participant startup gating as part of OAuth v1
+- unconditional remote startup validation or participant startup gating regardless of
+  `validateExtensionsOnStartup`
 - token-request `audience`
 - sender-constrained tokens or mTLS-bound access tokens
 - proactive or background token refresh
@@ -385,8 +386,36 @@ existing `echoMode` short-circuit already applies.
 
 `echoMode` MUST continue to short-circuit HTTP calls.
 
-The OAuth v1 specification MUST NOT define startup validation semantics for
-`validateExtensionsOnStartup` or `failOnExtensionValidationError`.
+### Startup Validation
+
+Startup validation MUST be split into local preflight and remote validation.
+
+For non-echo extensions, local preflight MUST run during participant startup, MUST send no
+outbound HTTP, and MUST fail startup on deterministic local initialization errors. Local preflight
+MUST cover:
+
+- resource-endpoint HTTP client construction
+- token-endpoint HTTP client construction for OAuth extensions
+- loading configured trust material
+- loading configured OAuth private key material
+- building one OAuth client assertion for OAuth extensions
+
+Local preflight failures MUST fail startup regardless of `validateExtensionsOnStartup` or
+`failOnExtensionValidationError`.
+
+`validateExtensionsOnStartup` MUST control only remote validation. If it is `false`, remote
+validation MUST be skipped. If it is `true`, remote validation MUST run for each configured
+non-echo extension.
+
+For `auth.type = none`, remote validation MAY remain a resource-endpoint reachability probe. For
+`auth.type = oauth`, remote validation MUST be auth-aware: it MUST acquire a token and then send a
+resource-endpoint validation request with that bearer token. Token acquisition failure, or a
+resource-endpoint `401` or `403`, MUST produce an invalid validation result. Other HTTP responses
+MAY be treated as a successful reachability result.
+
+`failOnExtensionValidationError` MUST apply only to remote validation results. If remote validation
+is enabled and this flag is `true`, any invalid remote validation result MUST fail startup. If the
+flag is `false`, invalid remote validation results MUST be logged and startup MUST continue.
 
 ## Example Configuration
 
@@ -500,6 +529,7 @@ The implementation MUST add or update unit tests for:
 - `401` invalidate-and-replay
 - key-loading failures
 - trust-material failures
+- local startup-preflight failures
 
 If implementation work uncovers a bug, the implementation MUST add a regression unit test for that
 failing scenario.
@@ -579,6 +609,9 @@ The integration suite MUST cover:
 - expiry-driven reacquisition on the next request
 - single `401` refresh-and-replay
 - submission and validation producing the same successful business response under OAuth
+- startup local-preflight failure for invalid local OAuth material
+- startup remote-validation behavior for `validateExtensionsOnStartup` and
+  `failOnExtensionValidationError`
 
 The integration suite MUST keep the existing non-OAuth `401` behavior covered separately. The
 OAuth-specific replay MUST NOT redefine non-OAuth `401` handling.
@@ -587,9 +620,9 @@ OAuth-specific replay MUST NOT redefine non-OAuth `401` handling.
 
 The OAuth v1 implementation MUST NOT define or require:
 
-- startup validation integration
-- participant startup gating
-- local-only startup validation as a required behavior
+- unconditional remote startup validation
+- participant startup gating when `validateExtensionsOnStartup = false`
+- startup health semantics beyond the local-preflight and remote-validation contract defined here
 - token-request `audience`
 - proactive refresh
 - background refresh tasks

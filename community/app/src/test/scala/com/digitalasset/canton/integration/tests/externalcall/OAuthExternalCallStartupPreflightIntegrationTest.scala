@@ -14,15 +14,15 @@ import com.digitalasset.canton.integration.{
 
 import java.nio.file.{Files, Path}
 
-sealed trait OAuthExternalCallStartupIntegrationTest
+sealed trait OAuthExternalCallStartupPreflightIntegrationTest
     extends CommunityIntegrationTest
     with IsolatedEnvironments
     with ExternalCallIntegrationTestBase
     with MockServerSetup
     with OAuthExternalCallTestFiles {
 
-  private lazy val missingOauthPrivateKeyFile: Path = {
-    val missingFile = Files.createTempFile("external-call-oauth-startup-missing-key", ".der")
+  private lazy val missingTrustCollectionFile: Path = {
+    val missingFile = Files.createTempFile("external-call-oauth-startup-missing-trust", ".crt")
     Files.deleteIfExists(missingFile)
     missingFile
   }
@@ -51,44 +51,27 @@ sealed trait OAuthExternalCallStartupIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         enableOAuthExternalCallExtension(
-          extensionId = "startup-ext",
+          extensionId = "startup-missing-trust-ext",
           port = startupMockServerPort,
           privateKeyFile = oauthPrivateKeyFile,
-          trustCollectionFile = trustCollectionFile,
+          trustCollectionFile = missingTrustCollectionFile,
           participantName = "participant1",
-          tokenEndpointPath = tokenEndpointPath,
-        ),
-        enableOAuthExternalCallExtension(
-          extensionId = "startup-missing-key-ext",
-          port = startupMockServerPort,
-          privateKeyFile = missingOauthPrivateKeyFile,
-          trustCollectionFile = trustCollectionFile,
-          participantName = "participant2",
           tokenEndpointPath = tokenEndpointPath,
         ),
       )
   }
 
-  "oauth external call startup behavior" should {
+  "oauth external call startup local preflight" should {
 
-    "skip startup remote validation when validateExtensionsOnStartup is false" in { implicit env =>
-      import env.*
-
-      participant1.start()
-
-      verifyTokenCallCount(0)
-      mockServer.getTotalCallCount shouldBe 0
-    }
-
-    "fail participant startup on invalid local OAuth key material before any startup HTTP" in {
+    "fail participant startup on invalid local OAuth trust material before any startup HTTP" in {
       implicit env =>
         import env.*
 
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          the[CommandFailure] thrownBy participant2.start(),
+          the[CommandFailure] thrownBy participant1.start(),
           logs => {
             logs.exists(_.message.contains("Extension startup local preflight failed")) shouldBe true
-            logs.exists(_.message.contains("startup-missing-key-ext")) shouldBe true
+            logs.exists(_.message.contains("startup-missing-trust-ext")) shouldBe true
           },
         )
 
@@ -98,13 +81,14 @@ sealed trait OAuthExternalCallStartupIntegrationTest
   }
 }
 
-class OAuthExternalCallStartupIntegrationTestH2 extends OAuthExternalCallStartupIntegrationTest {
+class OAuthExternalCallStartupPreflightIntegrationTestH2
+    extends OAuthExternalCallStartupPreflightIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-class OAuthExternalCallStartupIntegrationTestPostgres
-    extends OAuthExternalCallStartupIntegrationTest {
+class OAuthExternalCallStartupPreflightIntegrationTestPostgres
+    extends OAuthExternalCallStartupPreflightIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

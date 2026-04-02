@@ -126,5 +126,26 @@ class HttpExtensionRequestBuilderOAuthTest extends AnyWordSpec with BaseTest {
       )
       request.body shouldBe ""
     }
+
+    "attach Authorization to validation requests when an OAuth bearer token is supplied" in {
+      val builder = new HttpExtensionRequestBuilder(makeConfig(useTls = true))
+
+      val request = builder.buildValidationRequest(
+        timeout = Duration.ofMillis(500),
+        requestId = "req-1",
+        bearerToken = Some("access-token-1"),
+      )
+
+      request.uri shouldBe URI.create("https://localhost:8080/api/v1/external-call")
+      request.headers should contain theSameElementsInOrderAs Seq(
+        "Content-Type" -> "application/octet-stream",
+        "X-Daml-External-Function-Id" -> "_health",
+        "X-Daml-External-Config-Hash" -> "",
+        "X-Daml-External-Mode" -> "validation",
+        "X-Request-Id" -> "req-1",
+        "Authorization" -> "Bearer access-token-1",
+      )
+      request.body shouldBe ""
+    }
   }
 }

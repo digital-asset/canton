@@ -49,7 +49,8 @@ trait ExternalCallIntegrationTestBase {
     * default single-synchronizer fixtures.
     */
   protected def externalCallEnvironmentDefinition(
-      base: EnvironmentDefinition
+      base: EnvironmentDefinition,
+      startParticipantsInSetup: Boolean = true,
   ): EnvironmentDefinition =
     base
       .addConfigTransforms(ConfigTransforms.setProtocolVersion(ProtocolVersion.dev)*)
@@ -74,7 +75,9 @@ trait ExternalCallIntegrationTestBase {
       .withSetup { implicit env =>
         import env.*
 
-        participants.local.start()
+        if (startParticipantsInSetup) {
+          participants.local.start()
+        }
         sequencers.local.foreach(_.start())
         mediators.local.foreach(_.start())
 
@@ -107,7 +110,9 @@ trait ExternalCallIntegrationTestBase {
 
         sequencers.local.foreach(_.health.wait_for_initialized())
         mediators.local.foreach(_.health.wait_for_initialized())
-        participants.local.foreach(_.health.wait_for_initialized())
+        if (startParticipantsInSetup) {
+          participants.local.foreach(_.health.wait_for_initialized())
+        }
       }
 
   /** Port for the mock external call server - each test class should use a unique port */

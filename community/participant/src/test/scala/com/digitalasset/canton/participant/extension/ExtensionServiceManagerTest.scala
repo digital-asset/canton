@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.net.ConnectException
 import scala.collection.mutable
 import scala.concurrent.Future
 
@@ -55,6 +56,15 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       HttpExtensionClientResponse(statusCode = 200, body = body, headers = Map.empty)
   }
 
+  private final class ThrowingTransport(exception: Exception) extends HttpExtensionClientTransport {
+    val requests: mutable.ArrayBuffer[HttpExtensionClientRequest] = mutable.ArrayBuffer.empty
+
+    override def send(request: HttpExtensionClientRequest): HttpExtensionClientResponse = {
+      requests += request
+      throw exception
+    }
+  }
+
   private final class RecordingResourcesFactory extends HttpExtensionClientResourcesFactory {
     val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
     val createdResources: mutable.ArrayBuffer[HttpExtensionClientResources] = mutable.ArrayBuffer.empty
@@ -65,6 +75,26 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
         resourceTransport = new OkTransport(s"response-for-${config.name}")
       )
       createdResources += resources
+      resources
+    }
+  }
+
+  private final class ThrowingResourcesFactory(exception: RuntimeException)
+      extends HttpExtensionClientResourcesFactory {
+    val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
+
+    override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+      createCalls += config
+      throw exception
+    }
+  }
+
+  private final class FixedResourcesFactory(resources: HttpExtensionClientResources)
+      extends HttpExtensionClientResourcesFactory {
+    val createCalls: mutable.ArrayBuffer[ExtensionServiceConfig] = mutable.ArrayBuffer.empty
+
+    override def create(config: ExtensionServiceConfig): HttpExtensionClientResources = {
+      createCalls += config
       resources
     }
   }
@@ -207,7 +237,7 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       val resourcesFactory = new RecordingResourcesFactory
       val manager = new ExtensionServiceManager(
         Map("test-ext" -> makeConfig("test-ext")),
-        EngineExtensionsConfig.default,
+        EngineExtensionsConfig.default.copy(validateExtensionsOnStartup = true),
         resourcesFactory,
         StubRuntime,
         loggerFactory,
@@ -229,7 +259,7 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       val resourcesFactory = new RecordingResourcesFactory
       val manager = new ExtensionServiceManager(
         Map("ext1" -> makeConfig("ext1", 8080), "ext2" -> makeConfig("ext2", 8081)),
-        EngineExtensionsConfig.default,
+        EngineExtensionsConfig.default.copy(validateExtensionsOnStartup = true),
         resourcesFactory,
         StubRuntime,
         loggerFactory,
@@ -256,6 +286,101 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
 
       manager.validateAllExtensions().failOnShutdown.map { results =>
         results shouldBe empty
+      }
+    }
+
+    "fail startup initialization on local preflight errors even when remote validation is disabled" in {
+      val resourcesFactory = new ThrowingResourcesFactory(new RuntimeException("broken-local-material"))
+      val config = EngineExtensionsConfig(
+        echoMode = false,
+        validateExtensionsOnStartup = false,
+        failOnExtensionValidationError = false,
+      )
+      val manager = new ExtensionServiceManager(
+        Map("test-ext" -> makeConfig("test-ext")),
+        config,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      manager.initializeOnStartup().failOnShutdown.map { result =>
+        result.left.value should include("broken-local-material")
+        resourcesFactory.createCalls should have size 1
+      }
+    }
+
+    "skip startup remote validation when validateExtensionsOnStartup is false" in {
+      val transport = new ThrowingTransport(new ConnectException("should-not-run"))
+      val resourcesFactory = new FixedResourcesFactory(
+        HttpExtensionClientResources(resourceTransport = transport)
+      )
+      val config = EngineExtensionsConfig(
+        echoMode = false,
+        validateExtensionsOnStartup = false,
+        failOnExtensionValidationError = true,
+      )
+      val manager = new ExtensionServiceManager(
+        Map("test-ext" -> makeConfig("test-ext")),
+        config,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      manager.initializeOnStartup().failOnShutdown.map { result =>
+        result shouldBe Right(())
+        resourcesFactory.createCalls should have size 1
+        transport.requests shouldBe empty
+      }
+    }
+
+    "continue startup after invalid remote validation when failOnExtensionValidationError is false" in {
+      val transport = new ThrowingTransport(new ConnectException("issuer-down"))
+      val resourcesFactory = new FixedResourcesFactory(
+        HttpExtensionClientResources(resourceTransport = transport)
+      )
+      val config = EngineExtensionsConfig(
+        echoMode = false,
+        validateExtensionsOnStartup = true,
+        failOnExtensionValidationError = false,
+      )
+      val manager = new ExtensionServiceManager(
+        Map("test-ext" -> makeConfig("test-ext")),
+        config,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      manager.initializeOnStartup().failOnShutdown.map { result =>
+        result shouldBe Right(())
+        transport.requests should have size 1
+      }
+    }
+
+    "fail startup after invalid remote validation when failOnExtensionValidationError is true" in {
+      val transport = new ThrowingTransport(new ConnectException("issuer-down"))
+      val resourcesFactory = new FixedResourcesFactory(
+        HttpExtensionClientResources(resourceTransport = transport)
+      )
+      val config = EngineExtensionsConfig(
+        echoMode = false,
+        validateExtensionsOnStartup = true,
+        failOnExtensionValidationError = true,
+      )
+      val manager = new ExtensionServiceManager(
+        Map("test-ext" -> makeConfig("test-ext")),
+        config,
+        resourcesFactory,
+        StubRuntime,
+        loggerFactory,
+      )
+
+      manager.initializeOnStartup().failOnShutdown.map { result =>
+        result.left.value should include("test-ext")
+        result.left.value should include("issuer-down")
+        transport.requests should have size 1
       }
     }
 
