@@ -23,6 +23,11 @@ OAuth configuration MUST remain per extension.
 The implementation MUST replace the existing static bearer-token fields `jwt` and `jwtFile`. The
 implementation MUST NOT retain those fields as the long-term supported auth model.
 
+Compatibility handling for legacy `jwt` / `jwtFile` extension config is intentionally out of
+scope. Those fields existed only in an intermediate branch, were never used in production, and do
+not exist upstream. The implementation MUST NOT add translation or explicit rejection logic for
+them solely for branch-local compatibility.
+
 The implementation MUST NOT introduce:
 
 - a general auth-provider subsystem
