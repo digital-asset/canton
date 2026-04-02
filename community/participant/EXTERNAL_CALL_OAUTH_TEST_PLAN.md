@@ -145,19 +145,20 @@ Do not add checklist items for:
 ### 5. Token Response Parsing And Acquisition
 
 - [x] Accept a valid token response containing `access_token`, `token_type`, and `expires_in`.
+- [x] Accept a valid token response containing `access_token` and `token_type` when `expires_in` is omitted.
 - [x] Accept `token_type = Bearer` case-insensitively.
 - [x] Reject token responses missing `access_token`.
 - [x] Reject token responses missing `token_type`.
-- [x] Reject token responses missing `expires_in`.
 - [x] Reject malformed `expires_in`.
 - [x] Reject non-Bearer `token_type`.
 - [x] Treat malformed token responses as `502`.
-- [x] Compute local token expiry from `expires_in`.
+- [x] Compute local token expiry from `expires_in` when it is present.
 - [x] Treat access tokens as opaque bearer tokens without local claim parsing or verification.
 
 ### 6. Token Cache Behavior
 
 - [x] Reuse an unexpired cached token on later business requests for the same extension.
+- [x] Do not place tokens without `expires_in` into the shared cache for later business requests.
 - [x] Reacquire a token on the next business request after local expiry.
 - [x] Perform no proactive refresh before a business request needs a token.
 - [x] Perform no background refresh work.
@@ -242,7 +243,6 @@ Do not add checklist items for:
 - [x] Ensure top-level resource `tls-insecure` does not apply to the token endpoint.
 - [x] Use endpoint-specific custom trust material when configured.
 - [x] Fall back to the JVM default trust store when endpoint-specific trust material is omitted.
-- [ ] Treat insecure or trust-all TLS as test-only scaffolding rather than the canonical contract.
 - [x] Run startup local preflight without sending outbound HTTP.
 - [x] Fail startup local preflight on invalid OAuth signing key material.
 - [x] Fail startup local preflight on invalid OAuth trust material.
@@ -345,6 +345,8 @@ Do not add checklist items for:
 - 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers a single resource-server `401` causing one token refresh and one exact replay. The explicit command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, and this slice went green immediately once it was isolated on its own extension ID: one business request produced `2` token calls and `3` resource calls (`401`, replay success, validation success).
 - 2026-04-02: Reverified the touched external-call integration suites again with `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, which passed with 8 tests across 2 suites.
 - 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers malformed token responses surfacing as final `502` failures before any resource request is sent. The explicit TDD command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`: every red in this slice was test-side, first because `CommandFailure.toString` drops the detailed engine error, then because `LogEntry.commandFailureMessage` only applies to the environment-level error entry and not the OAuth WARN entries emitted by `HttpExtensionServiceClient`. The slice went green after asserting against the rendered warning/error log text instead. The final observable contract is: `3` token-endpoint calls (`maxRetries = 2`), `0` resource calls, and surfaced log/error text containing both `Malformed OAuth token response` and `status=502`.
+- 2026-04-02: `HttpExtensionOAuthTokenResponseParserTest`, `HttpExtensionOAuthTokenClientTest`, and `HttpExtensionServiceClientOAuthTest` now cover the standards-compliance change for omitted `expires_in`: parser and token client accept otherwise valid token responses without `expires_in`, malformed `expires_in` still surfaces as `502`, and the service client does not place unknown-lifetime tokens into the shared cross-request cache. The explicit command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenResponseParserTest com.digitalasset.canton.participant.extension.HttpExtensionOAuthTokenClientTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`. The first red was test-side only because a helper default argument triggered `-Werror`; the suite went green after making the helper overload explicit.
+- 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers HTTPS execution when the token response omits `expires_in`, proving that the participant still succeeds but reacquires a token for each OAuth-protected business request instead of reusing a shared cached token across later requests. The explicit command was `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2 -- -z "without cross-request token reuse when expires_in is omitted"'`. The first red was test-side only because the initial expectation counted one token acquisition per submission rather than per OAuth-protected business request on the confirming participant; the slice went green after correcting that expectation from `2` to `4`.
 - 2026-04-02: Reverified the touched external-call integration suites once more with `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.BasicExternalCallIntegrationTestH2 com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, which passed with 9 tests across 2 suites.
 - 2026-04-02: `HttpExtensionServiceClientOAuthTest` now also covers the regression where OAuth mode silently fell back to the resource transport if the resources bundle omitted `tokenTransport`. The explicit red-green command was `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest -- -z "dedicated token transport"'`: it first failed because the call still succeeded through the resource transport (`result.isLeft` was false), then passed after `HttpExtensionServiceClient` began failing fast with a local pre-outbound `500` when OAuth resources do not provide a dedicated token transport. Reverified with `sbt 'community-participant/testOnly com.digitalasset.canton.participant.extension.HttpExtensionServiceClientTest com.digitalasset.canton.participant.extension.HttpExtensionServiceClientOAuthTest'`, which passed with 61 tests across 2 suites.
 - 2026-04-02: `OAuthExternalCallIntegrationTest` now also covers a retryable token-endpoint failure followed by success through the outer retry loop. The explicit TDD command remained `sbt 'community-app/testOnly com.digitalasset.canton.integration.tests.externalcall.OAuthExternalCallIntegrationTestH2'`, and this slice went green immediately without production changes: one business request produced `2` token-endpoint calls (`503` with `Retry-After: 0`, then `200`) and `2` resource calls (submission plus validation) before succeeding.

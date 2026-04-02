@@ -15,13 +15,15 @@ class HttpExtensionOAuthTokenResponseParserTest extends AnyWordSpec with BaseTes
   private def tokenResponse(
       accessToken: Json = Json.fromString("opaque.access.token"),
       tokenType: Json = Json.fromString("Bearer"),
-      expiresIn: Json = Json.fromLong(120L),
-  ): String =
-    Json.obj(
-      "access_token" -> accessToken,
-      "token_type" -> tokenType,
-      "expires_in" -> expiresIn,
-    ).noSpaces
+      expiresIn: Option[Json] = Some(Json.fromLong(120L)),
+  ): String = {
+    val fields = Seq(
+      Some("access_token" -> accessToken),
+      Some("token_type" -> tokenType),
+      expiresIn.map("expires_in" -> _),
+    ).flatten
+    Json.obj(fields: _*).noSpaces
+  }
 
   "HttpExtensionOAuthTokenResponseParser" should {
 
@@ -37,7 +39,24 @@ class HttpExtensionOAuthTokenResponseParserTest extends AnyWordSpec with BaseTes
       result shouldBe Right(
         HttpExtensionOAuthAccessToken(
           value = "opaque.access.token",
-          expiresAtMillis = 121000L,
+          expiresAtMillis = Some(121000L),
+        )
+      )
+    }
+
+    "accept a valid token response without expires_in and leave local expiry unknown" in {
+      val parser = new HttpExtensionOAuthTokenResponseParser
+
+      val result = parser.parse(
+        response(tokenResponse(expiresIn = None)),
+        requestId = "req-1",
+        nowMillis = 1000L,
+      )
+
+      result shouldBe Right(
+        HttpExtensionOAuthAccessToken(
+          value = "opaque.access.token",
+          expiresAtMillis = None,
         )
       )
     }
@@ -67,7 +86,7 @@ class HttpExtensionOAuthTokenResponseParserTest extends AnyWordSpec with BaseTes
       result shouldBe Right(
         HttpExtensionOAuthAccessToken(
           value = jwtLikeButUnverified,
-          expiresAtMillis = 121000L,
+          expiresAtMillis = Some(121000L),
         )
       )
     }
@@ -84,11 +103,7 @@ class HttpExtensionOAuthTokenResponseParserTest extends AnyWordSpec with BaseTes
           "access_token" -> Json.fromString("opaque.access.token"),
           "expires_in" -> Json.fromLong(120L),
         ).noSpaces,
-        "missing expires_in" -> Json.obj(
-          "access_token" -> Json.fromString("opaque.access.token"),
-          "token_type" -> Json.fromString("Bearer"),
-        ).noSpaces,
-        "malformed expires_in" -> tokenResponse(expiresIn = Json.fromString("120")),
+        "malformed expires_in" -> tokenResponse(expiresIn = Some(Json.fromString("120"))),
         "non bearer token_type" -> tokenResponse(tokenType = Json.fromString("MAC")),
         "invalid json" -> """{"access_token": "opaque.access.token"""",
       )

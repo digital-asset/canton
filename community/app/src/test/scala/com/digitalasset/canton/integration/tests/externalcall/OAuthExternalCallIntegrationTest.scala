@@ -67,6 +67,14 @@ sealed trait OAuthExternalCallIntegrationTest
           tokenEndpointPath = tokenEndpointPath,
         ),
         enableOAuthExternalCallExtension(
+          extensionId = "no-expiry-ext",
+          port = mockServerPort,
+          privateKeyFile = oauthPrivateKeyFile,
+          trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
           extensionId = "wall-clock-ext",
           port = mockServerPort,
           privateKeyFile = oauthPrivateKeyFile,
@@ -242,6 +250,53 @@ sealed trait OAuthExternalCallIntegrationTest
       verifyTokenCallCount(1)
       verifyCallCount("echo", 4)
     }
+
+    "execute over HTTPS without cross-request token reuse when expires_in is omitted" in {
+      implicit env =>
+        import env.*
+
+        resetMockServer()
+        val issuedTokenCount = new AtomicInteger(0)
+        mockServer.setTokenHandler { _ =>
+          val tokenNumber = issuedTokenCount.incrementAndGet()
+          ExternalCallResponse(
+            statusCode = 200,
+            body =
+              s"""{"access_token":"no-expiry-token-$tokenNumber","token_type":"Bearer"}"""
+                .getBytes(StandardCharsets.UTF_8),
+            headers = Map("Content-Type" -> "application/json"),
+          )
+        }
+        setupEchoHandler()
+
+        val firstContractId = createExternalCallContract()
+        val secondContractId = createExternalCallContract()
+
+        val firstExerciseTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          firstContractId.exerciseCallExternal(
+            "no-expiry-ext",
+            "echo",
+            "00000000",
+            toHex("oauth-no-expiry-first"),
+          ).commands.asScala.toSeq,
+        )
+
+        val secondExerciseTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          secondContractId.exerciseCallExternal(
+            "no-expiry-ext",
+            "echo",
+            "00000000",
+            toHex("oauth-no-expiry-second"),
+          ).commands.asScala.toSeq,
+        )
+
+        firstExerciseTx.getUpdateId should not be empty
+        secondExerciseTx.getUpdateId should not be empty
+        verifyTokenCallCount(4)
+        verifyCallCount("echo", 4)
+      }
 
     "reacquire the token on the next business request after local expiry" in { implicit env =>
       import env.*

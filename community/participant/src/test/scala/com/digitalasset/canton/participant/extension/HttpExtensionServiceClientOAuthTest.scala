@@ -85,13 +85,21 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
 
   private def tokenResponse(
       accessToken: String,
+      expiresIn: Option[Long],
+  ): String = {
+    val fields = Seq(
+      Some("access_token" -> Json.fromString(accessToken)),
+      Some("token_type" -> Json.fromString("Bearer")),
+      expiresIn.map(value => "expires_in" -> Json.fromLong(value)),
+    ).flatten
+    Json.obj(fields: _*).noSpaces
+  }
+
+  private def tokenResponse(
+      accessToken: String,
       expiresIn: Long,
   ): String =
-    Json.obj(
-      "access_token" -> Json.fromString(accessToken),
-      "token_type" -> Json.fromString("Bearer"),
-      "expires_in" -> Json.fromLong(expiresIn),
-    ).noSpaces
+    tokenResponse(accessToken = accessToken, expiresIn = Some(expiresIn))
 
   private def response(
       statusCode: Int,
@@ -376,6 +384,38 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
         resourceTransport.requests should have size 2
         all(resourceTransport.requests.map(_.headers.toMap)) should contain(
           "Authorization" -> "Bearer token-1"
+        )
+      }
+    }
+
+    "avoid shared token-cache reuse across business requests when expires_in is omitted" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2", "req-3", "req-4"))
+      val tokenTransport = new FakeTransport(
+        Seq(
+          Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = None))),
+          Right(response(200, tokenResponse(accessToken = "token-2", expiresIn = None))),
+        )
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(response(200, "ok-1")),
+          Right(response(200, "ok-2")),
+        )
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(resourcesFactory, runtime)
+
+      for {
+        result1 <- client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown
+        result2 <- client.call("echo", "cafebabe", "feedface", "submission").failOnShutdown
+      } yield {
+        result1 shouldBe Right("ok-1")
+        result2 shouldBe Right("ok-2")
+        tokenTransport.requests should have size 2
+        resourceTransport.requests should have size 2
+        resourceTransport.requests.map(_.headers.toMap.apply("Authorization")) shouldBe Seq(
+          "Bearer token-1",
+          "Bearer token-2",
         )
       }
     }

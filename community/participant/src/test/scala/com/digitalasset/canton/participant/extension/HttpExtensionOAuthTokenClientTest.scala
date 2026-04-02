@@ -45,13 +45,15 @@ class HttpExtensionOAuthTokenClientTest extends AnyWordSpec with BaseTest {
   private def tokenResponse(
       accessToken: String = "opaque.access.token",
       tokenType: String = "Bearer",
-      expiresIn: Long = 120L,
-  ): String =
-    Json.obj(
-      "access_token" -> Json.fromString(accessToken),
-      "token_type" -> Json.fromString(tokenType),
-      "expires_in" -> Json.fromLong(expiresIn),
-    ).noSpaces
+      expiresIn: Option[Long] = Some(120L),
+  ): String = {
+    val fields = Seq(
+      Some("access_token" -> Json.fromString(accessToken)),
+      Some("token_type" -> Json.fromString(tokenType)),
+      expiresIn.map(value => "expires_in" -> Json.fromLong(value)),
+    ).flatten
+    Json.obj(fields: _*).noSpaces
+  }
 
   private def response(
       statusCode: Int,
@@ -108,7 +110,31 @@ class HttpExtensionOAuthTokenClientTest extends AnyWordSpec with BaseTest {
       result shouldBe Right(
         HttpExtensionOAuthAccessToken(
           value = "opaque.access.token",
-          expiresAtMillis = 121000L,
+          expiresAtMillis = Some(121000L),
+        )
+      )
+      transport.requests should have size 1
+      val request = transport.requests.head
+      request.timeout shouldBe Duration.ofSeconds(3)
+      request.headers should contain("X-Request-Id" -> "req-1")
+      request.body should include("client_assertion=signed.jwt.value")
+    }
+
+    "acquire a token successfully when the token response omits expires_in" in {
+      val transport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(expiresIn = None))))
+      )
+      val client = makeClient(transport)
+
+      val result = client.acquireToken(
+        timeout = Duration.ofSeconds(3),
+        requestId = "req-1",
+      )
+
+      result shouldBe Right(
+        HttpExtensionOAuthAccessToken(
+          value = "opaque.access.token",
+          expiresAtMillis = None,
         )
       )
       transport.requests should have size 1

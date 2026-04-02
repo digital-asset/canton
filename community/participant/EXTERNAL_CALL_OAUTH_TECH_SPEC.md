@@ -179,6 +179,10 @@ The implementation MUST satisfy all of the following:
 - An expired cached token MUST be replaced on the next business request that requires OAuth.
 - A cached token rejected by the resource server with `401` MUST be invalidated for one refresh-and-
   replay attempt.
+- Only access tokens with a locally known expiry instant MAY be placed into the shared cache.
+- If a token response omits `expires_in`, the implementation MUST still accept the token response if
+  it is otherwise valid, but MUST NOT place that token into the shared cache for later business
+  requests.
 - The implementation MUST NOT perform proactive refresh.
 - The implementation MUST NOT run a background refresh task.
 
@@ -219,14 +223,22 @@ The token response MUST contain:
 
 - `access_token`
 - `token_type`
+
+The token response MAY contain:
+
 - `expires_in`
 
 The implementation MUST reject the token response unless `token_type` equals `Bearer`,
 case-insensitively.
 
-The implementation MUST use `expires_in` to compute the local expiry instant used for cache reuse.
+If `expires_in` is present, the implementation MUST require it to be a non-negative integer and MUST
+use it to compute the local expiry instant used for cache reuse.
 
-A token response with missing or malformed required fields MUST be treated as malformed.
+If `expires_in` is absent, the implementation MUST treat the token lifetime as unknown and MUST NOT
+place that token into the shared cache for later business requests.
+
+A token response with missing or malformed required fields, or with a malformed `expires_in` field
+when present, MUST be treated as malformed.
 
 ## Client Assertion
 
@@ -319,7 +331,7 @@ directly at the top level:
 - `port`
 - `use-tls`
 - `trust-collection-file` when a custom trust collection is required
-- `tls-insecure` as an existing test-only compatibility field for the resource-server endpoint
+- `tls-insecure` as an existing non-production compatibility field for the resource-server endpoint
 - `connect-timeout`
 - `request-timeout`
 - `max-total-timeout`
@@ -348,7 +360,7 @@ The auth configuration MUST support:
   - `port`
   - `path`
   - `trust-collection-file` when a custom trust collection is required
-  - `tls-insecure` only when test scaffolding requires insecure TLS for the token endpoint
+  - `tls-insecure` as an explicit non-production compatibility override for the token endpoint
 - `client-id`
 - `private-key-file`
 - `key-id` when `kid` emission is required
@@ -381,8 +393,13 @@ The existing top-level `tls-insecure` field MUST apply only to the resource-serv
 
 The token endpoint MUST NOT inherit the resource-server `tls-insecure` setting.
 
-The implementation MUST treat insecure or trust-all TLS behavior as test-only scaffolding. The
-canonical OAuth contract MUST NOT rely on insecure TLS.
+`tls-insecure` support for either endpoint MUST remain an explicit opt-in compatibility mode for
+test and other non-production deployments that cannot provide a certificate chain trusted by the
+participant.
+
+The canonical secure OAuth contract MUST use normal certificate validation, either with
+endpoint-specific `trust-collection-file` values or the JVM default trust store, and MUST NOT rely
+on `tls-insecure`.
 
 ### Global Extension Settings
 
@@ -601,10 +618,10 @@ OAuth integration tests MUST terminate HTTPS for both the resource endpoint and 
 OAuth integration tests MAY satisfy TLS verification either by:
 
 - providing explicit test trust material through `trust-collection-file`
-- using the test-only `tls-insecure` and `token-endpoint.tls-insecure` scaffolding
+- using the non-production `tls-insecure` and `token-endpoint.tls-insecure` compatibility mode
 
 The canonical example configuration remains production-oriented and therefore MUST NOT rely on the
-test-only insecure TLS flags.
+non-production insecure TLS flags.
 
 The integration suite MUST cover:
 

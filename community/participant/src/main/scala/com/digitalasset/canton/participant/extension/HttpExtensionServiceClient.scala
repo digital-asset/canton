@@ -452,7 +452,7 @@ class HttpExtensionServiceClient private[extension] (
         }
         val result = tryAcquireOAuthToken(tokenClient, deadlineMs)
         oauthTokenLock.exclusive {
-          result.foreach(token => cachedOAuthToken.set(Some(token)))
+          result.foreach(token => cachedOAuthToken.set(token.expiresAtMillis.map(_ => token)))
           inFlightOAuthTokenAcquisition.set(None)
         }
         val _ = promise.trySuccess(result)
@@ -463,7 +463,7 @@ class HttpExtensionServiceClient private[extension] (
     oauthTokenLock.exclusive {
       val nowMillis = runtime.nowMillis()
       cachedOAuthToken.get() match {
-        case Some(token) if token.expiresAtMillis > nowMillis =>
+        case Some(token) if token.expiresAtMillis.exists(_ > nowMillis) =>
           OAuthTokenAcquisitionResolution.Cached(token)
         case None =>
           inFlightOAuthTokenAcquisition.get() match {
