@@ -210,6 +210,31 @@ that the token-endpoint URI is used both as:
 
 and that no separate audience override is supported in v1.
 
+### Discussion Outcome
+
+On 2026-04-02, this finding was reviewed again against repo-local precedent with upstream-friendliness
+as the deciding criterion.
+
+The strongest relevant precedent elsewhere in Canton is that configurable audience handling exists
+mainly for inbound JWT validation, where Canton checks presented tokens against configured target
+audience values. No stronger repo-local convention was found that would require outbound JWT emitters
+to expose an audience override by default.
+
+For outbound token generation, the current `external_call` implementation, tests, and local spec are
+already aligned on a narrow v1 contract: client assertion `aud` equals the token endpoint URI and no
+separate override is supported.
+
+### Decision
+
+Finding 3 remains **accepted v1 scope and should stay as implemented unless a concrete provider
+interoperability requirement forces expansion**.
+
+The repo decision is:
+
+- keep `aud = <token-endpoint URI>` in the client assertion
+- do not add an assertion-audience override in v1
+- do not reopen this as a defect unless a real provider-compatibility need justifies broader scope
+
 ### Status
 
 Accepted v1 design constraint. This is only a problem if broader provider interoperability becomes a
