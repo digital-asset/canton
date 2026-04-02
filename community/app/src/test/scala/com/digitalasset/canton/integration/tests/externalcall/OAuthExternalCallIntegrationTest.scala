@@ -366,7 +366,11 @@ sealed trait OAuthExternalCallIntegrationTest
       }
       mockServer.setHandler("echo") { req =>
         if (resourceCallCount.incrementAndGet() == 1) {
-          ExternalCallResponse.error(401, "Unauthorized")
+          ExternalCallResponse(
+            statusCode = 401,
+            body = "Unauthorized".getBytes(StandardCharsets.UTF_8),
+            headers = Map("WWW-Authenticate" -> """Bearer error="invalid_token""""),
+          )
         } else {
           ExternalCallResponse.ok(req.input)
         }

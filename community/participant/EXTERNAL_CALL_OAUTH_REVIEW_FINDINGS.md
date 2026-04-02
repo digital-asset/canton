@@ -59,7 +59,7 @@ necessarily defects relative to the narrower v1 contract adopted in this reposit
 | 1 | Insecure TLS (`tls-insecure`) support under OAuth | Resolved by spec clarification |
 | 2 | `expires_in` treated as mandatory in token responses | Resolved by conservative RFC-compatible fix |
 | 3 | Client assertion `aud` fixed to token endpoint URI | Accepted v1 design constraint |
-| 4 | Resource-server `401` replay does not inspect `WWW-Authenticate` | Open RFC 6750 mismatch |
+| 4 | Resource-server `401` replay does not inspect `WWW-Authenticate` | Resolved by narrowed replay trigger |
 | 5 | Token endpoint path forbids query strings | Open interoperability restriction |
 
 ## Finding 1: Insecure TLS Support Under OAuth
@@ -263,18 +263,49 @@ RFC 6750 defines bearer-token error signaling through the `WWW-Authenticate` cha
 does not always mean “refresh the token and retry”; it can also indicate another authorization
 problem or an application-specific unauthorized response.
 
-### Current Interpretation
+### Repo Precedent Review
 
-This is a real RFC 6750 mismatch. The current implementation uses a simplified rule:
+No existing HTTP code in the repo parses `WWW-Authenticate` challenges generically. However, the
+closest repo-local precedent, the sequencer gRPC authentication path, does not retry on a raw auth
+failure status alone. It invalidates tokens broadly on auth failure, but retries only when a more
+specific structured auth signal indicates that the token is missing or expired.
 
-- if OAuth is enabled and the resource response is `401`, attempt one token refresh and replay
+That precedent favors a narrow replay rule here rather than a blanket raw-`401` replay rule and
+also argues against building a generic reusable HTTP auth-challenge framework just for
+`external_call`.
 
-That may be acceptable for tightly controlled extension/resource deployments, but it is broader than
-the bearer-token challenge semantics defined in RFC 6750.
+### Decision
+
+Finding 4 is **resolved by narrowing the replay trigger**, not by leaving the broader `401`
+behavior in place.
+
+The repo decision is:
+
+- keep plain resource `401` terminal by default
+- allow one OAuth-specific invalidate-refresh-replay only when the response carries
+  `WWW-Authenticate: Bearer error="invalid_token"`
+- do not replay on missing `WWW-Authenticate`
+- do not replay on non-Bearer challenges
+- do not replay on plain `Bearer` without `error="invalid_token"`
+- do not replay on `Bearer error="insufficient_scope"`
+
+This is the closest fit to existing Canton retry conventions: retry only when a more specific auth
+signal is present than the raw unauthorized status alone.
+
+### Follow-up Applied
+
+The following repo-local changes were made to resolve this finding:
+
+- `community/participant/src/main/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClient.scala`
+- `community/participant/src/test/scala/com/digitalasset/canton/participant/extension/HttpExtensionServiceClientOAuthTest.scala`
+- `community/app/src/test/scala/com/digitalasset/canton/integration/tests/externalcall/OAuthExternalCallIntegrationTest.scala`
+- `community/participant/EXTERNAL_CALL_OAUTH_TECH_SPEC.md`
+- `community/participant/EXTERNAL_CALL_OAUTH_TEST_PLAN.md`
 
 ### Status
 
-Open.
+Resolved on 2026-04-02 by requiring an explicit bearer `invalid_token` challenge before the
+auth-local replay path is allowed to run.
 
 ## Finding 5: Token Endpoint Path Forbids Query Strings
 

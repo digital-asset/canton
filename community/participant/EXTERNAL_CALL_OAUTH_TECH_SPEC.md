@@ -146,18 +146,22 @@ One outer attempt MUST execute as follows:
    `min(configured request-timeout, remaining budget)`.
 5. The implementation MUST send the resource request.
 6. If the resource response is not `401`, that response MUST be the outcome of the outer attempt.
-7. If the resource response is `401` and OAuth is enabled:
+7. If the resource response is `401`, OAuth is enabled, and the response carries a
+   `WWW-Authenticate` bearer challenge with `error="invalid_token"`:
    - the implementation MUST invalidate the cached token only if it is the same token that was sent
      on the rejected request
    - the implementation MUST obtain a fresh token against the same outer deadline
    - the implementation MUST replay the resource request exactly once with the fresh token
-8. The implementation MUST feed the replay result, or the original non-`401` result, back into the
+8. If the resource response is `401` but does not carry that explicit bearer `invalid_token`
+   challenge, the original `401` response MUST be the outcome of the outer attempt.
+9. The implementation MUST feed the replay result, or the original non-replayed result, back into the
    existing outer retry loop.
 
 The auth-local replay MUST NOT consume a `maxRetries` slot.
 
 `401` MUST be the only resource response that triggers OAuth-specific recovery after a resource
-request has been sent.
+request has been sent, and within `401` responses only the explicit bearer `invalid_token`
+challenge MAY trigger that recovery.
 
 After the auth-local replay, the implementation MUST resume normal status handling:
 
@@ -177,8 +181,9 @@ The implementation MUST satisfy all of the following:
 
 - A cached access token MUST be reused while the client considers it unexpired.
 - An expired cached token MUST be replaced on the next business request that requires OAuth.
-- A cached token rejected by the resource server with `401` MUST be invalidated for one refresh-and-
-  replay attempt.
+- A cached token rejected by the resource server with `401` plus
+  `WWW-Authenticate: Bearer error="invalid_token"` MUST be invalidated for one refresh-and-replay
+  attempt.
 - Only access tokens with a locally known expiry instant MAY be placed into the shared cache.
 - If a token response omits `expires_in`, the implementation MUST still accept the token response if
   it is otherwise valid, but MUST NOT place that token into the shared cache for later business
@@ -505,8 +510,8 @@ The implementation MUST apply the following OAuth-specific mappings:
 - local signing failure: `500`
 - local key-loading failure: `500`
 - local auth-material failure: `500`
-- resource-server token rejection after the auth-local replay is exhausted: `401` with message
-  `Unauthorized - OAuth token rejected by resource server`
+- resource-server bearer `invalid_token` rejection after the auth-local replay is exhausted: `401`
+  with message `Unauthorized - OAuth token rejected by resource server`
 
 The returned `requestId` MUST be the request ID of the outbound HTTP interaction that produced the
 returned error.
@@ -523,7 +528,7 @@ The implementation MUST emit structured logs for:
 - token acquisition failure
 - cache reuse
 - token reacquisition
-- token invalidation after resource-server `401`
+- token invalidation after resource-server bearer `invalid_token` `401`
 - final external-call failure classification
 
 The implementation MUST NOT log:
@@ -629,7 +634,7 @@ The integration suite MUST cover:
 - end-to-end OAuth success
 - cached-token reuse across multiple business requests
 - expiry-driven reacquisition on the next request
-- single `401` refresh-and-replay
+- single bearer `invalid_token` `401` refresh-and-replay
 - submission and validation producing the same successful business response under OAuth
 - startup local-preflight failure for invalid local OAuth material
 - startup remote-validation behavior for `validateExtensionsOnStartup` and

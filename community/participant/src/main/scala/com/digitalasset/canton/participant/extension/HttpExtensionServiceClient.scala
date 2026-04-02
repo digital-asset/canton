@@ -407,7 +407,17 @@ class HttpExtensionServiceClient private[extension] (
       response: HttpExtensionClientResponse,
       bearerToken: Option[String],
   ): Boolean =
-    response.statusCode == 401 && bearerToken.nonEmpty && oauthTokenClient.nonEmpty
+    response.statusCode == 401 &&
+      bearerToken.nonEmpty &&
+      oauthTokenClient.nonEmpty &&
+      hasBearerInvalidTokenChallenge(response)
+
+  private def hasBearerInvalidTokenChallenge(response: HttpExtensionClientResponse): Boolean =
+    response.headers.iterator.collect {
+      case (name, values) if name.equalsIgnoreCase("WWW-Authenticate") => values
+    }.flatten.exists { headerValue =>
+      HttpExtensionServiceClient.BearerInvalidTokenChallengePattern.findFirstIn(headerValue).nonEmpty
+    }
 
   private def invalidateCachedOAuthTokenIfMatches(sentToken: String)(implicit tc: TraceContext): Unit =
     oauthTokenLock.exclusive {
@@ -579,6 +589,10 @@ class HttpExtensionServiceClient private[extension] (
 }
 
 private[extension] object HttpExtensionServiceClient {
+  // Keep OAuth-specific replay conservative: only explicit Bearer invalid_token challenges qualify.
+  private val BearerInvalidTokenChallengePattern =
+    """(?i)(?:^|,)\s*Bearer\b.*\berror\s*=\s*"invalid_token"""".r
+
   sealed trait OAuthTokenAcquisitionResolution
 
   sealed trait OAuthTokenAcquisitionStartReason

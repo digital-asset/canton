@@ -108,6 +108,13 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
   ): HttpExtensionClientResponse =
     HttpExtensionClientResponse(statusCode, body, headers)
 
+  private def invalidTokenUnauthorizedResponse(body: String): HttpExtensionClientResponse =
+    response(
+      401,
+      body,
+      Map("WWW-Authenticate" -> Seq("""Bearer error="invalid_token"""")),
+    )
+
   private final class ScriptedHttpsOAuthServer(
       val port: Int,
       val tokenRequests: CopyOnWriteArrayList[String],
@@ -850,8 +857,8 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       val resourceTransport = new FakeTransport(
         outcomes = Seq(
           Right(response(200, "ok-initial")),
-          Right(response(401, "unauthorized-a")),
-          Right(response(401, "unauthorized-b")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-a")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-b")),
           Right(response(200, "ok-a")),
           Right(response(200, "ok-b")),
         ),
@@ -919,8 +926,8 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       val resourceTransport = new FakeTransport(
         outcomes = Seq(
           Right(response(200, "ok-initial")),
-          Right(response(401, "unauthorized-a")),
-          Right(response(401, "unauthorized-b")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-a")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-b")),
           Right(response(200, "ok-after-retry")),
         ),
         onSend = request => {
@@ -976,7 +983,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(200, "ok-replayed")),
           Right(response(200, "ok-reused")),
         )
@@ -1032,7 +1039,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
             case 2 =>
               lateUnauthorizedStarted.trySuccess(())
               Await.result(releaseLateUnauthorized.future, 5.seconds)
-              response(401, "late-unauthorized")
+              invalidTokenUnauthorizedResponse("late-unauthorized")
             case 3 =>
               response(200, "ok-fresh")
             case 4 =>
@@ -1085,8 +1092,8 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized-1")),
-          Right(response(401, "unauthorized-2")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-1")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-2")),
         )
       )
       val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
@@ -1118,7 +1125,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(200, "ok-replayed")),
         )
       )
@@ -1166,6 +1173,135 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       }
     }
 
+    "treat a resource 401 without WWW-Authenticate as terminal without replaying" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(Right(response(401, "unauthorized")))
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(
+        resourcesFactory,
+        runtime,
+        config = makeConfig(maxRetries = 0),
+      )
+
+      client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
+        result.isLeft shouldBe true
+        val error = result.left.value
+        error.statusCode shouldBe 401
+        error.message shouldBe "Unauthorized: unauthorized"
+        error.requestId shouldBe Some("req-2")
+        tokenTransport.requests should have size 1
+        resourceTransport.requests should have size 1
+        resourceTransport.requests.head.headers should contain("Authorization" -> "Bearer token-1")
+      }
+    }
+
+    "treat a resource 401 with a non-Bearer challenge as terminal without replaying" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(
+            response(
+              401,
+              "unauthorized",
+              Map("WWW-Authenticate" -> Seq("""Basic realm="external-call"""")),
+            )
+          )
+        )
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(
+        resourcesFactory,
+        runtime,
+        config = makeConfig(maxRetries = 0),
+      )
+
+      client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
+        result.isLeft shouldBe true
+        val error = result.left.value
+        error.statusCode shouldBe 401
+        error.message shouldBe "Unauthorized: unauthorized"
+        error.requestId shouldBe Some("req-2")
+        tokenTransport.requests should have size 1
+        resourceTransport.requests should have size 1
+      }
+    }
+
+    "treat a resource 401 with a Bearer challenge but no invalid_token error as terminal without replaying" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(
+            response(
+              401,
+              "unauthorized",
+              Map("WWW-Authenticate" -> Seq("Bearer")),
+            )
+          )
+        )
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(
+        resourcesFactory,
+        runtime,
+        config = makeConfig(maxRetries = 0),
+      )
+
+      client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
+        result.isLeft shouldBe true
+        val error = result.left.value
+        error.statusCode shouldBe 401
+        error.message shouldBe "Unauthorized: unauthorized"
+        error.requestId shouldBe Some("req-2")
+        tokenTransport.requests should have size 1
+        resourceTransport.requests should have size 1
+      }
+    }
+
+    "treat a resource 401 with bearer insufficient_scope as terminal without replaying" in {
+      val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2"))
+      val tokenTransport = new FakeTransport(
+        Seq(Right(response(200, tokenResponse(accessToken = "token-1", expiresIn = 120L))))
+      )
+      val resourceTransport = new FakeTransport(
+        Seq(
+          Right(
+            response(
+              401,
+              "insufficient-scope",
+              Map("WWW-Authenticate" -> Seq("""Bearer error="insufficient_scope"""")),
+            )
+          )
+        )
+      )
+      val resourcesFactory = new FakeResourcesFactory(resourceTransport, tokenTransport)
+      val client = makeClient(
+        resourcesFactory,
+        runtime,
+        config = makeConfig(maxRetries = 0),
+      )
+
+      client.call("echo", "cafebabe", "deadbeef", "submission").failOnShutdown.map { result =>
+        result.isLeft shouldBe true
+        val error = result.left.value
+        error.statusCode shouldBe 401
+        error.message shouldBe "Unauthorized: insufficient-scope"
+        error.requestId shouldBe Some("req-2")
+        tokenTransport.requests should have size 1
+        resourceTransport.requests should have size 1
+      }
+    }
+
     "allow the OAuth-specific 401 replay even when maxRetries is zero" in {
       val runtime = new FakeRuntime(requestIds = Seq("req-1", "req-2", "req-3", "req-4"))
       val tokenTransport = new FakeTransport(
@@ -1176,7 +1312,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(200, "ok-replayed")),
         )
       )
@@ -1205,7 +1341,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(503, "service-down")),
           Right(response(200, "ok-after-outer-retry")),
         )
@@ -1295,7 +1431,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       val resourceRequests = new AtomicInteger(0)
       val resourceTransport = new FakeTransport(
         outcomes = Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(200, "ok-replayed")),
         ),
         onSend = _ =>
@@ -2007,9 +2143,9 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       )
       val resourceTransport = new FakeTransport(
         Seq(
-          Right(response(401, "unauthorized-1")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-1")),
           Right(response(503, "service-down")),
-          Right(response(401, "unauthorized-2")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized-2")),
           Right(response(200, "ok-after-final-replay")),
         )
       )
@@ -2055,7 +2191,7 @@ class HttpExtensionServiceClientOAuthTest extends AsyncWordSpec with BaseTest {
       val resourceRequests = new AtomicInteger(0)
       val resourceTransport = new FakeTransport(
         outcomes = Seq(
-          Right(response(401, "unauthorized")),
+          Right(invalidTokenUnauthorizedResponse("unauthorized")),
           Right(response(503, "service-down")),
           Right(response(200, "ok-after-outer-retry")),
         ),
