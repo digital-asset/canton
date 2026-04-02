@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.daml.jwt.{Jwt, JwtDecoder}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.externalcall.java.externalcalltest as E
@@ -14,11 +15,13 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
+import io.circe.parser.parse
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
+import java.net.URLDecoder
 import java.security.spec.PKCS8EncodedKeySpec
-import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
@@ -57,6 +60,14 @@ sealed trait OAuthExternalCallIntegrationTest
         ConfigTransforms.useStaticTime,
         enableOAuthExternalCallExtension(
           extensionId = "test-ext",
+          port = mockServerPort,
+          privateKeyFile = oauthPrivateKeyFile,
+          trustCollectionFile = trustCollectionFile,
+          participantName = "participant1",
+          tokenEndpointPath = tokenEndpointPath,
+        ),
+        enableOAuthExternalCallExtension(
+          extensionId = "wall-clock-ext",
           port = mockServerPort,
           privateKeyFile = oauthPrivateKeyFile,
           trustCollectionFile = trustCollectionFile,
@@ -142,7 +153,59 @@ sealed trait OAuthExternalCallIntegrationTest
     JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
   }
 
+  private def formField(formBody: String, fieldName: String): Option[String] =
+    formBody
+      .split("&")
+      .toSeq
+      .flatMap(_.split("=", 2) match {
+        case Array(name, value) => Some(name -> value)
+        case Array(name) => Some(name -> "")
+        case _ => None
+      })
+      .collectFirst {
+        case (encodedName, encodedValue)
+            if URLDecoder.decode(encodedName, StandardCharsets.UTF_8) == fieldName =>
+          URLDecoder.decode(encodedValue, StandardCharsets.UTF_8)
+      }
+
+  private def decodeAssertionPayload(assertion: String) =
+    parse(JwtDecoder.decode(Jwt(assertion)).valueOrFail("decode JWT assertion").payload)
+      .valueOrFail("parse JWT assertion payload")
+
   "oauth external call integration" should {
+
+    "build client assertions from wall-clock time even under static time" in { implicit env =>
+      import env.*
+
+      resetMockServer()
+      mockServer.setTokenSuccessHandler(accessToken = "wall-clock-token", expiresIn = 120L)
+      setupEchoHandler()
+
+      val contractId = createExternalCallContract()
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallExternal(
+          "wall-clock-ext",
+          "echo",
+          "00000000",
+          toHex("oauth-wall-clock"),
+        ).commands.asScala.toSeq,
+      )
+
+      exerciseTx.getUpdateId should not be empty
+      verifyTokenCallCount(1)
+
+      val tokenRequest = mockServer.getLastTokenRequest.value
+      val clientAssertion = formField(tokenRequest.body, "client_assertion").value
+      val payload = decodeAssertionPayload(clientAssertion)
+      val payloadCursor = payload.hcursor
+      val issuedAt = payloadCursor.get[Long]("iat").valueOrFail("iat")
+      val expiresAt = payloadCursor.get[Long]("exp").valueOrFail("exp")
+      val wallClockNow = Instant.now().getEpochSecond
+
+      math.abs(wallClockNow - issuedAt) should be < 120L
+      expiresAt shouldBe issuedAt + 30L
+    }
 
     "execute over HTTPS and reuse the cached token across later business requests" in { implicit env =>
       import env.*
@@ -213,7 +276,7 @@ sealed trait OAuthExternalCallIntegrationTest
       firstExerciseTx.getUpdateId should not be empty
       verifyTokenCallCount(1)
 
-      env.environment.simClock.foreach(_.advance(Duration.ofSeconds(2)))
+      Thread.sleep(2000L)
 
       val secondExerciseTx = participant1.ledger_api.javaapi.commands.submit(
         Seq(alice),

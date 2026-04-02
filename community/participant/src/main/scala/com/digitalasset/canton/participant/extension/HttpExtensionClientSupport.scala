@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
-import com.digitalasset.canton.time.Clock
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
@@ -31,13 +30,6 @@ private[participant] trait HttpExtensionClientRuntime {
 private[participant] object HttpExtensionClientRuntime {
   val system: HttpExtensionClientRuntime = new HttpExtensionClientRuntime {
     override def nowMillis(): Long = System.currentTimeMillis()
-    override def sleepMillis(ms: Long): Unit = Threading.sleep(ms)
-    override def newRequestId(): String = UUID.randomUUID().toString
-    override def nextRetryJitterDouble(): Double = Random.nextDouble()
-  }
-
-  def fromClock(clock: Clock): HttpExtensionClientRuntime = new HttpExtensionClientRuntime {
-    override def nowMillis(): Long = clock.now.toInstant.toEpochMilli
     override def sleepMillis(ms: Long): Unit = Threading.sleep(ms)
     override def newRequestId(): String = UUID.randomUUID().toString
     override def nextRetryJitterDouble(): Double = Random.nextDouble()

@@ -680,7 +680,7 @@ class ParticipantNodeBootstrap(
           val manager = new ExtensionServiceManager(
             extensionConfigs = parameters.engine.extensions,
             engineExtensionsConfig = parameters.engine.extensionSettings,
-            runtime = HttpExtensionClientRuntime.fromClock(clock),
+            runtime = HttpExtensionClientRuntime.system,
             loggerFactory = loggerFactory,
           )
           logger.info(
