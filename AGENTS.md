@@ -4,6 +4,8 @@
 
 This repo is a fork of the official canton network repo where we are adding the `external_call` extension.
 
+## Coding guidelines
+
 The changes we make here must:
 
 - Be upstream-friendly and optimized for acceptance by the upstream maintainers.
