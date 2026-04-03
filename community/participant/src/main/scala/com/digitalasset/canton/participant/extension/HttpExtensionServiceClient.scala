@@ -470,30 +470,22 @@ class HttpExtensionServiceClient private[extension] (
         case Some(token) if token.expiresAtMillis.exists(_ > nowMillis) =>
           OAuthTokenAcquisitionResolution.Cached(token)
         case None =>
-          inFlightOAuthTokenAcquisition.get() match {
-            case Some(existingPromise) =>
-              OAuthTokenAcquisitionResolution.Join(existingPromise)
-            case None =>
-              val promise = Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]]()
-              inFlightOAuthTokenAcquisition.set(Some(promise))
-              OAuthTokenAcquisitionResolution.Start(
-                promise,
-                OAuthTokenAcquisitionStartReason.Missing,
-              )
-          }
+          joinOrStartTokenAcquisitionLocked(OAuthTokenAcquisitionStartReason.Missing)
         case Some(_) =>
-          inFlightOAuthTokenAcquisition.get() match {
-            case Some(existingPromise) =>
-              OAuthTokenAcquisitionResolution.Join(existingPromise)
-            case None =>
-              val promise = Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]]()
-              inFlightOAuthTokenAcquisition.set(Some(promise))
-              OAuthTokenAcquisitionResolution.Start(
-                promise,
-                OAuthTokenAcquisitionStartReason.Expired,
-              )
-          }
+          joinOrStartTokenAcquisitionLocked(OAuthTokenAcquisitionStartReason.Expired)
       }
+    }
+
+  private def joinOrStartTokenAcquisitionLocked(
+      reason: OAuthTokenAcquisitionStartReason
+  ): OAuthTokenAcquisitionResolution =
+    inFlightOAuthTokenAcquisition.get() match {
+      case Some(existingPromise) =>
+        OAuthTokenAcquisitionResolution.Join(existingPromise)
+      case None =>
+        val promise = Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]]()
+        inFlightOAuthTokenAcquisition.set(Some(promise))
+        OAuthTokenAcquisitionResolution.Start(promise, reason)
     }
 
   private def tryAcquireOAuthToken(
