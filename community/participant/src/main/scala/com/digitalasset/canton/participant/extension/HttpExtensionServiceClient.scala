@@ -198,11 +198,15 @@ class HttpExtensionServiceClient private[extension] (
       response.statusCode match {
         case 401 if treat401And403AsInvalid =>
           ExtensionValidationResult.Invalid(
-            Seq(s"OAuth validation request failed with Unauthorized: ${responseBodyOrDefault(response, "Unauthorized")}")
+            Seq(
+              s"OAuth validation request failed with Unauthorized: ${responseMapper.responseBodyOrDefault(response, "Unauthorized")}"
+            )
           )
         case 403 if treat401And403AsInvalid =>
           ExtensionValidationResult.Invalid(
-            Seq(s"OAuth validation request failed with Forbidden: ${responseBodyOrDefault(response, "Forbidden")}")
+            Seq(
+              s"OAuth validation request failed with Forbidden: ${responseMapper.responseBodyOrDefault(response, "Forbidden")}"
+            )
           )
         case code if code >= 200 && code < 600 =>
           ExtensionValidationResult.Valid
@@ -216,16 +220,6 @@ class HttpExtensionServiceClient private[extension] (
         ExtensionValidationResult.Invalid(Seq(s"Connection timeout: ${e.getMessage}"))
       case e: Exception =>
         ExtensionValidationResult.Invalid(Seq(s"Validation failed: ${e.getMessage}"))
-    }
-
-  private def responseBodyOrDefault(
-      response: HttpExtensionClientResponse,
-      defaultMessage: String,
-  ): String =
-    if (response.body.nonEmpty && response.body.length < 500) {
-      response.body
-    } else {
-      defaultMessage
     }
 
   /** Make an HTTP call with retry logic */

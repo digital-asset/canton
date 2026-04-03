@@ -147,19 +147,19 @@ class HttpExtensionOAuthTokenClientTest extends AnyWordSpec with BaseTest {
     "preserve exact token-endpoint HTTP status codes and request ids" in {
       val retryAfterHeaders = Map("Retry-After" -> Seq("7"))
       val failingResponses = Seq(
-        400 -> response(400, "bad-request"),
-        401 -> response(401, "unauthorized"),
-        403 -> response(403, "forbidden"),
-        404 -> response(404, "not-found"),
-        408 -> response(408, "timed-out"),
-        429 -> response(429, "rate-limited", retryAfterHeaders),
-        500 -> response(500, "boom"),
-        502 -> response(502, "bad-gateway"),
-        503 -> response(503, "service-down", retryAfterHeaders),
-        504 -> response(504, "gateway-timeout"),
+        400 -> (response(400, "bad-request"), "Bad Request: bad-request"),
+        401 -> (response(401, "unauthorized"), "Unauthorized: unauthorized"),
+        403 -> (response(403, "forbidden"), "Forbidden: forbidden"),
+        404 -> (response(404, "not-found"), "Not found: not-found"),
+        408 -> (response(408, "timed-out"), "Request timeout: timed-out"),
+        429 -> (response(429, "rate-limited", retryAfterHeaders), "Rate limit exceeded: rate-limited"),
+        500 -> (response(500, "boom"), "Internal server error: boom"),
+        502 -> (response(502, "bad-gateway"), "Bad gateway: bad-gateway"),
+        503 -> (response(503, "service-down", retryAfterHeaders), "Service unavailable: service-down"),
+        504 -> (response(504, "gateway-timeout"), "Gateway timeout: gateway-timeout"),
       )
 
-      failingResponses.foreach { case (statusCode, resp) =>
+      failingResponses.foreach { case (statusCode, (resp, expectedMessage)) =>
         withClue(s"statusCode=$statusCode") {
           val transport = new FakeTransport(Seq(Right(resp)))
           val client = makeClient(transport)
@@ -172,6 +172,7 @@ class HttpExtensionOAuthTokenClientTest extends AnyWordSpec with BaseTest {
           result.isLeft shouldBe true
           val error = result.left.value
           error.statusCode shouldBe statusCode
+          error.message shouldBe expectedMessage
           error.requestId shouldBe Some("req-1")
 
           statusCode match {
