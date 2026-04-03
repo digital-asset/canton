@@ -68,8 +68,7 @@ private[extension] final class HttpExtensionResponseMapper {
       requestId: String,
       defaultMessage: String,
   ): ExtensionCallError = {
-    val message =
-      compactBody(response).fold(defaultMessage)(body => s"$defaultMessage: $body")
+    val message = renderFailureMessage(response, defaultMessage)
     ExtensionCallError(response.statusCode, message, Some(requestId))
   }
 
@@ -80,8 +79,7 @@ private[extension] final class HttpExtensionResponseMapper {
   ): ExtensionCallErrorWithRetry = {
     val retryAfter = firstHeaderValue(response, "Retry-After").flatMap(s => Try(s.toInt).toOption)
 
-    val message =
-      compactBody(response).fold(defaultMessage)(body => s"$defaultMessage: $body")
+    val message = renderFailureMessage(response, defaultMessage)
 
     ExtensionCallErrorWithRetry(response.statusCode, message, Some(requestId), retryAfter)
   }
@@ -105,6 +103,12 @@ private[extension] final class HttpExtensionResponseMapper {
 
   private def compactBody(response: HttpExtensionClientResponse): Option[String] =
     Option.when(response.body.nonEmpty && response.body.length < 500)(response.body)
+
+  private def renderFailureMessage(
+      response: HttpExtensionClientResponse,
+      defaultMessage: String,
+  ): String =
+    compactBody(response).fold(defaultMessage)(body => s"$defaultMessage: $body")
 
   private def firstHeaderValue(
       response: HttpExtensionClientResponse,
