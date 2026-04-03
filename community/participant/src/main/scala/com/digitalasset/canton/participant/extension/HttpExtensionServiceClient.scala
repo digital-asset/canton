@@ -301,42 +301,77 @@ class HttpExtensionServiceClient private[extension] (
         Left(error)
 
       case Right(bearerToken) =>
-        sendResourceRequest(
+        sendWithOptionalOAuthReplay(
           functionId = functionId,
           configHash = configHash,
           input = input,
           mode = mode,
           bearerToken = bearerToken,
           deadlineMs = deadlineMs,
-        ).flatMap { case (response, requestId) =>
-          if (shouldReplayAfterUnauthorized(response, bearerToken)) {
-            bearerToken.foreach(invalidateCachedOAuthTokenIfMatches)
-            currentBearerToken(deadlineMs).flatMap { freshBearerToken =>
-              sendResourceRequest(
-                functionId = functionId,
-                configHash = configHash,
-                input = input,
-                mode = mode,
-                bearerToken = freshBearerToken,
-                deadlineMs = deadlineMs,
-              ).flatMap { case (replayResponse, replayRequestId) =>
-                if (replayResponse.statusCode == 401) {
-                  Left(
-                    ExtensionCallError(
-                      401,
-                      "Unauthorized - OAuth token rejected by resource server",
-                      Some(replayRequestId),
-                    )
-                  )
-                } else {
-                  mapResourceResponse(replayResponse, replayRequestId)
-                }
-              }
-            }
-          } else {
-            mapResourceResponse(response, requestId)
-          }
+        )
+    }
+  }
+
+  private def sendWithOptionalOAuthReplay(
+      functionId: String,
+      configHash: String,
+      input: String,
+      mode: String,
+      bearerToken: Option[String],
+      deadlineMs: Long,
+  )(implicit tc: TraceContext): Either[ExtensionCallError, String] =
+    sendResourceRequest(
+      functionId = functionId,
+      configHash = configHash,
+      input = input,
+      mode = mode,
+      bearerToken = bearerToken,
+      deadlineMs = deadlineMs,
+    ).flatMap { case (response, requestId) =>
+      if (shouldReplayAfterUnauthorized(response, bearerToken)) {
+        replayResourceRequestAfterUnauthorized(
+          functionId = functionId,
+          configHash = configHash,
+          input = input,
+          mode = mode,
+          sentBearerToken = bearerToken,
+          deadlineMs = deadlineMs,
+        )
+      } else {
+        mapResourceResponse(response, requestId)
+      }
+    }
+
+  private def replayResourceRequestAfterUnauthorized(
+      functionId: String,
+      configHash: String,
+      input: String,
+      mode: String,
+      sentBearerToken: Option[String],
+      deadlineMs: Long,
+  )(implicit tc: TraceContext): Either[ExtensionCallError, String] = {
+    sentBearerToken.foreach(invalidateCachedOAuthTokenIfMatches)
+    currentBearerToken(deadlineMs).flatMap { freshBearerToken =>
+      sendResourceRequest(
+        functionId = functionId,
+        configHash = configHash,
+        input = input,
+        mode = mode,
+        bearerToken = freshBearerToken,
+        deadlineMs = deadlineMs,
+      ).flatMap { case (replayResponse, replayRequestId) =>
+        if (replayResponse.statusCode == 401) {
+          Left(
+            ExtensionCallError(
+              401,
+              "Unauthorized - OAuth token rejected by resource server",
+              Some(replayRequestId),
+            )
+          )
+        } else {
+          mapResourceResponse(replayResponse, replayRequestId)
         }
+      }
     }
   }
 
