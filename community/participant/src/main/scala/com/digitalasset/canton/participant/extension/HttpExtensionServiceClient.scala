@@ -6,16 +6,10 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.{ExtensionServiceAuthConfig, ExtensionServiceConfig}
-import com.digitalasset.canton.participant.extension.HttpExtensionServiceClient.{
-  OAuthTokenAcquisitionResolution,
-  OAuthTokenAcquisitionStartReason,
-}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Mutex
 
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.util.Try
 
 /** HTTP client implementation for extension services with retry logic,
@@ -100,11 +94,29 @@ class HttpExtensionServiceClient private[extension] (
       )
     case _ => None
   }
-  private val oauthTokenLock = new Mutex()
-  private val cachedOAuthToken = new AtomicReference[Option[HttpExtensionOAuthAccessToken]](None)
-  private val inFlightOAuthTokenAcquisition
-      : AtomicReference[Option[Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]]]] =
-    new AtomicReference(None)
+  private lazy val oauthTokenManager: Option[HttpExtensionOAuthTokenManager] = config.auth match {
+    case _: ExtensionServiceAuthConfig.OAuth =>
+      Some(
+        new HttpExtensionOAuthTokenManager(
+          extensionId = extensionId,
+          requestTimeoutForRemainingBudget = requestTimeoutForRemainingBudget,
+          acquireToken = (timeout, requestId) =>
+            oauthTokenClient match {
+              case Some(tokenClient) =>
+                tokenClient.acquireToken(
+                  timeout = timeout,
+                  requestId = requestId,
+                )
+              case None =>
+                Left(ExtensionCallError(500, "OAuth token client not available", None))
+            },
+          nowMillis = () => runtime.nowMillis(),
+          newRequestId = () => runtime.newRequestId(),
+          loggerFactory = loggerFactory,
+        )
+      )
+    case _ => None
+  }
 
   // Declared function config hashes for validation
   private val declaredConfigHashes: Map[String, String] =
@@ -449,105 +461,16 @@ class HttpExtensionServiceClient private[extension] (
     }
 
   private def invalidateCachedOAuthTokenIfMatches(sentToken: String)(implicit tc: TraceContext): Unit =
-    oauthTokenLock.exclusive {
-      cachedOAuthToken.get() match {
-        case Some(cachedToken) if cachedToken.value == sentToken =>
-          cachedOAuthToken.set(None)
-          logger.debug(
-            s"Invalidated cached OAuth token for extension '$extensionId' after resource-server 401"
-          )
-        case _ =>
-          ()
-      }
-    }
+    oauthTokenManager.foreach(_.invalidateCachedTokenIfMatches(sentToken))
 
   private def currentBearerToken(deadlineMs: Long)(implicit
       tc: TraceContext
   ): Either[ExtensionCallError, Option[String]] =
     try {
-      oauthTokenClient match {
+      oauthTokenManager match {
         case None => Right(None)
-        case Some(tokenClient) =>
-          acquireSharedOAuthToken(tokenClient, deadlineMs).map(token => Some(token.value))
-      }
-    } catch {
-      case e: Exception =>
-        Left(logAndMapPreOutboundLocalFailure(e))
-    }
-
-  private def acquireSharedOAuthToken(
-      tokenClient: HttpExtensionOAuthTokenClient,
-      deadlineMs: Long,
-  )(implicit tc: TraceContext): Either[ExtensionCallError, HttpExtensionOAuthAccessToken] =
-    nextOAuthTokenAcquisitionResolution() match {
-      case OAuthTokenAcquisitionResolution.Cached(token) =>
-        logger.debug(s"Reusing cached OAuth token for extension '$extensionId'")
-        Right(token)
-      case OAuthTokenAcquisitionResolution.Join(promise) =>
-        blocking(Await.result(promise.future, scala.concurrent.duration.Duration.Inf))
-      case OAuthTokenAcquisitionResolution.Start(promise, startReason) =>
-        if (startReason == OAuthTokenAcquisitionStartReason.Expired) {
-          logger.debug(s"Reacquiring OAuth token for extension '$extensionId' after expiry")
-        }
-        val result = tryAcquireOAuthToken(tokenClient, deadlineMs)
-        oauthTokenLock.exclusive {
-          result.foreach(token => cachedOAuthToken.set(token.expiresAtMillis.map(_ => token)))
-          inFlightOAuthTokenAcquisition.set(None)
-        }
-        val _ = promise.trySuccess(result)
-        result
-    }
-
-  private def nextOAuthTokenAcquisitionResolution(): OAuthTokenAcquisitionResolution =
-    oauthTokenLock.exclusive {
-      val nowMillis = runtime.nowMillis()
-      cachedOAuthToken.get() match {
-        case Some(token) if token.expiresAtMillis.exists(_ > nowMillis) =>
-          OAuthTokenAcquisitionResolution.Cached(token)
-        case None =>
-          joinOrStartTokenAcquisitionLocked(OAuthTokenAcquisitionStartReason.Missing)
-        case Some(_) =>
-          joinOrStartTokenAcquisitionLocked(OAuthTokenAcquisitionStartReason.Expired)
-      }
-    }
-
-  private def joinOrStartTokenAcquisitionLocked(
-      reason: OAuthTokenAcquisitionStartReason
-  ): OAuthTokenAcquisitionResolution =
-    inFlightOAuthTokenAcquisition.get() match {
-      case Some(existingPromise) =>
-        OAuthTokenAcquisitionResolution.Join(existingPromise)
-      case None =>
-        val promise = Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]]()
-        inFlightOAuthTokenAcquisition.set(Some(promise))
-        OAuthTokenAcquisitionResolution.Start(promise, reason)
-    }
-
-  private def tryAcquireOAuthToken(
-      tokenClient: HttpExtensionOAuthTokenClient,
-      deadlineMs: Long,
-  )(implicit tc: TraceContext): Either[ExtensionCallError, HttpExtensionOAuthAccessToken] =
-    try {
-      requestTimeoutForRemainingBudget(deadlineMs).flatMap { timeout =>
-        val tokenRequestId = runtime.newRequestId()
-        logger.debug(
-          s"Starting OAuth token acquisition for extension '$extensionId': requestId=$tokenRequestId"
-        )
-        val result = tokenClient.acquireToken(
-          timeout = timeout,
-          requestId = tokenRequestId,
-        )
-        result match {
-          case Right(_) =>
-            logger.debug(
-              s"OAuth token acquisition succeeded for extension '$extensionId': requestId=$tokenRequestId"
-            )
-          case Left(error) =>
-            logger.warn(
-              s"OAuth token acquisition failed for extension '$extensionId': status=${error.statusCode}, requestId=${error.requestId.getOrElse("none")}, message=${error.message}"
-            )
-        }
-        result
+        case Some(tokenManager) =>
+          tokenManager.currentBearerToken(deadlineMs).map(Some(_))
       }
     } catch {
       case e: Exception =>
@@ -613,25 +536,4 @@ private[extension] object HttpExtensionServiceClient {
   // Keep OAuth-specific replay conservative: only explicit Bearer invalid_token challenges qualify.
   private val BearerInvalidTokenChallengePattern =
     """(?i)(?:^|,)\s*Bearer\b.*\berror\s*=\s*"invalid_token"""".r
-
-  sealed trait OAuthTokenAcquisitionResolution
-
-  sealed trait OAuthTokenAcquisitionStartReason
-
-  object OAuthTokenAcquisitionStartReason {
-    case object Missing extends OAuthTokenAcquisitionStartReason
-    case object Expired extends OAuthTokenAcquisitionStartReason
-  }
-
-  object OAuthTokenAcquisitionResolution {
-    final case class Cached(token: HttpExtensionOAuthAccessToken)
-        extends OAuthTokenAcquisitionResolution
-    final case class Join(promise: Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]])
-        extends OAuthTokenAcquisitionResolution
-    final case class Start(
-        promise: Promise[Either[ExtensionCallError, HttpExtensionOAuthAccessToken]],
-        reason: OAuthTokenAcquisitionStartReason,
-    )
-        extends OAuthTokenAcquisitionResolution
-  }
 }
