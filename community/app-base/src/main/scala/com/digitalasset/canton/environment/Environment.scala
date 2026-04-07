@@ -198,13 +198,22 @@ class Environment(
   installJavaUtilLoggingBridge()
   logger.debug(config.portDescription)
 
-  private val numThreads = Threading.detectNumberOfThreads(noTracingLogger)
+  private val numThreads = config.parameters.threading.parallelism
+    .getOrElse(Threading.detectNumberOfThreads(noTracingLogger))
   implicit val executionContext: ExecutionContextIdlenessExecutorService =
     Threading.newExecutionContext(
       loggerFactory.threadName + "-env-ec",
       noTracingLogger,
-      numThreads,
+      parallelism = numThreads,
+      maxExtraThreads = config.parameters.threading.maxExtraThreads,
+      keepAliveMillis = config.parameters.threading.keepAliveMillis,
+      corePoolSize = config.parameters.threading.corePoolSize,
+      maxPoolSize = config.parameters.threading.maxPoolSize,
+      minRunnable = config.parameters.threading.minRunnable,
     )
+  config.parameters.threading.mutexMaxSpins.foreach { maxSpins =>
+    Mutex.MaxSpins.set(maxSpins.value)
+  }
 
   private val deadlockConfig = config.monitoring.deadlockDetection
   protected def timeouts: ProcessingTimeout = config.parameters.timeouts.processing

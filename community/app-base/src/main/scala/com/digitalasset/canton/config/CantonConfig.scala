@@ -288,6 +288,38 @@ object RetentionPeriodDefaults {
     CantonConfigValidatorDerivation[RetentionPeriodDefaults]
 }
 
+/** Configure main execution contexts
+  *
+  * @param keepAlive
+  *   Keep alive time for fork-join pool excess threads.
+  * @param parallelism
+  *   Number of CPU cores to use for the main ec (derived automatically by default)
+  * @param mutexMaxSpins
+  *   Tweak the number of spins we want to run before parking the thread
+  */
+final case class ThreadingConfig(
+    keepAlive: config.NonNegativeFiniteDuration = ThreadingConfig.defaultKeepAliveMillis,
+    maxExtraThreads: PositiveInt = PositiveInt.tryCreate(256),
+    parallelism: Option[PositiveInt] = None,
+    corePoolSize: Option[PositiveInt] = None,
+    maxPoolSize: Option[PositiveInt] = None,
+    minRunnable: Option[PositiveInt] = None,
+    mutexMaxSpins: Option[PositiveInt] = None,
+) extends UniformCantonConfigValidation {
+
+  def keepAliveMillis: PositiveInt =
+    PositiveInt.create(keepAlive.underlying.toMillis.toInt).getOrElse(PositiveInt.tryCreate(60000))
+
+}
+object ThreadingConfig {
+  private val defaultKeepAliveMillis = config.NonNegativeFiniteDuration.ofSeconds(60) // fj default
+
+  implicit val threadingConfigCantonConfigValidator: CantonConfigValidator[ThreadingConfig] = {
+    import CantonConfigValidatorInstances.*
+    CantonConfigValidatorDerivation[ThreadingConfig]
+  }
+}
+
 /** Parameters for testing Canton. Use default values in a production environment.
   *
   * @param enableAdditionalConsistencyChecks
@@ -315,6 +347,8 @@ object RetentionPeriodDefaults {
   * @param stateRefreshInterval
   *   If configured, the config file will be reread in the given interval to allow dynamic
   *   properties to be picked up immediately
+  * @param threading
+  *   Threading configurations
   */
 final case class CantonParameters(
     clock: ClockConfig = ClockConfig.WallClock(),
@@ -334,6 +368,7 @@ final case class CantonParameters(
     ),
     enableAlphaStateViaConfig: Boolean = false,
     stateRefreshInterval: Option[config.NonNegativeFiniteDuration] = None,
+    threading: ThreadingConfig = ThreadingConfig(),
 ) extends UniformCantonConfigValidation {
   def getStartupParallelism(numThreads: PositiveInt): PositiveInt =
     startupParallelism.getOrElse(numThreads)
@@ -1378,6 +1413,8 @@ object CantonConfig {
           deriveReader[ProcessingTimeout]
         deriveReader[TimeoutSettings]
       }
+      implicit val threadingConfigReader: ConfigReader[ThreadingConfig] =
+        deriveReader[ThreadingConfig]
       deriveReader[CantonParameters]
     }
     lazy implicit final val cantonFeaturesReader: ConfigReader[CantonFeatures] =
@@ -2062,6 +2099,8 @@ object CantonConfig {
           deriveWriter[ProcessingTimeout]
         deriveWriter[TimeoutSettings]
       }
+      implicit val threadingConfigWriter: ConfigWriter[ThreadingConfig] =
+        deriveWriter[ThreadingConfig]
       deriveWriter[CantonParameters]
     }
     lazy implicit final val cantonFeaturesWriter: ConfigWriter[CantonFeatures] =

@@ -25,7 +25,7 @@ function do_usage() {
 function do_setup() {
   for db in $(cat "databases")
   do
-    echo "creating db ${db}"
+    echo "creating db ${DBPREFIX}${db}"
     echo "create database ${DBPREFIX}${db}; grant all on database ${DBPREFIX}${db} to current_user;" | \
       PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT $POSTGRES_DB $POSTGRES_USER
   done
@@ -34,7 +34,7 @@ function do_setup() {
 function do_drop() {
   for db in $(cat "databases")
   do
-    echo "dropping db ${db}"
+    echo "dropping db ${DBPREFIX}${db}"
     echo "drop database if exists ${DBPREFIX}${db};" | \
     PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT $POSTGRES_DB $POSTGRES_USER
   done

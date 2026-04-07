@@ -23,6 +23,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
+import com.digitalasset.canton.participant.admin.CantonPackageServiceError.CannotAutodetectSynchronizer
 import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
 import com.digitalasset.canton.participant.admin.data.UploadDarData
 import com.digitalasset.canton.participant.admin.{
@@ -169,7 +170,18 @@ class GrpcPackageService(
       synchronizerIdRaw: Option[String]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, StatusRuntimeException, PhysicalSynchronizerId] =
+  ): EitherT[Future, StatusRuntimeException, PhysicalSynchronizerId] = {
+    def singleConnectedSynchronizer(
+        connected: Set[PhysicalSynchronizerId]
+    ): Either[CannotAutodetectSynchronizer.Failure, PhysicalSynchronizerId] =
+      connected.toSeq match {
+        case Seq() => Left(CantonPackageServiceError.CannotAutodetectSynchronizer.Failure(Seq()))
+        case Seq(onlySynchronizerId) => Right(onlySynchronizerId)
+        case multiple =>
+          Left(
+            CantonPackageServiceError.CannotAutodetectSynchronizer.Failure(multiple.map(_.logical))
+          )
+      }
     for {
       synchronizerIdO <- EitherT
         .fromEither[Future](
@@ -185,22 +197,15 @@ class GrpcPackageService(
             CantonPackageServiceError.NotConnectedToSynchronizer.Error(synchronizerId.toString)
           )
       )
-      singleConnectedSynchronizer = connected.toSeq match {
-        case Seq() => Left(CantonPackageServiceError.CannotAutodetectSynchronizer.Failure(Seq()))
-        case Seq(onlySynchronizerId) => Right(onlySynchronizerId)
-        case multiple =>
-          Left(
-            CantonPackageServiceError.CannotAutodetectSynchronizer.Failure(multiple.map(_.logical))
-          )
-      }
       synchronizerId <- EitherT
         .fromEither[Future](
           validatedSpecifiedSynchronizerIdO
             .map(_.leftMap(_.asGrpcError))
-            .getOrElse(singleConnectedSynchronizer.leftMap(_.asGrpcError))
+            .getOrElse(singleConnectedSynchronizer(connected).leftMap(_.asGrpcError))
         )
 
     } yield synchronizerId
+  }
 
   override def vetDar(request: v30.VetDarRequest): Future[v30.VetDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext

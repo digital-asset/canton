@@ -42,7 +42,9 @@ class CommitmentMetrics private[metrics] (
     histograms: CommitmentHistograms,
     metricsFactory: LabeledMetricsFactory,
 ) {
-  import MetricsContext.Implicits.empty
+  private implicit val metricsContext: MetricsContext = new MetricsContext(
+    Map("sync" -> synchronizerAlias.unwrap)
+  )
   private val prefix = histograms.prefix
 
   val compute: Timer = metricsFactory.timer(histograms.compute.info)

@@ -724,6 +724,20 @@ abstract class SequencerClientImpl(
               nextState(sendInFlight = sendInFlight),
             )
 
+          case SendAsyncClientError.RequestRefused(sendAsyncError)
+              if sendAsyncError.isMaxSequencingTimeTooFar && config.amplifyOnMaxSequencingTimeTooFar =>
+            logger.debug(
+              s"Send request with message id $messageId was refused by $sequencerId because its max sequencing time is too far in the future compared to the sequencer's clock (the sequencer could be behind on processing and is catching up)."
+            )
+            // Immediately try the next sequencer because the MaxSequencingTimeTooFar is most likely due to
+            // a particular sequencer being behind on processing and catching up, and requesting other sequencers may
+            // very well succeed
+            Either.cond(
+              patienceO.isEmpty,
+              Left(error),
+              nextState(sendInFlight = sendInFlight),
+            )
+
           case _: SendAsyncClientError.RequestRefused =>
             logger.debug(
               s"Send request with message id $messageId was refused by $sequencerId: $error"

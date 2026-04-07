@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
@@ -1123,6 +1124,34 @@ final class SequencerClientTest
         env.client.close()
       }
 
+      "trigger amplification on 'max sequencing time too far' error and if the flag is set" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(amplifyOnMaxSequencingTimeTooFar = true),
+          amplificationConfig = amplificationConfig,
+          firstSendAsyncResponseO = Some(Left(maxSequencingTimeTooFarError)),
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion), amplify = true)
+          .futureValueUS shouldBe Right(())
+
+        env.client.close()
+      }
+
+      "not trigger amplification on 'max sequencing time too far' and if the flag is not set" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(amplifyOnMaxSequencingTimeTooFar = false),
+          amplificationConfig = amplificationConfig,
+          firstSendAsyncResponseO = Some(Left(maxSequencingTimeTooFarError)),
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion), amplify = true)
+          .futureValueUS shouldBe Left(maxSequencingTimeTooFarError)
+
+        env.client.close()
+      }
+
       "not trigger amplification if it is not 'overloaded' and the flag is set" in {
         val env = RichEnvFactory.create(
           options = SequencerClientConfig(enableAmplificationImprovements = true),
@@ -1969,47 +1998,34 @@ final class SequencerClientTest
       new MockPool(clock, firstSendAsyncResponseO)
   }
 
-  private val overloadedError = SendAsyncClientError.RequestRefused(
-    SendAsyncError.SendAsyncErrorGrpc(
-      GrpcError.GrpcRequestRefusedByServer(
-        request = "test-request",
-        serverName = "test-server",
-        status = Status.UNAVAILABLE,
-        optTrailers = None,
-        decodedCantonError = Some(
-          DecodedCantonError(
-            code = SequencerErrors.Overloaded,
-            cause = "test-cause",
-            correlationId = None,
-            traceId = None,
-            context = Map.empty,
-            resources = Seq.empty,
-          )
-        ),
+  def clientErrorWithCantonErrorCode(errorCode: ErrorCode): SendAsyncClientError.RequestRefused =
+    SendAsyncClientError.RequestRefused(
+      SendAsyncError.SendAsyncErrorGrpc(
+        GrpcError.GrpcRequestRefusedByServer(
+          request = "test-request",
+          serverName = "test-server",
+          status = Status.UNAVAILABLE,
+          optTrailers = None,
+          decodedCantonError = Some(
+            DecodedCantonError(
+              code = errorCode,
+              cause = "test-cause",
+              correlationId = None,
+              traceId = None,
+              context = Map.empty,
+              resources = Seq.empty,
+            )
+          ),
+        )
       )
     )
-  )
 
-  private val senderUnknownError = SendAsyncClientError.RequestRefused(
-    SendAsyncError.SendAsyncErrorGrpc(
-      GrpcError.GrpcRequestRefusedByServer(
-        request = "test-request",
-        serverName = "test-server",
-        status = Status.UNAVAILABLE,
-        optTrailers = None,
-        decodedCantonError = Some(
-          DecodedCantonError(
-            code = SequencerErrors.SenderUnknown,
-            cause = "test-cause",
-            correlationId = None,
-            traceId = None,
-            context = Map.empty,
-            resources = Seq.empty,
-          )
-        ),
-      )
-    )
+  private val overloadedError = clientErrorWithCantonErrorCode(SequencerErrors.Overloaded.code)
+  private val senderUnknownError = clientErrorWithCantonErrorCode(
+    SequencerErrors.SenderUnknown.code
   )
+  private val maxSequencingTimeTooFarError =
+    clientErrorWithCantonErrorCode(SequencerErrors.MaxSequencingTimeTooFar.code)
 
   private implicit class EnrichedSequencerClient(client: RichSequencerClient) {
     // flush needs to be called twice in order to finish asynchronous processing

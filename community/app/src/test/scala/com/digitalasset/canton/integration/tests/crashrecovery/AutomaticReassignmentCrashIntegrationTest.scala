@@ -110,7 +110,7 @@ class AutomaticReassignmentCrashIntegrationTest
 
       seq.setPolicy_("Block assignments") {
         SendPolicy.processTimeProofs_ { r =>
-          if (r.isConfirmationRequest) SendDecision.Reject else SendDecision.Process
+          if (r.isConfirmationRequest) SendDecision.Reject() else SendDecision.Process
         }
       }
 

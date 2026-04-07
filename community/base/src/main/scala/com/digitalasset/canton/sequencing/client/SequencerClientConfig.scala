@@ -87,6 +87,7 @@ final case class SequencerClientConfig(
     useNewConnectionPool: Boolean = true,
     timeReadingsRetention: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
     enableAmplificationImprovements: Boolean = true,
+    amplifyOnMaxSequencingTimeTooFar: Boolean = true,
 ) extends UniformCantonConfigValidation
 
 object SequencerClientConfig {

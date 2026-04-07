@@ -47,7 +47,20 @@ final class GeneratorsProtocol(
   import generatorsMessages.*
 
   implicit val recipientsArb: Arbitrary[Recipients] = {
-    val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
+    // Manually defined with Gen.oneOf to avoid Magnolia macro diamond-inheritance flakiness
+    // resulting in compilation error:
+    // ```
+    //  GeneratorsProtocol.scala:50:60: magnolia: child trait MemberRecipientOrBroadcast of trait Recipient is neither final nor a case class
+    //  [error]     val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
+    // ```
+    val protocolVersionDependentRecipientArb: Arbitrary[Recipient] = Arbitrary(
+      Gen.oneOf(
+        Arbitrary.arbitrary[Member].map(MemberRecipient.apply),
+        Gen.const(SequencersOfSynchronizer),
+        Arbitrary.arbitrary[MediatorGroupRecipient], // Uses the implicit defined above!
+        Gen.const(AllMembersOfSynchronizer),
+      )
+    )
 
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
