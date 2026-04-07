@@ -73,6 +73,50 @@ class InMemorySynchronizerConnectionConfigStore(
       .toRight(MissingConfigForSynchronizer(id))
   }
 
+  /** Performs the put. Note: should be guarded with the lock.
+    */
+  private def putInternal(
+      config: SynchronizerConnectionConfig,
+      status: SynchronizerConnectionConfigStore.Status,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
+  ) =
+    for {
+      _ <- predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
+
+      alias = config.synchronizerAlias
+
+      _ <- configuredPsid match {
+        case KnownPhysicalSynchronizerId(psid) =>
+          for {
+            _ <- checkAliasConsistent(psid, alias)
+            _ <- checkLogicalIdConsistent(psid, alias)
+          } yield ()
+
+        case UnknownPhysicalSynchronizerId => ().asRight
+      }
+
+      _ <- checkStatusConsistent(configuredPsid, alias, status)
+
+      _ <- configuredSynchronizerMap
+        .putIfAbsent(
+          (config.synchronizerAlias, configuredPsid),
+          StoredSynchronizerConnectionConfig(
+            config,
+            status,
+            configuredPsid,
+            synchronizerPredecessor,
+          ),
+        )
+        .fold(Either.unit[ConfigAlreadyExists])(existingConfig =>
+          Either.cond(
+            config == existingConfig.config && synchronizerPredecessor == existingConfig.predecessor,
+            (),
+            ConfigAlreadyExists(config.synchronizerAlias, configuredPsid),
+          )
+        )
+    } yield ()
+
   override def put(
       config: SynchronizerConnectionConfig,
       status: SynchronizerConnectionConfigStore.Status,
@@ -80,49 +124,10 @@ class InMemorySynchronizerConnectionConfigStore(
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, Unit] = {
-
-    val alias = config.synchronizerAlias
-
-    val res =
-      lock.exclusive {
-        for {
-          _ <- predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
-
-          _ <- configuredPsid match {
-            case KnownPhysicalSynchronizerId(psid) =>
-              for {
-                _ <- checkAliasConsistent(psid, alias)
-                _ <- checkLogicalIdConsistent(psid, alias)
-              } yield ()
-
-            case UnknownPhysicalSynchronizerId => ().asRight
-          }
-
-          _ <- checkStatusConsistent(configuredPsid, alias, status)
-
-          _ <- configuredSynchronizerMap
-            .putIfAbsent(
-              (config.synchronizerAlias, configuredPsid),
-              StoredSynchronizerConnectionConfig(
-                config,
-                status,
-                configuredPsid,
-                synchronizerPredecessor,
-              ),
-            )
-            .fold(Either.unit[ConfigAlreadyExists])(existingConfig =>
-              Either.cond(
-                config == existingConfig.config && synchronizerPredecessor == existingConfig.predecessor,
-                (),
-                ConfigAlreadyExists(config.synchronizerAlias, configuredPsid),
-              )
-            )
-        } yield ()
-      }
-
-    EitherT.fromEither[FutureUnlessShutdown](res)
-  }
+  ): EitherT[FutureUnlessShutdown, Error, Unit] =
+    EitherT.fromEither[FutureUnlessShutdown](lock.exclusive {
+      putInternal(config, status, configuredPsid, synchronizerPredecessor)
+    })
 
   // Ensure there is no other active configuration
   private def checkStatusConsistent(
@@ -270,16 +275,56 @@ class InMemorySynchronizerConnectionConfigStore(
     EitherT.fromEither(res)
   }
 
+  override def upsert(
+      psid: PhysicalSynchronizerId,
+      insert: (
+          SynchronizerConnectionConfig,
+          SynchronizerConnectionConfigStore.Status,
+          Option[SynchronizerPredecessor],
+      ),
+      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
+    val res =
+      lock.exclusive {
+        getInternal(ConfigIdentifier.WithPsid(psid)) match {
+          case Left(_: MissingConfigForSynchronizer) =>
+            val (config, status, predecessor) = insert
+
+            putInternal(config, status, KnownPhysicalSynchronizerId(psid), predecessor).map { _ =>
+              StoredSynchronizerConnectionConfig(
+                config,
+                status,
+                KnownPhysicalSynchronizerId(psid),
+                predecessor,
+              )
+            }
+
+          case Right(storedConfig) =>
+            val updatedStoredConfig = storedConfig.copy(config = transform(storedConfig.config))
+            configuredSynchronizerMap
+              .put(
+                (storedConfig.config.synchronizerAlias, KnownPhysicalSynchronizerId(psid)),
+                updatedStoredConfig,
+              )
+              .discard
+
+            Right(updatedStoredConfig)
+        }
+      }
+
+    EitherT.fromEither[FutureUnlessShutdown](res)
+  }
+
   override def setSequencerIds(
       psid: PhysicalSynchronizerId,
       sequencerIds: Map[SequencerAlias, SequencerId],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
-    val id = ConfigIdentifier.WithPsid(psid)
-
     val res =
       lock.exclusive {
         for {
-          storedConfig <- getInternal(id)
+          storedConfig <- getInternal(ConfigIdentifier.WithPsid(psid))
 
           updatedConnectionConfig = sequencerIds.foldLeft(storedConfig.config) {
             case (config, (alias, id)) =>
@@ -292,7 +337,7 @@ class InMemorySynchronizerConnectionConfigStore(
             storedConfig.config
               .subsumeMerge(updatedConnectionConfig)
               .leftMap[Error](
-                InconsistentSequencerIds(id, sequencerIds, _)
+                InconsistentSequencerIds(psid, sequencerIds, _)
               )
 
           updatedStoredConfig = storedConfig.copy(config = mergedConnectionConfig)

@@ -451,18 +451,7 @@ class DbActiveContractStore(
                 cid -> reassignmentCounter
               })
             }
-      } yield {
-        contractIds
-          .diff(acsContracts.keySet)
-          .foreach(cid =>
-            ErrorUtil.internalError(
-              new IllegalStateException(
-                s"Archived non-transient contract $cid should have been active in the ACS and have a reassignment counter defined"
-              )
-            )
-          )
-        acsContracts
-      }
+      } yield acsContracts
     }
   }
 

@@ -67,6 +67,10 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         ConfigTransforms.updateAllMediatorConfigs_(
           _.focus(_.timeTracker.observationLatency).replace(observationLatency.toConfig)
         ),
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.parameters.producePostOrderingTopologyTicks)
+            .replace(false)
+        ),
       )
       // Do not use a static time because this test requires a non-zero topology change delay
       .withSetup { env =>

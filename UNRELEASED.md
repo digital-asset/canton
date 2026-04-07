@@ -15,6 +15,14 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### Mediator Crash Fault Tolerance
+The mediator is now crash fault-tolerant in the sense that it guarantees that all verdicts will eventually be persisted
+and available on the inspection API. One remaining limitation is that a crash between the persistence of the verdict and
+the sending of the verdict to the sequencer will result in the verdict not being sent to the informee participants.
+Similarly, if the verdict is sent but fails to be sequenced for whatever reason, it will not be re-sent upon restart.
+An immediate consequence is that it is possible for the mediator to report a request as being approved, even though the participants
+involved did not commit the request, due to never receiving the mediator's verdict and timing out.
+
 ### Sequencer Inspection Service
 A new service is available on the Admin API of the sequencer.
 It provides an RPC that allows to query for traffic summaries of sequenced events.
@@ -29,7 +37,7 @@ Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/ho
 - Multi-synchronizer is available in early access and has to be enabled explicitly.
   This feature should only be used in test environments.
 
-- To enable contract reassignment across synchronizers, this flag must be activated on all participants
+- To enable contract reassignment across synchronizers, the flag `PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER`  must be activated on all participants
   hosting a stakeholder of the contract on both the source and target synchronizers. For a synchronizer,
   it can be done as follows:
 
@@ -57,6 +65,9 @@ participant.topology.synchronizer_trust_certificates.propose(
 
 
 ### Minor Improvements
+- The Ledger API now enforces a maximum number of signatures per party that can be provided for external submissions.
+This value defaults to 50 and can be changed at the following config path: `canton.participants.<participant_name>.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party`
+- *BREAKING* The expert `keep-alive-client` configuration parameter for various client services moved to `channel.keep-alive-client`.
 - *BREAKING* We reduced the defaults for `setBalanceRequestSubmissionWindowSize` and `defaultMaxSequencingTimeOffset`
   to 2 minutes.
 - The Ledger JSON API `v2/package-vetting` endpoint exposes list functionality on the GET method by accepting a request body. This is not recommended by the HTTP specification, hence the endpoint is deprecated.
@@ -181,6 +192,16 @@ the value for sequencers is  configured to be 500 for the public API and 100 for
 - Deprecated usage of `PartyToKeyMapping`. The functionality provided by `PartyToKeyMapping` is now available directly in `PartyToParticipant`.
   Please use `PartyToParticipant` for new transactions. `PartyToKeyMapping` is still fully supported in this version (including existing and new transactions).
   In future version, creation of new `PartyToKeyMapping` transactions may be disallowed.
+- Deprecated: the individual JVM metric flags `classes`, `cpu`, `memoryPools`, `threads`, `gc`, and `buffers` in
+  `canton.monitoring.metrics.jvm-metrics` are no longer supported since the upgrade to OpenTelemetry instrumentation 2.26.0.
+  All standard JVM metrics (classes, cpu, memory pools, threads, garbage collector) are now always enabled when
+  `jvm-metrics.enabled = true`. A new `experimental` flag has been added to control experimental JVM metrics
+  (e.g. buffer pools). Users who previously set `buffers = true` should migrate to `experimental = true`.
+  See https://github.com/open-telemetry/opentelemetry-java-instrumentation/pull/16087 for details.
+- Deprecated: the Zipkin trace exporter configuration `canton.monitoring.tracing.tracer.exporter.type=zipkin` is
+  deprecated following the OpenTelemetry specification deprecation of Zipkin exporters. The Zipkin exporter
+  will be removed in a future release. Users should migrate to the OTLP exporter.
+  See https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/ for details.
 
 ### Enhanced Reliability for `GetHighestOffsetByTimestamp`
 
@@ -208,6 +229,14 @@ No migration required.
 
 - Sequencer health status used to incorrectly return the synchronizer uid instead of the sequencer uid.
 
+- Now the nodes will correctly amplify on observing a `SEQUENCER_MAX_SEQUENCING_TIME_TOO_FAR` error code.
+  Previously nodes using BFT sequencer connections and request amplification configured would fail with `SEQUENCER_SUBMISSION_REQUEST_REFUSED`
+  error code without further amplification despite other sequencers potentially accepting the transaction.
+  Prior behaviour can be restored by setting `canton.sequencers.<node>.sequencer-client.amplify-on-max-sequencing-time-too-far` to `false`.
+  - *BREAKING:* `SequencerService.sendAsync` gRPC service will now return CantonError code `SEQUENCER_MAX_SEQUENCING_TIME_TOO_FAR`
+    instead of a generic code `SEQUENCER_SUBMISSION_REQUEST_REFUSED` for transactions with a `maxSequencingTime` too far in the future
+    from the sequencer view (usually when sequencer is catching up and is behind on processing).
+
 ### (YY-nnn, Severity): Title
 
 #### Issue Description
@@ -232,6 +261,11 @@ No migration required.
 ### Removal of the old sequencer connection transports
 The old sequencer connections tranports have been removed, and only the new sequencer connection pool remains.
 Consequently, the configuration `<node>.sequencer-client.use-new-connection-pool` has been deprecated and no longer has any effect.
+
+### Removal of multi-host name resolution tooling
+Support for the multi-host name resolution was removed.
+This was only used if synchronizer connectivity defined a sequencer with multiple endpoints, which is not supported with our current sequencers:
+we now have multiple sequencers each with exactly one endpoint.
 
 ### Changes from NonNegativeLong to Long
 Some console commands using a NonNegativeLong for the offset are changed to accept a Long instead.
@@ -511,6 +545,9 @@ failing) as `ImportAcs`.
 ### update to GRPC 1.77.0
 
 removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
+
+### Deprecate config key: participant.parameters.initial-protocol-version
+This config key was unused and has been marked as deprecated.
 
 ## Compatibility
 

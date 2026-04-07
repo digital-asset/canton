@@ -798,19 +798,24 @@ final class IssConsensusModule[E <: Env[E]](
     val currentEpochNumber = epochState.epoch.info.number
     val latestCompletedEpochNumber = latestCompletedEpoch.info.number
     val minimumEndEpochNumber = catchupDetector.shouldCatchUpTo(currentEpochNumber)
-    if (
-      updatedEpoch &&
-      minimumEndEpochNumber.isDefined &&
+    if (updatedEpoch && minimumEndEpochNumber.isDefined) {
       // if epochState is closed, we have probably just finished an epoch and are waiting for new topology.
       // So we should wait with state transfer until we are in the new epoch.
-      !epochState.isClosing
-    ) {
-      logger.debug(
-        s"Switching to catch-up state transfer (up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
-          s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
-      )
-      startStateTransfer(currentEpochNumber, StateTransferType.Catchup, minimumEndEpochNumber)
-      true
+      if (!epochState.isClosing) {
+        logger.debug(
+          s"Switching to catch-up state transfer (up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
+            s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
+        )
+        startStateTransfer(currentEpochNumber, StateTransferType.Catchup, minimumEndEpochNumber)
+        true
+      } else {
+        logger.info(
+          s"Do not switching to catch-up state transfer because epochState is closing (probably just finished an epoch), but otherwise we would have since:" +
+            s"(up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
+            s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
+        )
+        false
+      }
     } else {
       false
     }

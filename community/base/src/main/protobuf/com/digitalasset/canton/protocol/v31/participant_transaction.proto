@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v31;
 
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/common_stable.proto";
 import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
 import "scalapb/scalapb.proto";
 
@@ -49,4 +50,35 @@ message ExternalAuthorization {
   // know an upper limit on when it must be processed by the executing participant node to be
   // valid. Typically hours or days in the future.
   optional int64 max_record_time = 3;
+}
+
+// Compared to v30: No LookupByKeyActionDescription
+message ActionDescription {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  oneof description {
+    v30.ActionDescription.CreateActionDescription create = 1;
+    v30.ActionDescription.ExerciseActionDescription exercise = 2;
+    v30.ActionDescription.FetchActionDescription fetch = 3;
+  }
+}
+
+// Compared to v30:
+// - resolved_keys now has new structure
+// - action_description uses updated structure
+message ViewParticipantData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  message KeyResolutionWithMaintainers {
+    v30.GlobalKey key = 1;
+    repeated string maintainers = 2;
+    repeated string contract_ids = 3;
+  }
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  repeated v30.InputContract core_inputs = 2;
+  repeated v30.CreatedContract created_core = 3;
+  repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
+  repeated KeyResolutionWithMaintainers resolved_keys = 5;
+  ActionDescription action_description = 6;
+  v30.ViewParticipantData.RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.
 }

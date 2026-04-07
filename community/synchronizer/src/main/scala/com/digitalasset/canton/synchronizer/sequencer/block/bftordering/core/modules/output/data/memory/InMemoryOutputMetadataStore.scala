@@ -158,19 +158,17 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
       .toSeq
       .sortBy(_.blockNumber)
 
-  override def getLastConsecutiveBlock(implicit
+  override def getLastBlockInLatestCompletedEpoch(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[OutputBlockMetadata]] =
-    createFuture(lastConsecutiveActionName) { () =>
-      val initialBlockNumber = lowerBound.get().map(_.blockNumber).getOrElse(BlockNumber.First)
+    createFuture(lastBlockInLatestCompletedEpochName) { () =>
+      val lastStartedEpoch = epochs.keySet.maxOption
       Success(
-        blocks.keySet.toSeq.sorted.zipWithIndex
-          .takeWhile { case (blockNumber, index) =>
-            blockNumber == BlockNumber(initialBlockNumber + index)
-          }
-          .map { case (blockNumber, _) => blockNumber }
-          .maxOption
-          .map(blocks)
+        lastStartedEpoch.flatMap { epochNumber =>
+          sortedBlocksForEpoch(
+            EpochNumber(epochNumber - 1L) // we go the previous to get last completed
+          ).maxByOption(_.blockNumber)
+        }
       )
     }
 
@@ -255,6 +253,7 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
   ): E#FutureUnlessShutdownT[Option[OutputMetadataStore.LowerBound]] =
     createFuture(getLowerBoundActionName)(() => Success(lowerBound.get()))
 
+  def latestBlock(): Option[BlockNumber] = blocks.keySet.maxOption
 }
 
 class InMemoryOutputMetadataStore(

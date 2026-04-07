@@ -6,7 +6,6 @@ package com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{InternedPartyId, LfPartyId, ReassignmentCounter}
 
 /** Represents a change to the ACS. The contracts are accompanied by their stakeholders.
@@ -78,12 +77,15 @@ sealed trait AcsChangeFactory {
     */
   def archivalCids: Set[LfContractId]
 
-  /** Building the final AcsChange
+  /** Building the final AcsChange.
+    *
+    * If a contract in archivalCids is missing in reassignmentCounterForArchivals, it will be
+    * omitted from the result.
     *
     * @param reassignmentCounterForArchivals
-    *   must have an entry for each archivalCids
+    *   reassignment counters for archivalCids
     */
-  def tryAcsChange(
+  def acsChange(
       reassignmentCounterForArchivals: Map[LfContractId, ReassignmentCounter]
   )(implicit loggingContext: NamedLoggingContext): AcsChange
 
@@ -106,23 +108,17 @@ final case class AcsChangeFactoryImpl(
 
   override def archivalCids: Set[LfContractId] = archivalDeactivations.keySet
 
-  override def tryAcsChange(
+  override def acsChange(
       reassignmentCounterForArchivals: Map[LfContractId, ReassignmentCounter]
   )(implicit loggingContext: NamedLoggingContext): AcsChange = {
     val enrichedArchivalDeactivations
         : Map[LfContractId, ContractStakeholdersAndReassignmentCounter] =
-      archivalDeactivations.map { case (contractId, stakeholders) =>
-        contractId -> ContractStakeholdersAndReassignmentCounter(
-          stakeholders = stakeholders,
-          reassignmentCounter = reassignmentCounterForArchivals.getOrElse(
-            contractId,
-            ErrorUtil.internalError(
-              new IllegalStateException(
-                s"contract ID $contractId not provided in reassignmentCounterForArchivals"
-              )
-            ),
-          ),
-        )
+      archivalDeactivations.collect {
+        case (contractId, stakeholders) if reassignmentCounterForArchivals.contains(contractId) =>
+          contractId -> ContractStakeholdersAndReassignmentCounter(
+            stakeholders = stakeholders,
+            reassignmentCounter = reassignmentCounterForArchivals(contractId),
+          )
       }
     initialAcsChange.copy(
       deactivations = initialAcsChange.deactivations ++ enrichedArchivalDeactivations
@@ -139,7 +135,7 @@ final case class TestAcsChangeFactory(
     contractActivenessChanged: Boolean = true
 ) extends AcsChangeFactory {
   override def archivalCids: Set[LfContractId] = Set.empty
-  override def tryAcsChange(
+  override def acsChange(
       reassignmentCounterForArchivals: Map[LfContractId, ReassignmentCounter]
   )(implicit loggingContext: NamedLoggingContext): AcsChange = AcsChange.empty
   override def contractActivenessChanged(contractId: LfContractId): Boolean =

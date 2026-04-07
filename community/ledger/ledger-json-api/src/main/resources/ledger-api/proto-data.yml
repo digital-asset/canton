@@ -3726,6 +3726,16 @@ fileComments:
               Must be a valid LedgerString (as described in ``value.proto``).
 
               Optional
+            paid_traffic_cost: |-
+              The traffic cost that this participant node paid for the corresponding (un)assignment request.
+
+              Not set for transactions that were
+              - initiated by another participant
+              - initiated offline via the repair service
+              - processed before the participant started serving traffic cost on the Ledger API
+              - returned as part of a query filtering for a non submitting party
+
+              Optional
             trace_context: |-
               Ledger API trace context
 
@@ -4364,6 +4374,17 @@ fileComments:
               signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
               Optional: can be empty
+            paid_traffic_cost: |-
+              The traffic cost that this participant node paid for the confirmation
+              request for this transaction.
+
+              Not set for transactions that were
+              - initiated by another participant
+              - initiated offline via the repair service
+              - processed before the participant started serving traffic cost on the Ledger API
+              - returned as part of a query filtering for a non submitting party
+
+              Optional
             trace_context: |-
               Ledger API trace context
 

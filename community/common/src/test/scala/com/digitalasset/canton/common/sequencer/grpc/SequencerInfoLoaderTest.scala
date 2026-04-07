@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, Positi
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   SequencerConnection,
@@ -27,7 +28,6 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
 import com.digitalasset.canton.{
   BaseTest,
@@ -74,7 +74,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
       .map { case (alias, endpoint, result) =>
         (
           GrpcSequencerConnection(
-            NonEmpty.mk(Seq, endpoint),
+            NonEmpty.mk(Set, endpoint),
             transportSecurity = false,
             None,
             alias,
@@ -357,7 +357,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
     implicit val materializer: Materializer = Materializer(actorSystem)
     val sequencerInfoLoader = new SequencerInfoLoader(
       ProcessingTimeout(),
-      TracingConfig.Propagation.Disabled,
+      ClientChannelParams.ForTesting,
       clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(
         includeAlphaVersions = true,
         includeBetaVersions = true,
@@ -470,7 +470,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
         (1 to n.value)
           .map(i =>
             GrpcSequencerConnection(
-              NonEmpty.mk(Seq, endpoint1),
+              NonEmpty.mk(Set, endpoint1),
               transportSecurity = false,
               None,
               SequencerAlias.tryCreate(s"sequencer$i"),

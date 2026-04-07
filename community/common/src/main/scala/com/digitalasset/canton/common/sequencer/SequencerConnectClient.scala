@@ -13,6 +13,7 @@ import com.digitalasset.canton.common.sequencer.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.client.SequencerClient
@@ -20,7 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeR
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId, SequencerId}
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContextExecutor
 
@@ -88,7 +89,7 @@ object SequencerConnectClient {
       synchronizerAlias: SynchronizerAlias,
       sequencerConnection: SequencerConnection,
       timeouts: ProcessingTimeout,
-      traceContextPropagation: TracingConfig.Propagation,
+      params: ClientChannelParams,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContextExecutor
@@ -99,7 +100,7 @@ object SequencerConnectClient {
           connection,
           synchronizerAlias,
           timeouts,
-          traceContextPropagation,
+          params,
           SequencerClient
             .loggerFactoryWithSequencerAlias(
               loggerFactory.append("synchronizerAlias", synchronizerAlias.toString),

@@ -67,7 +67,7 @@ import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.canton.util.{EitherTUtil, TryUtil}
 import com.digitalasset.canton.version.{HashingSchemeVersion, HashingSchemeVersionConverter}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto
@@ -356,6 +356,13 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         s"Requesting execution of daml transaction with submission ID ${executionRequest.submissionId}"
       )
       val result = for {
+        _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+          executionRequest.signatures.values
+            .forall(_.sizeIs <= config.maximumNumberOfSignaturesPerParty.value),
+          InteractiveSubmissionExecuteError.Reject(
+            s"One or more parties provided more than the maximum number of signatures allowed (${config.maximumNumberOfSignaturesPerParty.value})"
+          ),
+        )
         executionResult <- externalTransactionProcessor.processExecute(executionRequest)
         _ <- EitherT
           .liftF[Future, InteractiveSubmissionExecuteError.Reject, Unit](

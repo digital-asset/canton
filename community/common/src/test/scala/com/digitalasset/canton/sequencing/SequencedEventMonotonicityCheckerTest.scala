@@ -57,8 +57,8 @@ final class SequencedEventMonotonicityCheckerTest
       val checkedHandler = checker.handler(handler)
       val (batch1, batch2) = bobEvents.splitAt(2)
 
-      checkedHandler(Traced(batch1)).futureValueUS.unwrap.futureValueUS
-      checkedHandler(Traced(batch2)).futureValueUS.unwrap.futureValueUS
+      checkedHandler(Traced(batch1)).futureValueUS.unwrap.futureValueUS.future.futureValueUS
+      checkedHandler(Traced(batch2)).futureValueUS.unwrap.futureValueUS.future.futureValueUS
       handler.invocations.get.flatMap(_.value) shouldBe bobEvents
     }
 
@@ -83,9 +83,9 @@ final class SequencedEventMonotonicityCheckerTest
       val handler = mkHandler()
       val checkedHandler = checker.handler(handler)
 
-      checkedHandler(Traced(Seq(event1))).futureValueUS.unwrap.futureValueUS
+      checkedHandler(Traced(Seq(event1))).futureValueUS.unwrap.futureValueUS.future.futureValueUS
       loggerFactory.assertThrowsAndLogs[MonotonicityFailureException](
-        checkedHandler(Traced(Seq(event2))).futureValueUS.unwrap.futureValueUS,
+        checkedHandler(Traced(Seq(event2))).futureValueUS.unwrap.futureValueUS.future.futureValueUS,
         _.errorMessage should include(ErrorUtil.internalErrorMessage),
       )
     }
@@ -144,7 +144,7 @@ final class SequencedEventMonotonicityCheckerTest
 
 object SequencedEventMonotonicityCheckerTest {
   class CapturingApplicationHandler()
-      extends ApplicationHandler[SequencedEnvelopeBox, ClosedEnvelope] {
+      extends UnthrottledApplicationHandler[SequencedEnvelopeBox, ClosedEnvelope] {
     val invocations =
       new AtomicReference[Seq[BoxedEnvelope[SequencedEnvelopeBox, ClosedEnvelope]]](Seq.empty)
 

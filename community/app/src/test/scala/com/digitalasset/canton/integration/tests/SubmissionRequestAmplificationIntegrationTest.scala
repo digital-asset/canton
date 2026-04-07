@@ -37,7 +37,8 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.sequencing.protocol.{MessageId, TrafficState}
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencerErrors, TrafficState}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -297,30 +298,50 @@ abstract class SubmissionRequestAmplificationIntegrationTest
 
   }
 
-  "ping even if one sequencer refuses or drops" in { implicit env =>
-    import env.*
+  def testAmplifiesFor(sendDecision: SendDecision): Unit =
+    s"ping even if one sequencer refuses with $sendDecision" in { implicit env =>
+      import env.*
 
-    val sequencer = getProgrammableSequencer(sequencer1.name)
+      val sequencer = getProgrammableSequencer(sequencer1.name)
 
-    val dropped = new AtomicInteger(0)
-    sequencer.setPolicy_("drop everything but time proofs and ACS commitments")(
-      SendPolicy.processTimeProofs_ { submissionRequest =>
-        if (ProgrammableSequencerPolicies.isAcsCommitment(submissionRequest)) {
-          SendDecision.Process
-        } else {
-          dropped.getAndIncrement()
-          SendDecision.Drop
+      val policyAppliedCount = new AtomicInteger(0)
+      sequencer.setPolicy_("refuse everything but time proofs and ACS commitments")(
+        SendPolicy.processTimeProofs_ { submissionRequest =>
+          if (ProgrammableSequencerPolicies.isAcsCommitment(submissionRequest)) {
+            SendDecision.Process
+          } else {
+            policyAppliedCount.getAndIncrement()
+            sendDecision
+          }
         }
-      }
-    )
-    participant1.health.ping(participant2.id)
+      )
 
-    eventually() {
-      dropped.get() should be >= 9
+      val errorCode = sendDecision match {
+        case SendDecision.Reject(error) => error.code
+        case SendDecision.Drop =>
+          SequencerErrors.InternalTesting("Message dropped by send policy.").code
+        case _ => fail("Unexpected SendDecision")
+      }
+
+      loggerFactory.assertLogsUnorderedOptional(
+        participant1.health.ping(participant2.id),
+        (LogEntryOptionality.OptionalMany, _.shouldBeCantonErrorCode(errorCode)),
+      )
+
+      eventually() {
+        policyAppliedCount.get() should be >= 9
+      }
+
+      sequencer.resetPolicy()
     }
 
-    sequencer.resetPolicy()
-  }
+  testAmplifiesFor(SendDecision.Drop)
+  testAmplifiesFor(SendDecision.Reject(SequencerErrors.Overloaded("Test with overload rejection")))
+  testAmplifiesFor(
+    SendDecision.Reject(
+      SequencerErrors.MaxSequencingTimeTooFar("Test with max sequencing time too far")
+    )
+  )
 
   private def getAmplificationMetrics(node: LocalInstanceReference)(implicit
       env: TestConsoleEnvironment
@@ -390,7 +411,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
         if (ProgrammableSequencerPolicies.isAcsCommitment(submissionRequest)) {
           SendDecision.Process
         } else {
-          SendDecision.Reject
+          SendDecision.Reject()
         }
       }
     )

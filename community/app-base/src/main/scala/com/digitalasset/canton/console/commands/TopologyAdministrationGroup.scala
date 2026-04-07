@@ -3710,7 +3710,7 @@ class TopologyAdministrationGroup(
       )
       def propose_successor(
           sequencerId: SequencerId,
-          endpoints: NonEmpty[Seq[URI]],
+          endpoints: NonEmpty[Set[URI]],
           successorSynchronizerId: PhysicalSynchronizerId,
           customTrustCertificates: Option[ByteString] = None,
           store: Option[TopologyStoreId] = None,
@@ -3727,7 +3727,7 @@ class TopologyAdministrationGroup(
             adminCommand(
               TopologyAdminCommands.Write.Propose(
                 mapping = networking.Endpoint
-                  .fromUris(endpoints)
+                  .fromUris(endpoints.toSeq)
                   .map { case (validatedEndpoints, useTls) =>
                     LsuSequencerConnectionSuccessor(
                       sequencerId,

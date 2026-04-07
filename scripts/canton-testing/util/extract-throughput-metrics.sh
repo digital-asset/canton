@@ -27,11 +27,12 @@ load-metrics() {
   eval "$(read-csv-metric.py "$METRICS_DIR/$1" "$2" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt")"
 }
 
-load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX
+load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX "measurement=canton.transactions-emitted"
 # the indexer metrics include many events, but we are only interested in the indexer event updates
 load-metrics participant1.daml.participant.api.indexer.events.csv UPDATES PerformanceTest
 load-metrics participant1.synchronizer.daml.sequencer-client.handler.sequencer-events.csv PARTICIPANT_EVENTS
 load-metrics mediator.daml.sequencer-client.handler.sequencer-events.csv MEDIATOR_EVENTS
+load-metrics canton.performance.failed.csv FAILED_TRADER1 "role=participant1-trader1"
 
 # Starting point for general throughput measurements
 # shellcheck disable=SC2034
@@ -60,8 +61,9 @@ EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
 Throughput (transaction service): $TX_THROUGHPUT root nodes/s ($TX_EARLY_TO_LATE_COUNT tx root nodes in $TX_EARLY_TO_LATE_TIME s)
-Throughput (read service): $UPDATES_THROUGHPUT root nodes/s ($UPDATES_EARLY_TO_LATE_COUNT update root nodes in $UPDATES_EARLY_TO_LATE_TIME s)
+Throughput (read service): $UPDATES_THROUGHPUT updates/s ($UPDATES_EARLY_TO_LATE_COUNT updates in $UPDATES_EARLY_TO_LATE_TIME s)
 Throughput (participant sequencer client): $PARTICIPANT_EVENTS_THROUGHPUT events/s ($PARTICIPANT_EVENTS_EARLY_TO_LATE_COUNT events in $PARTICIPANT_EVENTS_EARLY_TO_LATE_TIME s)
 Throughput (mediator sequencer client): $MEDIATOR_EVENTS_THROUGHPUT events/s ($MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT events in $MEDIATOR_EVENTS_EARLY_TO_LATE_TIME s)
+Failed commands (trader1): $FAILED_TRADER1_EARLY_TO_LATE_COUNT
 
 EOI

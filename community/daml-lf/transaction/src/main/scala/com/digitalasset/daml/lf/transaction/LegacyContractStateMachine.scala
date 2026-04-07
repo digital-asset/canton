@@ -528,8 +528,6 @@ object LegacyContractStateMachine {
         this.consumedBy == other.consumedBy &&
         this.localActiveKeys == other.localActiveKeys
 
-    /** See docs of [[LegacyContractStateMachine.advance]]
-      */
     private[lf] def advance(
         substate: ActiveLedgerState[Nid]
     ): ActiveLedgerState[Nid] =

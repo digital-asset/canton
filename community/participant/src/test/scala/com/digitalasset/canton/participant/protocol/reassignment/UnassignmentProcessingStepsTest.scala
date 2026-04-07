@@ -1105,6 +1105,7 @@ final class UnassignmentProcessingStepsTest
       engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       DummyTickRequest,
       PublishUpdateViaRecordOrderPublisher.noop,
+      trafficCost = NonNegativeLong.tryCreate(123L),
     )
 
     "succeed without errors" in {

@@ -585,7 +585,7 @@ class ParticipantNodeBootstrap(
 
         sequencerInfoLoader = new SequencerInfoLoader(
           parameters.processingTimeouts,
-          parameters.tracing.propagation,
+          config.sequencerClient.clientChannelParams(parameters.tracing.propagation),
           ProtocolVersionCompatibility.supportedProtocols(parameters),
           parameters.protocolConfig.minimumProtocolVersion,
           parameters.protocolConfig.dontWarnOnDeprecatedPV,

@@ -393,7 +393,7 @@ private[lf] object IdeLedgerRunner {
                   }
               }
             case Question.Update.NeedKey(
-                  keyWithMaintainers,
+                  gkey,
                   limit,
                   progress,
                   committers,
@@ -402,11 +402,11 @@ private[lf] object IdeLedgerRunner {
               val contracts = progress match {
                 case NeedKeyProgression.Unstarted =>
                   val disclosedInsts =
-                    disclosuresByKey.get(keyWithMaintainers.globalKey).getOrElse(Vector.empty)
+                    disclosuresByKey.getOrElse(gkey, Vector.empty)
                   for {
                     globalInsts <- ledger
                       .lookupKey(
-                        keyWithMaintainers.globalKey,
+                        gkey,
                         committers,
                         readAs,
                         disclosedInsts,

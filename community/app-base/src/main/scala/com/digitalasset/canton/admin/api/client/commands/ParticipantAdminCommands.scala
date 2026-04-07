@@ -76,7 +76,13 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{BinaryFileUtil, GrpcStreamingUtils, OptionUtil, PathUtils}
+import com.digitalasset.canton.util.{
+  BinaryFileUtil,
+  GrpcStreamingUtils,
+  OptionUtil,
+  PathUtils,
+  ResourceUtil,
+}
 import com.digitalasset.canton.{ReassignmentCounter, SequencerCounter, SynchronizerAlias, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -85,7 +91,7 @@ import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 import io.scalaland.chimney.dsl.*
 
-import java.io.{File, IOException}
+import java.io.{File, FileInputStream, IOException}
 import java.nio.file.{Files, Path, Paths}
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
@@ -565,31 +571,30 @@ object ParticipantAdminCommands {
       override protected def submitRequest(
           service: PartyManagementServiceStub,
           request: Unit,
-      ): Future[v30.AddPartyWithAcsAsyncResponse] = {
-        val acsSnapshotBytes =
-          ByteString.copyFrom(better.files.File(importFile.getAbsolutePath).loadBytes)
-        val isFirstChunk = new AtomicBoolean(true)
-        GrpcStreamingUtils.streamToServer(
-          service.addPartyWithAcsAsync,
-          bytes => {
-            val isFirst = isFirstChunk.getAndSet(false)
-            v30.AddPartyWithAcsAsyncRequest(
-              ByteString.copyFrom(bytes),
-              arguments = Option.when(isFirst)(
-                v30.AddPartyArguments(
-                  partyId = party.toProtoPrimitive,
-                  synchronizerId = synchronizerId.toProtoPrimitive,
-                  sourceParticipantUid = sourceParticipant.uid.toProtoPrimitive,
-                  topologySerial = serial.value,
-                  participantPermission =
-                    PartyParticipantPermission.toProtoPrimitive(participantPermission),
-                )
-              ),
-            )
-          },
-          acsSnapshotBytes,
-        )
-      }
+      ): Future[v30.AddPartyWithAcsAsyncResponse] =
+        ResourceUtil.withResource(new FileInputStream(importFile)) { inputStream =>
+          val isFirstChunk = new AtomicBoolean(true)
+          GrpcStreamingUtils.streamToServer(
+            service.addPartyWithAcsAsync,
+            bytes => {
+              val isFirst = isFirstChunk.getAndSet(false)
+              v30.AddPartyWithAcsAsyncRequest(
+                ByteString.copyFrom(bytes),
+                arguments = Option.when(isFirst)(
+                  v30.AddPartyArguments(
+                    partyId = party.toProtoPrimitive,
+                    synchronizerId = synchronizerId.toProtoPrimitive,
+                    sourceParticipantUid = sourceParticipant.uid.toProtoPrimitive,
+                    topologySerial = serial.value,
+                    participantPermission =
+                      PartyParticipantPermission.toProtoPrimitive(participantPermission),
+                  )
+                ),
+              )
+            },
+            inputStream,
+          )
+        }
 
       override protected def handleResponse(
           response: v30.AddPartyWithAcsAsyncResponse
@@ -730,28 +735,27 @@ object ParticipantAdminCommands {
       override protected def submitRequest(
           service: PartyManagementServiceStub,
           request: Unit,
-      ): Future[v30.ImportPartyAcsResponse] = {
-        val acsSnapshotBytes =
-          ByteString.copyFrom(better.files.File(file.getAbsolutePath).loadBytes)
-        val isFirstChunk = new AtomicBoolean(true)
-        GrpcStreamingUtils.streamToServer(
-          service.importPartyAcs,
-          bytes => {
-            val isFirst = isFirstChunk.getAndSet(false)
-            v30.ImportPartyAcsRequest(
-              ByteString.copyFrom(bytes),
-              synchronizerId = Option.when(isFirst)(synchronizer.toProtoPrimitive),
-              workflowIdPrefix =
-                if (isFirst) OptionUtil.emptyStringAsNone(workflowIdPrefix) else None,
-              contractImportMode = Option.when(isFirst)(contractImportMode.toProtoV30),
-              representativePackageIdOverride =
-                Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
-              partyId = Option.when(isFirst)(party.map(_.toProtoPrimitive)).flatten,
-            )
-          },
-          acsSnapshotBytes,
-        )
-      }
+      ): Future[v30.ImportPartyAcsResponse] =
+        ResourceUtil.withResource(new FileInputStream(file)) { inputStream =>
+          val isFirstChunk = new AtomicBoolean(true)
+          GrpcStreamingUtils.streamToServer(
+            service.importPartyAcs,
+            bytes => {
+              val isFirst = isFirstChunk.getAndSet(false)
+              v30.ImportPartyAcsRequest(
+                ByteString.copyFrom(bytes),
+                synchronizerId = Option.when(isFirst)(synchronizer.toProtoPrimitive),
+                workflowIdPrefix =
+                  if (isFirst) OptionUtil.emptyStringAsNone(workflowIdPrefix) else None,
+                contractImportMode = Option.when(isFirst)(contractImportMode.toProtoV30),
+                representativePackageIdOverride =
+                  Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
+                partyId = Option.when(isFirst)(party.map(_.toProtoPrimitive)).flatten,
+              )
+            },
+            inputStream,
+          )
+        }
 
       override protected def handleResponse(
           response: v30.ImportPartyAcsResponse
@@ -874,26 +878,25 @@ object ParticipantAdminCommands {
       override protected def submitRequest(
           service: ParticipantRepairServiceStub,
           request: Unit,
-      ): Future[v30.ImportAcsResponse] = {
-        val acsBytes =
-          ByteString.copyFrom(better.files.File(importFilePath.getAbsolutePath).loadBytes)
-        val isFirstChunk = new AtomicBoolean(true)
-        GrpcStreamingUtils.streamToServer(
-          service.importAcs,
-          (bytes: Array[Byte]) => {
-            val isFirst = isFirstChunk.getAndSet(false)
-            v30.ImportAcsRequest(
-              ByteString.copyFrom(bytes),
-              Option.when(isFirst)(workflowIdPrefix),
-              Option.when(isFirst)(contractImportMode.toProtoV30),
-              excludedStakeholders.map(_.toProtoPrimitive).toSeq,
-              Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
-              Option.when(isFirst)(synchronizerId.toProtoPrimitive),
-            )
-          },
-          acsBytes,
-        )
-      }
+      ): Future[v30.ImportAcsResponse] =
+        ResourceUtil.withResource(new FileInputStream(importFilePath)) { inputStream =>
+          val isFirstChunk = new AtomicBoolean(true)
+          GrpcStreamingUtils.streamToServer(
+            service.importAcs,
+            (bytes: Array[Byte]) => {
+              val isFirst = isFirstChunk.getAndSet(false)
+              v30.ImportAcsRequest(
+                ByteString.copyFrom(bytes),
+                Option.when(isFirst)(workflowIdPrefix),
+                Option.when(isFirst)(contractImportMode.toProtoV30),
+                excludedStakeholders.map(_.toProtoPrimitive).toSeq,
+                Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
+                Option.when(isFirst)(synchronizerId.toProtoPrimitive),
+              )
+            },
+            inputStream,
+          )
+        }
 
       override protected def handleResponse(
           response: v30.ImportAcsResponse

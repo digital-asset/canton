@@ -5,10 +5,12 @@ package com.digitalasset.canton.platform
 
 import anorm.SqlParser.long
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.api.AcsContinuationToken
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -137,14 +139,132 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
     verifyAchsConsistency(targetLastEventSeqId)
   }
 
+  behavior of "ACHS reading"
+
+  it should "return active contracts when activeAt is before ACHS' validAt (falls back to activate)" in {
+    val txsCreatedNotArchived = 200
+    val txSize = 3
+
+    val allUpdates = createsAndArchives(
+      nextRecordTime = nextRecordTime,
+      txSize = txSize,
+      txsCreatedThenArchived = 0,
+      txsCreatedNotArchived = txsCreatedNotArchived,
+      createPayloadLength = 42,
+      archiveArgumentPayloadLengthFromTo = (10, 20),
+      archiveResultPayloadLengthFromTo = (10, 20),
+    )
+
+    val start = index.currentLedgerEnd().futureValue.fold(0L)(_.unwrap)
+
+    ingestUpdates(allUpdates*)
+
+    val validAt = getAchsValidAt
+    val beforeValidAt = offsetForEventSeqId(validAt) - 1L
+
+    val contractsBeforeValidAt = activeContractIds(beforeValidAt).filter(_._2 > start)
+
+    contractsBeforeValidAt should not be empty
+    contractsBeforeValidAt.size shouldBe (beforeValidAt - start) * txSize
+  }
+
+  it should "return active contracts when activeAt is after ACHS validAt (uses ACHS)" in {
+    val txsCreatedThenArchived = 10
+    val txsCreatedNotArchived = 1
+    val txSize = 3
+    val repetitions = 50
+
+    val allUpdates = (1 to repetitions).flatMap { _ =>
+      createsAndArchives(
+        nextRecordTime = nextRecordTime,
+        txSize = txSize,
+        txsCreatedThenArchived = txsCreatedThenArchived,
+        txsCreatedNotArchived = txsCreatedNotArchived,
+        createPayloadLength = 42,
+        archiveArgumentPayloadLengthFromTo = (10, 20),
+        archiveResultPayloadLengthFromTo = (10, 20),
+      )
+    }
+
+    val start = index.currentLedgerEnd().futureValue.fold(0L)(_.unwrap)
+
+    ingestUpdates(allUpdates*)
+
+    val ledgerEnd = index.currentLedgerEnd().futureValue
+
+    val contractsAtLedgerEnd = activeContractIds(ledgerEnd.value.unwrap).filter(_._2 > start)
+
+    contractsAtLedgerEnd.size shouldBe txsCreatedNotArchived * txSize * repetitions
+
+    // offset at validAt so that ACHS is used
+    val atValidAtOffset = offsetForEventSeqId(getAchsValidAt)
+    // offset before validAt so that ACHS is not used
+    val beforeValidAtOffset = atValidAtOffset - 1
+
+    val achsContracts = activeContractIds(atValidAtOffset).filter(_._2 > start)
+    val noAchsContracts = activeContractIds(beforeValidAtOffset).filter(_._2 > start)
+
+    achsContracts should not be empty
+    noAchsContracts should not be empty
+    achsContracts.size shouldBe noAchsContracts.size + txSize
+
+    noAchsContracts shouldBe achsContracts.filter(_._2 < atValidAtOffset)
+  }
+
+  // TODO(#30241) add mid-stream restart test when initialization logic is in place
+
+  it should "return same active contracts with ACHS enabled and disabled" in {
+    val txsCreatedThenArchived = 5
+    val txsCreatedNotArchived = 1
+    val txSize = 3
+    val repetitions = 50
+
+    val allUpdates = (1 to repetitions).flatMap { _ =>
+      createsAndArchives(
+        nextRecordTime = nextRecordTime,
+        txSize = txSize,
+        txsCreatedThenArchived = txsCreatedThenArchived,
+        txsCreatedNotArchived = txsCreatedNotArchived,
+        createPayloadLength = 42,
+        archiveArgumentPayloadLengthFromTo = (10, 20),
+        archiveResultPayloadLengthFromTo = (10, 20),
+      )
+    }
+
+    val lastEventSeqIdBefore = getLastEventSeqId
+    ingestUpdates(allUpdates*)
+    val expectedLastEventSeqId =
+      lastEventSeqIdBefore + txSize * (txsCreatedThenArchived * 2 + txsCreatedNotArchived) * repetitions
+
+    verifyAchsConsistency(expectedLastEventSeqId)
+
+    val ledgerEnd = index.currentLedgerEnd().futureValue.value.unwrap
+
+    // fetch ACS using the ACHS-enabled index service (ACHS should be used)
+    val achsContracts = activeContractIds(ledgerEnd)
+    achsContracts should not be empty
+
+    // restart indexer with ACHS disabled and fetch ACS again (ACHS should not be used, but result should be the same)
+    restartIndexer(
+      config = indexerConfig.copy(
+        achsConfig = None
+      )
+    )
+
+    val noAchsContracts = activeContractIds(ledgerEnd)
+    noAchsContracts should not be empty
+
+    achsContracts shouldBe noAchsContracts
+
+    // restart with original config for the next tests
+    restartIndexer(config = indexerConfig)
+  }
+
   private def verifyAchsConsistency(targetLastEventSeqId: Long): Unit = {
     val expectedValidAt = targetLastEventSeqId - achsConfig.validAtDistanceTarget.unwrap
     val expectedLastPopulated = expectedValidAt - achsConfig.lastPopulatedDistanceTarget.unwrap
     eventually(60.seconds) {
-      val validAt =
-        SQL"SELECT valid_at FROM lapi_achs_state"
-          .as(long("valid_at").single)(connection)
-
+      val validAt = getAchsValidAt
       validAt should be >= expectedValidAt - aggregationThreshold
       validAt should be <= expectedValidAt + aggregationThreshold
 
@@ -184,4 +304,30 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
       achsIds shouldBe activeIds
     }
   }
+
+  private def getAchsValidAt: Long =
+    SQL"SELECT valid_at FROM lapi_achs_state"
+      .as(long("valid_at").single)(connection)
+
+  private def offsetForEventSeqId(seqId: Long): Long =
+    SQL"""SELECT MAX(event_offset) AS max_offset
+            FROM lapi_events_activate_contract
+            WHERE event_sequential_id <= $seqId"""
+      .as(long("max_offset").?.single)(connection)
+      .getOrElse(0L)
+
+  private def activeContractIds(activeAt: Long): Seq[(String, Long)] =
+    index
+      .getActiveContracts(
+        eventFormat = allPartyEventFormat,
+        activeAt = Some(Offset.tryFromLong(activeAt)),
+        continuationToken = None,
+        checksum = AcsContinuationToken.emptyChecksum,
+      )
+      .runWith(Sink.seq)
+      .futureValue
+      .flatMap(
+        _.contractEntry.activeContract
+          .flatMap(_.createdEvent.map(event => event.contractId -> event.offset))
+      )
 }

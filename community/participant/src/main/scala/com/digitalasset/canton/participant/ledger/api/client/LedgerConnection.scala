@@ -60,7 +60,9 @@ object LedgerConnection {
       .executor(ec)
       .intercept(
         TraceContextGrpc.clientInterceptor(
-          Some(GrpcTelemetry.builder(tracerProvider.openTelemetry).build().newClientInterceptor())
+          Some(
+            GrpcTelemetry.builder(tracerProvider.openTelemetry).build().createClientInterceptor()
+          )
         )
       )
     LedgerClient.withoutToken(builder.build(), clientConfig, loggerFactory)

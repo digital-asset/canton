@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencing.traffic
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.{SyncCryptoClient, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.SynchronizerParameters
@@ -247,6 +247,15 @@ class SequencerRateLimitManagerImplTest
           batch = batch,
         ),
         sequencingTimestamp,
+        SyncCryptoClient
+          .getSnapshotForTimestamp(
+            cryptoClient,
+            sequencingTimestamp,
+            None,
+            warnIfApproximate = false,
+          )
+          .futureValueUS
+          .ipsSnapshot,
         submissionTimestamp = submissionTimestamp,
         None,
         warnIfApproximate = false,

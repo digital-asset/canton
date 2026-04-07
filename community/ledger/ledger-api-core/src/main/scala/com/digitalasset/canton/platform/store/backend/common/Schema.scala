@@ -160,6 +160,7 @@ private[backend] object AppendOnlySchema {
         "external_transaction_hash" -> fieldStrategy.byteaOptional(_ =>
           _.external_transaction_hash
         ),
+        "traffic_cost" -> fieldStrategy.bigintOptional(_ => _.traffic_cost),
 
         // event related columns
         "event_type" -> fieldStrategy.smallint(_ => _.event_type),
@@ -200,6 +201,7 @@ private[backend] object AppendOnlySchema {
         "external_transaction_hash" -> fieldStrategy.byteaOptional(_ =>
           _.external_transaction_hash
         ),
+        "traffic_cost" -> fieldStrategy.bigintOptional(_ => _.traffic_cost),
 
         // event related columns
         "event_type" -> fieldStrategy.smallint(_ => _.event_type),
@@ -263,6 +265,7 @@ private[backend] object AppendOnlySchema {
         "external_transaction_hash" -> fieldStrategy.byteaOptional(_ =>
           _.external_transaction_hash
         ),
+        "traffic_cost" -> fieldStrategy.bigintOptional(_ => _.traffic_cost),
 
         // event related columns
         "event_type" -> fieldStrategy.smallint(_ => _.event_type),

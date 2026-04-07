@@ -13,7 +13,6 @@ import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
-  GlobalKeyWithMaintainers,
   NeedKeyProgression,
 }
 import com.digitalasset.daml.lf.value.Value._
@@ -64,7 +63,7 @@ sealed trait Result[+A] extends Product with Serializable {
   private[lf] def consume(
       pcs: PartialFunction[ContractId, FatContractInstance] = PartialFunction.empty,
       pkgs: PartialFunction[PackageId, Package] = PartialFunction.empty,
-      keys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+      keys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
         PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
@@ -187,7 +186,7 @@ final case class ResultNeedPackage[A](packageId: PackageId, resume: Option[Packa
   * When it is [[transaction.NeedKeyProgression.Unstarted]], this is the initial query for the given key.
   */
 final case class ResultNeedKey[A](
-    key: GlobalKeyWithMaintainers,
+    key: GlobalKey,
     limit: Int,
     continuationToken: NeedKeyProgression.CanContinue,
     resume: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Result[A],

@@ -6,8 +6,6 @@ module ExceptionAndContractKey where
 
 import Daml.Script
 import DA.Exception
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template K
   with

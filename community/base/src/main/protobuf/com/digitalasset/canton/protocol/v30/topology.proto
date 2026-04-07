@@ -197,8 +197,10 @@ message ParticipantSynchronizerPermission {
   // optional individual limits for this participant
   ParticipantSynchronizerLimits limits = 4;
 
-  // optional earliest time when participant can log in (again)
-  // used to temporarily disable participants
+  // Optional earliest time when participant can log in (again).
+  // Used to temporarily disable participants.
+  // A participant cannot login before the sequencer has reached login_after, i.e.,
+  // the sequencer must have produced an event with timestamp login_after.
   // In microseconds of UTC time since Unix epoch
   optional int64 login_after = 5;
 }

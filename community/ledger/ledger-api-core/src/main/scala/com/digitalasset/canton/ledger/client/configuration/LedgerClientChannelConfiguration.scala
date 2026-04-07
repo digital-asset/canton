@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.client.configuration
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import io.grpc.internal.GrpcUtil
 import io.grpc.netty.shaded.io.grpc.netty.{NegotiationType, NettyChannelBuilder}
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
@@ -19,14 +20,17 @@ final case class LedgerClientChannelConfiguration(
     sslContext: Option[SslContext],
     maxInboundMetadataSize: Int = GrpcUtil.DEFAULT_MAX_HEADER_LIST_SIZE,
     maxInboundMessageSize: Int = LedgerClientChannelConfiguration.DefaultMaxInboundMessageSize,
+    flowControlWindow: PositiveInt = LedgerClientChannelConfiguration.DefaultFlowControlWindow,
 ) {
 
   def builderFor(host: String, port: Int): NettyChannelBuilder = {
-    val builder = NettyChannelBuilder.forAddress(host, port)
+    val builder = NettyChannelBuilder
+      .forAddress(host, port)
     sslContext
       .fold(builder.usePlaintext())(builder.sslContext(_).negotiationType(NegotiationType.TLS))
       .maxInboundMetadataSize(maxInboundMetadataSize)
       .maxInboundMessageSize(maxInboundMessageSize)
+      .flowControlWindow(flowControlWindow.unwrap)
   }
 
 }
@@ -34,6 +38,8 @@ final case class LedgerClientChannelConfiguration(
 object LedgerClientChannelConfiguration {
 
   val DefaultMaxInboundMessageSize: Int = 10 * 1024 * 1024
+  val DefaultFlowControlWindow: PositiveInt =
+    PositiveInt.tryCreate(1024 * 1024) // 1mb instead of 64kb
   val InsecureDefaults: LedgerClientChannelConfiguration =
     LedgerClientChannelConfiguration(sslContext = None)
 

@@ -11,6 +11,7 @@ import com.digitalasset.canton.environment.{
   HasProtocolCantonNodeParameters,
 }
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.DisasterRecoverySequencingTimeUpperBound
 
 trait SequencerParameters {
   def maxConfirmationRequestsBurstFactor: PositiveDouble
@@ -41,6 +42,12 @@ trait SequencerParameters {
   *   maximum number of auth tokens and nonces per member
   * @param maxSubscriptionsPerMember
   *   maximum number of subscriptions per member
+  *
+  * @param drSequencingTimeUpperBound
+  *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
+  *   strictly greater to this value will not be delivered. Important notes:
+  *   - SHOULD be set only in disaster recovery scenarios.
+  *   - MUST be the same value in all sequencers of a synchronizer.
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -54,6 +61,7 @@ final case class SequencerNodeParameters(
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
+    drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

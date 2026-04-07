@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   EnvVarTestOverrides,
   TestInclusions,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -131,6 +132,7 @@ sealed trait JsonApiConformanceBase
         import env.*
         participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
       }
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   "Ledger JSON API" should {
     testCaseName in { implicit env =>
@@ -204,6 +206,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
       }
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
   override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++

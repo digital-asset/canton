@@ -17,8 +17,6 @@ module ContractIdInContractKeySkipCheck where
 
 import Daml.Script
 import ContractIdInContractKeySkipCheckType (ContractId'(..))
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template Contract with
     party : Party
@@ -51,7 +49,7 @@ queryCrashes = script do
     alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:queryCrashes"
     cid <- submit alice $ do
           createCmd Contract with party = alice
-    queryContractKey @ContractKeyWithCid alice (alice, ContractId' cid)
+    queryByKey @ContractKeyWithCid alice (alice, ContractId' cid)
 
 exerciseCmdCrashes = script do
     alice <- allocateParty "Alice-ContractIdInContractKeySkipCheck:exerciseCmdCrashes"

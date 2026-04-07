@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import cats.data.OptionT
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{
@@ -495,7 +494,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
     logger.info(s"Creating a gRPC channel to $p2pEndpointId")
 
-    val channel = createChannelBuilder(p2pEndpoint.endpointConfig).build()
+    val channel =
+      createChannelBuilder(p2pEndpoint.endpointConfig, maxInboundMessageSize = None).build()
     val channelId = channel.toString
 
     val authenticationContextO =
@@ -504,8 +504,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
           auth.psId,
           member = auth.sequencerId,
           crypto = auth.authenticationServices.syncCryptoForAuthentication.crypto,
-          channelPerEndpoint =
-            NonEmpty(Map, Endpoint(p2pEndpoint.address, p2pEndpoint.port) -> channel),
+          endpoint = Endpoint(p2pEndpoint.address, p2pEndpoint.port),
+          channel = channel,
           supportedProtocolVersions = Seq(auth.psId.protocolVersion),
           tokenManagerConfig = auth.authTokenConfig,
           metricsO = None,

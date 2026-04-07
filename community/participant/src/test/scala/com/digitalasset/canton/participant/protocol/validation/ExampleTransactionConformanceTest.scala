@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
   GetEngineAbortStatus,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.validation.ExampleTransactionConformanceTest.HashReInterpretationCounter
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
@@ -145,8 +145,8 @@ class ExampleTransactionConformanceTest
         (viewTree, resolvers)
       })
 
-    val transactionTreeFactory: TransactionTreeFactoryImpl =
-      TransactionTreeFactoryImpl(
+    val transactionTreeFactory: TransactionTreeFactory =
+      TransactionTreeFactory(
         ExampleTransactionFactory.submittingParticipant,
         factory.psid,
         factory.cantonContractIdVersion,
@@ -158,13 +158,11 @@ class ExampleTransactionConformanceTest
     def reInterpret(
         mcc: ModelConformanceChecker,
         view: TransactionView,
-        keyResolver: LfKeyResolver,
         commonData: TransactionProcessingSteps.CommonData,
     ): EitherT[Future, Error, ConformanceReInterpretationResult] =
       mcc
         .reInterpret(
           view,
-          keyResolver,
           commonData.ledgerTime,
           commonData.preparationTime,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
@@ -180,13 +178,11 @@ class ExampleTransactionConformanceTest
     ): EitherT[Future, ErrorWithSubTransaction[Unit], Result] = {
       val rootViewTrees = views.map(_._1)
       val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
-      val keyResolvers = views.forgetNE.flatMap { case (_, resolvers) => resolvers }.toMap
       val rootViewTreesWithEffects =
         rootViewTrees.map(tree => (tree, tree.view.allSubviews.map(_ => ())))
       mcc
         .check(
           rootViewTreesWithEffects,
-          keyResolvers,
           ips,
           commonData,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
@@ -252,7 +248,6 @@ class ExampleTransactionConformanceTest
                     reInterpret(
                       sut,
                       viewTree.view,
-                      Map.empty: LfKeyResolver,
                       TransactionProcessingSteps.tryCommonData(topLevelViewTrees),
                     ).mapK(FutureUnlessShutdown.outcomeK)
                   )

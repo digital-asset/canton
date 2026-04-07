@@ -37,6 +37,11 @@ trait LeaderSelectionPolicy[E <: Env[E]] {
     */
   def firstBlockWeNeedToAdd: Option[BlockNumber]
 
+  /** The current epoch that all [[addBlock]] need to be in (None means we can [[addBlock]] from any
+    * epoch)
+    */
+  def currentEpoch: Option[EpochNumber]
+
   def getHistoricState(
       epochNumber: EpochNumber
   )(implicit

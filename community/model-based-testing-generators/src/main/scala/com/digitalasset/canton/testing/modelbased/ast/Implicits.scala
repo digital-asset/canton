@@ -145,4 +145,24 @@ object Implicits {
   implicit class RichCommands(commands: Concrete.Commands) {
     def actions: List[Concrete.Action] = commands.commands.map(_.action)
   }
+
+  implicit class RichConcreteTransaction(tx: Concrete.Transaction) {
+
+    /** Recursively collect all [[Concrete.QueryByKey]] nodes from the transaction, descending into
+      * Exercise, ExerciseByKey and Rollback sub-transactions.
+      */
+    def queryByKeyNodes: List[Concrete.QueryByKey] = {
+      def fromAction(action: Concrete.Action): List[Concrete.QueryByKey] = action match {
+        case qbk: Concrete.QueryByKey => List(qbk)
+        case Concrete.Exercise(_, _, _, _, subTransaction) => subTransaction.flatMap(fromAction)
+        case Concrete.ExerciseByKey(_, _, _, _, _, _, subTransaction) =>
+          subTransaction.flatMap(fromAction)
+        case Concrete.Rollback(subTransaction) => subTransaction.flatMap(fromAction)
+        case _: Concrete.Create | _: Concrete.CreateWithKey | _: Concrete.Fetch |
+            _: Concrete.FetchByKey | _: Concrete.LookupByKey =>
+          Nil
+      }
+      tx.flatMap(fromAction)
+    }
+  }
 }

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
@@ -24,6 +23,7 @@ import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.TestSubmissionService
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,
@@ -65,7 +65,6 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.digitalasset.daml.lf.data.Ref.UserId
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
 import org.scalatest.EitherValues.*
@@ -514,7 +513,7 @@ class MaliciousParticipantNode(
             command.transactionUuid,
             cryptoSnapshot.ipsSnapshot,
             contractOfId,
-            metadata.globalKeyMapping.asCidOptionMap,
+            metadata.globalKeyMapping,
             maxSequencingTime,
             validatePackageVettings = false,
           )

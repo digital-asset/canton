@@ -5,6 +5,7 @@ package com.digitalasset.canton.config
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import scala.concurrent.duration.Duration
@@ -34,7 +35,14 @@ final case class GrpcHealthServerConfig(
   override val jwksCacheConfig: JwksCacheConfig = JwksCacheConfig()
   override def limits: Option[ActiveRequestLimitsConfig] = None
   def toRemoteConfig: FullClientConfig =
-    FullClientConfig(address, port, keepAliveClient = keepAliveServer.map(_.clientConfigFor))
+    FullClientConfig(
+      address,
+      port,
+      channel = ClientChannelParams.Default.copy(
+        maxInboundMessageSize = maxInboundMessageSize,
+        keepAliveClient = keepAliveServer.map(_.clientConfigFor),
+      ),
+    )
 }
 
 /** Configuration of health server backend. */

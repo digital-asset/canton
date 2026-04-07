@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package command
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.value.Value
 
 /** Accepted commands for replay */
@@ -31,10 +31,14 @@ object ReplayCommand {
 
   /** Command for exercising a choice on an existing contract specified by its key
     *
-    * @param templateId  identifier of the original contract
-    * @param contractKey key of the contract on which the choice is exercised
-    * @param choiceId    identifier choice
-    * @param argument    value passed for the choice
+    * @param templateId
+    *   identifier of the original contract
+    * @param contractKey
+    *   key of the contract on which the choice is exercised
+    * @param choiceId
+    *   identifier choice
+    * @param argument
+    *   value passed for the choice
     */
   final case class ExerciseByKey(
       templateId: Identifier,
@@ -58,4 +62,5 @@ object ReplayCommand {
       templateId: Identifier,
       contractKey: Value,
   ) extends ReplayCommand
+
 }

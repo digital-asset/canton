@@ -5,20 +5,12 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.{
   Add,
   Archive,
   Create,
   Purge,
-}
-import com.digitalasset.canton.participant.store.ActiveContractStore.{
-  AcsWarning,
-  ActivenessChangeDetail,
-  ChangeAfterArchival,
-  ChangeBeforeCreation,
-  ChangeType,
-  DoubleContractArchival,
-  DoubleContractCreation,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
@@ -93,17 +85,6 @@ object ActivationsDeactivationsConsistencyCheck {
       if (changes.hasNext) {
         val (currentToc, currentChange) = changes.next()
 
-        val doubleArchival = currentChange match {
-          case Archive =>
-            earliestArchivalO.toList.flatMap(doubleContractArchival(_, currentToc))
-
-          case _ => Nil
-        }
-
-        val changeAfterArchivalO = earliestArchivalO.toList
-          .map(ChangeAfterArchival(cid, _, currentToc))
-          .filter(_.timeOfChanges.contains(toc))
-
         val doubleCreation = currentChange match {
           case Create(_) =>
             latestCreateO.toList.flatMap(doubleContractCreation(_, currentToc))
@@ -120,13 +101,11 @@ object ActivationsDeactivationsConsistencyCheck {
           case _: Add if isActive => doubleContractCreation(prevToc, currentToc)
           case Purge if isInactive =>
             latestArchivalOrPurgeO.toList.flatMap(doubleContractArchival(_, currentToc))
-
           case _ => Nil
         }
 
         updateStateVariables(currentChange, currentToc)
-        val warnings =
-          addPurge ++ doubleCreation ++ doubleArchival ++ changeAfterArchivalO ++ changeBeforeCreation
+        val warnings = addPurge ++ doubleCreation ++ changeBeforeCreation
 
         if (warnings.nonEmpty)
           warnings
@@ -145,13 +124,8 @@ object ActivationsDeactivationsConsistencyCheck {
       ()
     }.isDefined
 
-    val containsDoubleArchival = warnings.collectFirst { case _: DoubleContractArchival =>
-      ()
-    }.isDefined
-
     val filteredWarnings = warnings.mapFilter {
       case c: ChangeBeforeCreation => Option.when(!containsDoubleCreation)(c)
-      case c: ChangeAfterArchival => Option.when(!containsDoubleArchival)(c)
       case other => Some(other)
     }
 

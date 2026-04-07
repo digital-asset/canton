@@ -14,8 +14,6 @@
 module KeyNotVisibleStakeholders where
 
 import Daml.Script
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template Keyed
   with

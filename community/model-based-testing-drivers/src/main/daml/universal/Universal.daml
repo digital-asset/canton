@@ -7,8 +7,7 @@ import RollbackException
 import qualified DA.Map as M
 import DA.Exception (ActionThrow(throw))
 import DA.Optional (isSome)
-import DA.ContractKeys (queryNByKey, lookupByKey)
-import Prelude hiding (lookupByKey)
+import DA.ContractKeys (lookupNByKey)
 
 data Kind = Consuming | NonConsuming
   deriving (Eq, Show)
@@ -204,7 +203,7 @@ interpretTxAction env action =
       assert (isSome result == expectedSuccess)
       return env
     (QueryByKey keyId maintainers exhaustive expectedContractIds) -> do
-      result <- queryNByKey @UniversalWithKey
+      result <- lookupNByKey @UniversalWithKey
                   (length expectedContractIds + if exhaustive then 1 else 0)
                   (keyId, maintainers)
       assert (fmap (\(_, contract) -> contract.contractId) result == expectedContractIds)

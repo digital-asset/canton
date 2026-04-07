@@ -48,9 +48,8 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -79,8 +78,6 @@ class ModelConformanceChecker(
     * @param rootViewTrees
     *   all received transaction view trees contained in a confirmation request that have the same
     *   transaction id and represent a top-most view
-    * @param keyResolverFor
-    *   The key resolver to be used for re-interpreting root views
     * @param commonData
     *   the common data of all the (rootViewTree : TransactionViewTree) trees in `rootViews`
     * @return
@@ -88,7 +85,6 @@ class ModelConformanceChecker(
     */
   def check[ViewEffect](
       rootViewTrees: NonEmpty[Seq[(FullTransactionViewTree, RoseTree[ViewEffect])]],
-      keyResolverFor: TransactionView => LfKeyResolver,
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
@@ -134,7 +130,6 @@ class ModelConformanceChecker(
             viewPos,
             mediator,
             transactionUuid,
-            keyResolverFor(view),
             ledgerTime,
             preparationTime,
             submittingParticipantO,
@@ -242,7 +237,6 @@ class ModelConformanceChecker(
 
   def reInterpret(
       view: TransactionView,
-      resolverFromView: LfKeyResolver,
       ledgerTime: CantonTimestamp,
       preparationTime: CantonTimestamp,
       getEngineAbortStatus: GetEngineAbortStatus,
@@ -259,7 +253,13 @@ class ModelConformanceChecker(
 
     val inputContracts = view.inputContracts.fmap(_.contract)
 
-    val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, resolverFromView)
+    // TODO(#31527): SPM this will be changed once many contracts are supported
+    val keys = inputContracts.view
+      .map { case (cid, c) => (cid, c.inst.contractKeyWithMaintainers.map(_.globalKey)) }
+      .collect { case (cid, Some(key)) => (cid, key) }
+      .groupMapReduce(_._2) { case (cid, _) => Vector(cid) }(_ ++ _)
+
+    val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, keys)
 
     for {
 
@@ -294,7 +294,6 @@ class ModelConformanceChecker(
       viewPosition: ViewPosition,
       mediator: MediatorGroupRecipient,
       transactionUuid: UUID,
-      resolverFromView: LfKeyResolver,
       ledgerTime: CantonTimestamp,
       preparationTime: CantonTimestamp,
       submitterMetadataO: Option[SubmitterMetadata],
@@ -318,7 +317,6 @@ class ModelConformanceChecker(
         .getOrElse(
           reInterpret(
             view,
-            resolverFromView,
             ledgerTime,
             preparationTime,
             getEngineAbortStatus,
@@ -340,12 +338,6 @@ class ModelConformanceChecker(
 
       _ <- checkPackageVetting(view, topologySnapshot, usedPackages, metadata.ledgerTime)
 
-      // For transaction views of protocol version 3 or higher,
-      // the `resolverFromReinterpretation` is the same as the `resolverFromView`.
-      // The `TransactionTreeFactoryImplV3` rebuilds the `resolverFromReinterpretation`
-      // again by re-running the `ContractStateMachine` and checks consistency
-      // with the reconstructed view's global key inputs,
-      // which by the view equality check is the same as the `resolverFromView`.
       wfTx <- EitherT.fromEither[FutureUnlessShutdown](
         WellFormedTransaction
           .check(lfTx, metadata, WithoutSuffixes)
@@ -371,7 +363,7 @@ class ModelConformanceChecker(
           transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,
           contractOfId = TransactionTreeFactory.contractInstanceLookup(contractAndKeyLookup),
-          keyResolver = resolverFromReinterpretation.asCidOptionMap,
+          keyResolver = resolverFromReinterpretation,
           absolutizer = absolutizer,
         )
       ).leftMap(err => TransactionTreeError(err, view.viewHash))

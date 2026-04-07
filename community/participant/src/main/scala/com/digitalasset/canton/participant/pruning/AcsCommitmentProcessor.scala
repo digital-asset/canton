@@ -784,7 +784,7 @@ class AcsCommitmentProcessor private (
       FutureUnlessShutdown.pure(AcsChange.empty)
 
     case Some(withoutArchival) if withoutArchival.archivalCids.isEmpty =>
-      FutureUnlessShutdown.pure(withoutArchival.tryAcsChange(Map.empty))
+      FutureUnlessShutdown.pure(withoutArchival.acsChange(Map.empty))
 
     case Some(acsChangeFactory) =>
       // Retrieves the reassignment counters of the archived contracts from the latest state in the active contract store
@@ -793,7 +793,12 @@ class AcsCommitmentProcessor private (
           acsChangeFactory.archivalCids,
           toc.timestamp,
         )
-        .map(acsChangeFactory.tryAcsChange)
+        .map(
+          // If an inactive contract is archived, it should not change the acs commitment.
+          // The previous step has not determined a reassignment counter for such contracts.
+          // Therefore, the next line will filter them out.
+          acsChangeFactory.acsChange
+        )
   }).map { acsChange =>
     // we only log the full list of changes on trace level
     logger.trace(
@@ -1398,7 +1403,7 @@ class AcsCommitmentProcessor private (
       logPassiveInstanceAtInfo = true,
     )
 
-    HandlerResult.asynchronous(result)
+    HandlerResult.asynchronousUnit(result)
   }
 
   private def updateParticipantLatency(
@@ -2219,7 +2224,6 @@ class AcsCommitmentProcessor private (
                     .map(snapshot => (snapshot, None))
                 } else {
                   synchronizerCrypto.currentSnapshotApproximation.map(snapshot =>
-                    // TODO(#31332): Make sure session signing keys with PV34 are forbidden
                     // We do not specify a `validityPeriodEnd` because session signing keys should only be used
                     // for PV > 34, and it avoids having to pass the max sequencing time through.
                     (

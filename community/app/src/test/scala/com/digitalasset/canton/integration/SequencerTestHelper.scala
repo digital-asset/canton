@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration
 
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SequencerApiClientConfig}
@@ -18,6 +17,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{
   ClientChannelBuilder,
+  ClientChannelParams,
   GrpcClient,
   GrpcManagedChannel,
 }
@@ -33,7 +33,6 @@ import com.digitalasset.canton.sequencing.authentication.{
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -57,10 +56,11 @@ object SequencerTestHelper {
 
     channelBuilder
       .create(
-        NonEmpty(Seq, daEndpoint),
+        daEndpoint,
         useTls = false,
         executor,
-        traceContextPropagation = Propagation.Enabled,
+        trustCertificate = None,
+        params = ClientChannelParams.ForTesting,
       )
       .build()
   }

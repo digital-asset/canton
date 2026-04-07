@@ -3,14 +3,19 @@
 
 package com.digitalasset.canton.crypto.sync
 
+import com.digitalasset.canton.ProtocolVersionChecksAnyWordSpec
 import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithLongTermKeys
 import com.digitalasset.canton.topology.DefaultTestIdentities.{participant1, participant2}
 import com.digitalasset.canton.topology.TestingTopology
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-class SyncCryptoWithLongTermKeysTest extends AnyWordSpec with SyncCryptoTest {
+class SyncCryptoWithLongTermKeysTest
+    extends AnyWordSpec
+    with SyncCryptoTest
+    with ProtocolVersionChecksAnyWordSpec {
   // we explicitly disable any use of session signing keys
   override protected lazy val sessionSigningKeysConfig: SessionSigningKeysConfig =
     SessionSigningKeysConfig.disabled
@@ -26,67 +31,68 @@ class SyncCryptoWithLongTermKeysTest extends AnyWordSpec with SyncCryptoTest {
     /* This test checks whether a node that does not use session keys can verify a signature
      * sent by a node that uses session keys (with a signature delegation defined).
      */
-    "correctly verify signature that contains a delegation for a session key" in {
+    "correctly verify signature that contains a delegation for a session key" onlyRunWithOrGreaterThan
+      ProtocolVersion.v35 in {
 
-      // enable session keys just for signing
-      val testingTopologyWithSessionKeys =
-        TestingTopology()
-          .withSimpleParticipants(participant1)
-          .withCryptoConfig(
-            cryptoConfigWithSessionSigningKeysConfig(SessionSigningKeysConfig.default)
-          )
-          .build(crypto, loggerFactory)
+        // enable session keys just for signing
+        val testingTopologyWithSessionKeys =
+          TestingTopology()
+            .withSimpleParticipants(participant1)
+            .withCryptoConfig(
+              cryptoConfigWithSessionSigningKeysConfig(SessionSigningKeysConfig.default)
+            )
+            .build(crypto, loggerFactory)
 
-      ResourceUtil.withResource(
-        testingTopologyWithSessionKeys.forOwnerAndSynchronizer(participant1)
-      ) { p1WithSessionKey =>
-        val signature = p1WithSessionKey.syncCryptoSigner
-          .sign(
-            testingTopologyWithSessionKeys.topologySnapshot(),
-            None,
-            hash,
-            defaultUsage,
-          )
-          .valueOrFail("sign failed")
-          .futureValueUS
+        ResourceUtil.withResource(
+          testingTopologyWithSessionKeys.forOwnerAndSynchronizer(participant1)
+        ) { p1WithSessionKey =>
+          val signature = p1WithSessionKey.syncCryptoSigner
+            .sign(
+              testingTopologyWithSessionKeys.topologySnapshot(),
+              None,
+              hash,
+              defaultUsage,
+            )
+            .valueOrFail("sign failed")
+            .futureValueUS
 
-        signature.signatureDelegation should not be empty
+          signature.signatureDelegation should not be empty
 
-        syncCryptoVerifierP1
-          .verifySignature(
-            testSnapshot,
-            hash,
-            participant1.member,
-            signature,
-            defaultUsage,
-          )
-          .valueOrFail("verification failed")
-          .futureValueUS
+          syncCryptoVerifierP1
+            .verifySignature(
+              testSnapshot,
+              hash,
+              participant1.member,
+              signature,
+              defaultUsage,
+            )
+            .valueOrFail("verification failed")
+            .futureValueUS
 
-        syncCryptoVerifierP1
-          .verifyKeyUsage(
-            testSnapshot,
-            participant1.member,
-            signature.signedBy,
-            signature.signatureDelegation,
-            defaultUsage,
-          )
-          .valueOrFail("verification failed")
-          .futureValueUS
+          syncCryptoVerifierP1
+            .verifyKeyUsage(
+              testSnapshot,
+              participant1.member,
+              signature.signedBy,
+              signature.signatureDelegation,
+              defaultUsage,
+            )
+            .valueOrFail("verification failed")
+            .futureValueUS
 
-        syncCryptoVerifierP1
-          .verifyKeyUsage(
-            testSnapshot,
-            participant2.member,
-            signature.signedBy,
-            signature.signatureDelegation,
-            defaultUsage,
-          )
-          .futureValueUS
-          .isLeft shouldBe true
+          syncCryptoVerifierP1
+            .verifyKeyUsage(
+              testSnapshot,
+              participant2.member,
+              signature.signedBy,
+              signature.signatureDelegation,
+              defaultUsage,
+            )
+            .futureValueUS
+            .isLeft shouldBe true
 
+        }
       }
-    }
 
   }
 

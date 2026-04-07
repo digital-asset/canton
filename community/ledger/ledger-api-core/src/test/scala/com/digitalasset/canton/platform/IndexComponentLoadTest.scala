@@ -8,9 +8,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.{
   AcsContinuationToken,
-  CumulativeFilter,
-  EventFormat,
-  TemplateWildcardFilter,
   TransactionFormat,
   TransactionShape,
   UpdateFormat,
@@ -28,7 +25,7 @@ import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
-import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
+import com.digitalasset.daml.lf.data.{Bytes, Time}
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.flatspec.AnyFlatSpec
@@ -57,23 +54,6 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       connectionPoolEnabled = true,
     ).toPostgresDbConfig
 
-  private val wildcardTemplates = CumulativeFilter(
-    templateFilters = Set.empty,
-    interfaceFilters = Set.empty,
-    templateWildcardFilter = Some(TemplateWildcardFilter(includeCreatedEventBlob = false)),
-  )
-  private def eventFormat(party: Ref.Party) = EventFormat(
-    filtersByParty = Map(
-      party -> wildcardTemplates
-    ),
-    filtersForAnyParty = None,
-    verbose = false,
-  )
-  private val allPartyEventFormat = EventFormat(
-    filtersByParty = Map.empty,
-    filtersForAnyParty = Some(wildcardTemplates),
-    verbose = false,
-  )
   override implicit val traceContext: TraceContext = TraceContext.createNew("load-test")
 
   private val testAcsChangeFactory = TestAcsChangeFactory()

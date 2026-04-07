@@ -413,7 +413,7 @@ class CommandProgressTrackerImpl(
         }
 
       case accepted: TransactionLogUpdate.TransactionAccepted =>
-        accepted.completionStreamResponse
+        accepted.completionStreamResponseO
           .flatMap(_.completionResponse.completion)
           .foreach { completion =>
             val key = (

@@ -13,7 +13,14 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope
-import com.digitalasset.canton.sequencing.{HandlerResult, PossiblyIgnoredApplicationHandler}
+import com.digitalasset.canton.sequencing.{
+  AsyncResult,
+  HandlerResult,
+  PossiblyIgnoredApplicationHandler,
+  UnthrottledAsync,
+  UnthrottledAsyncF,
+  UnthrottledImmediate,
+}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.{CursorPrehead, SequencerCounterTrackerStore}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -72,11 +79,30 @@ class CleanSequencerCounterTracker(
             val lastTs = lastEvent.timestamp
             val eventBatchCounter = allocateEventBatchCounter()
             handler(tracedEvents).map { asyncF =>
-              val asyncFSignalled = asyncF.andThenF { case () =>
-                store.synchronizeWithClosing("signal-clean-event-batch")(
-                  signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
-                )
-              }
+              val asyncFSignalled: AsyncResult[UnthrottledAsync] = AsyncResult(
+                asyncF.unwrap.flatMap {
+                  // If the unthrottled async is a noop, mark the event clean as part of the AsyncResult
+                  case UnthrottledImmediate =>
+                    store
+                      .synchronizeWithClosing("signal-clean-event-batch")(
+                        signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
+                      )
+                      .map(_ => UnthrottledImmediate)
+                  // Otherwise, do it when unthrottledAsync is complete, and flatMap the result
+                  // with the existing unthrottledAsync such that any error resulting from the storing
+                  // can get handled later as any other error
+                  case UnthrottledAsyncF(future) =>
+                    FutureUnlessShutdown.pure(
+                      UnthrottledAsyncF(
+                        future.flatMap { _ =>
+                          store.synchronizeWithClosing("signal-clean-event-batch")(
+                            signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
+                          )
+                        }
+                      )
+                    )
+                }
+              )
               asyncFSignalled
             }
         }

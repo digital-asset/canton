@@ -5,10 +5,10 @@ package com.digitalasset.daml.lf
 package transaction
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
-import com.digitalasset.canton.testing.modelbased.ast.Implicits._
+import com.digitalasset.canton.testing.modelbased.ast.Implicits.*
 import com.digitalasset.canton.testing.modelbased.checker.{
-  PropertyCheckerResultAssertions,
   PropertyChecker,
+  PropertyCheckerResultAssertions,
 }
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
@@ -20,12 +20,13 @@ import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
   defaultPackageId,
   toIdentifier,
 }
-import com.digitalasset.daml.lf.value.{Value => V}
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.LoneElement
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.util.Try
 
 // This test runs on every PR and therefore generates a small number of small samples in order to keep the runtime
 // reasonable. For more extensive testing, see
@@ -37,8 +38,8 @@ class NextGenContractStateMachineGenerativeSpecSmall
       maxSamples = 200,
     )
 
-/** Abstract base class for generative testing of the contract state machine. Subclasses control
-  * the generation parameters (size, sample count, parallelism, etc.).
+/** Abstract base class for generative testing of the contract state machine. Subclasses control the
+  * generation parameters (size, sample count, parallelism, etc.).
   */
 abstract class NextGenContractStateMachineGenerativeSpec(
     sampleSize: Int,
@@ -51,7 +52,36 @@ abstract class NextGenContractStateMachineGenerativeSpec(
     with Matchers
     with PropertyCheckerResultAssertions {
 
-  import NextGenContractStateMachineGenerativeSpec._
+  import NextGenContractStateMachineGenerativeSpec.*
+
+  private def verifyQueriesMatchContractOrder(
+      scenario: Concrete.Scenario,
+      state: NextGenContractStateMachine.LLState,
+  ): Either[String, Unit] =
+    Try {
+      val tx = scenario.ledger(1).commands.map(_.action)
+      val contractOrder = state.contractOrder
+
+      // assert that contractOrder has unique elements only, then convert to set
+      val contractOrderSet: Set[V.ContractId] = contractOrder.toSet
+      contractOrderSet should have size contractOrder.size.toLong
+
+      // assert that contractOrder contains exactly the contract ids in the scenario
+      val scenarioContractIds: Set[V.ContractId] = tx.flatMap(collectIds).toSet
+      contractOrderSet shouldEqual scenarioContractIds
+
+      // assert all queries have the order as specified by the contractOrder.
+      tx.queryByKeyNodes.foreach { case Concrete.QueryByKey(contractIds, _, _, _) =>
+        val queryResult = contractIds.map(toContractId)
+        val queryResultSet = queryResult.toSet
+        val filteredOrder = contractOrder.filter(queryResultSet)
+        withClue(
+          s"QueryByKey result order does not match contractOrder:\n  queryResult=$queryResult\n  contractOrder=$contractOrder\n"
+        ) {
+          filteredOrder shouldBe queryResult
+        }
+      }
+    }.toEither.left.map(_.getMessage).map(_ => ())
 
   "the contract state machine" should {
     "accept a valid scenario" in {
@@ -83,7 +113,7 @@ abstract class NextGenContractStateMachineGenerativeSpec(
         .checkProperty(
           generate = () => generator.generate(size = sampleSize, distinctKeyToContractRatio = 0.4),
           shrink = Shrinker.shrinkScenario.suchThat(_.ledger.size == 2),
-          property = processScenario,
+          property = processScenario(_, stateProp = verifyQueriesMatchContractOrder),
           maxSamples = maxSamples,
           timeout = timeout,
           bufferSize = sampleBufferSize,
@@ -151,6 +181,22 @@ object NextGenContractStateMachineGenerativeSpec {
       .flatMap(_.actions.map(fromAction))
       .foldLeft(Map.empty[Concrete.ContractId, Concrete.KeyId])(_ ++ _)
   }
+
+  private def collectIds(action: Concrete.Action): Set[V.ContractId] =
+    action match {
+      case Concrete.Create(contractId, _, _) => Set(toContractId(contractId))
+      case Concrete.CreateWithKey(contractId, _, _, _, _) => Set(toContractId(contractId))
+      case Concrete.Exercise(_, contractId, _, _, subTransaction) =>
+        Set(toContractId(contractId)) ++ subTransaction.flatMap(collectIds)
+      case Concrete.ExerciseByKey(_, contractId, _, _, _, _, subTransaction) =>
+        Set(toContractId(contractId)) ++ subTransaction.flatMap(collectIds)
+      case Concrete.Fetch(contractId) => Set(toContractId(contractId))
+      case Concrete.FetchByKey(contractId, _, _) => Set(toContractId(contractId))
+      case Concrete.LookupByKey(Some(contractId), _, _) => Set(toContractId(contractId))
+      case Concrete.LookupByKey(None, _, _) => Set.empty
+      case Concrete.QueryByKey(contractIds, _, _, _) => contractIds.map(toContractId).toSet
+      case Concrete.Rollback(subTransaction) => subTransaction.flatMap(collectIds).toSet
+    }
 
   private class TransactionProcessor(keyMap: Map[Concrete.ContractId, Concrete.KeyId]) {
     private var nodeCounter: Int = 0
@@ -265,7 +311,9 @@ object NextGenContractStateMachineGenerativeSpec {
   }
 
   private def processScenario(
-      scenario: Concrete.Scenario
+      scenario: Concrete.Scenario,
+      stateProp: (Concrete.Scenario, NextGenContractStateMachine.LLState) => Either[String, Unit] =
+        (_, _) => Right(()),
   ): Either[String, Unit] = {
     val keyMap = collectKeys(scenario)
     new TransactionProcessor(keyMap)
@@ -275,7 +323,7 @@ object NextGenContractStateMachineGenerativeSpec {
       )
       .left
       .map(_.toString)
-      .map(_ => ())
+      .flatMap(s => stateProp(scenario, s))
   }
 
   // TODO(#31454)

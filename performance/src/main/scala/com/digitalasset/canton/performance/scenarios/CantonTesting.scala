@@ -246,14 +246,15 @@ object CantonTesting {
         .map { case (duration, unit) =>
           FiniteDuration(duration, unit)
         },
+      targetLatencyMs: Int = sys.env.get("TARGET_LATENCY_MS").map(_.toInt).getOrElse(7500),
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
 
     import consoleEnvironment.*
 
     val rateSettings = RateSettings(
-      submissionRateSettings = SubmissionRateSettings.TargetLatency(
-        startRate = 3,
-        targetLatencyMs = 10000,
+      submissionRateSettings = SubmissionRateSettings.TargetLatencyNew(
+        startPending = 10,
+        targetLatencyMs = targetLatencyMs,
       ),
       batchSize = batchSize,
       factorOfMaxSubmissionsPerIteration = 0.5,
@@ -270,7 +271,7 @@ object CantonTesting {
       name = masterName,
       runConfig = MasterDynamicConfig(
         totalCycles = totalCycles,
-        reportFrequency = 1000,
+        reportFrequency = 10000,
         runType = new M.orchestration.runtype.DvpRun(
           numAssetsPerIssuer,
           0,
@@ -427,8 +428,7 @@ object CantonTesting {
     }
 
     val measurements = selectParticipants(participants).map { p =>
-      val parties = p.parties.list().map(_.party)
-      p.ledger_api.updates.start_measuring(parties.toSet, "canton.transactions-emitted")
+      p.ledger_api.updates.start_measuring(Set.empty, "canton.transactions-emitted")
     }
 
     @tailrec
@@ -445,6 +445,9 @@ object CantonTesting {
     awaitCompletion(maxTestDuration.fromNow, pollInterval)
 
     measurements.foreach(_.close())
+
+    runners.foreach(_.setActive(false))
+    Threading.sleep(targetLatencyMs.toLong)
 
     runners.foreach(_.close())
 

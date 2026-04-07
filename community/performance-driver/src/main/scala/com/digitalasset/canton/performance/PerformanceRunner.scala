@@ -97,8 +97,9 @@ object RateSettings {
     }
 
     final case class TargetLatencyNew(
+        startPending: Double = 5.0,
         targetLatencyMs: Int = 5000,
-        stepFactor: Double = 0.01,
+        stepFactor: Double = 0.03,
         cutFactor: Double = 0.9,
         targetLatencyTolerance: Double = 0.05,
         increaseThreshold: Double = 0.75,

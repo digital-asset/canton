@@ -90,6 +90,9 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   /** Replaces the config for the given alias and physical synchronizer id. Will return an
     * [[SynchronizerConnectionConfigStore.MissingConfigForSynchronizer]] error if there is no config
     * for the (alias, physicalSynchronizerId).
+    *
+    * Should be used only when goal is to completely replace the config (e.g., modify synchronizer
+    * of the admin API). For any other usage, [[upsert]] should be preferred.
     */
   def replace(
       configuredPsid: ConfiguredPhysicalSynchronizerId,
@@ -98,13 +101,29 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit]
 
+  /** If no entry exists for the given psid, insert a new config. Otherwise, update the config. The
+    * `transform` method should be minimal to limit the impact of race conditions with other
+    * operations.
+    */
+  def upsert(
+      psid: PhysicalSynchronizerId,
+      insert: (
+          SynchronizerConnectionConfig,
+          SynchronizerConnectionConfigStore.Status,
+          Option[SynchronizerPredecessor],
+      ),
+      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig]
+
   /** Sets the sequencer IDs for the given sequencers of the given synchronizer.
     *
     * Returns an error if the connection does not exist or if a different id already exists for a
     * sequencer.
     *
     * This is better than [[replace]] because [[setSequencerIds]] works well even if there are
-    * concurrent calls. Failure can happen only if inconcistent ids are set.
+    * concurrent calls. Failure can happen only if inconsistent ids are set.
     */
   def setSequencerIds(
       psid: PhysicalSynchronizerId,
@@ -383,20 +402,12 @@ object SynchronizerConnectionConfigStore {
   }
 
   final case class InconsistentSequencerIds(
-      id: String,
+      psid: PhysicalSynchronizerId,
       sequencerIds: Map[SequencerAlias, SequencerId],
       details: String,
   ) extends Error {
     val message =
-      s"Connection for synchronizer $id cannot be updated to set ids $sequencerIds: $details."
-  }
-
-  object InconsistentSequencerIds {
-    def apply(
-        id: ConfigIdentifier,
-        sequencerIds: Map[SequencerAlias, SequencerId],
-        details: String,
-    ): InconsistentSequencerIds = InconsistentSequencerIds(id.toString, sequencerIds, details)
+      s"Connection for synchronizer $psid cannot be updated to set ids $sequencerIds: $details."
   }
 
   final case class MissingConfigForSynchronizer(

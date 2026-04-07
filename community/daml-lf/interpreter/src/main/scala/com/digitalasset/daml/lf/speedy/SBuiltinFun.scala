@@ -2151,12 +2151,25 @@ private[lf] object SBuiltinFun {
                 for {
                   entry <- machine.needKeys(
                     NameOf.qualifiedNameOfCurrentFunc,
-                    cachedKey.globalKeyWithMaintainers,
+                    cachedKey.globalKeyWithMaintainers.globalKey,
                     m,
                     mbToken,
                   )
                   (result, newMbtoken) = entry
-                  result <- loop(resume(result.view.map(_.contractId), newMbtoken))
+                  // sanity check: check that any returned contracts have the key asked.
+                  result <- result.find(_.contractKeyWithMaintainers.forall(_.globalKey != gkey)) match {
+                    case None =>
+                      loop(resume(result.view.map(_.contractId), newMbtoken))
+                    case Some(contract) =>
+                      crash(
+                        s"""Contract key mismatch: the ledger returned a contract whose key does not match the requested key.
+                           | Requested key: $gkey
+                           | Returned contract id: ${contract.contractId}
+                           | Returned contract template: ${contract.templateId}
+                           | Returned contract key: ${contract.contractKeyWithMaintainers.map(_.globalKey).getOrElse("<no key>")}
+                           |""".stripMargin
+                      )
+                  }
                 } yield result
               case Right(Right((mapping, next))) =>
                 for {

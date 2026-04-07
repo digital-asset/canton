@@ -51,6 +51,7 @@ import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   CreatedEvent,
+  ReassignmentAccepted,
   TransactionAccepted,
   TransactionRejected,
 }
@@ -230,10 +231,20 @@ class InMemoryStateUpdaterSpec
     )
     inside(preparedWithTrafficCostResult.updates.loneElement) {
       case transactionAccepted: TransactionAccepted =>
-        transactionAccepted.paidTrafficCost shouldBe paidTrafficCost
+        // Submitting party filter should return the cost
+        transactionAccepted.paidTrafficCost(Some(Set(party1))) shouldBe Some(paidTrafficCost.value)
+        // Wildcard filter (None) should return the cost
+        transactionAccepted.paidTrafficCost(None) shouldBe Some(paidTrafficCost.value)
+        // Non submitting party should return no cost
+        transactionAccepted.paidTrafficCost(Some(Set(party2))) shouldBe None
     }
 
-    val rejected = offset(12L) -> commandRejected(4, synchronizerId1, trafficCost = paidTrafficCost)
+    val rejected = offset(12L) -> commandRejected(
+      4,
+      synchronizerId1,
+      trafficCost = paidTrafficCost,
+      actAs = List(party1),
+    )
     val preparedRejectedWithTrafficCostResult = InMemoryStateUpdater.prepare(
       Vector(rejected),
       someLedgerEnd,
@@ -241,7 +252,52 @@ class InMemoryStateUpdaterSpec
     )
     inside(preparedRejectedWithTrafficCostResult.updates.loneElement) {
       case transactionRejected: TransactionRejected =>
-        transactionRejected.completionStreamResponse.completionResponse.completion.value.paidTrafficCost shouldBe paidTrafficCost.value
+        // Submitting party filter should return the cost
+        transactionRejected.paidTrafficCost(Some(Set(party1))) shouldBe Some(paidTrafficCost.value)
+        // Wildcard filter (None) should return the cost
+        transactionRejected.paidTrafficCost(None) shouldBe Some(paidTrafficCost.value)
+        // Non submitting party should return no cost
+        transactionRejected.paidTrafficCost(Some(Set(party2))) shouldBe None
+    }
+
+    val assign = offset(13L) -> assignmentAccepted(
+      2,
+      source = synchronizerId2,
+      target = synchronizerId1,
+      completionInfo = completionInfo,
+    )
+    val prepareAssign = InMemoryStateUpdater.prepare(
+      Vector(assign),
+      someLedgerEnd,
+      traceContext,
+    )
+    inside(prepareAssign.updates.loneElement) { case reassignmentAccepted: ReassignmentAccepted =>
+      // Submitting party filter should return the cost
+      reassignmentAccepted.paidTrafficCost(Some(Set(party1))) shouldBe Some(paidTrafficCost.value)
+      // Wildcard filter (None) should return the cost
+      reassignmentAccepted.paidTrafficCost(None) shouldBe Some(paidTrafficCost.value)
+      // Non submitting party should return no cost
+      reassignmentAccepted.paidTrafficCost(Some(Set(party2))) shouldBe None
+    }
+
+    val unassign = offset(14L) -> unassignmentAccepted(
+      3,
+      source = synchronizerId1,
+      target = synchronizerId2,
+      completionInfo = completionInfo,
+    )
+    val prepareUnassign = InMemoryStateUpdater.prepare(
+      Vector(unassign),
+      someLedgerEnd,
+      traceContext,
+    )
+    inside(prepareUnassign.updates.loneElement) { case reassignmentAccepted: ReassignmentAccepted =>
+      // Submitting party filter should return the cost
+      reassignmentAccepted.paidTrafficCost(Some(Set(party1))) shouldBe Some(paidTrafficCost.value)
+      // Wildcard filter (None) should return the cost
+      reassignmentAccepted.paidTrafficCost(None) shouldBe Some(paidTrafficCost.value)
+      // Non submitting party should return no cost
+      reassignmentAccepted.paidTrafficCost(Some(Set(party2))) shouldBe None
     }
   }
 
@@ -675,11 +731,10 @@ object InMemoryStateUpdaterSpec {
         effectiveAt = Timestamp.Epoch,
         offset = offset(11L),
         events = Vector(),
-        completionStreamResponse = None,
+        completionStreamResponseO = None,
         synchronizerId = synchronizerId1.toProtoPrimitive,
         recordTime = Timestamp.Epoch,
         externalTransactionHash = None,
-        paidTrafficCost = NonNegativeLong.zero,
       )(emptyTraceContext)
 
     val assignLogUpdate =
@@ -689,7 +744,7 @@ object InMemoryStateUpdaterSpec {
         workflowId = workflowId,
         offset = offset(17L),
         recordTime = Timestamp.Epoch,
-        completionStreamResponse = None,
+        completionStreamResponseO = None,
         reassignmentInfo = ReassignmentInfo(
           sourceSynchronizer = ReassignmentTag.Source(synchronizerId1),
           targetSynchronizer = ReassignmentTag.Target(synchronizerId2),
@@ -717,7 +772,7 @@ object InMemoryStateUpdaterSpec {
         workflowId = workflowId,
         offset = offset(18L),
         recordTime = Timestamp.Epoch,
-        completionStreamResponse = None,
+        completionStreamResponseO = None,
         reassignmentInfo = ReassignmentInfo(
           sourceSynchronizer = ReassignmentTag.Source(synchronizerId2),
           targetSynchronizer = ReassignmentTag.Target(synchronizerId1),
@@ -821,6 +876,7 @@ object InMemoryStateUpdaterSpec {
       updateId = tx_accepted_updateId,
       submissionId = "submissionId",
       actAs = tx_accepted_submitters.toSeq,
+      paidTrafficCost = 90L,
     )
     val tx_rejected_completion: Completion =
       tx_accepted_completion.copy(
@@ -869,16 +925,15 @@ object InMemoryStateUpdaterSpec {
             )
           )
           .toVector,
-        completionStreamResponse = Some(tx_accepted_completionStreamResponse),
+        completionStreamResponseO = Some(tx_accepted_completionStreamResponse),
         synchronizerId = synchronizerId1.toProtoPrimitive,
         recordTime = Timestamp(1),
         externalTransactionHash = None,
-        paidTrafficCost = NonNegativeLong.zero,
       )(emptyTraceContext)
 
     val tx_accepted_withoutCompletionStreamResponse: TransactionLogUpdate.TransactionAccepted =
       tx_accepted_withCompletionStreamResponse.copy(
-        completionStreamResponse = None,
+        completionStreamResponseO = None,
         offset = tx_accepted_withoutCompletionStreamResponse_offset,
       )(emptyTraceContext)
 
@@ -1258,9 +1313,10 @@ object InMemoryStateUpdaterSpec {
       t: Long,
       source: SynchronizerId,
       target: SynchronizerId,
+      completionInfo: Option[CompletionInfo] = None,
   ): Update.ReassignmentAccepted =
     Update.SequencedReassignmentAccepted(
-      optCompletionInfo = None,
+      optCompletionInfo = completionInfo,
       workflowId = Some(workflowId),
       updateId = txId3,
       reassignmentInfo = ReassignmentInfo(
@@ -1289,9 +1345,10 @@ object InMemoryStateUpdaterSpec {
       t: Long,
       source: SynchronizerId,
       target: SynchronizerId,
+      completionInfo: Option[CompletionInfo] = None,
   ): Update.ReassignmentAccepted =
     Update.SequencedReassignmentAccepted(
-      optCompletionInfo = None,
+      optCompletionInfo = completionInfo,
       workflowId = Some(workflowId),
       updateId = txId4,
       reassignmentInfo = ReassignmentInfo(
@@ -1321,10 +1378,11 @@ object InMemoryStateUpdaterSpec {
       t: Long,
       synchronizerId: SynchronizerId,
       trafficCost: NonNegativeLong = NonNegativeLong.zero,
+      actAs: List[Ref.Party] = List.empty,
   ): Update.CommandRejected =
     Update.SequencedCommandRejected(
       completionInfo = CompletionInfo(
-        actAs = List.empty,
+        actAs = actAs,
         userId = Ref.UserId.assertFromString("some-app-id"),
         commandId = Ref.CommandId.assertFromString("cmdId"),
         optDeduplicationPeriod = None,

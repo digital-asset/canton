@@ -28,19 +28,19 @@ import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerSends
+import com.digitalasset.canton.sequencing.client.pool.{
+  GrpcSequencerConnectionPoolFactory,
+  SequencerConnectionPool,
+}
 import com.digitalasset.canton.sequencing.client.transports.replay.{ReplayClient, ReplayClientImpl}
 import com.digitalasset.canton.sequencing.client.{ReplayConfig, RequestSigner}
-import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnection,
-  GrpcSequencerConnectionXPoolFactory,
-  SequencerConnectionXPool,
-  SequencerConnections,
-}
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.time.Clock
@@ -289,12 +289,12 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionXPool] = {
-    val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionPool] = {
+    val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
       clientProtocolVersions = NonEmpty(Seq, testedProtocolVersion),
       minimumProtocolVersion = Some(testedProtocolVersion),
       authConfig = AuthenticationTokenManagerConfig(),
-      keepAliveClientConfigO = Some(KeepAliveClientConfig()),
+      params = ClientChannelParams.ForTesting,
       member = member,
       clock = clock,
       crypto = synchronizerCrypto.crypto,

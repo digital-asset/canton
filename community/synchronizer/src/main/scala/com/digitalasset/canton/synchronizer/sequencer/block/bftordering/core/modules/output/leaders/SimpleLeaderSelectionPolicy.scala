@@ -41,6 +41,8 @@ class SimpleLeaderSelectionPolicy[E <: Env[E]] extends LeaderSelectionPolicy[E] 
 
   override def firstBlockWeNeedToAdd: Option[BlockNumber] = None
 
+  override def currentEpoch: Option[EpochNumber] = None
+
   override def getHistoricState(
       epochNumber: EpochNumber
   )(implicit

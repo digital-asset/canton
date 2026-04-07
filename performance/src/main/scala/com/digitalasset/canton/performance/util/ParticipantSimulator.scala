@@ -34,7 +34,14 @@ import com.digitalasset.canton.protocol.messages.{
   UnsignedProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.SequencerAggregator.MessageAggregationConfig
-import com.digitalasset.canton.sequencing.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
+import com.digitalasset.canton.sequencing.client.pool.{
+  GrpcSequencerConnectionPoolFactory,
+  SequencerConnectionPool,
+  SequencerSubscriptionFactoryImpl,
+  SequencerSubscriptionPoolFactoryImpl,
+  SubscriptionHandlerFactoryImpl,
+}
 import com.digitalasset.canton.sequencing.client.{
   NoDelay,
   RichSequencerClientImpl,
@@ -51,17 +58,12 @@ import com.digitalasset.canton.sequencing.protocol.{
   SubmissionRequest,
 }
 import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnectionXPoolFactory,
   PostAggregationHandlerImpl,
   SequencedSerializedEvent,
   SequencerAggregator,
   SequencerConnectionPoolDelays,
-  SequencerConnectionXPool,
   SequencerConnections,
-  SequencerSubscriptionPoolFactoryImpl,
-  SequencerSubscriptionXFactoryImpl,
   SubmissionRequestAmplification,
-  SubscriptionHandlerXFactoryImpl,
 }
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -484,11 +486,12 @@ class ParticipantSimulator(
     val synchronizerMetrics =
       metrics.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("synchronizer"))
 
-    val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+    val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
       clientProtocolVersions = NonEmpty(Seq, pv),
       minimumProtocolVersion = Some(pv),
       authConfig = nodeParameters.sequencerClient.authToken,
-      keepAliveClientConfigO = nodeParameters.sequencerClient.keepAliveClient,
+      params =
+        nodeParameters.sequencerClient.clientChannelParams(config.monitoring.tracing.propagation),
       member = pid,
       clock = environment.clock,
       crypto = crypto,
@@ -524,7 +527,7 @@ class ParticipantSimulator(
         )
     )
 
-    val sequencerSubscriptionFactory = new SequencerSubscriptionXFactoryImpl(
+    val sequencerSubscriptionFactory = new SequencerSubscriptionFactoryImpl(
       SequencedEventValidatorFactory.noValidation(psid, warn = false),
       env.environment.config.parameters.timeouts.processing,
       loggerFactoryForParticipant,
@@ -563,7 +566,7 @@ class ParticipantSimulator(
       environment.futureSupervisor,
     )
 
-    val subscriptionHandlerFactory = new SubscriptionHandlerXFactoryImpl(
+    val subscriptionHandlerFactory = new SubscriptionHandlerFactoryImpl(
       environment.clock,
       synchronizerMetrics.sequencerClient,
       new SingleUseCell[SequencerClientSubscriptionError.ApplicationHandlerFailure],
@@ -610,7 +613,7 @@ class ParticipantSimulator(
   }
   private def respondAcsCommitment(
       event: SequencedEvent[ClosedEnvelope],
-      pool: SequencerConnectionXPool,
+      pool: SequencerConnectionPool,
       syncCrypto: SyncCryptoApi,
   )(implicit traceContext: TraceContext): Unit =
     event.envelopes

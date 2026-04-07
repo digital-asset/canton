@@ -354,6 +354,7 @@ run_ordinary_tests:
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.modelbased \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.UpgradesMatrixIntegration \
           "
           # Tests excluded here are covered by
           #

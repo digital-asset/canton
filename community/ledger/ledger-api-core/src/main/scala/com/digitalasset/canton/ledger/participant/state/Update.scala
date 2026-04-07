@@ -187,6 +187,10 @@ object Update {
       */
     def completionInfoO: Option[CompletionInfo]
 
+    /** Traffic cost paid by this node for the sequencing of the corresponding transaction event
+      */
+    def paidTrafficCost: Option[NonNegativeLong] = completionInfoO.map(_.paidTrafficCost)
+
     /** The metadata of the transaction that was provided by the submitter. It is visible to all
       * parties that can see the transaction.
       */
@@ -361,6 +365,10 @@ object Update {
       */
     def optCompletionInfo: Option[CompletionInfo]
 
+    /** Traffic cost paid by this node for the sequencing of the corresponding transaction event
+      */
+    def paidTrafficCost: Option[NonNegativeLong] = optCompletionInfo.map(_.paidTrafficCost)
+
     /** A submitter-provided identifier used for monitoring and to traffic-shape the work handled by
       * Daml applications
       */
@@ -484,6 +492,7 @@ object Update {
           Logging.completionInfo(reassignmentAccepted.optCompletionInfo),
           Logging.updateId(reassignmentAccepted.updateId),
           Logging.workflowIdOpt(reassignmentAccepted.workflowId),
+          Logging.optionalTrafficCost(reassignmentAccepted.paidTrafficCost),
         )
     }
   }
@@ -762,6 +771,9 @@ object Update {
 
     def trafficCost(trafficCost: NonNegativeLong): LoggingEntry =
       "trafficCost" -> trafficCost.value.toString
+
+    def optionalTrafficCost(trafficCost: Option[NonNegativeLong]): LoggingEntry =
+      "trafficCost" -> trafficCost.map(_.value.toString)
   }
 
 }

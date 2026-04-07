@@ -84,7 +84,9 @@ trait SyncCryptoTest
     jceStaticSynchronizerParameters,
   )
 
-  protected lazy val testingTopology: TestingIdentityFactory =
+  protected def createTestingTopologyWith(
+      sessionSigningKeysConfig: SessionSigningKeysConfig
+  ): TestingIdentityFactory =
     TestingTopology()
       .withSynchronizers(
         synchronizers = DefaultTestIdentities.physicalSynchronizerId,
@@ -94,6 +96,9 @@ trait SyncCryptoTest
       .withStaticSynchronizerParams(jceStaticSynchronizerParameters)
       .withCryptoConfig(cryptoConfigWithSessionSigningKeysConfig(sessionSigningKeysConfig))
       .build(crypto, loggerFactory)
+
+  protected lazy val testingTopology: TestingIdentityFactory =
+    createTestingTopologyWith(sessionSigningKeysConfig)
 
   protected lazy val defaultUsage: NonEmpty[Set[SigningKeyUsage]] = SigningKeyUsage.ProtocolOnly
 

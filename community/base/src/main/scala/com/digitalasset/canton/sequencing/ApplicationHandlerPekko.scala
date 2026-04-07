@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.syntax.either.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
@@ -52,7 +51,7 @@ class ApplicationHandlerPekko[F[+_], Context](
       asyncParallelism: PositiveInt
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Flow[
     F[BoxedEnvelope[PossiblyIgnoredEnvelopeBox, ClosedEnvelope]],
-    F[UnlessShutdown[Either[ApplicationHandlerError, Unit]]],
+    F[UnlessShutdown[Either[ApplicationHandlerError, UnthrottledAsync]]],
     NotUsed,
   ] =
     Flow[F[BoxedEnvelope[PossiblyIgnoredEnvelopeBox, ClosedEnvelope]]].contextualize
@@ -69,7 +68,7 @@ class ApplicationHandlerPekko[F[+_], Context](
               errorOrSyncResult match {
                 case Right(Some(syncResult)) =>
                   processAsyncResult(syncResult, killSwitchOfContext(context))
-                case Right(None) => FutureUnlessShutdown.pure(Either.unit)
+                case Right(None) => FutureUnlessShutdown.pure(Right(UnthrottledAsync.immediate))
                 case Left(error) => FutureUnlessShutdown.pure(Left(error))
               }
             case AbortedDueToShutdown => FutureUnlessShutdown.abortedDueToShutdown
@@ -145,7 +144,7 @@ class ApplicationHandlerPekko[F[+_], Context](
       killSwitch: KillSwitch,
   )(implicit
       closeContext: CloseContext
-  ): FutureUnlessShutdown[Either[ApplicationHandlerError, Unit]] = {
+  ): FutureUnlessShutdown[Either[ApplicationHandlerError, UnthrottledAsync]] = {
     val EventBatchSynchronousResult(firstTimestamp, lastTimestamp, asyncResult) = syncResult
     implicit val batchTraceContext: TraceContext = syncResult.traceContext
     asyncResult.unwrap.transformIntoSuccess {
@@ -200,6 +199,6 @@ object ApplicationHandlerPekko {
   private final case class EventBatchSynchronousResult(
       firstTimestamp: CantonTimestamp,
       lastTimestamp: CantonTimestamp,
-      asyncResult: AsyncResult[Unit],
+      asyncResult: AsyncResult[UnthrottledAsync],
   )(implicit val traceContext: TraceContext)
 }

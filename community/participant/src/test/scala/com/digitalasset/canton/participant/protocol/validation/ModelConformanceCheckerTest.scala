@@ -72,7 +72,6 @@ import com.digitalasset.daml.lf.engine.Error.Interpretation.DamlException
 import com.digitalasset.daml.lf.engine.{Error, Error as LfError}
 import com.digitalasset.daml.lf.interpretation.Error.ContractNotFound
 import com.digitalasset.daml.lf.transaction.*
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.value.Value
 import monocle.macros.GenLens
 import monocle.{Lens, Traversal}
@@ -836,7 +835,7 @@ class ModelConformanceCheckerTest
           transactionUuid = seedGenerator.generateUuid(),
           topologySnapshot = topologySnapshot,
           contractOfId = contractOfId,
-          keyResolver = keyResolver.asCidOptionMap,
+          keyResolver = keyResolver,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
         )
@@ -873,7 +872,7 @@ class ModelConformanceCheckerTest
       coreInputs = Map.empty[LfContractId, InputContract],
       createdCore = Seq.empty[CreatedContract],
       createdInSubviewArchivedInCore = Set.empty[LfContractId],
-      resolvedKeys = Map.empty[LfGlobalKey, LfVersioned[SerializableKeyResolution]],
+      resolvedKeys = Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       inRollback = false,
       informees = Set.empty[LfPartyId],
     )
@@ -908,7 +907,6 @@ class ModelConformanceCheckerTest
                 view = fullTransactionViewTree.view,
                 ledgerTime = fullTransactionViewTree.ledgerTime,
                 preparationTime = fullTransactionViewTree.preparationTime,
-                resolverFromView = keyResolver,
                 getEngineAbortStatus = getEngineAbortStatus,
                 topologySnapshot = topologySnapshot,
               )
@@ -923,7 +921,6 @@ class ModelConformanceCheckerTest
           topologySnapshot = topologySnapshot,
           commonData = commonData,
           reInterpretedTopLevelViews = reInterpretedTopLevelViews,
-          keyResolverFor = _ => keyResolver,
           getEngineAbortStatus = getEngineAbortStatus,
         )
         .map {

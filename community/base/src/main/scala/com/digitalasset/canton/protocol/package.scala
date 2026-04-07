@@ -81,6 +81,10 @@ package object protocol {
   type LfNodeLookupByKey = Node.LookupByKey
   val LfNodeLookupByKey: Node.LookupByKey.type = Node.LookupByKey
 
+  /** Shorthand for query by key nodes. */
+  type LfNodeQueryByKey = Node.QueryByKey
+  val LfNodeQueryByKey: Node.QueryByKey.type = Node.QueryByKey
+
   /** Shorthand for rollback nodes. */
   type LfNodeRollback = Node.Rollback
   val LfNodeRollback: Node.Rollback.type = Node.Rollback

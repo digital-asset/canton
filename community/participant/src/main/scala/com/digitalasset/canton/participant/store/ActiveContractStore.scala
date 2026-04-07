@@ -83,8 +83,6 @@ trait ActiveContractStore
     *   - [[ActiveContractStore.ChangeBeforeCreation]] for every change that occurs before the
     *     creation timestamp. This is reported only if no
     *     [[ActiveContractStore.DoubleContractCreation]] is reported.
-    *   - [[ActiveContractStore.ChangeAfterArchival]] if this creation is later than the earliest
-    *     archival of the contract.
     */
   def markContractsCreated(
       contracts: Seq[(LfContractId, ReassignmentCounter)],
@@ -151,9 +149,6 @@ trait ActiveContractStore
     *   - [[ActiveContractStore.DoubleContractArchival]] if the contract is archived a second time.
     *   - [[ActiveContractStore.SimultaneousDeactivation]] if the contract is unassigned at the same
     *     time or has been archived by a different request at the same time.
-    *   - [[ActiveContractStore.ChangeAfterArchival]] for every change that occurs after the
-    *     archival timestamp. This is reported only if no
-    *     [[ActiveContractStore.DoubleContractArchival]] is reported.
     *   - [[ActiveContractStore.ChangeBeforeCreation]] if this archival is earlier than the latest
     *     creation of the contract.
     */
@@ -228,8 +223,6 @@ trait ActiveContractStore
     *   irregularities are reported:
     *   - [[ActiveContractStore.SimultaneousActivation]] if an assignment from another synchronizer
     *     or a creation has been added with the same timestamp.
-    *   - [[ActiveContractStore.ChangeAfterArchival]] if this timestamp is after the earliest
-    *     archival of the contract.
     *   - [[ActiveContractStore.ChangeBeforeCreation]] if this timestamp is before the latest
     *     creation of the contract.
     *   - [[ActiveContractStore.ReassignmentCounterShouldIncrease]] if the reassignment counter does
@@ -260,8 +253,6 @@ trait ActiveContractStore
     *   are reported:
     *   - [[ActiveContractStore.SimultaneousDeactivation]] if an unassignment to another
     *     synchronizer or a creation has been added with the same timestamp.
-    *   - [[ActiveContractStore.ChangeAfterArchival]] if this timestamp is after the earliest
-    *     archival of the contract.
     *   - [[ActiveContractStore.ChangeBeforeCreation]] if this timestamp is before the latest
     *     creation of the contract.
     *   - [[ActiveContractStore.ReassignmentCounterShouldIncrease]] if the reassignment counter does
@@ -623,21 +614,13 @@ object ActiveContractStore {
   }
 
   /** The state of a contract is changed before its `creation`. */
+  // TODO(i31579): double-check if this can be removed
   final case class ChangeBeforeCreation(
       contractId: LfContractId,
       creation: TimeOfChange,
       change: TimeOfChange,
   ) extends AcsWarning {
     override def timeOfChanges: List[TimeOfChange] = List(creation, change)
-  }
-
-  /** The state of a contract is changed after its `archival`. */
-  final case class ChangeAfterArchival(
-      contractId: LfContractId,
-      archival: TimeOfChange,
-      change: TimeOfChange,
-  ) extends AcsWarning {
-    override def timeOfChanges: List[TimeOfChange] = List(archival, change)
   }
 
   /** ReassignmentCounter should increase monotonically with the time of change. */
@@ -859,13 +842,9 @@ trait ActiveContractSnapshot {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfContractId, TimeOfChange]]
 
-  /** Returns a map to the latest reassignment counter of the contracts before the given timestamp.
-    * Fails if not all given contract ids are active in the ACS, or if the ACS has not defined their
-    * latest reassignment counter.
-    *
-    * @throws java.lang.IllegalArgumentException
-    *   if not all given contract ids are active in the ACS, if the ACS does not contain the latest
-    *   reassignment counter for each given contract id.
+  /** Returns a map to the latest reassignment counter of the contracts just before the given
+    * timestamp. Filters out contract ids that have not been active just before
+    * `timestampExclusive`.
     */
   def contractsReassignmentCounterSnapshotBefore(
       contractIds: Set[LfContractId],

@@ -27,7 +27,7 @@ import com.digitalasset.canton.platform.config.{
 import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
-import com.digitalasset.canton.platform.store.cache.LedgerEndCache
+import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -66,6 +66,7 @@ private class JdbcLedgerWriteDao(
     contractLoader: ContractLoader,
     lfValueTranslation: LfValueTranslation,
     contractStore: LedgerApiContractStoreImpl,
+    achsStateCache: AchsStateCache,
     pruningOffsetService: PruningOffsetService,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
@@ -92,6 +93,7 @@ private class JdbcLedgerWriteDao(
     lfValueTranslation = lfValueTranslation,
     pruningOffsetService = pruningOffsetService,
     contractStore = contractStore,
+    achsStateCache = achsStateCache,
   )
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()

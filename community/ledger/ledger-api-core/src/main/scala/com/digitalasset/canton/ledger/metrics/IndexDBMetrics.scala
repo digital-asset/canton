@@ -478,6 +478,12 @@ class MainIndexDBMetrics(
   val getFilteredActiveContractIds: DatabaseMetrics = createDbMetrics(
     "get_filtered_active_contract_ids"
   )
+  val getAchsIdRanges: DatabaseMetrics = createDbMetrics(
+    "get_achs_id_ranges"
+  )
+  val getAchsFilteredIds: DatabaseMetrics = createDbMetrics(
+    "get_achs_filtered_ids"
+  )
   val getActiveContractBatch: DatabaseMetrics = createDbMetrics(
     "get_active_contract_batch"
   )

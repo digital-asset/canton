@@ -391,7 +391,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
             // The participant's resilient sequencer subscription warns that it is giving up the sequencer-client-side
             // subscription due to the tombstone error.
             logEntry => {
-              logEntry.loggerName should include("SequencerSubscriptionX")
+              logEntry.loggerName should include("SequencerSubscription")
               logEntry.warningMessage should (include(
                 "Permanently closing sequencer subscription due to error"
               ) and include("FAILED_PRECONDITION/SEQUENCER_TOMBSTONE_ENCOUNTERED"))
@@ -534,7 +534,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
 
       val invalidConnection =
         GrpcSequencerConnection(
-          NonEmpty(Seq, Endpoint("fake-host", Port.tryCreate(100))),
+          NonEmpty(Set, Endpoint("fake-host", Port.tryCreate(100))),
           transportSecurity = false,
           None,
           SequencerAlias.Default,

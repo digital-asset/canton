@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.{
   SequencerTrafficControlSubscriber,
   TrafficPurchasedManager,
 }
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -95,12 +96,13 @@ trait SequencerRateLimitManager extends AutoCloseable {
     * by this method in the order T1 -> T2. However, if T1 and T2 have been processed in the correct
     * order, it is then ok to call the method with T1 again, which will result in the same output as
     * when it was first called.
-    * @param lastSequencerEventTimestamp
+    * @param latestSequencerEventTimestamp
     *   timestamp of the last event addressed to the sequencer.
     */
   def validateRequestAndConsumeTraffic(
       request: SubmissionRequest,
       sequencingTime: CantonTimestamp,
+      sequencingTopologySnapshot: TopologySnapshot,
       submissionTimestamp: Option[CantonTimestamp],
       latestSequencerEventTimestamp: Option[CantonTimestamp],
       warnIfApproximate: Boolean,

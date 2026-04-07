@@ -7,7 +7,6 @@ import cats.{Monad, Order}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.daml.lf.data.*
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import scala.annotation.nowarn
 
@@ -24,21 +23,21 @@ object LfTransactionUtil {
     case _: LfNodeFetch => None
     case nx: LfNodeExercises if nx.consuming => Some(nx.targetCoid)
     case _: LfNodeExercises => None
-    case _: LfNodeLookupByKey => None
+    case _: LfNodeQueryByKey => None
   }
 
   def contractIds(node: LfActionNode): Vector[LfContractId] = node match {
     case n: LfNodeCreate => Vector(n.coid)
     case n: LfNodeFetch => Vector(n.coid)
     case n: LfNodeExercises => Vector(n.targetCoid)
-    case n: LfNodeLookupByKey => n.result
+    case n: LfNodeQueryByKey => n.result
   }
 
-  def usedContractId(node: LfActionNode): Option[LfContractId] = node match {
-    case _: LfNodeCreate => None
-    case n: LfNodeFetch => Some(n.coid)
-    case n: LfNodeExercises => Some(n.targetCoid)
-    case n: LfNodeLookupByKey => n.result.asCidOption
+  def usedContractId(node: LfActionNode): Vector[LfContractId] = node match {
+    case _: LfNodeCreate => Vector.empty
+    case n: LfNodeFetch => Vector(n.coid)
+    case n: LfNodeExercises => Vector(n.targetCoid)
+    case n: LfNodeQueryByKey => n.result
   }
 
   /** Whether or not a node has a random seed */
@@ -46,7 +45,7 @@ object LfTransactionUtil {
     case _: LfNodeCreate => true
     case _: LfNodeExercises => true
     case _: LfNodeFetch => false
-    case _: LfNodeLookupByKey => false
+    case _: LfNodeQueryByKey => false
     case _: LfNodeRollback => false
   }
 

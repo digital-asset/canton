@@ -375,9 +375,8 @@ class TestSubmissionService(
       case ResultNeedKey(key, _, _, resume) =>
         // TODO(#30398) review this code once engine really support NUCK
 
-        val gk = key.globalKey
         for {
-          cidO <- keyResolver.resolveKey(gk)(traceContext)
+          cidO <- keyResolver.resolveKey(key)(traceContext)
           contracts <- cidO.toList.parTraverse(contractResolver(_)(traceContext))
           r <- resolve(resume(contracts.flatten.toVector, NeedKeyProgression.Finished))
         } yield r

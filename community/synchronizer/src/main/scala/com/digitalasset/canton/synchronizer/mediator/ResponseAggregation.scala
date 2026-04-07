@@ -20,7 +20,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.*
@@ -62,6 +62,8 @@ final case class ResponseAggregation[VKEY](
     decisionTime: CantonTimestamp,
     override val version: CantonTimestamp,
     state: Either[MediatorVerdict, Map[VKEY, ViewState]],
+    @VisibleForTesting
+    finalizedPromise: PromiseUnlessShutdown[Unit],
 )(
     val requestTraceContext: TraceContext,
     val participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
@@ -72,6 +74,18 @@ final case class ResponseAggregation[VKEY](
   override type VKey = VKEY
 
   override def isFinalized: Boolean = state.isLeft
+
+  /** Future that completes when the response aggregation is completed and the sequencer counter
+    * corresponding to the request can safely be marked as clean (does not need to be replayed
+    * during crash recovery)
+    */
+  def finalizedFuture: FutureUnlessShutdown[Unit] = finalizedPromise.futureUS
+
+  /** Fulfill the finalizedPromise, indicating the request has been fully processed such that its
+    * associated sequencer counter can be marked clean.
+    */
+  def completeFinalizedPromise(): Unit =
+    finalizedPromise.outcome_(())
 
   def asFinalized(protocolVersion: ProtocolVersion): Option[FinalizedResponse] =
     state.swap.toOption.map { verdict =>
@@ -336,7 +350,15 @@ final case class ResponseAggregation[VKEY](
       version: CantonTimestamp = version,
       state: Either[MediatorVerdict, Map[VKEY, ViewState]] = state,
   ): ResponseAggregation[VKEY] =
-    ResponseAggregation(requestId, request, responseTimeout, decisionTime, version, state)(
+    ResponseAggregation(
+      requestId,
+      request,
+      responseTimeout,
+      decisionTime,
+      version,
+      state,
+      finalizedPromise,
+    )(
       requestTraceContext,
       participantResponseDeadlineTick,
     )
@@ -545,6 +567,7 @@ object ResponseAggregation {
       topologySnapshot: TopologySnapshot,
       batchingConfig: BatchingConfig,
       participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
+      finalizePromise: PromiseUnlessShutdown[Unit],
   )(implicit
       requestTraceContext: TraceContext,
       ec: ExecutionContext,
@@ -563,6 +586,7 @@ object ResponseAggregation {
         decisionTime,
         requestId.unwrap,
         Right(initialState),
+        finalizePromise,
       )(requestTraceContext, participantResponseDeadlineTick)
     }
 

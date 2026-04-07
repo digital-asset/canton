@@ -41,12 +41,13 @@ import com.digitalasset.canton.participant.topology.{
   TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.channel.{
   SequencerChannelClient,
   SequencerChannelClientFactory,
 }
-import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnectionXPool}
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
@@ -80,7 +81,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       syncPersistentStateManager: SyncPersistentStateManager,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
-      connectionPool: SequencerConnectionXPool,
+      connectionPool: SequencerConnectionPool,
   )(
       cryptoApiProvider: SyncCryptoApiParticipantProvider,
       clock: Clock,
@@ -484,7 +485,9 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         synchronizerAlias,
         config,
         participantNodeParameters.processingTimeouts,
-        participantNodeParameters.tracing.propagation,
+        participantNodeParameters.sequencerClient.clientChannelParams(
+          participantNodeParameters.tracing.propagation
+        ),
         loggerFactory,
       )
   }

@@ -13,7 +13,11 @@ import com.digitalasset.canton.common.sequencer.SequencerConnectClient.{
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
+import com.digitalasset.canton.networking.grpc.{
+  CantonGrpcUtil,
+  ClientChannelBuilder,
+  ClientChannelParams,
+}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
@@ -24,7 +28,7 @@ import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeR
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Success}
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
@@ -38,7 +42,7 @@ class GrpcSequencerConnectClient(
     sequencerConnection: GrpcSequencerConnection,
     synchronizerAlias: SynchronizerAlias,
     val timeouts: ProcessingTimeout,
-    traceContextPropagation: TracingConfig.Propagation,
+    params: ClientChannelParams,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
     extends SequencerConnectClient
@@ -46,8 +50,16 @@ class GrpcSequencerConnectClient(
     with FlagCloseable {
 
   private val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
-  private val builder =
-    sequencerConnection.mkChannelBuilder(clientChannelBuilder, traceContextPropagation)
+  private val builder = {
+    // TODO(i31759): Remove multiple endpoints from `SequencerConnection`
+    if (sequencerConnection.endpoints.sizeIs > 1) {
+      logger.warn(
+        s"Configuration for sequencer ${sequencerConnection.sequencerAlias} defines more than one endpoint. " ++
+          "This is deprecated and not supported. Only the first endpoint will be used."
+      )(TraceContext.empty)
+    }
+    sequencerConnection.mkChannelBuilder(clientChannelBuilder, params)
+  }
 
   override def getSynchronizerClientBootstrapInfo()(implicit
       traceContext: TraceContext

@@ -2344,13 +2344,13 @@ object LsuAnnouncement extends TopologyMappingCompanion {
 }
 
 final case class GrpcConnection(
-    endpoints: NonEmpty[Seq[Endpoint]],
+    endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
     customTrustCertificates: Option[ByteString],
 ) {
   def toProtoV30: v30.LsuSequencerConnectionSuccessor.SequencerConnection =
     v30.LsuSequencerConnectionSuccessor.SequencerConnection(
-      endpoints = endpoints.map(_.toURI(transportSecurity).toString),
+      endpoints = endpoints.map(_.toURI(transportSecurity).toString).toSeq,
       customTrustCertificates = customTrustCertificates,
     )
 }
@@ -2373,7 +2373,7 @@ object GrpcConnection {
       .leftMap(err => ValueConversionError("endpoints", err))
     (endpoints, useTls) = endpointsAndTls
 
-  } yield GrpcConnection(endpoints, useTls, customTrustCertificates)
+  } yield GrpcConnection(endpoints.toSet, useTls, customTrustCertificates)
 
   def fromProtoV30(
       value: v30.LsuSequencerConnectionSuccessor.SequencerConnection

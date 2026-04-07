@@ -8,11 +8,14 @@ import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.networking.grpc.{ClientChannelBuilder, ManagedChannelBuilderProxy}
+import com.digitalasset.canton.networking.grpc.{
+  ClientChannelBuilder,
+  ClientChannelParams,
+  ManagedChannelBuilderProxy,
+}
 import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
 import com.google.protobuf.ByteString
 
@@ -53,7 +56,7 @@ sealed trait SequencerConnection extends PrettyPrinting {
 }
 
 final case class GrpcSequencerConnection(
-    endpoints: NonEmpty[Seq[Endpoint]],
+    endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
     customTrustCertificates: Option[ByteString],
     sequencerAlias: SequencerAlias,
@@ -61,12 +64,19 @@ final case class GrpcSequencerConnection(
 ) extends SequencerConnection {
   override def certificates: Option[ByteString] = customTrustCertificates
 
-  def mkChannelBuilder(clientChannelBuilder: ClientChannelBuilder, tracePropagation: Propagation)(
+  def mkChannelBuilder(clientChannelBuilder: ClientChannelBuilder, params: ClientChannelParams)(
       implicit executor: Executor
   ): ManagedChannelBuilderProxy =
+    // This is only called by the GrpcSequencerConnectClient, and the unicity of endpoints has been checked before.
     ManagedChannelBuilderProxy(
       clientChannelBuilder
-        .create(endpoints, transportSecurity, executor, customTrustCertificates, tracePropagation)
+        .create(
+          endpoints.head1,
+          transportSecurity,
+          executor,
+          customTrustCertificates,
+          params,
+        )
     )
 
   override def toProtoV30: v30.SequencerConnection =
@@ -95,10 +105,9 @@ final case class GrpcSequencerConnection(
       connection: URI,
       additionalConnections: URI*
   ): Either[String, SequencerConnection] =
-    for {
-      newEndpoints <- Endpoint
-        .fromUris(NonEmpty(Seq, connection, additionalConnections*))
-    } yield copy(endpoints = endpoints ++ newEndpoints._1)
+    Endpoint
+      .fromUris(NonEmpty(Seq, connection, additionalConnections*))
+      .map(newEndpoints => copy(endpoints = endpoints ++ newEndpoints._1))
 
   override def withCertificates(certificates: ByteString): SequencerConnection =
     copy(customTrustCertificates = Some(certificates))
@@ -121,7 +130,7 @@ object GrpcSequencerConnection {
       endpointsWithTlsFlag <- Endpoint.fromUris(NonEmpty(Seq, uri))
       (endpoints, useTls) = endpointsWithTlsFlag
     } yield GrpcSequencerConnection(
-      endpoints,
+      endpoints.toSet,
       useTls,
       customTrustCertificates,
       sequencerAlias,
@@ -161,7 +170,7 @@ object SequencerConnection {
       sequencerAlias <- SequencerAlias.fromProtoPrimitive(alias)
       sequencerId <- sequencerIdP.traverse(SequencerId.fromProtoPrimitive(_, "sequencer_id"))
     } yield GrpcSequencerConnection(
-      endpoints._1,
+      endpoints._1.toSet,
       grpcP.transportSecurity,
       grpcP.customTrustCertificates,
       sequencerAlias,
@@ -193,7 +202,7 @@ object SequencerConnection {
         case grpc @ GrpcSequencerConnection(endpoints, _, _, _, _) =>
           for {
             allMergedEndpoints <- connectionsNel.tail1.flatTraverse {
-              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.forgetNE)
+              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.forgetNE.toSeq)
               case _ => Left("Cannot merge grpc and http sequencer connections")
             }
           } yield grpc.copy(

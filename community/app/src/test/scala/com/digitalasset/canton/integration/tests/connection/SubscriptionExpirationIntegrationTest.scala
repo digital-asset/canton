@@ -13,9 +13,9 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.sequencing.{
-  GrpcInternalSequencerConnectionX,
-  SequencerSubscriptionXImpl,
+import com.digitalasset.canton.sequencing.client.pool.{
+  GrpcInternalSequencerConnection,
+  SequencerSubscriptionImpl,
 }
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
@@ -49,11 +49,11 @@ sealed trait SubscriptionExpirationIntegrationTest
       }
 
       def isConnectionRestart(logEntry: LogEntry): Boolean = logEntry.loggerName.contains(
-        "GrpcInternalSequencerConnectionX"
+        "GrpcInternalSequencerConnection"
       ) && (logEntry.message.startsWith("Starting") || logEntry.message.startsWith("Stopping"))
 
       def isSubscriptionStart(logEntry: LogEntry): Boolean =
-        logEntry.loggerName.contains("SequencerSubscriptionX") && logEntry.message.startsWith(
+        logEntry.loggerName.contains("SequencerSubscription") && logEntry.message.startsWith(
           "Starting subscription at"
         )
 
@@ -62,8 +62,8 @@ sealed trait SubscriptionExpirationIntegrationTest
       clue("wait for connection or subscription restart") {
         loggerFactory.assertLogsSeq(
           SuppressionRule.LevelAndAbove(INFO) &&
-            (SuppressionRule.forLogger[GrpcInternalSequencerConnectionX] ||
-              SuppressionRule.forLogger[SequencerSubscriptionXImpl[?]])
+            (SuppressionRule.forLogger[GrpcInternalSequencerConnection] ||
+              SuppressionRule.forLogger[SequencerSubscriptionImpl[?]])
         )(
           eventually() {
             Threading.sleep(500)
@@ -78,7 +78,7 @@ sealed trait SubscriptionExpirationIntegrationTest
               // There should be no connection restart.
               // If there is a connection restart, it must precede the subscription start (otherwise we would not have
               // obtained a connection for the subscription), so we would have captured it.
-              if (logEntry.loggerName.contains("GrpcInternalSequencerConnectionX"))
+              if (logEntry.loggerName.contains("GrpcInternalSequencerConnection"))
                 logEntry.message should (not startWith "Starting" and not startWith "Stopping")
               else succeed
             }

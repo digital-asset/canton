@@ -1627,7 +1627,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       lookedUpInst.contractId -> lookedUpInst,
       lookerUpInst.contractId -> lookerUpInst,
     )
-    lazy val lookupKey = Map(lookedUpInst.contractKeyWithMaintainers.get -> Vector(lookedUpInst))
+    lazy val lookupKey = Map(lookedUpInst.contractKeyWithMaintainers.get.globalKey -> Vector(lookedUpInst))
 
     def firstLookupNode(tx: Tx): Option[(NodeId, Node.LookupByKey)] =
       tx.nodes.collectFirst { case (nid, nl: Node.LookupByKey) =>
@@ -1880,7 +1880,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         fetcherInst.contractId -> fetcherInst,
       )
       lazy val lookupKey =
-        Map(withKeyContractInst.contractKeyWithMaintainers.get -> Vector(withKeyContractInst))
+        Map(withKeyContractInst.contractKeyWithMaintainers.get.globalKey -> Vector(withKeyContractInst))
 
       val submitters = Set(alice)
 
@@ -2146,7 +2146,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     )
     val contracts = Map(contract.contractId -> contract)
     lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get -> Vector(contract))
+      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
     def run(cmd: ApiCommand, withKey: Boolean = false) = {
       val submitters = Set(party)
       val Right(cmds) = preprocessor
@@ -2304,7 +2304,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       )
     val contracts = Map(contract.contractId -> contract)
     lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get -> Vector(contract))
+      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
 
     def run(cmd: ApiCommand, withKey: Boolean) = {
       val submitters = Set(party)
@@ -2393,13 +2393,13 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     )
     val contracts = Map(contract.contractId -> contract)
     lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get -> Vector(contract))
+      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
 
     def run(cmd: ApiCommand): Int = {
       val submitters = Set(party)
       var keyLookups = 0
 
-      val mockedKeyLookup = Function.unlift { (key: GlobalKeyWithMaintainers) =>
+      val mockedKeyLookup = Function.unlift { (key: GlobalKey) =>
         keyLookups += 1
         lookupKey.lift(key)
       }
@@ -3182,14 +3182,14 @@ class EngineTestHelpers(
     )
 
   lazy val defaultKey =
-    Map(withKeyContractInst.contractKeyWithMaintainers.get -> Vector(withKeyContractInst))
+    Map(withKeyContractInst.contractKeyWithMaintainers.get.globalKey -> Vector(withKeyContractInst))
 
   val lookupContract = defaultContracts
 
   val lookupPackage = allPackages
 
   lazy val lookupKey =
-    Map(withKeyContractInst.contractKeyWithMaintainers.get -> Vector(withKeyContractInst))
+    Map(withKeyContractInst.contractKeyWithMaintainers.get.globalKey -> Vector(withKeyContractInst))
 
   def hash(s: String): Hash = crypto.Hash.hashPrivateKey(s)
   def participant: Ref.IdString.ParticipantId = Ref.ParticipantId.assertFromString("participant")
@@ -3240,7 +3240,7 @@ class EngineTestHelpers(
       ledgerEffectiveTime: Time.Timestamp,
       lookupPackages: PartialFunction[PackageId, Package],
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
-      keys: Map[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = Map.empty,
+      keys: Map[GlobalKey, Vector[FatContractInstance]] = Map.empty,
   )(implicit traceContext: TraceContext): Either[Error, (VersionedTransaction, Tx.Metadata)] = {
 
     val nodeSeedMap = txMeta.nodeSeeds.toSeq.toMap
@@ -3325,7 +3325,7 @@ class EngineTestHelpers(
 
   case class ReinterpretState(
       contracts: Map[ContractId, FatContractInstance],
-      keys: Map[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
+      keys: Map[GlobalKey, Vector[FatContractInstance]],
       nodes: HashMap[NodeId, Node] = HashMap.empty,
       roots: BackStack[NodeId] = BackStack.empty,
       timeBoundaries: Time.Range = Time.Range.unconstrained,
@@ -3341,7 +3341,7 @@ class EngineTestHelpers(
           (
             contracts.updated(coinst.contractId, coinst),
             coinst.contractKeyWithMaintainers.fold(keys)(k =>
-              keys.updated(k, keys.getOrElse(k, Vector.empty) :+ coinst)
+              keys.updated(k.globalKey, keys.getOrElse(k.globalKey, Vector.empty) :+ coinst)
             ),
           )
         case (acc, _) => acc

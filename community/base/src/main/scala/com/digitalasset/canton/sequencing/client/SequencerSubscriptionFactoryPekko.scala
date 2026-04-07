@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.SequencerAggregatorPekko.HasSequencerSubscriptionFactoryPekko
-import com.digitalasset.canton.sequencing.SequencerConnectionWithPekkoSubscribe
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionWithPekkoSubscribe
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext

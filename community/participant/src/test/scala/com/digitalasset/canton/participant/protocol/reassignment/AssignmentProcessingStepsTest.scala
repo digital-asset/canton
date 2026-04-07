@@ -824,6 +824,7 @@ final class AssignmentProcessingStepsTest
       engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       DummyTickRequest,
       PublishUpdateViaRecordOrderPublisher.noop,
+      trafficCost = NonNegativeLong.tryCreate(123L),
     )
     val mockDeliver = mock[Deliver[DefaultOpenEnvelope]]
     when(mockDeliver.timestamp).thenReturn(CantonTimestamp.Epoch)

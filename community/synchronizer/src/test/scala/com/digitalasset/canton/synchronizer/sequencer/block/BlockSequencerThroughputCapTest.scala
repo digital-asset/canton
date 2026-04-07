@@ -65,18 +65,20 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       thresholds: NonEmpty[Seq[PositiveDouble]] =
         NonEmpty.mk(Seq, 0.9, 0.8, 0.7).map(PositiveDouble.tryCreate),
       observationPeriodSeconds: Int = 1,
+      requestType: SubmissionRequestType = SubmissionRequestType.ConfirmationRequest,
+      clockOpt: Option[SimClock] = None,
   ) = {
-    val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+    val clock = clockOpt.getOrElse(new SimClock(CantonTimestamp.Epoch, loggerFactory))
     (
       observationPeriodSeconds,
       clock,
       new IndividualBlockSequencerThroughputCap(
         observationPeriodSeconds,
         strict,
-        thresholds,
+        thresholdsConfig = thresholds,
         updateEveryMs = NonNegativeInt.zero,
         config,
-        SubmissionRequestType.ConfirmationRequest,
+        requestType,
         clock,
         sequencerMetrics,
         timeouts,
@@ -129,9 +131,9 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
         SubmissionRequestEntry(m1, ConfirmationResponse, ts, 1L)
 
       def assertAllAreAccepted: Assertion = {
-        cap.shouldRejectTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
-        cap.shouldRejectTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
-        cap.shouldRejectTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+        cap.shouldAllowTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
+        cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
+        cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
       }
 
       // initially all are accepted
@@ -149,23 +151,23 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       cap.addBlockUpdateInternal(Seq(confirmationRequest(clock.now)))
       cap.addBlockUpdateInternal(Seq(confirmationRequest(clock.now)))
       val msg = "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
-      cap.shouldRejectTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
-      cap.shouldRejectTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
-      cap.shouldRejectTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
 
       // after receiving more than 1 topology transaction requests in a second, they are also rejected
       cap.addBlockUpdateInternal(Seq(topologyTransaction(clock.now)))
       cap.addBlockUpdateInternal(Seq(topologyTransaction(clock.now)))
-      cap.shouldRejectTransaction(TopologyTransaction, m1, 0).left.value should myInclude(msg)
-      cap.shouldRejectTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
-      cap.shouldRejectTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
 
       // confirmation responses (and all other message types) are not counted, so they don't get rejected
       cap.addBlockUpdateInternal(Seq(confirmationResponse(clock.now)))
       cap.addBlockUpdateInternal(Seq(confirmationResponse(clock.now)))
-      cap.shouldRejectTransaction(TopologyTransaction, m1, 0).left.value should myInclude(msg)
-      cap.shouldRejectTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
-      cap.shouldRejectTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
 
       // after advancing, the scheduler takes care of updating the cap (so now submissions are all accepted again)
       clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong).plusMillis(1L))
@@ -182,7 +184,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       val eventSize: Long = 128
 
       // originally, initialized = false, so nothing should be rejected
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
 
       // add two events for m1, the second of which is directly at the observationPeriod
       tpsCap.addEvent(clock.now, m1, eventSize)
@@ -191,12 +193,12 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // the second event is added but does not trigger a removal, and thus does not
       // cause initialized to be set to true
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
 
       // finally, initialized becomes true once > observationPeriod has been observed
       clock.advance(Duration.ofNanos(1000))
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel).left.value should myInclude(
         "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
       )
     }
@@ -215,18 +217,18 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       tpsCap.addEvent(clock.now, m1, eventSize)
       tpsCap.addEvent(clock.now, m1, eventSize)
       val msg = "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel).left.value should myInclude(msg)
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel).left.value should myInclude(msg)
 
       // advance the clock to simulate time passing since the latest event was added
       clock.advance(Duration.ofSeconds(1).plus(Duration.ofMillis(1)))
       tpsCap.advanceWindow() // simulate the parent scheduler tick running
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
 
       // ensure that the cap is re-enforced once again once events are added
       clock.advance(Duration.ofNanos(1000))
       tpsCap.addEvent(clock.now, m1, eventSize)
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel).left.value should myInclude(msg)
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel).left.value should myInclude(msg)
     }
 
     "allow large events to temporarily exceed caps and then rate limit accordingly" in {
@@ -251,7 +253,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       // but then subsequent events for that client get rejected
       tpsCap.addEvent(clock.now, m1, bigClientEvent)
       tpsCap.getMemberUsage(m1).map(_.bytes) should contain(bigClientEvent)
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel).left.value should myInclude(
         "2048000 bytes over the past 1 seconds is more than the allowed 1024000,0 for the period"
       )
 
@@ -260,28 +262,28 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       // once added, this second client should also be rate limited
       tpsCap.addEvent(clock.now, m2, bigGlobalEvent)
       tpsCap.getMemberUsage(m2).map(_.bytes) should contain(bigGlobalEvent)
-      tpsCap.shouldRejectTransaction(m2, thresholdLevel).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, thresholdLevel).left.value should myInclude(
         "9216000 bytes over the past 1 seconds is more than the allowed 1024000,0 for the period"
       )
 
       // With the current utilization, each member is guaranteed globalCap / (1 + v_active)
       // In case of three clients, this is 3MB / (1 + 3) = 750KB
-      tpsCap.shouldRejectTransaction(m3, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m3, thresholdLevel) shouldBe Right(())
       tpsCap.addEvent(clock.now, m3, smallEvent)
       tpsCap.getMemberUsage(m3).map(_.bytes) should contain(smallEvent)
-      tpsCap.shouldRejectTransaction(m3, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m3, thresholdLevel) shouldBe Right(())
       tpsCap.addEvent(clock.now, m3, smallEvent)
       tpsCap.getMemberUsage(m3).map(_.bytes) should contain(2 * smallEvent)
-      tpsCap.shouldRejectTransaction(m3, thresholdLevel).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m3, thresholdLevel).left.value should myInclude(
         "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
       )
 
       // advance the clock, reducing global utilization back to zero
       clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong).plus(Duration.ofMillis(1)))
       tpsCap.advanceWindow()
-      tpsCap.shouldRejectTransaction(m1, thresholdLevel) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, thresholdLevel) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m3, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, thresholdLevel) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m3, thresholdLevel) shouldBe Right(())
     }
 
     "enforce threshold level caps from TPS increases" in {
@@ -299,43 +301,43 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // total global utilization should be 10% right now: 1/10 from the above addEvent
       // insertion at any threshold level succeeds during unregulated operation
-      tpsCap.shouldRejectTransaction(m2, 3) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 2) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 3) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 2) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 2 (>=70%) only works for levels <= 2
       (1 to 6).foreach(_ => tpsCap.addEvent(clock.now, m1, 1))
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 2"
       )
-      tpsCap.shouldRejectTransaction(m2, 2) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 2) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 1 (>=80%) only works for levels <= 1
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 1"
       )
-      tpsCap.shouldRejectTransaction(m2, 2).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 2).left.value should myInclude(
         "Request at level 2 is higher than the current threshold 1"
       )
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 0 (>=90%) only works for levels <= 0
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 2).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 2).left.value should myInclude(
         "Request at level 2 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 1).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 1).left.value should myInclude(
         "Request at level 1 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
     }
 
     "enforce threshold level caps from KB/s increases" in {
@@ -354,43 +356,43 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       tpsCap.addEvent(clock.now, m1, (bytesCap * 0.6).toLong)
 
       // insertion at any threshold level succeeds during unregulated operation
-      tpsCap.shouldRejectTransaction(m2, 3) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 2) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 3) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 2) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 2 (>=70%) only works for levels <= 2
       tpsCap.addEvent(clock.now, m1, (bytesCap * 0.1).toLong)
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 2"
       )
-      tpsCap.shouldRejectTransaction(m2, 2) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 2) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 1 (>=80%) only works for levels <= 1
       tpsCap.addEvent(clock.now, m1, (bytesCap * 0.1).toLong)
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 1"
       )
-      tpsCap.shouldRejectTransaction(m2, 2).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 2).left.value should myInclude(
         "Request at level 2 is higher than the current threshold 1"
       )
-      tpsCap.shouldRejectTransaction(m2, 1) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 1) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
 
       // insertion when utilization is in level 0 (>=90%) only works for levels <= 0
       tpsCap.addEvent(clock.now, m1, (bytesCap * 0.1).toLong)
-      tpsCap.shouldRejectTransaction(m2, 3).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 3).left.value should myInclude(
         "Request at level 3 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 2).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 2).left.value should myInclude(
         "Request at level 2 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 1).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 1).left.value should myInclude(
         "Request at level 1 is higher than the current threshold 0"
       )
-      tpsCap.shouldRejectTransaction(m2, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m2, 0) shouldBe Right(())
     }
 
     "enforce throttling when high TPS reaches highest threshold level" in {
@@ -420,23 +422,23 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // w/ globalCap = 10 and vActive = 3, throttled rate per member is: 10 / (1 + 3) = 2.5
       // since m1 already has 3 events in the window, it will be denied service
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "Therefore, the sequencer is allocating the same bandwidth of 2,5 transactions over 1 seconds to all 3 active validators"
       )
       // but m4 (w/ no usage) is allowed to send requests
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
 
       tpsCap.addEvent(clock.now, m4, eventSize) // 100%, and vAct = 4, so fair share is 2.0
       tpsCap.addEvent(clock.now, m5, eventSize) // 110%, and vAct = 5, so fair share is 1.67
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
       tpsCap.addEvent(clock.now, m4, eventSize) // 120%
       tpsCap.getMemberUsage(m4).map(_.count) should contain(2)
       tpsCap.getMemberUsage(m5).map(_.count) should contain(1)
-      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m4, 0).left.value should myInclude(
         "Therefore, the sequencer is allocating the same bandwidth of 1,7 transactions over 1 seconds to all 5 active validators"
       )
-      tpsCap.shouldRejectTransaction(m5, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m5, 0) shouldBe Right(())
 
       clock.advance(
         Duration.ofSeconds(observationPeriodSeconds.toLong).minus(Duration.ofMillis(rounds.toLong))
@@ -478,23 +480,23 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // w/ globalCap = 3000KB/s and vActive = 3, throttled rate per member is: 3000KB/s / (1 + 3) = 768 KB/s
       // since m1 already has 1228 KB/s events in the window, it will be denied service
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "3 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
       )
       // but m4 (w/ no usage) is allowed to send requests
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
 
       tpsCap.addEvent(clock.now, m4, eventSize) // 100%, and vAct = 4, so fair share is 614 KB/s
       tpsCap.addEvent(clock.now, m5, eventSize) // 110%, and vAct = 5, so fair share is 512 KB/s
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
-      tpsCap.shouldRejectTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m4, 0) shouldBe Right(())
       tpsCap.addEvent(clock.now, m4, eventSize) // 120%
       tpsCap.getMemberUsage(m4).map(_.bytes) should contain(2 * eventSize)
       tpsCap.getMemberUsage(m5).map(_.bytes) should contain(eventSize)
-      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m4, 0).left.value should myInclude(
         "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
       )
-      tpsCap.shouldRejectTransaction(m5, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m5, 0) shouldBe Right(())
 
       clock.advance(
         Duration.ofSeconds(observationPeriodSeconds.toLong).minus(Duration.ofMillis(rounds.toLong))
@@ -535,11 +537,11 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // Exceed the per-client TPS cap (1.0) for m1
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m1, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isLeft shouldBe true
 
       // Submit another event to bring # of rejections to 2
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m1, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isLeft shouldBe true
 
       // Verify that m1's rejection is recorded with "per_member" label and count
       val metric = "confirmation-request.rejections"
@@ -575,7 +577,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       }
 
       // m1 should be throttled due to global cap, not per-member cap
-      val rejection1 = tpsCap.shouldRejectTransaction(m1, 0)
+      val rejection1 = tpsCap.shouldAllowTransaction(m1, 0)
       rejection1.isLeft shouldBe true
       rejection1.left.value should myInclude(
         "allocating the same bandwidth of 2,5 transactions"
@@ -611,17 +613,17 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
       // Exceed per-client TPS cap (1.0) for m1 - trigger 2 rejections for m1
       tpsCap.addEvent(clock.now, m1, eventSize)
-      tpsCap.shouldRejectTransaction(m1, 0).isLeft shouldBe true
-      tpsCap.shouldRejectTransaction(m1, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isLeft shouldBe true
 
       // Exceed per-client TPS cap (1.0) for m2 - trigger 3 rejections for m2
       tpsCap.addEvent(clock.now, m2, eventSize)
-      tpsCap.shouldRejectTransaction(m2, 0).isLeft shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isLeft shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isLeft shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isLeft shouldBe true
 
       // m3 should not be rejected (no events added for m3)
-      tpsCap.shouldRejectTransaction(m3, 0) shouldBe Right(())
+      tpsCap.shouldAllowTransaction(m3, 0) shouldBe Right(())
 
       // Verify rejection metrics are tracked independently
       val metricName = "confirmation-request.rejections"
@@ -675,41 +677,41 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       tpsCap.addEvent(clock.now, m1, eventSize)
       tpsCap.addEvent(clock.now, m1, eventSize)
       // nothing should throttle us
-      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       // now, m2 enters the stage, which means that the cap must be halved
       // so m1 no longer can submit transactions
       tpsCap.addEvent(clock.now, m1, eventSize) // m1: 4; memberCap: 4
       clock.advance(Duration.ofMillis(500))
       tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 1; memberCap: 3
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 3,0 transactions over 1 seconds to all 2 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 2; memberCap: 2
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 2,0 transactions over 1 seconds to all 2 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       // now we add more events for m3
       tpsCap.addEvent(clock.now, m3, eventSize) // m1: 4, m2: 2, m3: 1; memberCap: 1.5
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 1,5 transactions over 1 seconds to all 3 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 0).left.value should myInclude(
         "bandwidth of 1,5 transactions over 1 seconds to all 3 active validators"
       )
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
       tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 1; memberCap: 1
       tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 2; memberCap: 1
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 0).left.value should myInclude(
         "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
       )
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m4, 0).left.value should myInclude(
         "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
       )
 
@@ -721,10 +723,10 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       // so the excess TPS that can be distributed is 1.5 to the leading spenders each
       clock.advance(Duration.ofMillis(501))
       tpsCap.advanceWindow()
-      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe false
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m4, 0).isRight shouldBe false
+      tpsCap.shouldAllowTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe false
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m4, 0).isRight shouldBe false
     }
 
     "cap Kbps sensibly in non-strict mode" in {
@@ -752,41 +754,41 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       tpsCap.addEvent(clock.now, m1, eventSize)
       tpsCap.addEvent(clock.now, m1, eventSize)
       // nothing should throttle us
-      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       // now, m2 enters the stage, which means that the cap must be halved
       // so m1 no longer can submit transactions
       tpsCap.addEvent(clock.now, m1, eventSize) // m1: 4; memberCap: 1000 Kbps
       clock.advance(Duration.ofMillis(500))
       tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 1; memberCap: 750 Kbps
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 768000,0 bytes over 1 seconds to all 2 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 2; memberCap: 500 Kbps
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 512000,0 bytes over 1 seconds to all 2 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe true
       // now we add more events for m3
       tpsCap.addEvent(clock.now, m3, eventSize) // m1: 4, m2: 2, m3: 1; memberCap: 375 Kbps
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 384000,0 bytes over 1 seconds to all 3 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 0).left.value should myInclude(
         "bandwidth of 384000,0 bytes over 1 seconds to all 3 active validators"
       )
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
       tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 1; memberCap: 250 Kbps
       tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 2; memberCap: 250 Kbps
-      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m1, 0).left.value should myInclude(
         "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
       )
-      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m2, 0).left.value should myInclude(
         "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
       )
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m4, 0).left.value should myInclude(
         "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
       )
 
@@ -798,10 +800,73 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       // so the excess Kbps that can be distributed is 375 to the leading spenders each
       clock.advance(Duration.ofMillis(501))
       tpsCap.advanceWindow()
-      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe false
-      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
-      tpsCap.shouldRejectTransaction(m4, 0).isRight shouldBe false
+      tpsCap.shouldAllowTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m2, 0).isRight shouldBe false
+      tpsCap.shouldAllowTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldAllowTransaction(m4, 0).isRight shouldBe false
+    }
+
+    "exempt sequencers from rate limiting only for topology transactions" in {
+      // test for issue #29485: sequencers should not be rate limited for topology transactions
+      // but should be rate limited for other transaction types
+      val config = createIndividualConfig(perClientTpsCap = 1.0) // 1 transaction per second
+
+      // create a cap for topology transactions
+      val (observationPeriodSeconds, clock, tpsCapTopology) = mkCap(
+        config,
+        strict = true,
+        requestType = SubmissionRequestType.TopologyTransaction,
+      )
+
+      // create cap for confirmation requests to test non-topology transactions
+      val (_, _, tpsCapConfirmation) = mkCap(
+        config,
+        strict = true,
+        requestType = SubmissionRequestType.ConfirmationRequest,
+        clockOpt = Some(clock),
+      )
+
+      // initialize the cap
+      tpsCapTopology.addEvent(clock.now, m1, 1000L)
+      tpsCapConfirmation.addEvent(clock.now, m1, 1000L)
+      clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong))
+
+      // exceeds limit of 1 per second
+      tpsCapTopology.addEvent(clock.now, m1, 1000L)
+      tpsCapTopology.addEvent(clock.now, m1, 1000L)
+      tpsCapConfirmation.addEvent(clock.now, m1, 1000L)
+      tpsCapConfirmation.addEvent(clock.now, m1, 1000L)
+
+      // way above limit for sequencer
+      for (_ <- 1 to 10) {
+        tpsCapTopology.addEvent(clock.now, m6, 1000L)
+        tpsCapConfirmation.addEvent(clock.now, m6, 1000L)
+      }
+
+      // exceeds limit of 1 per second for mediator
+      tpsCapTopology.addEvent(clock.now, m5, 1000L)
+      tpsCapTopology.addEvent(clock.now, m5, 1000L)
+      tpsCapConfirmation.addEvent(clock.now, m5, 1000L)
+      tpsCapConfirmation.addEvent(clock.now, m5, 1000L)
+
+      // regular members should be rate limited
+      tpsCapTopology.shouldAllowTransaction(m1, 0).isLeft shouldBe true
+      tpsCapTopology.shouldAllowTransaction(m1, 0).left.value should myInclude("transactions")
+      tpsCapConfirmation.shouldAllowTransaction(m1, 0).isLeft shouldBe true
+      tpsCapConfirmation.shouldAllowTransaction(m1, 0).left.value should myInclude("transactions")
+
+      // sequencers (m6) should never be rejected for topology transactions
+      tpsCapTopology.shouldAllowTransaction(m6, 0) shouldBe Right(())
+
+      // but sequencers (m6) SHOULD be rejected for other transaction types like confirmation requests
+      tpsCapConfirmation.shouldAllowTransaction(m6, 0).isLeft shouldBe true
+      tpsCapConfirmation.shouldAllowTransaction(m6, 0).left.value should myInclude("transactions")
+
+      // mediators should be rate limited for all transaction types
+      tpsCapTopology.shouldAllowTransaction(m5, 0).isLeft shouldBe true
+      tpsCapTopology.shouldAllowTransaction(m5, 0).left.value should myInclude("transactions")
+      tpsCapConfirmation.shouldAllowTransaction(m5, 0).isLeft shouldBe true
+      tpsCapConfirmation.shouldAllowTransaction(m5, 0).left.value should myInclude("transactions")
     }
   }
 }
@@ -810,8 +875,9 @@ object BlockSequencerThroughputCapTest {
   private val m1 = DefaultTestIdentities.participant1
   private val m2 = DefaultTestIdentities.participant2
   private val m3 = DefaultTestIdentities.participant3
-  private val m4 = DefaultTestIdentities.sequencerId
+  private val m4 = DefaultTestIdentities.participant4
   private val m5 = DefaultTestIdentities.mediatorId
+  private val m6 = DefaultTestIdentities.sequencerId
 
   private val defaultGlobalTpsCap = 10.0
   private val defaultGlobalKbpsCap = 3000.0

@@ -32,7 +32,18 @@ package object sequencing {
     * processing may run concurrently with later events' synchronous processing and with
     * asynchronous processing of other events.
     */
-  type HandlerResult = FutureUnlessShutdown[AsyncResult[Unit]]
+  type GenericHandlerResult[+A] = FutureUnlessShutdown[AsyncResult[A]]
+
+  /** A specific GenericHandlerResult that returns [[UnthrottledAsync]] in the async computation.
+    * The [[UnthrottledAsync]] is not subject to throttling in the sequencer client, but can be used
+    * to hold additional async computation that happens after the [[AsyncResult]] completes.
+    */
+  type HandlerResult = FutureUnlessShutdown[AsyncResult[UnthrottledAsync]]
+
+  /** An application handler that returns a HandlerResult
+    */
+  type UnthrottledApplicationHandler[-Box[+_ <: Envelope[?]], -E <: Envelope[?]] =
+    ApplicationHandler[Box, E, UnthrottledAsync]
 
   ///////////////////////////////
   // The boxes and their handlers
@@ -43,8 +54,10 @@ package object sequencing {
     */
   type OrdinaryEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[OrdinarySequencedEvent[E]]]
   type SequencedEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[SequencedEventWithTraceContext[E]]]
-  type OrdinaryApplicationHandler[-E <: Envelope[?]] = ApplicationHandler[OrdinaryEnvelopeBox, E]
-  type SequencedApplicationHandler[-E <: Envelope[?]] = ApplicationHandler[SequencedEnvelopeBox, E]
+  type OrdinaryApplicationHandler[-E <: Envelope[?]] =
+    UnthrottledApplicationHandler[OrdinaryEnvelopeBox, E]
+  type SequencedApplicationHandler[-E <: Envelope[?]] =
+    UnthrottledApplicationHandler[SequencedEnvelopeBox, E]
 
   /** Just a signature around the [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]] The
     * term "raw" indicates that the trace context is missing. Try to use the box
@@ -56,7 +69,8 @@ package object sequencing {
     * `Traced` contains a trace context for the entire batch.
     */
   type UnsignedEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[WithCounter[Traced[SequencedEvent[E]]]]]
-  type UnsignedApplicationHandler[-E <: Envelope[?]] = ApplicationHandler[UnsignedEnvelopeBox, E]
+  type UnsignedApplicationHandler[-E <: Envelope[?]] =
+    UnthrottledApplicationHandler[UnsignedEnvelopeBox, E]
   type UnsignedProtocolEventHandler = UnsignedApplicationHandler[DefaultOpenEnvelope]
 
   /** Default box for `PossiblyIgnoredProtocolEvents`. The outer `Traced` contains a trace context
@@ -64,7 +78,7 @@ package object sequencing {
     */
   type PossiblyIgnoredEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[PossiblyIgnoredSequencedEvent[E]]]
   type PossiblyIgnoredApplicationHandler[-E <: Envelope[?]] =
-    ApplicationHandler[PossiblyIgnoredEnvelopeBox, E]
+    UnthrottledApplicationHandler[PossiblyIgnoredEnvelopeBox, E]
 
   ///////////////////////////////////
   // Serialized events in their boxes

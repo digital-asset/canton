@@ -81,7 +81,7 @@ trait MalformedRequestResponseSendFailureIntegrationTest
               sr
             ) && failureCounter
               .incrementAndGet() == 1 =>
-          SendDecision.Reject
+          SendDecision.Reject()
         case _ => SendDecision.Process
       }
 

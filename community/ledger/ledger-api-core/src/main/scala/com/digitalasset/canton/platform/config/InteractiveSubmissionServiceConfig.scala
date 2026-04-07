@@ -20,11 +20,14 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
   *   transactions are not supported and would be rejected anyway during confirmation. Disabling
   *   this check won't provide functional support for those transactions, the flag only rejects them
   *   early and prevent their submission to the synchronizer.
+  * @param maximumNumberOfSignaturesPerParty
+  *   Maximum number of external signatures that will be allowed per party per submission.
   */
 final case class InteractiveSubmissionServiceConfig(
     enableVerboseHashing: Boolean = false,
     contractLookupParallelism: PositiveInt = PositiveInt.tryCreate(5),
     enforceSingleRootNode: Boolean = true,
+    maximumNumberOfSignaturesPerParty: PositiveInt = PositiveInt.tryCreate(50),
 )
 
 object InteractiveSubmissionServiceConfig {

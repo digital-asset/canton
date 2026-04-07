@@ -73,7 +73,7 @@ private[bftordering] class ServerAuthenticatingServerInterceptor(
         implicit val executor: Executor = (command: Runnable) => ec.execute(command)
         val authenticationServiceChannel = GrpcManagedChannel(
           s"server-authenticationServiceChannel-$endpoint",
-          createChannelBuilder(endpoint.endpointConfig).build(),
+          createChannelBuilder(endpoint.endpointConfig, maxInboundMessageSize = None).build(),
           this,
           loggerFactory.getTracedLogger(getClass),
         )

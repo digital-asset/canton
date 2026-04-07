@@ -31,6 +31,7 @@ import com.digitalasset.canton.integration.util.{
   AcsInspection,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
+  TestUtils,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -39,6 +40,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
+  TrafficTestUtils,
 }
 import com.digitalasset.canton.ledger.participant.state.ReassignmentCommandsBatch.{
   DifferingSynchronizers,
@@ -147,6 +149,12 @@ abstract class ReassignmentServiceIntegrationTest
           )
         )
       }
+      .withTrafficControl(
+        TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+        TrafficTestUtils.predictableTraffic,
+        topUpAllMembers = true,
+        disableCommitments = true,
+      )
 
   "ReassignmentService" should {
     /*
@@ -670,6 +678,12 @@ abstract class ReassignmentServiceIntegrationTest
       submittingParty = submittingParty.toLf,
       participantOverride = submittingParticipantOverride,
     )
+    // Get the unassignment cost from the source synchronizer sequencer (sequencer1)
+    // to compare it with the cost exposed on the unassignment event and completion
+    val unassignCost = sequencer1.traffic_control
+      .traffic_summaries(Seq(unassignmentCompletion.synchronizerTime.value.recordTime.value))
+      .loneElement
+      .totalTrafficCost
 
     val templateId = Iou.TEMPLATE_ID_WITH_PACKAGE_ID
     val expectedTemplateId = Some(
@@ -716,7 +730,7 @@ abstract class ReassignmentServiceIntegrationTest
       traceContext = unassignmentCompletion.traceContext,
       offset = 0L,
       synchronizerTime = None,
-      paidTrafficCost = 0L,
+      paidTrafficCost = unassignCost,
     )
 
     unassignmentCompletion.copy(
@@ -740,6 +754,12 @@ abstract class ReassignmentServiceIntegrationTest
       submittingParty = submittingParty.toLf,
       participantOverride = submittingParticipantOverride,
     )
+    // Get the unassignment cost from the target synchronizer sequencer (sequencer2)
+    // to compare it with the cost exposed on the assignment event and completion
+    val assignCost = sequencer2.traffic_control
+      .traffic_summaries(Seq(assignmentCompletion.synchronizerTime.value.recordTime.value))
+      .loneElement
+      .totalTrafficCost
 
     val ledgerEndAfterAssignment =
       submittingParticipantOverride.getOrElse(participant1).ledger_api.state.end()
@@ -777,7 +797,7 @@ abstract class ReassignmentServiceIntegrationTest
       traceContext = assignmentCompletion.traceContext,
       offset = 0L,
       synchronizerTime = None,
-      paidTrafficCost = 0L,
+      paidTrafficCost = assignCost,
     )
 
     assignmentCompletion.copy(

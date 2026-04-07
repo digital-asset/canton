@@ -71,6 +71,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.{
 }
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -431,6 +432,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         FutureSupervisor.Noop,
         SequencerTrafficConfig(),
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         runtimeReady = FutureUnlessShutdown.unit,
       )
       .futureValueUS
@@ -1332,6 +1334,7 @@ object ReferenceSequencerWithTrafficControlApiTestBase {
     override def validateRequestAndConsumeTraffic(
         request: SubmissionRequest,
         sequencingTime: CantonTimestamp,
+        sequencingTopologySnapshot: TopologySnapshot,
         submissionTimestamp: Option[CantonTimestamp],
         latestSequencerEventTimestamp: Option[CantonTimestamp],
         warnIfApproximate: Boolean,
@@ -1346,6 +1349,7 @@ object ReferenceSequencerWithTrafficControlApiTestBase {
           super.validateRequestAndConsumeTraffic(
             request,
             sequencingTime,
+            sequencingTopologySnapshot,
             submissionTimestamp,
             latestSequencerEventTimestamp,
             warnIfApproximate,

@@ -15,6 +15,7 @@ import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractValidator, EitherTUtil, MonadUtil, ReassignmentTag}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
 import scala.concurrent.ExecutionContext
@@ -92,25 +93,26 @@ object ReassignmentValidation {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
-    for {
-      participantWithMultiSynchronizerEnabled <- EitherT.right(
-        topologySnapshot.participantsWithSupportedFeature(
-          participants,
-          feature = ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+    if (psid.protocolVersion >= ProtocolVersion.v35)
+      for {
+        participantWithMultiSynchronizerEnabled <- EitherT.right(
+          topologySnapshot.participantsWithSupportedFeature(
+            participants,
+            feature = ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+          )
         )
-      )
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        Either.cond(
-          participantWithMultiSynchronizerEnabled == participants,
-          (),
-          ReassignmentValidationError.MultiSynchronizerIsNotEnabled(
-            participants.diff(participantWithMultiSynchronizerEnabled),
-            psid,
-          ): ReassignmentValidationError,
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          Either.cond(
+            participantWithMultiSynchronizerEnabled == participants,
+            (),
+            ReassignmentValidationError.MultiSynchronizerIsNotEnabled(
+              participants.diff(participantWithMultiSynchronizerEnabled),
+              psid,
+            ): ReassignmentValidationError,
+          )
         )
-      )
-
-    } yield ()
+      } yield ()
+    else EitherTUtil.unitUS
 
   def authenticateContractAndStakeholders(
       contractValidator: ContractValidator,

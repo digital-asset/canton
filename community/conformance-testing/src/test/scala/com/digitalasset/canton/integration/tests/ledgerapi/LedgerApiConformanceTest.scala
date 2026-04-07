@@ -14,10 +14,7 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVe
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
-import com.digitalasset.canton.integration.util.TestUtils.{
-  waitForTargetTimeOnMediator,
-  waitForTargetTimeOnSequencer,
-}
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -153,56 +150,6 @@ class LedgerApiConformanceMultiSynchronizerTest
   }
 }
 
-class LedgerApiConformanceWithTrafficControlTest
-    extends CommunityIntegrationTest
-    with IsolatedEnvironments {
-
-  override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
-      .withSetup { implicit env =>
-        // Wait for the synchronizer owners' time to have advanced to a recent wall-clock time
-        //  to avoid that traffic control flakily rejects topology changes due to submission times
-        //  close to epoch being too far behind a later synchronizer time close to wall-clock.
-        val now = wallClock.now
-        import env.*
-        waitForTargetTimeOnSequencer(sequencer1, now, logger)
-        waitForTargetTimeOnMediator(mediator1, now, logger)
-      }
-      .withTrafficControl()
-      .withSetup(setupLedgerApiConformanceEnvironment(_))
-
-  // ensure ledger api conformance tests have less noisy neighbours
-  protected override def numPermits: PositiveInt = PositiveInt.tryCreate(2)
-
-  protected def setupLedgerApiConformanceEnvironment(implicit
-      env: TestConsoleEnvironment
-  ): Unit = {
-    import env.*
-    participants.all.synchronizers.connect_local(sequencer1, alias = daName)
-  }
-
-  protected val ledgerApiTestToolPlugin =
-    new UseLedgerApiTestTool(
-      loggerFactory,
-      connectedSynchronizersCount = 1,
-      lfVersion = UseLedgerApiTestTool.LfVersion.Stable,
-      version = LAPITTVersion.LocalJar,
-    )
-  registerPlugin(ledgerApiTestToolPlugin)
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-
-  "Ledger API test tool on a synchronizer with traffic control enabled" can {
-    "pass traffic control related conformance tests" in { implicit env =>
-      ledgerApiTestToolPlugin.runSuites(
-        suites = LedgerApiConformanceBase.trafficControlTests.mkString(","),
-        exclude = Nil,
-        concurrency = 2,
-      )
-    }
-  }
-}
-
 object LedgerApiConformanceBase {
   val multiSynchronizerTests = Seq(
     "CommandServiceIT:CSsubmitAndWaitPrescribedSynchronizerId",
@@ -212,10 +159,6 @@ object LedgerApiConformanceBase {
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
     "VettingIT:PVListVettedPackagesMultiSynchronizer",
     "VettingIT:PVListVettedPackagesPagination",
-  )
-  val trafficControlTests = Seq(
-    "InteractiveSubmissionServiceIT:ISSPrepareSubmissionRequestBasic",
-    "InteractiveSubmissionServiceIT:ISSPrepareSubmissionRequestWithoutCostEstimation",
   )
   val excludedTests = Seq(
     // Exclude tests which are run separately below
@@ -246,6 +189,7 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected val numShards: Int = 6
   assert(shard < numShards)

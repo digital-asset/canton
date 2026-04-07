@@ -50,7 +50,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -150,7 +149,7 @@ class TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: ContractInstanceOfId,
-          _keyResolver: LegacyContractStateMachine.KeyResolver,
+          _keyResolver: LfKeyResolver,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
       )(implicit
@@ -185,7 +184,7 @@ class TransactionConfirmationRequestFactoryTest
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
           _rbContext: RollbackContext,
-          _keyResolver: LegacyContractStateMachine.KeyResolver,
+          _keyResolver: LfKeyResolver,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,

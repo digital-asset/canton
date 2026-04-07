@@ -105,7 +105,15 @@ trait DataContinuityTest
     LogEntry.assertLogSeq(
       Seq.empty,
       // Handle db backend initialization delay
-      Seq(e => assert(e.warningMessage.contains("Failed to initialize pool"))),
+      Seq(
+        e => assert(e.warningMessage.contains("Failed to initialize pool")),
+        e =>
+          assert(
+            e.warningMessage.contains(
+              s"Using a session signing key is not possible with protocol version 34."
+            )
+          ),
+      ),
     )
   )
 

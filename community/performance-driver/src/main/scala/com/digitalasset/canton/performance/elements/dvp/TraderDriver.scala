@@ -381,6 +381,7 @@ class TraderDriver(
               rate.updateRate(CantonTimestamp.now())
               val freeAssets =
                 master.data.issuers.asScala.map(issuer => assets.num(new Party(issuer))).sum
+
               freeAssetsMetric.updateValue(freeAssets)
               val numOpenApprovals = proposals.num(false)
 
@@ -402,7 +403,7 @@ class TraderDriver(
               logger.debug(
                 s"Proposals $proposalStats, Accepts $acceptanceStats, max-new: $maxNew, max-accept: $maxAccept, mine ${proposals
                     .num(true)}, theirs ${proposals
-                    .num(false)}, inventory ${assets.totalNum}, rate $rate, pending: ${rate.pending}"
+                    .num(false)}, inventory $freeAssets of ${assets.totalNum}, rate $rate, pending: ${rate.pending}"
               )
               val cmdsP = createProposals(maxNew, master.data.issuers.size, params)
               val cmdsA = acceptProposals(maxAccept, params)
@@ -739,12 +740,13 @@ object TraderDriver {
         Math.min(todo, newProposals6 + (batchSize - newProposals6 % batchSize) % batchSize)
 
       // now, to the approvals which is simple
-      val newApprovals1 = Math.min(numOpenApprovals, totalCmds - newProposals6)
+      val newApprovals1 = Math.min(numOpenApprovals, totalCmds - newProposals7)
       // should not use up all free assets
       val newApprovals2 = Math.min(newApprovals1, Math.max(0, freeAssets - newProposals7))
-      // should only submit according to batch size
+      // should only submit according to batch size if we are still processing proposals
+      // otherwise we just work off our queue of approvals
       val newApprovals3 =
-        if (todo > 0 && freeAssets > batchSize)
+        if (todo > 0)
           newApprovals2 - newApprovals2 % batchSize
         else newApprovals2
 

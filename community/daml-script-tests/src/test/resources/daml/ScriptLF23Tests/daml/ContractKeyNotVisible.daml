@@ -9,8 +9,6 @@ module ContractKeyNotVisible where
 import Daml.Script
 import DA.Optional
 import ScriptAssertHelpers
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template Foo
   with

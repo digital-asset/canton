@@ -185,8 +185,14 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       val trafficState = participant1.traffic_control.traffic_state(daId)
       trafficState.extraTrafficPurchased.value shouldBe 500000L
       trafficState.extraTrafficRemainder should be < 500000L
-      trafficState.baseTrafficRemainder.value should be < (maxBaseTrafficAmount)
+      trafficState.baseTrafficRemainder.value should be < maxBaseTrafficAmount
       trafficState.serial shouldBe Some(PositiveInt.tryCreate(1))
+
+      sequencer1.traffic_control
+        .traffic_state_of_members(Seq(mediator1.id))
+        .trafficStates(mediator1.id)
+        .extraTrafficPurchased
+        .value should be > 0L
     }
 
     "perform an LSU" in { implicit env =>
@@ -259,6 +265,12 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       logger.debug("Setting traffic state on new sequencers")
       sequencer3.traffic_control.set_lsu_state(oldTrafficStateSeq1)
       sequencer4.traffic_control.set_lsu_state(oldTrafficStateSeq2)
+
+      sequencer3.traffic_control
+        .traffic_state_of_members(Seq(mediator1.id))
+        .trafficStates(mediator1.id)
+        .extraTrafficPurchased
+        .value should be > 0L
 
       // Command is expected to return an error if called again
       loggerFactory.assertThrowsAndLogs[CommandFailure](

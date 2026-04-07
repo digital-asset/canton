@@ -6,15 +6,28 @@ package com.digitalasset.canton.integration.tests.traffic
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
-import com.digitalasset.canton.admin.api.client.data.{
-  SequencerConnections,
-  SynchronizerConnectionConfig,
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
+  TRANSACTION_SHAPE_ACS_DELTA,
+  TRANSACTION_SHAPE_LEDGER_EFFECTS,
 }
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.daml.ledger.api.v2.transaction_filter.{
+  CumulativeFilter,
+  EventFormat,
+  Filters,
+  TransactionShape,
+  WildcardFilter,
+}
+import com.daml.ledger.javaapi.data.CreatedEvent
+import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.UpdateWrapper
+import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
-import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -29,6 +42,8 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.security.SecurityTestLensUtils
+import com.digitalasset.canton.integration.util.TestUtils
+import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -45,14 +60,13 @@ import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, Sequ
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{SequencerAlias, config}
-import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.nowarn
 import scala.concurrent.{Await, Future}
+import scala.jdk.CollectionConverters.*
 
 /** Test how the traffic cost of transactions is exposed on LAPI (completion and update streams)
   */
@@ -82,9 +96,7 @@ sealed trait TrafficCostOnLAPITest
         import env.*
         val synchronizerConfig = SynchronizerConnectionConfig(
           daName,
-          SequencerConnections.single(
-            sequencer1.sequencerConnection.withAlias(SequencerAlias.tryCreate(sequencer1.name))
-          ),
+          sequencerConnections = sequencer1,
           manualConnect = false,
           Some(sequencer1.physical_synchronizer_id),
           // Disable time proofs to avoid messing with the traffic state in the background
@@ -99,6 +111,7 @@ sealed trait TrafficCostOnLAPITest
           participant.health.wait_for_running()
           participant.synchronizers.connect_by_config(synchronizerConfig)
           participant.dars.upload(CantonExamplesPath)
+          participant.dars.upload(CantonTestsPath)
         }
 
         sequencer1.topology.synchronizer_parameters.propose_update(
@@ -119,6 +132,7 @@ sealed trait TrafficCostOnLAPITest
         charlie = participant1.parties.enable("charlie")
       }
       .withTrafficControl(
+        TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
         TrafficTestUtils.predictableTraffic,
         topUpAllMembers = true,
         disableCommitments = true,
@@ -126,7 +140,7 @@ sealed trait TrafficCostOnLAPITest
 
   // Runs test assertion, restarts all participants, and re-rerun the same assertions
   // to make sure everything still works with persistence through the DB
-  private def assertWithRestart(f: String => Assertion)(implicit env: TestConsoleEnvironment) = {
+  private def assertWithRestart(f: String => Unit)(implicit env: TestConsoleEnvironment) = {
     import env.*
 
     f("before restart")
@@ -148,6 +162,49 @@ sealed trait TrafficCostOnLAPITest
     f("after restart")
   }
 
+  private def assertCostFromTransactionWrapper(update: UpdateWrapper, expectedCost: Option[Long]) =
+    inside(update) { case UpdateService.TransactionWrapper(transaction) =>
+      transaction.paidTrafficCost shouldBe expectedCost
+    }
+
+  private def assertUpdateCost(
+      participant: ParticipantReference,
+      party: Option[PartyId],
+      offset: Long,
+      shape: TransactionShape,
+      expectedCost: Option[Long],
+      updateId: String,
+      cluePrefix: String,
+  ) = {
+    val updateFormat = getUpdateFormat(party.toList.toSet, transactionShape = shape)
+    // From stream
+    withClue(s"[$cluePrefix] transaction cost from $shape update stream") {
+      assertCostFromTransactionWrapper(
+        participant.ledger_api.updates
+          .updates(
+            updateFormat,
+            completeAfter = PositiveInt.one,
+            beginOffsetExclusive = offset,
+          )
+          .loneElement,
+        expectedCost,
+      )
+    }
+
+    // Pointwise lookup
+    withClue(s"[$cluePrefix] transaction cost from pointwise lookup") {
+      assertCostFromTransactionWrapper(
+        participant.ledger_api.updates
+          .update_by_id(
+            updateId,
+            updateFormat,
+          )
+          .value,
+        expectedCost,
+      )
+    }
+  }
+
   "ledger API completions" should {
     "show correct transaction cost for an accepted transaction" in { implicit env =>
       import env.*
@@ -163,6 +220,9 @@ sealed trait TrafficCostOnLAPITest
         sequencer1.traffic_control.traffic_summaries(Seq(recordTime)).loneElement.totalTrafficCost
       expectedTrafficCost should be > 0L
 
+      // Check that the traffic cost returned from the submit command contains the correct cost
+      transaction.getPaidTrafficCost shouldBe expectedTrafficCost
+
       // While we're at it, check that the participant's last consumed cost also matches the expected cost
       participant1.traffic_control
         .traffic_state(synchronizer1Id)
@@ -170,6 +230,7 @@ sealed trait TrafficCostOnLAPITest
         .value shouldBe expectedTrafficCost
 
       assertWithRestart { cluePrefix =>
+        // Completion checks //
         val completion =
           participant1.ledger_api.completions.list(alice, 1, transaction.getOffset - 1).loneElement
 
@@ -193,7 +254,132 @@ sealed trait TrafficCostOnLAPITest
           transaction.getOffset - 1,
           timeout = config.NonNegativeDuration.ofSeconds(2),
         ) shouldBe empty
+
+        // Update checks //
+        // Test for both transaction shapes
+        List(TRANSACTION_SHAPE_LEDGER_EFFECTS, TRANSACTION_SHAPE_ACS_DELTA).foreach { shape =>
+          // Assert cost on updates from Alice's perspective on P1
+          assertUpdateCost(
+            participant1,
+            Some(alice),
+            transaction.getOffset - 1,
+            shape,
+            // Expect the cost to be available as alice is a submitting party and p1 is the submitting node
+            Some(expectedTrafficCost),
+            completion.updateId,
+            s"$cluePrefix - alice",
+          )
+
+          // Assert cost on updates when reading as any party on P1
+          assertUpdateCost(
+            participant1,
+            party = None,
+            transaction.getOffset - 1,
+            shape,
+            // Expect the cost to be available
+            Some(expectedTrafficCost),
+            completion.updateId,
+            s"$cluePrefix - any party",
+          )
+
+          // Assert cost on updates from Bob's perspective on P2
+          assertUpdateCost(
+            participant2,
+            Some(bob),
+            ledgerEndP2,
+            shape,
+            // Expect no cost as P2 is not the submitting node
+            None,
+            completion.updateId,
+            s"$cluePrefix - bob",
+          )
+
+          // Assert cost on updates from Charlie's perspective on P1
+          assertUpdateCost(
+            participant1,
+            Some(charlie),
+            transaction.getOffset - 1,
+            shape,
+            None,
+            completion.updateId,
+            s"$cluePrefix - charlie",
+          )
+        }
       }
+    }
+
+    // This is tested specifically because there's a special case when grabbing the transaction from a completion
+    // returns an empty transaction, which can happen for non-consuming transactions.
+    // See CommandServiceImpl.fetchTransactionFromCompletion
+    "show correct transaction cost for an accepted transaction with only a non-consuming choice" in {
+      implicit env =>
+        import env.*
+
+        val universalCreate = new UniversalContract(
+          List(alice.toProtoPrimitive).asJava,
+          List.empty.asJava,
+          List.empty.asJava,
+          List(alice.toProtoPrimitive).asJava,
+        ).create.commands.loneElement
+
+        val universal = participant1.ledger_api.javaapi.commands
+          .submit(Seq(alice), Seq(universalCreate), includeCreatedEventBlob = true)
+        val nonConsumingExercise = inside(universal.getEvents.loneElement) {
+          case created: CreatedEvent =>
+            UniversalContract.Contract
+              .fromCreatedEvent(created)
+              .id
+              .exerciseTouch(List(bob.toProtoPrimitive).asJava)
+              .commands()
+              .loneElement
+        }
+        val transaction =
+          participant1.ledger_api.javaapi.commands.submit(Seq(alice), Seq(nonConsumingExercise))
+        val recordTime = CantonTimestamp.fromInstant(transaction.getRecordTime).value
+        val expectedTrafficCost =
+          sequencer1.traffic_control.traffic_summaries(Seq(recordTime)).loneElement.totalTrafficCost
+        expectedTrafficCost should be > 0L
+
+        // Check that the traffic cost returned from the submit command contains the correct cost
+        transaction.getPaidTrafficCost shouldBe expectedTrafficCost
+    }
+
+    // This is an odd case but it's technically possible to call submitAndWaitForTransaction while passing an event filter
+    // that filters for a non-submitting party (or any party for that matter).
+    // In order to keep the desired semantics that the returned traffic cost is set to 0 when filtering for non submitting
+    // parties, we test specifically for it here, as there's special handling for this scenario in CommandServiceImpl.fetchTransactionFromCompletion
+    // TODO(i31269): This currently does not work as we can't easily differentiate between the fallback being called because
+    // the transaction has only non-consuming events (see test above), or because the party filter excludes submitting parties
+    // For now, the traffic cost is reported in both cases
+    "show empty transaction cost for a submitAndWait with a party filter that does not contain the submitting party" ignore {
+      implicit env =>
+        import env.*
+
+        val iou =
+          IouSyntax.testIou(alice, bob).create().commands().loneElement
+        val transaction = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          Seq(iou),
+          customEventFormat = Some(
+            EventFormat(
+              filtersByParty = Map(
+                // Filter for charlie, who's not even involved in the transaction
+                charlie.toProtoPrimitive -> Filters(
+                  Seq(
+                    CumulativeFilter.defaultInstance.withWildcardFilter(
+                      WildcardFilter(includeCreatedEventBlob = false)
+                    )
+                  )
+                )
+              ),
+              filtersForAnyParty = None,
+              verbose = false,
+            )
+          ),
+        )
+
+        // The paid traffic cost from charlie's perspective should be 0
+        transaction.getPaidTrafficCost shouldBe 0L
     }
 
     "emit completions with cost for all actAs parties" in { implicit env =>
@@ -219,7 +405,7 @@ sealed trait TrafficCostOnLAPITest
       trafficState.lastConsumedCost.value shouldBe expectedTrafficCost
 
       assertWithRestart { cluePrefix =>
-        Seq(alice, charlie).map { party =>
+        Seq(alice, charlie).foreach { party =>
           val completion =
             participant1.ledger_api.completions
               .list(party, 1, transaction.getOffset - 1)
@@ -230,7 +416,7 @@ sealed trait TrafficCostOnLAPITest
             completion.paidTrafficCost shouldBe expectedTrafficCost
             completion.synchronizerTime.value.recordTime.value shouldBe trafficState.timestamp.toProtoTimestamp
           }
-        }.last
+        }
       }
     }
 

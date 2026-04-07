@@ -23,7 +23,6 @@ import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.DurationInt
 
 final class ModelBasedCantonIntegrationTest
@@ -73,7 +72,7 @@ final class ModelBasedCantonIntegrationTest
           .checkProperty(
             generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
             shrink = Shrinker.shrinkScenario,
-            property = (scenario: Concrete.Scenario, cancelled: AtomicBoolean) =>
+            property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
               runAndCompare(cantonInterpreter, scenario, cancelled),
             timeout = 50.minutes,
             // We evaluate as many samples as possible within the allotted time.
@@ -83,6 +82,7 @@ final class ModelBasedCantonIntegrationTest
             sampleBufferSize = 100,
             generatorParallelism = 3,
             evaluatorParallelism = 5,
+            cacheSuccesses = true,
           )
         logger.info(result.summary)
         result.assertPassed(Pretty.prettyScenario)
@@ -98,7 +98,7 @@ object ModelBasedCantonIntegrationTest {
   private def runAndCompare(
       cantonInterpreter: CantonInterpreter,
       scenario: Concrete.Scenario,
-      cancelled: AtomicBoolean,
+      cancelled: () => Boolean,
   )(implicit loggingContext: NamedLoggingContext): Either[String, Unit] = {
     val referenceResult = ReferenceInterpreter(loggingContext.loggerFactory)
       .runAndProject(scenario)(loggingContext.traceContext)

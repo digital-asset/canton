@@ -19,6 +19,7 @@ import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SynchronizerRegistryErrorGroup
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
@@ -36,6 +37,10 @@ trait SynchronizerRegistry extends AutoCloseable {
   /** Returns a synchronizer handle that is used to setup a connection to a new synchronizer, and
     * the synchronizer connection config that was updated with missing sequencer ids of sequencers
     * for which the connection attempt was successful.
+    *
+    * @return
+    *   The synchronizer handle and the updated list of sequencer connections (with sequencer ids
+    *   set).
     */
   def connect(
       config: SynchronizerConnectionConfig,
@@ -43,17 +48,21 @@ trait SynchronizerRegistry extends AutoCloseable {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SynchronizerHandle, SynchronizerConnectionConfig)]
+    Either[SynchronizerRegistryError, (SynchronizerHandle, SequencerConnections)]
   ]
 
   /** Performs the handshake with the synchronizer.
+    *
+    * @return
+    *   The aggregate information of the sequencers and the updated list of sequencer connections
+    *   (with sequencer ids set).
     */
   def pureHandshake(
       config: SynchronizerConnectionConfig
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SynchronizerConnectionConfig)]
+    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SequencerConnections)]
   ]
 }
 

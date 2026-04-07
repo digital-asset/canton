@@ -194,74 +194,59 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
         }
       }
 
-      "get the last consecutive block in the store" when {
-
+      "get last block in latest completed epoch" when {
         "the store is empty" in {
           val store = createStore()
-          store.getLastConsecutiveBlock.map(_ shouldBe empty)
+          store.getLastBlockInLatestCompletedEpoch.map(_ shouldBe empty)
         }
 
-        "all blocks in the store are consecutive" in {
+        "have started (but not completed one epoch)" in {
           val store = createStore()
-          val block1 = createBlock(BlockNumber.First)
-          val block2 = createBlock(1L)
-          val storeInit: Future[Unit] = for {
-            _ <- store.insertBlockIfMissing(block1)
-            _ <- store.insertBlockIfMissing(block2)
-          } yield ()
-
-          storeInit.flatMap { _ =>
-            store.getLastConsecutiveBlock
-              .map(_.map(_.blockNumber) shouldBe Some(1L))
+          for {
+            _ <- store.insertEpochIfMissing(
+              OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true)
+            )
+            _ <- store.insertBlockIfMissing(createBlock(0L))
+            result <- store.getLastBlockInLatestCompletedEpoch
+          } yield {
+            result shouldBe None
           }
         }
 
-        "blocks in the store are consecutive only after an initial gap" in {
+        "give result when epoch have completed" in {
           val store = createStore()
-          val block1 = createBlock(1L)
-          val block2 = createBlock(2L)
-          val storeInit: Future[Unit] = for {
-            _ <- store.insertBlockIfMissing(block1)
-            _ <- store.insertBlockIfMissing(block2)
-          } yield ()
-
-          storeInit.flatMap { _ =>
-            store.getLastConsecutiveBlock
-              .map(_.map(_.blockNumber) shouldBe None)
+          for {
+            _ <- store.insertEpochIfMissing(
+              OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true)
+            )
+            _ <- store.insertBlockIfMissing(createBlock(0L))
+            _ <- store.insertBlockIfMissing(createBlock(1L))
+            _ <- store.insertBlockIfMissing(createBlock(2L))
+            _ <- store.insertEpochIfMissing(
+              OutputEpochMetadata(EpochNumber(1L), couldAlterOrderingTopology = true)
+            ) // start epoch 1
+            result <- store.getLastBlockInLatestCompletedEpoch
+          } yield {
+            result shouldBe Some(createBlock(2L))
           }
         }
 
-        "blocks in the store are consecutive only after a gap after the initial block" in {
+        "give result when epoch have completed (and next is making progress)" in {
           val store = createStore()
-          val block1 = createBlock(BlockNumber.First)
-          val block2 = createBlock(2L)
-          val block3 = createBlock(3L)
-          val storeInit: Future[Unit] = for {
-            _ <- store.insertBlockIfMissing(block1)
-            _ <- store.insertBlockIfMissing(block2)
-            _ <- store.insertBlockIfMissing(block3)
-          } yield ()
-
-          storeInit.flatMap { _ =>
-            store.getLastConsecutiveBlock
-              .map(_.map(_.blockNumber) shouldBe Some(BlockNumber.First))
-          }
-        }
-
-        "blocks in the store are not all consecutive" in {
-          val store = createStore()
-          val block1 = createBlock(BlockNumber.First)
-          val block2 = createBlock(1L)
-          val block3 = createBlock(3L)
-          val storeInit: Future[Unit] = for {
-            _ <- store.insertBlockIfMissing(block1)
-            _ <- store.insertBlockIfMissing(block2)
-            _ <- store.insertBlockIfMissing(block3)
-          } yield ()
-
-          storeInit.flatMap { _ =>
-            store.getLastConsecutiveBlock
-              .map(_.map(_.blockNumber) shouldBe Some(1L))
+          for {
+            _ <- store.insertEpochIfMissing(
+              OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true)
+            )
+            _ <- store.insertBlockIfMissing(createBlock(0L))
+            _ <- store.insertBlockIfMissing(createBlock(1L))
+            _ <- store.insertBlockIfMissing(createBlock(2L))
+            _ <- store.insertEpochIfMissing(
+              OutputEpochMetadata(EpochNumber(1L), couldAlterOrderingTopology = true)
+            ) // start epoch 1
+            _ <- store.insertBlockIfMissing(createBlock(3L, EpochNumber(1L)))
+            result <- store.getLastBlockInLatestCompletedEpoch
+          } yield {
+            result shouldBe Some(createBlock(2L))
           }
         }
       }
@@ -360,8 +345,8 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               blocks = 3L,
             ))
 
-            lastBlock <- store.getLastConsecutiveBlock
-            _ = lastBlock shouldBe Some(block3)
+            lastBlock <- store.getLastBlockInLatestCompletedEpoch
+            _ = lastBlock shouldBe Some(block2)
 
             pruningEpoch = EpochNumber(EpochNumber.First + 1)
             _ <- store.saveLowerBound(pruningEpoch)
@@ -378,8 +363,8 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               OutputMetadataStore.LowerBound(pruningEpoch, BlockNumber(1L))
             )
 
-            lastBlockAfterPruning <- store.getLastConsecutiveBlock
-            _ = lastBlockAfterPruning shouldBe Some(block3)
+            lastBlockAfterPruning <- store.getLastBlockInLatestCompletedEpoch
+            _ = lastBlockAfterPruning shouldBe Some(block2)
 
           } yield succeed
         }

@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.daml.lf.data.Ref
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.OptionConverters.*
 
 /** An interpreter that executes scenarios against a real Canton instance.
@@ -51,9 +51,9 @@ final class CantonInterpreter private (
 
   import CantonInterpreter.*
 
-  /** Checks the cancellation flag and returns `Left` if cancellation has been requested. */
-  private def checkCancelled(cancelled: AtomicBoolean): Either[InterpreterError, Unit] =
-    Either.cond(!cancelled.get(), (), SubmitFailure("Cancelled"))
+  /** Checks the cancellation function and returns `Left` if cancellation has been requested. */
+  private def checkCancelled(cancelled: () => Boolean): Either[InterpreterError, Unit] =
+    Either.cond(!cancelled(), (), SubmitFailure("Cancelled"))
 
   // -- Command execution --
 
@@ -128,7 +128,7 @@ final class CantonInterpreter private (
       partyIdMapping: PartyIdMapping,
       contractIdMapping: ContractIdMapping,
       commandsList: List[Concrete.Commands],
-      cancelled: AtomicBoolean,
+      cancelled: () => Boolean,
   ): Either[InterpreterError, ContractIdMapping] =
     commandsList
       .foldLeftM((contractIdMapping, DisclosureStore())) {
@@ -151,7 +151,7 @@ final class CantonInterpreter private (
       partyIdMapping: PartyIdMapping,
       contractIdMapping: ContractIdMapping,
       numLedgerSteps: Int,
-      cancelled: AtomicBoolean,
+      cancelled: () => Boolean,
   ): Either[InterpreterError, Map[
     Projections.PartyId,
     Map[Concrete.ParticipantId, Projections.Projection],
@@ -195,14 +195,14 @@ final class CantonInterpreter private (
     * @param scenario
     *   the scenario to execute
     * @param cancelled
-    *   a flag that, when set to `true`, causes the interpreter to stop between RPC calls and return
-    *   a `Left("Cancelled")` error.
+    *   a cancellation function: when it returns `true`, the interpreter stops between RPC calls and
+    *   returns a `Left("Cancelled")` error.
     * @return
     *   either an error message, or a map from party ID to (participant ID to projection)
     */
   def runAndProject(
       scenario: Concrete.Scenario,
-      cancelled: AtomicBoolean = new AtomicBoolean(false),
+      cancelled: () => Boolean = () => false,
   ): Either[
     String,
     Map[Projections.PartyId, Map[Concrete.ParticipantId, Projections.Projection]],

@@ -39,6 +39,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
+import com.digitalasset.canton.platform.store.dao.events.ACSReader
 import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref.{
@@ -59,6 +60,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.sql.Connection
+import java.util.concurrent.atomic.AtomicReference
 import scala.util.chaining.scalaUtilChainingOps
 
 private[backend] trait StorageBackendTestsEvents
@@ -1570,7 +1572,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawThinCreatedEvent(
@@ -1587,6 +1589,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1610,9 +1613,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1622,7 +1626,7 @@ private[backend] trait StorageBackendTestsEvents
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
           filteredAdditionalWitnessParties = Set.empty,
           internalContractId = 10L,
-          requestingParties = Some(Set("witness2", "stakeholder2", "submitter2", "actor2")),
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
           reassignmentCounter = 345,
           acsDeltaForParticipant = true,
         ),
@@ -1635,7 +1639,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawArchivedEvent(
@@ -1652,6 +1656,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1674,9 +1679,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1701,7 +1707,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawThinCreatedEvent(
@@ -1718,6 +1724,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1741,9 +1748,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1753,7 +1761,7 @@ private[backend] trait StorageBackendTestsEvents
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
           filteredAdditionalWitnessParties = Set.empty,
           internalContractId = 10L,
-          requestingParties = Some(Set("witness2", "stakeholder2", "submitter2", "actor2")),
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
           reassignmentCounter = 345,
           acsDeltaForParticipant = true,
         ),
@@ -1774,6 +1782,7 @@ private[backend] trait StorageBackendTestsEvents
           commandId = Some("command-id"),
           traceContext = serializableTraceContext,
           recordTime = Timestamp.assertFromLong(100L),
+          trafficCost = Some(8465L),
         ),
         externalTransactionHash = Some(someExternalTransactionHashBinary),
       ),
@@ -1831,7 +1840,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawExercisedEvent(
@@ -1848,6 +1857,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1881,9 +1891,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1907,7 +1918,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawExercisedEvent(
@@ -1924,6 +1935,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1957,9 +1969,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -2000,6 +2013,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2026,6 +2040,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2062,6 +2077,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2158,6 +2174,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2196,6 +2213,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2224,6 +2242,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2260,6 +2279,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2288,6 +2308,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2401,12 +2422,14 @@ private[backend] trait StorageBackendTestsEvents
         submitters = None,
         external_transaction_hash = None,
         create_key_hash = None,
+        traffic_cost = None,
       )(),
       dtosAssign(
         event_sequential_id = 2L,
         workflow_id = None,
         command_id = None,
         submitter = None,
+        traffic_cost = None,
       )(),
       dtosConsumingExercise(
         event_sequential_id = 3L,
@@ -2420,6 +2443,7 @@ private[backend] trait StorageBackendTestsEvents
         exercise_argument_compression = None,
         exercise_result_compression = None,
         internal_contract_id = None,
+        traffic_cost = None,
       ),
       dtosUnassign(
         event_sequential_id = 4L,
@@ -2429,6 +2453,7 @@ private[backend] trait StorageBackendTestsEvents
         deactivated_event_sequential_id = None,
         assignment_exclusivity = None,
         internal_contract_id = None,
+        traffic_cost = None,
       ),
       dtosWitnessedCreate(
         event_sequential_id = 5L,
@@ -2436,6 +2461,7 @@ private[backend] trait StorageBackendTestsEvents
         command_id = None,
         submitters = None,
         external_transaction_hash = None,
+        traffic_cost = None,
       )(),
       dtosWitnessedExercised(
         event_sequential_id = 6L,
@@ -2448,6 +2474,7 @@ private[backend] trait StorageBackendTestsEvents
         exercise_argument_compression = None,
         exercise_result_compression = None,
         internal_contract_id = None,
+        traffic_cost = None,
       ),
     ).flatten
 
@@ -2479,6 +2506,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2505,6 +2533,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2543,6 +2572,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2568,6 +2598,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2608,6 +2639,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2634,6 +2666,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2674,6 +2707,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2710,6 +2744,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2749,6 +2784,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2775,6 +2811,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -3067,7 +3104,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val achs = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 1000L,
@@ -3130,7 +3167,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt2 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
@@ -3160,7 +3197,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt3 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
@@ -3192,7 +3229,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt4 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
@@ -3248,7 +3285,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val achs = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
@@ -3271,7 +3308,7 @@ private[backend] trait StorageBackendTestsEvents
     )
     val achsAfter = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(
+        .fetchAchsIds(
           stakeholderO = Some(signatory),
           templateIdO = None,
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
@@ -3285,6 +3322,201 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     achsAfter shouldBe Vector(4L)
+  }
+
+  behavior of "fetchAchsIds"
+
+  it should "correctly filter deactivated contracts from ACHS with varying activeAtEventSeqId" in {
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(
+          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 2L, activeAt = 2L)
+        )
+    )
+    executeSql(
+      updateLedgerEnd(offset(4), 4L)
+    )
+
+    def fetchACHS(activeAtEventSeqId: Long): Vector[Long] =
+      executeSql(
+        backend.event.updateStreamingQueries
+          .fetchAchsIds(
+            stakeholderO = Some(signatory),
+            templateIdO = None,
+            activeAtEventSeqId = activeAtEventSeqId,
+          )
+          .fetchPage(_)(
+            PaginatingAsyncStream.PaginationFromTo.ascending(
+              startExclusive = 0L,
+              endInclusive = 1000L,
+            )
+          )
+      )
+
+    fetchACHS(0L) shouldBe Vector(1L, 2L)
+    fetchACHS(2L) shouldBe Vector(1L, 2L)
+    fetchACHS(3L) shouldBe Vector(2L)
+    fetchACHS(4L) shouldBe empty
+  }
+
+  behavior of "AchsValidatingIdFilterPageQuery (fetchAchsIdFilterPageQuery)"
+
+  private def withAchsData(test: => Unit): Unit = {
+    val achsDtos: Vector[DbDto] = (1L to 5L)
+      .map { i =>
+        dtosCreate(
+          event_offset = i,
+          event_sequential_id = i,
+          internal_contract_id = i,
+          notPersistedContractId = hashCid(s"#achs-$i"),
+        )(
+          stakeholders = Set(signatory),
+          template_id = someTemplateId,
+        )
+      }
+      .toVector
+      .flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(achsDtos, _))
+    executeSql(updateLedgerEnd(offset(5), 5L))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(
+          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 5L, activeAt = 1000L)
+        )
+    )
+    test
+  }
+
+  private def toggle(flag: AtomicReference[Boolean]): Boolean =
+    flag.updateAndGet(x => !x)
+
+  it should "fetchPage: return empty when achsIsValid is false from the beginning" in withAchsData {
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => false,
+      getLastPopulated = () => 500L,
+    )
+    executeSql(
+      wrapped.fetchPage(_)(
+        PaginationFromTo.ascending(startExclusive = 0L, endInclusive = 1000L)
+      )
+    ) shouldBe empty
+  }
+
+  it should "fetchPage: delegate to underlying when achsIsValid is true" in withAchsData {
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => true,
+      getLastPopulated = () => 500L,
+    )
+    executeSql(
+      wrapped.fetchPage(_)(
+        PaginationFromTo.ascending(startExclusive = 0L, endInclusive = 1000L)
+      )
+    ) shouldBe Vector(1L, 2L, 3L, 4L, 5L)
+  }
+
+  it should "fetchPageBounds: return None when achsIsValid is false from the beginning" in withAchsData {
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => false,
+      getLastPopulated = () => 500L,
+    )
+    val input = PaginationInput(PaginationFromTo.ascending(0L, 1000L), limit = 100)
+    executeSql(wrapped.fetchPageBounds(_)(input)) shouldBe None
+  }
+
+  it should "fetchPageBounds: on last page, pin result toInclusive to lastPopulated" in withAchsData {
+    val lastPopulated = 10L
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => true,
+      getLastPopulated = () => lastPopulated,
+    )
+    // limit=100 means all 5 entries fit in one page => last page
+    val input = PaginationInput(PaginationFromTo.ascending(0L, 1000L), limit = 100)
+    val result = executeSql(wrapped.fetchPageBounds(_)(input))
+
+    result shouldBe defined
+    result.value.lastPage shouldBe true
+    // Last page pins toInclusive to lastPopulated
+    result.value.fromTo.toInclusive shouldBe lastPopulated
+  }
+
+  it should "fetchPageBounds: on non-last page, do not pin result toInclusive to lastPopulated" in withAchsData {
+    val lastPopulated = 10L
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => true,
+      getLastPopulated = () => lastPopulated,
+    )
+    val input = PaginationInput(PaginationFromTo.ascending(0L, 1000L), limit = 1)
+    val result = executeSql(wrapped.fetchPageBounds(_)(input))
+
+    result shouldBe defined
+    result.value.lastPage shouldBe false
+    // Non-last page should NOT have toInclusive pinned to lastPopulated
+    result.value.fromTo.toInclusive should not be lastPopulated
+  }
+
+  it should "fetchPageBounds: become invalid mid-flight (valid on first call, invalid on second)" in withAchsData {
+    val valid = new AtomicReference[Boolean](true)
+    val underlying = backend.event.updateStreamingQueries
+      .fetchAchsIds(
+        stakeholderO = Some(signatory),
+        templateIdO = None,
+        activeAtEventSeqId = 0L,
+      )
+    val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
+      achsQuery = underlying,
+      achsIsValid = () => valid.get(),
+      getLastPopulated = () => 500L,
+    )
+    val input = PaginationInput(PaginationFromTo.ascending(0L, 1000L), limit = 100)
+
+    // First call: valid
+    executeSql(wrapped.fetchPageBounds(_)(input)) shouldBe defined
+
+    // Invalidate mid-flight
+    toggle(valid) shouldBe false
+
+    // Second call: should return None
+    executeSql(wrapped.fetchPageBounds(_)(input)) shouldBe None
   }
 }
 

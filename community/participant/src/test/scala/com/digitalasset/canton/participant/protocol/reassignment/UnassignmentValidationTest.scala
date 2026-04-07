@@ -43,11 +43,16 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
 
-class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class UnassignmentValidationTest
+    extends AnyWordSpec
+    with BaseTest
+    with ProtocolVersionChecksAnyWordSpec
+    with HasExecutionContext {
   private val sourceSynchronizer = Source(
     SynchronizerId.tryFromString("synchronizer::source").toPhysical
   )
@@ -334,7 +339,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
         stakeholders = Set(alice, bob),
       )
 
-      "fail if a stakeholder is hosted on a participant without the flag enabled on source synchronizer" in {
+      "fail if a stakeholder is hosted on a participant without the flag enabled on source synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
         def commonValidation(contract: ContractInstance, participants: ParticipantId*) =
           performValidation(
             contract = contract,
@@ -368,7 +373,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
         commonValidation(contract, aliceParticipant, bobParticipant) shouldBe None
       }
 
-      "fail if a stakeholder is hosted on a participant without the flag enabled on target synchronizer" in {
+      "fail if a stakeholder is hosted on a participant without the flag enabled on target synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
         def reassigningParticipantValidation(
             contract: ContractInstance,
             participants: ParticipantId*

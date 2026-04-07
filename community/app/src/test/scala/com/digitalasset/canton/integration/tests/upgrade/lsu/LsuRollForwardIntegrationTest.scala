@@ -29,7 +29,6 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
 }
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
@@ -66,6 +65,15 @@ Important notes:
       If defined and the perform_manual_lsu returns error
          Synchronizer index is past upgrade time
       then a second call should be done with empty upgrade time.
+
+Flow to guarantee time monotonicity:
+  - Agree on a max sequencing time Tmax for the broken synchronizer S2
+  - Have all the sequencer nodes of S2 set Tmax in the config and restart:
+      canton.sequencers.sequencer.parameters.lsu-repair.global-max-sequencing-time-inclusive=Tmax
+    Note: all sequencers must apply this config before this time is reached on the synchronizer
+  - Agree on values for the LSU sequencing time override for the sequencers of S3
+  - Have all the sequencer nodes of S3 set these values
+      canton.sequencers.sequencer.parameters.lsu-repair.lsu-sequencing-bounds-override
  */
 @nowarn("msg=dead code")
 final class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionContext {
@@ -95,9 +103,10 @@ final class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionConte
   Ideally, we should compute the values during the test. However, changing the config of a running node
   in our integration test is difficult. Hence, we pick values that are sufficiently in the future.
    */
+  private lazy val maxSequencingTime = CantonTimestamp.Epoch.plusSeconds(599)
   private lazy val lsuSequencingBoundsOverride =
     LsuSequencingBoundsOverride(
-      lowerBoundSequencingTimeExclusive = CantonTimestamp.Epoch.plusSeconds(600),
+      lowerBoundSequencingTimeExclusive = maxSequencingTime.plusSeconds(1),
       upgradeTime = CantonTimestamp.Epoch.plusSeconds(630),
     )
 
@@ -141,6 +150,16 @@ final class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionConte
         new NetworkBootstrapper(S2M2)
       }
       .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(
+        ConfigTransforms.updateSequencerConfig("sequencer3")(
+          _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeInclusive)
+            .replace(Some(lsuSequencingBoundsOverride.lowerBoundSequencingTimeExclusive))
+        ),
+        ConfigTransforms.updateSequencerConfig("sequencer4")(
+          _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeInclusive)
+            .replace(Some(lsuSequencingBoundsOverride.lowerBoundSequencingTimeExclusive))
+        ),
+      )
       .withSetup { implicit env =>
         import env.*
 
@@ -229,7 +248,6 @@ final class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionConte
       fixture2 = Fixture(
         currentPsid = fixture1.newPsid,
         upgradeTime = null, // it should not be used
-        // TODO(#31526) Allow to grab topology from S2 instead of S1
         oldSynchronizerNodes =
           SynchronizerNodes(Seq(sequencer3, sequencer4), Seq(mediator3, mediator4)),
         newSynchronizerNodes =
@@ -247,25 +265,26 @@ final class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionConte
 
       fixture2.newSynchronizerNodes.all.start()
 
-      val (_, latestS2TopologyChangeEffectiveTime) =
-        participant2.underlying.value.sync.syncPersistentStateManager
-          .get(fixture2.currentPsid)
-          .value
-          .topologyStore
-          .maxTimestamp(SequencedTime(CantonTimestamp.MaxValue), includeRejected = false)
-          .futureValueUS
-          .value
+      environment.simClock.value.advanceTo(maxSequencingTime)
+
+      /*
+      We cannot rely on the standard waitForTargetTimeOnSequencer: as soon as the sequencing time is past
+      the target time, nothing gets sequenced (and so waitForTargetTimeOnSequencer foes not complete)
+       */
+      eventually() {
+        val ts = sequencer3.underlying.value.sequencer.sequencer.sequencingTime.futureValueUS.value
+        ts should be >= maxSequencingTime
+      }
 
       migrateSynchronizerNodes(
         fixture2,
         ignorePsidCheck = true,
-        sequencerLsuStateTsOverride = Some(latestS2TopologyChangeEffectiveTime.value),
+        sequencerLsuStateTsOverride = Some(maxSequencingTime),
       )
 
       transferTraffic(
         Some(fixture2),
-        // TODO(#31663) The ts should be the upper bound on S2
-        trafficTsOverride = Some(environment.clock.now),
+        trafficTsOverride = Some(maxSequencingTime),
       )
     }
 

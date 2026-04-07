@@ -6,7 +6,12 @@ package com.digitalasset.canton.synchronizer.sequencer
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  SequencerDeliverError,
+  SequencerErrors,
+  SignedContent,
+  SubmissionRequest,
+}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -20,7 +25,10 @@ object SendDecision {
   case object Process extends SendDecision
 
   /** Immediately reject the [[SubmissionRequest]] and return a [[protocol.SendAsyncError]] */
-  case object Reject extends SendDecision
+  final case class Reject(
+      error: SequencerDeliverError =
+        SequencerErrors.InternalTesting("Message rejected by send policy.")
+  ) extends SendDecision
 
   /** Drop the submission request but provide a successful [[protocol.SendAsyncError]] emulating the
     * send getting lost

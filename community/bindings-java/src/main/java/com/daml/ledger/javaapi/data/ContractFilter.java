@@ -7,6 +7,8 @@ import com.daml.ledger.javaapi.data.codegen.Contract;
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion;
 import com.daml.ledger.javaapi.data.codegen.ContractTypeCompanion;
 import com.daml.ledger.javaapi.data.codegen.InterfaceCompanion;
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy;
+
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 import java.util.Collections;
@@ -108,7 +110,12 @@ public final class ContractFilter<Ct> {
   }
 
   public Ct toContract(CreatedEvent createdEvent) throws IllegalArgumentException {
-    return companion.fromCreatedEvent(createdEvent);
+    return companion.fromCreatedEvent(createdEvent, UnknownTrailingFieldPolicy.STRICT);
+  }
+
+  public Ct toContract(CreatedEvent createdEvent, UnknownTrailingFieldPolicy policy)
+      throws IllegalArgumentException {
+    return companion.fromCreatedEvent(createdEvent, policy);
   }
 
   public UpdateFormat updateFormat(Optional<Set<String>> parties) {

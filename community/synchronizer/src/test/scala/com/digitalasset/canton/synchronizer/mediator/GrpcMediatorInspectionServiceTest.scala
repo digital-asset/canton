@@ -97,7 +97,8 @@ class GrpcMediatorInspectionServiceTest
 
     val scanService = new GrpcMediatorInspectionService(
       finalizedResponseStore,
-      timeAwaiter,
+      () => timeAwaiter.getCurrentKnownTime(),
+      ts => tc => timeAwaiter.awaitKnownTimestamp(ts)(tc),
       batchSize = PositiveInt.tryCreate(batchSize),
       loggerFactory = loggerFactory,
     )

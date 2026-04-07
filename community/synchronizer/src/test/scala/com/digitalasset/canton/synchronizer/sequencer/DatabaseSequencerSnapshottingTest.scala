@@ -65,6 +65,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
       storage,
       sequencerStore,
       lsuSequencingBounds = None,
+      drSequencingTimeUpperBound = None,
       clock,
       sequencerId,
       crypto,

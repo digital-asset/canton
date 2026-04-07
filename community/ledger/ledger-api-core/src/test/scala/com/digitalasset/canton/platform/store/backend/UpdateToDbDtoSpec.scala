@@ -249,6 +249,8 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           trace_context = serializedEmptyTraceContext,
           external_transaction_hash =
             Option.when(!isRepairTransaction)(externalTransactionHash.unwrap.toByteArray),
+          traffic_cost =
+            Option.when(!isRepairTransaction)(someCompletionInfo.paidTrafficCost.value),
           event_type = PersistentEventType.Create.asInt,
           event_sequential_id = 0,
           node_id = createNodeId.index,
@@ -472,6 +474,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         template_id = None,
         package_id = None,
         ledger_effective_time = None,
+        traffic_cost = Some(completionInfo.paidTrafficCost.value),
       )
       val dtoCompletion = DbDto.CommandCompletion(
         completion_offset = someOffset.unwrap,
@@ -602,6 +605,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId1,
           trace_context = serializedEmptyTraceContext,
           external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+          traffic_cost = someTrafficCost,
           event_type = PersistentEventType.ConsumingExercise.asInt,
           event_sequential_id = 0,
           node_id = exerciseNodeId.index,
@@ -753,6 +757,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNode)),
           package_id = Some(exerciseNode.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         )
       dtos(3) shouldEqual
         DbDto.CommandCompletion(
@@ -881,6 +886,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNode)),
           package_id = Some(exerciseNode.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1023,6 +1029,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeA)),
           package_id = Some(exerciseNodeA.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1063,6 +1070,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeB)),
           package_id = Some(exerciseNodeB.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1101,6 +1109,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = None,
           package_id = None,
           ledger_effective_time = None,
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1256,6 +1265,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeA)),
           package_id = Some(exerciseNodeA.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1296,6 +1306,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeB)),
           package_id = Some(exerciseNodeB.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1315,6 +1326,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId1,
           trace_context = serializedEmptyTraceContext,
           external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+          traffic_cost = someTrafficCost,
           event_type = PersistentEventType.Create.asInt,
           event_sequential_id = 0,
           node_id = createNodeCId.index,
@@ -1496,6 +1508,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeA)),
           package_id = Some(exerciseNodeA.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1536,6 +1549,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeB)),
           package_id = Some(exerciseNodeB.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1576,6 +1590,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeC)),
           package_id = Some(exerciseNodeC.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1616,6 +1631,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(templateIdWithPackageName(exerciseNodeD)),
           package_id = Some(exerciseNodeD.templateId.packageId),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          traffic_cost = Some(completionInfo.paidTrafficCost.value),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -1794,6 +1810,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId1,
           trace_context = serializedEmptyTraceContext,
           external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+          traffic_cost = someTrafficCost,
           event_type = PersistentEventType.ConsumingExercise.asInt,
           event_sequential_id = 0,
           node_id = exerciseNodeId.index,
@@ -1936,6 +1953,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizer_id = someSynchronizerId1,
         trace_context = serializedEmptyTraceContext,
         external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+        traffic_cost = someTrafficCost,
         event_type = PersistentEventType.Create.asInt,
         event_sequential_id = 0,
         node_id = createNodeId.index,
@@ -1976,6 +1994,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizer_id = someSynchronizerId1,
         trace_context = serializedEmptyTraceContext,
         external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+        traffic_cost = someTrafficCost,
         event_type = PersistentEventType.ConsumingExercise.asInt,
         event_sequential_id = 0,
         node_id = exerciseNodeId.index,
@@ -2179,6 +2198,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizer_id = someSynchronizerId1,
         trace_context = serializedEmptyTraceContext,
         external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+        traffic_cost = None,
         event_type = PersistentEventType.Create.asInt,
         event_sequential_id = 0,
         node_id = createNodeId.index,
@@ -2335,6 +2355,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             synchronizer_id = someSynchronizerId1,
             trace_context = serializedEmptyTraceContext,
             external_transaction_hash = Some(externalTransactionHash.unwrap.toByteArray),
+            traffic_cost = someTrafficCost,
             event_type = PersistentEventType.Create.asInt,
             event_sequential_id = 0,
             node_id = createNodeId.index,
@@ -2457,6 +2478,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizer_id = SynchronizerId.tryFromString("x::synchronizer2"),
         trace_context = serializedEmptyTraceContext,
         external_transaction_hash = None,
+        traffic_cost = someTrafficCost,
         event_type = PersistentEventType.Assign.asInt,
         event_sequential_id = 0,
         node_id = 0,
@@ -2584,6 +2606,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizer_id = SynchronizerId.tryFromString("x::synchronizer1"),
         trace_context = serializedEmptyTraceContext,
         external_transaction_hash = None,
+        traffic_cost = someTrafficCost,
         event_type = PersistentEventType.Unassign.asInt,
         event_sequential_id = 0,
         node_id = 0,
@@ -2886,7 +2909,8 @@ object UpdateToDbDtoSpec {
   private val otherParticipantId =
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecRemoteParticipant")
   private val someOffset = Offset.tryFromLong(12345678L)
-  private val someTrafficCost = NonNegativeLong.tryCreate(31380)
+  private val nonNegativeTrafficCost: NonNegativeLong = NonNegativeLong.tryCreate(31380L)
+  private val someTrafficCost: Option[Long] = Some(nonNegativeTrafficCost.value)
   private val someRecordTime =
     CantonTimestamp(
       Time.Timestamp.assertFromInstant(Instant.parse(("2000-01-01T00:00:00.000000Z")))
@@ -2906,7 +2930,7 @@ object UpdateToDbDtoSpec {
     commandId = someCommandId,
     optDeduplicationPeriod = None,
     submissionId = Some(someSubmissionId),
-    paidTrafficCost = someTrafficCost,
+    paidTrafficCost = nonNegativeTrafficCost,
   )
   private val someSynchronizerId1 = SynchronizerId.tryFromString("x::synchronizer1")
   private val someTransactionMeta = state.TransactionMeta(

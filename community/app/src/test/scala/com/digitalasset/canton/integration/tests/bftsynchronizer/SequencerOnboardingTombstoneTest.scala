@@ -191,7 +191,7 @@ trait SequencerOnboardingTombstoneTest
         (
           LogEntryOptionality.Required,
           (entry: LogEntry) => {
-            entry.loggerName should include("SequencerSubscriptionX")
+            entry.loggerName should include("SequencerSubscription")
             entry.warningMessage should (include(
               "Permanently closing sequencer subscription due to error"
             ) and include(
@@ -202,7 +202,7 @@ trait SequencerOnboardingTombstoneTest
         (
           LogEntryOptionality.OptionalMany,
           (entry: LogEntry) => {
-            entry.loggerName should include("GrpcConnectionX")
+            entry.loggerName should include("GrpcConnection")
             entry.warningMessage should include(
               "Request failed for server-seq2x-0"
             )

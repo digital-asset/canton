@@ -7,8 +7,6 @@ import Daml.Script
 import DA.Assert ((===))
 import qualified DA.Set as S
 import DA.Set (Set)
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template BasicKey
   with

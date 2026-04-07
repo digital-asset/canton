@@ -345,7 +345,7 @@ private[lf] object Speedy {
 
     final private[speedy] def needKeys(
         location: => String,
-        key: GlobalKeyWithMaintainers,
+        key: GlobalKey,
         n: Int,
         progress: NeedKeyProgression.CanContinue,
     ): ContU[(Vector[FatContractInstance], NeedKeyProgression.HasStarted)] =

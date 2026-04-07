@@ -18,13 +18,12 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, O
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{MetricValue, SequencerClientMetrics}
 import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.client.pool.{SequencerConnection, SequencerConnectionPool}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   SequencedEventHandler,
   SequencedSerializedEvent,
   SequencerClientRecorder,
-  SequencerConnectionX,
-  SequencerConnectionXPool,
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.Member
@@ -134,7 +133,7 @@ class ReplayClientImpl(
     recordedPath: Path,
     replaySendsConfig: ReplayAction.SequencerSends,
     member: Member,
-    connectionPool: SequencerConnectionXPool,
+    connectionPool: SequencerConnectionPool,
     requestSigner: RequestSigner,
     syncCryptoApi: SyncCryptoApi,
     clock: Clock,
@@ -168,7 +167,7 @@ class ReplayClientImpl(
         java.time.Duration.between
       )
 
-  private def getConnection(requester: String): Either[String, SequencerConnectionX] =
+  private def getConnection(requester: String): Either[String, SequencerConnection] =
     connectionPool
       .getConnections(
         requester,

@@ -925,6 +925,39 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
       execFailure(prepared, badSignatures, "Received 0 valid signatures")
     }
 
+    "fail in phase 1 if the number of signatures is above the number of registered keys" in {
+      implicit env =>
+        import env.*
+
+        val prepared = ppn.ledger_api.javaapi.interactive_submission.prepare(
+          Seq(aliceE.partyId),
+          Seq(
+            new M.Cycle(
+              "test-external-signing",
+              aliceE.toProtoPrimitive,
+            ).create.commands.loneElement
+          ),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
+        )
+
+        val maxSignatures =
+          participant1.config.ledgerApi.interactiveSubmissionService.maximumNumberOfSignaturesPerParty
+
+        val sigs = List.fill(maxSignatures.increment.value)(
+          env.global_secret.sign(
+            prepared.preparedTransactionHash,
+            aliceE.signingFingerprints.head1,
+            SigningKeyUsage.ProtocolOnly,
+          )
+        )
+
+        execFailure(
+          prepared,
+          Map(aliceE.partyId -> sigs),
+          s"One or more parties provided more than the maximum number of signatures allowed ($maxSignatures)",
+        )
+    }
+
     "fail in phase 1 if the number of signatures is under the threshold" in { implicit env =>
       val prepared = ppn.ledger_api.javaapi.interactive_submission.prepare(
         Seq(danE.partyId),

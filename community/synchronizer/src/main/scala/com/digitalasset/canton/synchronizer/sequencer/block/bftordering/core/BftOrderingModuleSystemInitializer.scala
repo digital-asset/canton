@@ -299,6 +299,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           new OutputModule(
             outputModuleStartupState,
             orderingTopologyProvider,
+            leaderSelectionPolicyFactory,
             stores.outputStore,
             stores.epochStoreReader,
             blockSubscription,

@@ -20,7 +20,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType.TopologyTransaction
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.{Acknowledgment, Send}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -41,7 +40,7 @@ import io.opentelemetry.api.trace.Tracer
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-import BlockUpdateGeneratorImpl.{SequencedValidatedSubmission, State}
+import BlockUpdateGeneratorImpl.{SequencedPreValidatedSubmissionResult, State}
 import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 
 /** Processes a chunk of events in a block, yielding a [[ChunkUpdate]].
@@ -62,21 +61,32 @@ final class BlockChunkProcessor(
 
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
 
+  private val inFlightAggregationHandler = new InFlightAggregationHandler(
+    synchronizerSyncCryptoApi.pureCrypto,
+    memberValidator,
+    loggerFactory,
+    protocolVersion,
+  )
+
   private val submissionRequestValidator =
     new SubmissionRequestValidator(
-      synchronizerSyncCryptoApi,
-      sequencerId,
-      rateLimitManager,
+      inFlightAggregationHandler,
       batchingConfig,
       loggerFactory,
-      metrics,
       memberValidator = memberValidator,
+      protocolVersion,
     )
 
   private val sequencedSubmissionsValidator =
     new SequencedSubmissionsValidator(
+      sequencerId,
+      inFlightAggregationHandler = inFlightAggregationHandler,
+      trafficControlValidator = new TrafficControlValidator(
+        rateLimitManager,
+        loggerFactory,
+        metrics,
+      ),
       loggerFactory,
-      submissionRequestValidator = submissionRequestValidator,
     )
 
   def processDataChunk(
@@ -110,20 +120,13 @@ final class BlockChunkProcessor(
       height,
       index,
       orderingRequests,
+      state.inFlightAggregations.contains,
     )
 
     val acksValidationResultF = processAcknowledgements(state, fixedTsChanges)
 
     for {
       validatedSequencedSubmissions <- validatedSequencedSubmissionsF
-      latestTopologyTimestamp = validatedSequencedSubmissions
-        .findLast(_.submissionRequest.content.requestType == TopologyTransaction)
-        .map(_.sequencingTimestamp)
-        .orElse(state.latestPendingTopologyTransactionTimestamp)
-
-      acksValidationResult <- acksValidationResultF
-      (acksByMember, invalidAcks) = acksValidationResult
-
       validationResult <-
         sequencedSubmissionsValidator.sequentialApplySubmissionsAndEmitOutcomes(
           state,
@@ -132,6 +135,7 @@ final class BlockChunkProcessor(
         )
       SequencedSubmissionsValidationResult(
         finalInFlightAggregations,
+        latestTopologyTimestamp,
         inFlightAggregationUpdates,
         lastSequencerEventTimestamp,
         reversedOutcomes,
@@ -139,6 +143,10 @@ final class BlockChunkProcessor(
 
       finalInFlightAggregationsWithAggregationExpiry =
         expireInFlightAggregations(finalInFlightAggregations, lastTsBeforeValidation)
+
+      acksValidationResult <- acksValidationResultF
+      (acksByMember, invalidAcks) = acksValidationResult
+
       chunkUpdate =
         ChunkUpdate(
           acksByMember,
@@ -391,9 +399,10 @@ final class BlockChunkProcessor(
       height: Long,
       index: Int,
       submissionRequests: Seq[(CantonTimestamp, Traced[SignedSubmissionRequest], SequencerId)],
+      skipFreshInFlightValidationCheck: AggregationId => Boolean,
   )(implicit
       executionContext: ExecutionContext
-  ): FutureUnlessShutdown[Seq[SequencedValidatedSubmission]] =
+  ): FutureUnlessShutdown[Seq[SequencedPreValidatedSubmissionResult]] =
     MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(submissionRequests.zipWithIndex) {
       case ((sequencingTimestamp, tracedSubmissionRequest, orderingSequencerId), requestIndex) =>
         tracedSubmissionRequest.withTraceContext {
@@ -436,6 +445,13 @@ final class BlockChunkProcessor(
                 )
                 (topologyTimestampFromRequestError, topologySnapshotFromRequestO) =
                   topologySnapshotOrErrO.separate
+                snapshotAtSequencingTime <- SyncCryptoClient
+                  .getSnapshotForTimestamp(
+                    synchronizerSyncCryptoApi,
+                    sequencingTimestamp,
+                    latestSequencerEventTimestamp,
+                    warnIfApproximate,
+                  )
                 /* In PV34<= The sequencer verifies submission request signatures using a topology snapshot taken at
                  * either the sequencing time or at the `topologyTimestamp` provided in the request.
                  * For example confirmation responses/results set this timestamp to the referenced confirmation request
@@ -446,7 +462,7 @@ final class BlockChunkProcessor(
                  * responses/results may cause the session key (when enabled) to appear expired at verification time
                  * and lead to valid requests being rejected.
                  */
-                snapshotToValidateSubmissionRequest <- topologySnapshotFromRequestO match {
+                snapshotToValidateSubmissionRequest = topologySnapshotFromRequestO match {
                   case Some(ts) if protocolVersion < ProtocolVersion.v35 =>
                     logger.debug(
                       s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
@@ -454,40 +470,35 @@ final class BlockChunkProcessor(
                         s"topology timestamp ${submissionRequest.topologyTimestamp}; " +
                         s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
                     )
-                    FutureUnlessShutdown.pure(ts)
+                    ts
                   case _ =>
                     logger.debug(
                       s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
                         "obtained and using topology snapshot at request sequencing time; " +
                         s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
                     )
-                    SyncCryptoClient
-                      .getSnapshotForTimestamp(
-                        synchronizerSyncCryptoApi,
-                        sequencingTimestamp,
-                        latestSequencerEventTimestamp,
-                        warnIfApproximate,
-                      )
+                    snapshotAtSequencingTime
                 }
                 sequencedValidatedSubmission <- {
                   submissionRequestValidator
                     .performIndependentValidations(
                       sequencingTimestamp,
-                      signedSubmissionRequest,
+                      tracedSubmissionRequest,
                       snapshotToValidateSubmissionRequest,
                       topologySnapshotFromRequestO,
                       topologyTimestampFromRequestError,
+                      skipFreshInFlightValidationCheck,
                     )(traceContext, executionContext)
                     .value
                     .run
-                    .map { case (trafficConsumption, recipients) =>
-                      SequencedValidatedSubmission(
+                    .map { case (trafficConsumption, prevalidationOutcome) =>
+                      SequencedPreValidatedSubmissionResult(
                         sequencingTimestamp,
                         signedSubmissionRequest,
                         orderingSequencerId,
-                        topologyTimestampFromRequestError,
                         trafficConsumption,
-                        recipients,
+                        prevalidationOutcome,
+                        snapshotAtSequencingTime.ipsSnapshot,
                       )(traceContext)
                     }
                 }

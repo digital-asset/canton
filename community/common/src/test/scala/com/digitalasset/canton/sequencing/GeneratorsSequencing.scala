@@ -31,8 +31,8 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
       port <- Arbitrary.arbitrary[Port]
     } yield Endpoint(host, port))
 
-  implicit val endPointsArb: Arbitrary[NonEmpty[Seq[Endpoint]]] =
-    Arbitrary(Generators.nonEmptySetGen[Endpoint].map(_.toSeq))
+  implicit val endPointsArb: Arbitrary[NonEmpty[Set[Endpoint]]] =
+    Arbitrary(Generators.nonEmptySetGen[Endpoint])
 
   implicit val sequencerConnectionArb: Arbitrary[SequencerConnection] = genArbitrary
   implicit val submissionRequestAmplificationArb: Arbitrary[SubmissionRequestAmplification] =

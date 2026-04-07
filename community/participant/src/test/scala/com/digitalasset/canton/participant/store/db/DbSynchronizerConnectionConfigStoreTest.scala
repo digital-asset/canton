@@ -38,10 +38,10 @@ trait DbSynchronizerConnectionConfigStoreTest
   }
 }
 
-class SynchronizerConnectionConfigStoreTestH2
+final class SynchronizerConnectionConfigStoreTestH2
     extends DbSynchronizerConnectionConfigStoreTest
     with H2Test
 
-class SynchronizerConnectionConfigStoreTestPostgres
+final class SynchronizerConnectionConfigStoreTestPostgres
     extends DbSynchronizerConnectionConfigStoreTest
     with PostgresTest

@@ -25,8 +25,9 @@ object SubscriptionCloseReason {
   /** The handler threw an exception */
   final case class HandlerException(exception: Throwable) extends SubscriptionCloseReason[Nothing]
 
-  /** The subscription itself failed. [[com.digitalasset.canton.sequencing.SequencerConnectionX]]
-    * implementations are expected to provide their own hierarchy of errors and supply a matching
+  /** The subscription itself failed.
+    * [[com.digitalasset.canton.sequencing.client.pool.SequencerConnection]] implementations are
+    * expected to provide their own hierarchy of errors and supply a matching
     * [[SubscriptionErrorRetryPolicy]] to the [[SequencerClient]] for determining which errors are
     * appropriate for attempting to resume a subscription.
     */

@@ -14,6 +14,7 @@ import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
 import com.digitalasset.canton.ledger.api.{
   AcsContinuationToken,
@@ -38,6 +39,13 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawUnassignEvent,
 }
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesAcsDelta
+import com.digitalasset.canton.platform.store.cache.AchsStateCache
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  IdFilterPageQuery,
+  IdPageBounds,
+  PaginationFromTo,
+  PaginationInput,
+}
 import com.digitalasset.canton.platform.store.dao.events.UpdateReader.endSpanOnTermination
 import com.digitalasset.canton.platform.store.dao.{
   DbDispatcher,
@@ -57,10 +65,11 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.FullIdentifier
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.Attributes
 import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.{Attributes, OverflowStrategy}
 
-import scala.concurrent.{ExecutionContext, Future}
+import java.sql.Connection
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Success
 import scala.util.chaining.*
 
@@ -83,6 +92,7 @@ class ACSReader(
     eventStorageBackend: EventStorageBackend,
     lfValueTranslation: LfValueTranslation,
     contractStore: LedgerApiContractStore,
+    achsStateCache: AchsStateCache,
     incompleteOffsets: (
         Offset,
         Option[Set[Ref.Party]],
@@ -165,14 +175,103 @@ class ACSReader(
       loggerFactory = loggerFactory,
     )
 
+    def achsIsValid: Boolean = activeAtEventSeqId >= achsStateCache.get().validAt
+
+    def fetchAchsIdFilterPageQuery(
+        filter: DecomposedFilter
+    ): IdFilterPageQuery = {
+      val achsQuery: IdFilterPageQuery =
+        eventStorageBackend.updateStreamingQueries.fetchAchsIds(
+          stakeholderO = filter.party,
+          templateIdO = filter.templateId,
+          activeAtEventSeqId = activeAtEventSeqId,
+        )
+
+      new ACSReader.AchsValidatingIdFilterPageQuery(
+        achsQuery = achsQuery,
+        achsIsValid = () => achsIsValid,
+        getLastPopulated = () => achsStateCache.get().lastPointers.lastPopulated,
+      )
+    }
+
     def fetchActiveIds(initialFromIdExclusive: Long)(
+        filter: DecomposedFilter
+    ): Source[Long, NotUsed] =
+      if (achsStateCache.get().lastPointers.lastPopulated == 0 || !achsIsValid)
+        fetchActiveIdsFromFilterTables(
+          achsLastInput = None,
+          initialFromIdExclusive = initialFromIdExclusive,
+        )(filter)
+      else {
+        val achsLastInputPromise = Promise[Option[PaginationInput]]()
+        paginatingAsyncStream
+          .streamIdPagesFromSeekPaginationWithIdFilter(
+            idStreamName = s"ActiveContractIds $filter",
+            idPageSizing = idQueryPageSizing,
+            initialFromIdExclusive = initialFromIdExclusive,
+            initialEndInclusive = activeAtEventSeqId,
+            descendingOrder = false,
+          )(fetchAchsIdFilterPageQuery(filter))(
+            executeFetchBounds = f =>
+              activeIdQueriesLimiter.execute(
+                globalIdQueriesLimiter.execute(
+                  dispatcher.executeSql(metrics.index.db.getAchsIdRanges)(f)
+                )
+              ),
+            idFilterQueryParallelism = config.idFilterQueryParallelism,
+            executeFetchPage = f =>
+              activeIdQueriesLimiter.execute(
+                globalIdQueriesLimiter.execute(
+                  dispatcher.executeSql(
+                    metrics.index.db.getAchsFilteredIds
+                  )(f)
+                )
+              ),
+          )
+          .takeWhile(_ => achsIsValid)
+          .statefulMap(() => Option.empty[PaginationInput])(
+            f = { case (_previousInput, (input, ids)) =>
+              (Some(input), (input, ids))
+            },
+            onComplete = state => {
+              achsLastInputPromise
+                .trySuccess(state)
+                .discard
+              None
+            },
+          )
+          .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
+          .mapConcat(_._2)
+          .concat(
+            Source.futureSource(
+              achsLastInputPromise.future.map(achsLastInput =>
+                fetchActiveIdsFromFilterTables(
+                  achsLastInput = achsLastInput,
+                  initialFromIdExclusive = initialFromIdExclusive,
+                )(filter)
+              )(executionContext)
+            )
+          )
+      }
+
+    def fetchActiveIdsFromFilterTables(
+        achsLastInput: Option[PaginationInput],
+        initialFromIdExclusive: Long,
+    )(
         filter: DecomposedFilter
     ): Source[Long, NotUsed] =
       paginatingAsyncStream.streamIdsFromSeekPaginationWithIdFilter(
         idStreamName = s"ActiveContractIds $filter",
-        idPageSizing = idQueryPageSizing,
+        idPageSizing = achsLastInput
+          .map(lastInput =>
+            idQueryPageSizing.copy(
+              minPageSize = lastInput.limit
+            )
+          )
+          .getOrElse(idQueryPageSizing),
         idPageBufferSize = config.maxPagesPerIdPagesBuffer,
-        initialFromIdExclusive = initialFromIdExclusive,
+        initialFromIdExclusive =
+          achsLastInput.map(_.fromTo.toInclusive).getOrElse(initialFromIdExclusive),
         initialEndInclusive = activeAtEventSeqId,
         descendingOrder = false,
       )(
@@ -639,6 +738,56 @@ class ACSReader(
 }
 
 object ACSReader {
+
+  /** A wrapper around an ACHS `IdFilterPageQuery` that guards each call with validity checks and
+    * pins the upper bound to `lastPopulated`.
+    *
+    *   - `fetchPageBounds` returns `None` when `achsIsValid` is false (completing the stream). When
+    *     valid, it adjusts the input's `toInclusive` to `lastPopulated`, and on the last page, also
+    *     adjusts the returned bounds' `toInclusive` to `lastPopulated` so that the filter table
+    *     continuation starts from the correct position.
+    *   - `fetchPage` returns an empty vector when `achsIsValid` is false, otherwise delegates to
+    *     the underlying query.
+    *
+    * @param achsQuery
+    *   the underlying ACHS `IdFilterPageQuery` to delegate to
+    * @param achsIsValid
+    *   returns whether the ACHS cache is still valid for the requested `activeAtEventSeqId`
+    * @param getLastPopulated
+    *   returns the current `lastPopulated` event sequential id from the ACHS cache
+    */
+  private[store] class AchsValidatingIdFilterPageQuery(
+      achsQuery: IdFilterPageQuery,
+      achsIsValid: () => Boolean,
+      getLastPopulated: () => Long,
+  ) extends IdFilterPageQuery {
+    override def fetchPageBounds(connection: Connection)(
+        input: PaginationInput
+    ): Option[IdPageBounds] =
+      if (!achsIsValid()) None // this completes the stream
+      else {
+        val lastPopulated = getLastPopulated()
+        val adjustedInput = input.copy(
+          fromTo = input.fromTo.copy(
+            // pin the upper bound to the moving target of last populated - as soon we were able to catch up, the stream completes
+            toInclusive = lastPopulated
+          )
+        )
+        achsQuery.fetchPageBounds(connection)(adjustedInput).map { bounds =>
+          if (bounds.lastPage) {
+            // on last page, pin toInclusive to lastPopulated so filter table continuation starts from here
+            bounds.copy(fromTo = bounds.fromTo.copy(toInclusive = lastPopulated))
+          } else bounds
+        }
+      }
+
+    override def fetchPage(connection: Connection)(
+        fromTo: PaginationFromTo
+    ): Vector[Long] =
+      // the takeWhile anyway will filter this out later so does not make sense to do the query
+      if (!achsIsValid()) Vector.empty
+      else achsQuery.fetchPage(connection)(fromTo)
+  }
 
   def acsBeforePruningErrorReason(
       acsOffset: Offset,

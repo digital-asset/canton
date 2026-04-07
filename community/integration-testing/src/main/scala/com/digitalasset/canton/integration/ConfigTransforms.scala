@@ -92,9 +92,7 @@ object ConfigTransforms {
       )
     )
 
-    val updateInitialProtocolVersion = updateAllInitialProtocolVersion(pv)
-
-    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning ++ setContractStateMode :+ updateInitialProtocolVersion
+    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning ++ setContractStateMode
   }
 
   val protocolVersionTransforms: Seq[ConfigTransform] = setProtocolVersion(
@@ -235,16 +233,26 @@ object ConfigTransforms {
     */
   val defaults: Seq[ConfigTransform] =
     heavyTestDefaults ++
-      setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++ Seq(
-        // make unbounded duration bounded for our test
+      setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++
+      Seq(
+        // Make unbounded durations bounded for integration tests
         _.focus(_.parameters.timeouts.console.unbounded)
           .replace(config.NonNegativeDuration.tryFromDuration(3.minutes))
           .focus(_.parameters.timeouts.processing.unbounded)
-          .replace(config.NonNegativeDuration.tryFromDuration(3.minutes))
-          .focus(_.parameters.timeouts.processing.shutdownProcessing)
-          .replace(config.NonNegativeDuration.tryFromDuration(10.seconds)),
+          .replace(config.NonNegativeDuration.tryFromDuration(3.minutes)),
+
+        // Hypothesis (yves-da): increase teardown timeouts to prevent flaky CI failures caused by resource starvation.
+        // During environment teardown, all nodes (and their Postgres connections) are closed concurrently.
+        // On shared CI runners, creates a massive I/O and CPU spike.
+        // Increase `shutdownProcessing` to prevent internal flush tasks (e.g., sequencer-client-flush-sync)
+        // from breaching the default 10s limit, and bump the outer `closing` timeout to respect the timeout hierarchy.
+        _.focus(_.parameters.timeouts.processing.shutdownProcessing)
+          .replace(config.NonNegativeDuration.tryFromDuration(1.minute))
+          .focus(_.parameters.timeouts.processing.closing) // More time to close `ManagedNodes`
+          .replace(config.NonNegativeDuration.tryFromDuration(2.minute)),
+
+        // Increasing here the default timeout for providing more room for DB Servers under test load to provide a new connection
         ConfigTransforms.modifyAllStorageConfigs { (_, _, storageConfig) =>
-          // Increasing here the default timeout for providing more room for DB Servers under test load to provide a new connection
           val newConnectionTimeout = config.NonNegativeFiniteDuration.ofSeconds(30)
           storageConfig match {
             case memConfig: StorageConfig.Memory =>
@@ -256,13 +264,7 @@ object ConfigTransforms {
               h2Config.focus(_.parameters.connectionTimeout).replace(newConnectionTimeout)
           }
         },
-        ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.default),
       )
-
-  def updateAllInitialProtocolVersion(pv: ProtocolVersion): ConfigTransform =
-    updateAllParticipantConfigs_(
-      _.focus(_.parameters.initialProtocolVersion).replace(ParticipantProtocolVersion(pv))
-    )
 
   lazy val clearMinimumProtocolVersion: Seq[ConfigTransform] =
     Seq(
@@ -360,23 +362,26 @@ object ConfigTransforms {
 
   /** Use the given session signing keys config on all nodes with `nodeFilter(name)`.
     */
-  def setSessionSigningKeys(
+  def setSigningKeysIfPV35OrHigher(
       sessionSigningKeysConfig: SessionSigningKeysConfig,
       nodeFilter: String => Boolean = _ => true,
-  ): ConfigTransform =
+  ): ConfigTransform = {
+    val isPV35orHigher = BaseTest.testedProtocolVersion >= ProtocolVersion.v35
+
     updateAllParticipantConfigs {
-      case (name, config) if nodeFilter(name) =>
+      case (name, config) if nodeFilter(name) && isPV35orHigher =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     } compose updateAllSequencerConfigs {
-      case (name, config) if nodeFilter(name) =>
+      case (name, config) if nodeFilter(name) && isPV35orHigher =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     } compose updateAllMediatorConfigs {
-      case (name, config) if nodeFilter(name) =>
+      case (name, config) if nodeFilter(name) && isPV35orHigher =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     }
+  }
 
   /** Configure the environment with static time */
   def useStaticTime: ConfigTransform = {
@@ -417,7 +422,7 @@ object ConfigTransforms {
     )
 
     val disableSessionKeys =
-      ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled)
+      ConfigTransforms.setSigningKeysIfPV35OrHigher(SessionSigningKeysConfig.disabled)
 
     // Disable retries so that failed pings won't run forever
     val disablePingRetries = setPingRetries(false)
@@ -852,8 +857,7 @@ object ConfigTransforms {
   }
 
   def defaultsForNodes: Seq[ConfigTransform] =
-    setProtocolVersion(ProtocolVersion.v34) :+
-      ConfigTransforms.updateAllInitialProtocolVersion(ProtocolVersion.v34)
+    setProtocolVersion(ProtocolVersion.v34)
 
   def setTopologyTransactionRegistrationTimeout(
       timeout: config.NonNegativeFiniteDuration

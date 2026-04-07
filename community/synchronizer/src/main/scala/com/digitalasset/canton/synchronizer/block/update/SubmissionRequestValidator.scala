@@ -3,138 +3,72 @@
 
 package com.digitalasset.canton.synchronizer.block.update
 
-import cats.data.{Chain, EitherT, WriterT}
-import cats.implicits.catsStdInstancesForFuture
+import cats.data.{EitherT, WriterT}
 import cats.kernel.Monoid
 import cats.syntax.either.*
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.SignatureCheckError.GeneralError
-import com.digitalasset.canton.crypto.{
-  HashPurpose,
-  SignatureCheckError,
-  SyncCryptoApi,
-  SynchronizerCryptoClient,
-}
+import com.digitalasset.canton.crypto.{HashPurpose, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl.PrevalidationOutcome
 import com.digitalasset.canton.synchronizer.sequencer.*
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
-import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
-import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
-import monocle.Monocle.toAppliedFocusOps
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 import SubmissionRequestValidator.*
 
 /** Validates a single [[SubmissionRequest]] within a chunk.
+  *
+  * Can run in parallel to other submission requests.
+  *
+  * NOTE RENAME ME INTO PARALLESUBMISSIONREQUESTVALIDATOR
   */
 private[update] final class SubmissionRequestValidator(
-    synchronizerSyncCryptoApi: SynchronizerCryptoClient,
-    sequencerId: SequencerId,
-    rateLimitManager: SequencerRateLimitManager,
+    inFlightAggregationHandler: InFlightAggregationHandler,
     batchingConfig: BatchingConfig,
     override val loggerFactory: NamedLoggerFactory,
-    metrics: SequencerMetrics,
     memberValidator: SequencerMemberValidator,
-)(implicit closeContext: CloseContext)
-    extends NamedLogging {
-
-  private val trafficControlValidator = new TrafficControlValidator(
-    rateLimitManager,
-    loggerFactory,
-    metrics,
-  )
-
-  /** Returns the snapshot for signing the events (if the submission request specifies a signing
-    * timestamp) and the sequenced events by member.
-    *
-    * Drops the submission request if the sender is not registered or the
-    * [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest.maxSequencingTime]] is before
-    * the `sequencingTimestamp`.
-    *
-    * Produces a [[com.digitalasset.canton.sequencing.protocol.DeliverError]] if some recipients are
-    * unknown or the requested
-    * [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest.topologyTimestamp]] is too old
-    * or after the `sequencingTime`.
-    */
-  def applyAggregationAndTrafficControlAndGenerateOutcomes(
-      inFlightAggregations: InFlightAggregations,
-      sequencingTimestamp: CantonTimestamp,
-      signedSubmissionRequest: SignedSubmissionRequest,
-      orderingSequencerId: SequencerId,
-      trafficConsumption: TrafficConsumption,
-      errorOrRecipients: Either[SubmissionOutcome, Set[MemberRecipientOrBroadcast]],
-      latestSequencerEventTimestamp: Option[CantonTimestamp],
-  )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[SubmissionRequestValidationResult] = {
-    val processingResult =
-      errorOrRecipients match {
-        case Right(recipients) =>
-          applyToAggregationState(
-            recipients,
-            inFlightAggregations,
-            sequencingTimestamp,
-            signedSubmissionRequest.content,
-          ).leftMap { errorSubmissionOutcome =>
-            SubmissionRequestValidationResult(inFlightAggregations, errorSubmissionOutcome, None)
-          }.merge
-        case Left(errorSubmissionOutcome) =>
-          FutureUnlessShutdown.pure(
-            SubmissionRequestValidationResult(
-              inFlightAggregations,
-              errorSubmissionOutcome,
-              None,
-            )
-          )
-      }
-
-    trafficControlValidator.applyTrafficControl(
-      trafficConsumption,
-      processingResult,
-      signedSubmissionRequest,
-      orderingSequencerId,
-      sequencingTimestamp,
-      latestSequencerEventTimestamp,
-    )
-  }
-
-  // Below are 3 functions, each a for-comprehension of EitherT.
-  // In each Lefts are used to stop processing the submission request and immediately produce the sequenced events
-  // They are split into 3 functions to make it possible to re-use intermediate results (specifically
-  // BlockUpdateEphemeralState containing updated traffic states), even if further processing fails.
+    protocolVersion: ProtocolVersion,
+) extends NamedLogging {
 
   /** Performs validations that don't affect any state and resolves groups to members. Can and
     * should be run in parallel on many submissions (e.g. in a chunk).
+    *
+    * Upon a Left, we stop processing the submission request and produce the sequenced output event.
+    * We use [[SequencedEventValidation]] as a return result in order to capture whether the event,
+    * despite returning a left, should be charged to the submitting sender.
+    *
+    * We can do this after we validated the submission signature.
+    *
+    * @param skipFreshInFlightValidationCheck
+    *   small optimization to skip the member check if the aggregation id is already known
     */
   def performIndependentValidations(
       sequencingTimestamp: CantonTimestamp,
-      signedSubmissionRequest: SignedContent[SubmissionRequest],
+      signedSubmissionRequest: Traced[SignedContent[SubmissionRequest]],
       snapshotToValidateSubmissionRequest: SyncCryptoApi,
       topologySnapshotFromRequestO: Option[SyncCryptoApi],
       topologyTimestampError: Option[SequencerDeliverError],
+      skipFreshInFlightValidationCheck: AggregationId => Boolean,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): SequencedEventValidation[Set[MemberRecipientOrBroadcast]] = {
-    val submissionRequest = signedSubmissionRequest.content
+  ): SequencedEventValidation[PrevalidationOutcome] = {
+    val submissionRequest = signedSubmissionRequest.value.content
     for {
       isSenderRegistered <-
         EitherT
@@ -214,15 +148,17 @@ private[update] final class SubmissionRequestValidator(
       topologyOrSequencingSnapshot = topologySnapshotFromRequestO.getOrElse(
         snapshotToValidateSubmissionRequest
       )
-      _ <- validateMaxSequencingTimeForAggregationRule(
-        submissionRequest,
-        topologyOrSequencingSnapshot,
-        sequencingTimestamp,
-      )
-        .mapK(validationFUSK)
+      // Preserve the old behavior to avoid ledger forks for older protocols.
+      _ <- (if (protocolVersion <= ProtocolVersion.v34)
+              inFlightAggregationHandler.validateMaxSequencingTimeForAggregationRule(
+                submissionRequest,
+                topologyOrSequencingSnapshot,
+                sequencingTimestamp,
+              )
+            else EitherTUtil.unitUS).mapK(validationFUSK)
       _ <- checkClosedEnvelopesSignatures(
         topologyOrSequencingSnapshot,
-        submissionRequest,
+        signedSubmissionRequest.map(_.content),
         sequencingTimestamp,
       ).mapK(validationFUSK)
       recipients <-
@@ -231,7 +167,18 @@ private[update] final class SubmissionRequestValidator(
           sequencingTimestamp,
           topologyOrSequencingSnapshot,
         ).mapK(validationFUSK)
-    } yield recipients
+      // compute the aggregation id last (we keep this here as the old code computed
+      // the aggregation id as first step in the sequential stage. we now do this in the
+      // parallel stage but preserve the same order of operation)
+      aggregationInfo <- inFlightAggregationHandler
+        .computeAggregationIdAndValidateAggregationRule(
+          sequencingTimestamp,
+          topologyOrSequencingSnapshot,
+          submissionRequest,
+          skipFreshInFlightValidationCheck,
+        )
+        .mapK(validationFUSK)
+    } yield PrevalidationOutcome(recipients, aggregationInfo)
   }
 
   // TODO(#18401): This method should be harmonized with the GroupAddressResolver
@@ -371,14 +318,14 @@ private[update] final class SubmissionRequestValidator(
 
   private def checkClosedEnvelopesSignatures(
       topologyOrSequencingSnapshot: SyncCryptoApi,
-      submissionRequest: SubmissionRequest,
+      submissionRequest: Traced[SubmissionRequest],
       sequencingTimestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
     MonadUtil
-      .parTraverseWithLimit_(batchingConfig.parallelism)(submissionRequest.batch.envelopes) {
+      .parTraverseWithLimit_(batchingConfig.parallelism)(submissionRequest.value.batch.envelopes) {
         closedEnvelope =>
           EitherT
             .fromEither[FutureUnlessShutdown](
@@ -390,14 +337,14 @@ private[update] final class SubmissionRequestValidator(
             .flatMap { closedUncompressedEnvelope =>
               closedUncompressedEnvelope.verifySignatures(
                 topologyOrSequencingSnapshot,
-                submissionRequest.sender,
+                submissionRequest.value.sender,
               )
             }
       }
       .leftMap { error =>
         SequencerError.InvalidEnvelopeSignature
           .Error(
-            submissionRequest,
+            submissionRequest.value,
             error,
             sequencingTimestamp,
             topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
@@ -405,46 +352,6 @@ private[update] final class SubmissionRequestValidator(
           .report()
         SubmissionOutcome.Discard
       }
-
-  private def validateMaxSequencingTimeForAggregationRule(
-      submissionRequest: SubmissionRequest,
-      topologyOrSequencingSnapshot: SyncCryptoApi,
-      sequencingTimestamp: CantonTimestamp,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
-    submissionRequest.aggregationRule.traverse_ { _ =>
-      for {
-        synchronizerParameters <- EitherT(
-          topologyOrSequencingSnapshot.ipsSnapshot.findDynamicSynchronizerParameters()
-        )
-          .leftMap(error =>
-            SubmissionOutcome.Reject.logAndCreate(
-              submissionRequest,
-              sequencingTimestamp,
-              SequencerErrors.SubmissionRequestRefused(
-                s"Could not fetch dynamic synchronizer parameters: $error"
-              ),
-            )
-          )
-        maxSequencingTimeUpperBound = sequencingTimestamp.toInstant.plus(
-          synchronizerParameters.parameters.sequencerAggregateSubmissionTimeout.duration
-        )
-        _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-          submissionRequest.maxSequencingTime.toInstant.isBefore(maxSequencingTimeUpperBound),
-          SubmissionOutcome.Reject.logAndCreate(
-            submissionRequest,
-            sequencingTimestamp,
-            SequencerErrors.MaxSequencingTimeTooFar(
-              submissionRequest.messageId,
-              submissionRequest.maxSequencingTime,
-              maxSequencingTimeUpperBound,
-            ),
-          ): SubmissionOutcome,
-        )
-      } yield ()
-    }
 
   private def checkRecipientsAreKnown(
       submissionRequest: SubmissionRequest,
@@ -478,29 +385,29 @@ private[update] final class SubmissionRequestValidator(
     } yield res
 
   private def checkSignatureOnSubmissionRequest(
-      signedSubmissionRequest: SignedContent[SubmissionRequest],
+      signedSubmissionRequest: Traced[SignedContent[SubmissionRequest]],
       topologyOrSequencingSnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] = {
-    val submissionRequest = signedSubmissionRequest.content
 
     val alarm = for {
-      _ <- signedSubmissionRequest
-        .verifySignature(
-          topologyOrSequencingSnapshot,
-          submissionRequest.sender,
-          HashPurpose.SubmissionRequestSignature,
-        )
-        .leftMap[BaseAlarm](error =>
-          SequencerError.InvalidSubmissionRequestSignature.Error(
-            signedSubmissionRequest,
-            error,
-            topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
-            signedSubmissionRequest.timestampOfSigningKey,
+      _ <-
+        signedSubmissionRequest.value
+          .verifySignature(
+            topologyOrSequencingSnapshot,
+            signedSubmissionRequest.value.content.sender,
+            HashPurpose.SubmissionRequestSignature,
           )
-        )
+          .leftMap[BaseAlarm](error =>
+            SequencerError.InvalidSubmissionRequestSignature.Error(
+              signedSubmissionRequest.value,
+              error,
+              topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
+              signedSubmissionRequest.value.timestampOfSigningKey,
+            )
+          )
     } yield ()
 
     alarm.leftMap { a =>
@@ -525,302 +432,6 @@ private[update] final class SubmissionRequestValidator(
         )
       )
       .toLeft(())
-
-  // Performs additional checks and runs the aggregation logic
-  // If this succeeds, it will produce a SubmissionOutcome containing
-  // the complete validation result for a single submission
-  private def applyToAggregationState(
-      previouslyResolvedRecipients: Set[MemberRecipientOrBroadcast],
-      inFlightAggregations: InFlightAggregations,
-      sequencingTimestamp: CantonTimestamp,
-      submissionRequest: SubmissionRequest,
-  )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): EitherT[
-    FutureUnlessShutdown,
-    SubmissionOutcome,
-    SubmissionRequestValidationResult,
-  ] =
-    for {
-      aggregationIdO <- EitherT.fromEither[FutureUnlessShutdown](
-        submissionRequest
-          .aggregationId(synchronizerSyncCryptoApi.pureCrypto)
-          .leftMap { err =>
-            logger.error(
-              s"Internal error occurred when processing request $sequencingTimestamp: computation of aggregation id: ${err.message}"
-            )
-
-            SubmissionOutcome.Discard
-          }
-      )
-
-      aggregationOutcome <-
-        aggregationIdO
-          .traverse { case (aggregationId, aggregationRule) =>
-            val inFlightAggregation = inFlightAggregations.get(aggregationId)
-            EitherT
-              .fromEither[FutureUnlessShutdown](
-                submissionRequest.batch.toClosedUncompressedBatchResult
-                  .leftMap[SubmissionOutcome](_ => SubmissionOutcome.Discard)
-              )
-              .flatMap { uncompressedBatch =>
-                validateAggregationRuleAndUpdateInFlightAggregation(
-                  submissionRequest,
-                  uncompressedBatch,
-                  sequencingTimestamp,
-                  aggregationId,
-                  aggregationRule,
-                  inFlightAggregation,
-                ).map { case (updatedInFlightAggregation, inFlightAggregationUpdate) =>
-                  (
-                    aggregationId,
-                    updatedInFlightAggregation,
-                    inFlightAggregationUpdate,
-                    uncompressedBatch,
-                  )
-                }
-              }
-          }
-
-    } yield {
-
-      val (requestOrAggregatedBatch, aggregationUpdateO) = aggregationOutcome match {
-        case None => (submissionRequest.batch, None)
-        case Some(
-              (
-                aggregationId,
-                updatedInFlightAggregation,
-                inFlightAggregationUpdate,
-                uncompressedBatch,
-              )
-            ) =>
-          val aggregatedBatch = uncompressedBatch
-            .focus(_.envelopes)
-            .modify(_.lazyZip(updatedInFlightAggregation.aggregatedSignatures).map {
-              (envelope, signatures) =>
-                envelope.updateSignatures(signatures = signatures)
-            })
-          (
-            aggregatedBatch,
-            Some((aggregationId, updatedInFlightAggregation, inFlightAggregationUpdate)),
-          )
-      }
-
-      val submissionRecipients =
-        (submissionRequest.batch.allMembers + submissionRequest.sender).map(MemberRecipient.apply)
-
-      val allRecipients = previouslyResolvedRecipients ++ submissionRecipients
-
-      // We need to know whether the group of sequencers was addressed in order to update `latestSequencerEventTimestamp`.
-      // Simply checking whether this sequencer is within the resulting event recipients opens up
-      // the door for a malicious participant to target a single sequencer, which would result in the
-      // various sequencers reaching a different value.
-      //
-      // Currently, the only use cases of addressing a sequencer are:
-      //   * via AllMembersOfSynchronizer for topology transactions
-      //   * via SequencersOfSynchronizer for traffic control top-up messages
-      //
-      // Therefore, we check whether this sequencer was addressed via a group address to avoid the above
-      // case.
-      //
-      // NOTE: Pruning concerns
-      // ----------------------
-      // `latestSequencerEventTimestamp` is relevant for pruning.
-      // For the traffic top-ups, we can use the block's last timestamp to signal "safe-to-prune", because
-      // the logic to compute the balance based on `latestSequencerEventTimestamp` sits inside the manager
-      // and we can make it work together with pruning.
-      // For topology, pruning is not yet implemented. However, the logic to compute snapshot timestamps
-      // sits outside of the topology processor and so from the topology processor's point of view,
-      // `latestSequencerEventTimestamp` should be part of a "safe-to-prune" timestamp calculation.
-      //
-      // See https://github.com/DACH-NY/canton/pull/17676#discussion_r1515926774
-      val sequencerEventTimestamp =
-        Option.when(isThisSequencerAddressed(previouslyResolvedRecipients, submissionRequest))(
-          sequencingTimestamp
-        )
-
-      SubmissionRequestValidationResult(
-        inFlightAggregations,
-        SubmissionOutcome.Deliver(
-          submissionRequest,
-          sequencingTimestamp,
-          allRecipients,
-          requestOrAggregatedBatch,
-          traceContext,
-          trafficReceiptO = None, // traffic receipt is updated at the end of the processing
-          inFlightAggregation = aggregationUpdateO,
-        ),
-        sequencerEventTimestamp,
-      )
-    }
-
-  /** Validates the aggregation rule and computes the updated aggregation
-    */
-  private def validateAggregationRuleAndUpdateInFlightAggregation(
-      submissionRequest: SubmissionRequest,
-      uncompressedBatch: Batch[ClosedUncompressedEnvelope],
-      sequencingTimestamp: CantonTimestamp,
-      aggregationId: AggregationId,
-      rule: AggregationRule,
-      inFlightAggregationO: Option[InFlightAggregation],
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[
-    FutureUnlessShutdown,
-    SubmissionOutcome,
-    (InFlightAggregation, InFlightAggregationUpdate),
-  ] = {
-    ErrorUtil.requireState(
-      submissionRequest.aggregationRule.contains(rule),
-      s"Mismatch in aggregation rule $rule vs ${submissionRequest.aggregationRule}",
-    )
-    for {
-      inFlightAggregationAndUpdate <- inFlightAggregationO match {
-        case None =>
-          // New aggregation
-          validateAggregationRule(submissionRequest, sequencingTimestamp, rule).map { _ =>
-            val fresh = FreshInFlightAggregation(
-              submissionRequest.maxSequencingTime,
-              rule,
-            )
-            InFlightAggregation.initial(fresh) -> InFlightAggregationUpdate(
-              Some(fresh),
-              Chain.empty,
-            )
-          }
-
-        case Some(inFlightAggregation) =>
-          // Existing aggregation
-          wellFormedAggregationRule(submissionRequest, rule)
-            .map(_ => inFlightAggregation -> InFlightAggregationUpdate.empty)
-      }
-      (inFlightAggregation, inFlightAggregationUpdate) = inFlightAggregationAndUpdate
-
-      aggregatedSender = AggregatedSender(
-        submissionRequest.sender,
-        AggregationBySender(
-          sequencingTimestamp,
-          uncompressedBatch.envelopes.map(_.signatures),
-        ),
-      )
-
-      updatedAggregation <-
-        EitherT.fromEither[FutureUnlessShutdown](
-          inFlightAggregation
-            .tryAggregate(aggregatedSender)
-            .leftMap {
-              case InFlightAggregation.AlreadyDelivered(deliveredAt) =>
-                val message =
-                  s"The aggregatable request with aggregation ID $aggregationId was previously delivered at $deliveredAt"
-                SubmissionOutcome.Reject.logAndCreate(
-                  submissionRequest,
-                  sequencingTimestamp,
-                  SequencerErrors.AggregateSubmissionAlreadySent(message),
-                )
-              case InFlightAggregation.AggregationStuffing(_, at) =>
-                val message =
-                  s"The sender ${submissionRequest.sender} previously contributed to the aggregatable submission with ID $aggregationId at $at"
-                SubmissionOutcome.Reject.logAndCreate(
-                  submissionRequest,
-                  sequencingTimestamp,
-                  SequencerErrors.AggregateSubmissionStuffing(message),
-                )
-            }
-        )
-
-      fullInFlightAggregationUpdate = inFlightAggregationUpdate.tryMerge(
-        InFlightAggregationUpdate(None, Chain.one(aggregatedSender))
-      )
-      // If we're not delivering the request to all recipients right now, just send a receipt back to the sender
-      _ <- EitherT
-        .cond(
-          updatedAggregation.deliveredAt.nonEmpty,
-          logger.debug(
-            s"Aggregation ID $aggregationId has reached its threshold ${updatedAggregation.rule.threshold} and will be delivered at $sequencingTimestamp."
-          ), {
-            logger.debug(
-              s"Aggregation ID $aggregationId has now ${updatedAggregation.aggregatedSenders.size} senders aggregated. Threshold is ${updatedAggregation.rule.threshold.value}."
-            )
-            // we only return a receipt, as we are still collecting aggregation results
-            SubmissionOutcome.DeliverReceipt(
-              submissionRequest,
-              sequencingTimestamp,
-              traceContext,
-              trafficReceiptO = None, // traffic receipt is updated at the end of the processing
-              inFlightAggregation =
-                Some((aggregationId, updatedAggregation, fullInFlightAggregationUpdate)),
-            ): SubmissionOutcome
-          },
-        )
-        .mapK(FutureUnlessShutdown.outcomeK)
-    } yield (updatedAggregation, fullInFlightAggregationUpdate)
-  }
-
-  private def validateAggregationRule(
-      submissionRequest: SubmissionRequest,
-      sequencingTimestamp: CantonTimestamp,
-      rule: AggregationRule,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
-    for {
-      _ <- wellFormedAggregationRule(submissionRequest, rule)
-
-      unregisteredEligibleMembers <-
-        EitherT.right(
-          memberValidator
-            .areMembersRegisteredAt(rule.eligibleSenders.forgetNE, sequencingTimestamp)
-            .map(_.flatMap {
-              case (member, true) => None
-              case (member, false) => Some(member)
-            })
-        )
-
-      _ <- EitherTUtil
-        .condUnitET(
-          unregisteredEligibleMembers.isEmpty,
-          // TODO(#14322): review if still applicable and consider an error code (SequencerDeliverError)
-          SubmissionOutcome.Reject.logAndCreate(
-            submissionRequest,
-            sequencingTimestamp,
-            SequencerErrors.SubmissionRequestRefused(
-              s"Aggregation rule contains unregistered eligible members: $unregisteredEligibleMembers"
-            ),
-          ): SubmissionOutcome,
-        )
-        .mapK(FutureUnlessShutdown.outcomeK)
-    } yield ()
-
-  private def wellFormedAggregationRule(
-      submissionRequest: SubmissionRequest,
-      rule: AggregationRule,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
-    EitherT.fromEither(
-      SubmissionRequestValidations
-        .wellformedAggregationRule(submissionRequest.sender, rule)
-        .leftMap { message =>
-          val alarm = SequencerErrors.SubmissionRequestMalformed.Error(submissionRequest, message)
-          alarm.report()
-
-          SubmissionOutcome.Discard
-        }
-    )
-
-  // Off-boarded sequencers may still receive blocks (e.g., BFT sequencers still contribute to ordering for a while
-  //  after being deactivated in the Canton topology, specifically until the underlying consensus algorithm
-  //  allows them to be also removed from the BFT ordering topology), but they should not be considered addressed,
-  //  since they are not active in the Canton topology anymore (i.e., group recipients don't include them).
-  private def isThisSequencerAddressed(
-      recipients: Set[MemberRecipientOrBroadcast],
-      submissionRequest: SubmissionRequest,
-  ): Boolean =
-    recipients.contains(MemberRecipient(sequencerId)) || submissionRequest.batch.isBroadcast
 
 }
 

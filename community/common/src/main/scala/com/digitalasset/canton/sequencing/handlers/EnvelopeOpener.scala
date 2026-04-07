@@ -11,9 +11,9 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.sequencing.{
-  ApplicationHandler,
   OrdinaryApplicationHandler,
   OrdinaryEnvelopeBox,
+  UnthrottledApplicationHandler,
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.version.ProtocolVersion
@@ -31,19 +31,20 @@ object EnvelopeOpener {
       handler: OrdinaryApplicationHandler[DefaultOpenEnvelope]
   )(implicit
       logger: ErrorLoggingContext
-  ): ApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] = handler.replace { tracedEvents =>
-    val openedEvents = tracedEvents.map { closedEvents =>
-      closedEvents.map { event =>
-        val openedEvent = OrdinarySequencedEvent.openEnvelopes(event)(protocolVersion, hashOps)
-        openedEvent.openingErrors.foreach { error =>
-          EnvelopeOpenerError.EnvelopeOpenerDeserializationError
-            .Error(error, protocolVersion)
-            .report()
+  ): UnthrottledApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] = handler.replace {
+    tracedEvents =>
+      val openedEvents = tracedEvents.map { closedEvents =>
+        closedEvents.map { event =>
+          val openedEvent = OrdinarySequencedEvent.openEnvelopes(event)(protocolVersion, hashOps)
+          openedEvent.openingErrors.foreach { error =>
+            EnvelopeOpenerError.EnvelopeOpenerDeserializationError
+              .Error(error, protocolVersion)
+              .report()
+          }
+          openedEvent.event
         }
-        openedEvent.event
       }
-    }
-    handler(openedEvents)
+      handler(openedEvents)
   }
 }
 

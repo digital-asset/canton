@@ -1965,7 +1965,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Description(
       """Yields false, if the synchronizer is not connected or not healthy.
         |Yields false, if the synchronizer is configured in the Canton configuration and
-        |the participant is not active from the perspective of the synchronizer."""
+        |the participant is not active from the perspective of the synchronizer.
+        |Uses the local clock to evaluate `ParticipantSynchronizerPermission.login_after`."""
     )
     def active(synchronizerAlias: SynchronizerAlias): Boolean =
       list_connected().exists { r =>

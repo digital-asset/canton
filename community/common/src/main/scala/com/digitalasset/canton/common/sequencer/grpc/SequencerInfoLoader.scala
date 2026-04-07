@@ -22,6 +22,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.sequencing.{
@@ -33,7 +34,7 @@ import com.digitalasset.canton.sequencing.{
   SubmissionRequestAmplification,
 }
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
@@ -50,7 +51,7 @@ import scala.concurrent.{ExecutionContextExecutor, Promise}
 
 class SequencerInfoLoader(
     timeouts: ProcessingTimeout,
-    traceContextPropagation: TracingConfig.Propagation,
+    params: ClientChannelParams,
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
     dontWarnOnDeprecatedPV: Boolean,
@@ -68,7 +69,7 @@ class SequencerInfoLoader(
         synchronizerAlias,
         config,
         timeouts,
-        traceContextPropagation,
+        params,
         loggerFactory,
       )
   }
@@ -271,7 +272,7 @@ class SequencerInfoLoader(
     val connections = if (loadAllEndpoints) {
       sequencerConnections.connections.flatMap { case connection: GrpcSequencerConnection =>
         connection.endpoints.map(endpoint =>
-          connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
+          connection.copy(endpoints = NonEmpty.mk(Set, endpoint))
         )
       }
     } else

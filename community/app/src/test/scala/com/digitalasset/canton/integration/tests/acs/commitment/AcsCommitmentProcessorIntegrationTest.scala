@@ -88,13 +88,9 @@ sealed trait AcsCommitmentProcessorIntegrationTest
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        // TODO(#30006): Remove the extended periods once all session signing key fixes are enabled.
-        ConfigTransforms.setSessionSigningKeys(
-          SessionSigningKeysConfig(
-            enabled = true,
-            keyValidityDuration = config.PositiveFiniteDuration.ofHours(6),
-            toleranceShiftDuration = config.NonNegativeFiniteDuration.ofHours(3),
-            cutOffDuration = config.NonNegativeFiniteDuration.ofHours(1),
+        // this only sets/enables session signing keys when running with PV35 or higher
+        ConfigTransforms.setSigningKeysIfPV35OrHigher(
+          SessionSigningKeysConfig.default.copy(
             // we evict the session key cache right away to make sure we use a fresh session signing key for each request
             keyEvictionPeriod = config.PositiveFiniteDuration.ofMillis(1),
             // we must disable bound checks because `keyEvictionPeriod` is shorter than `keyValidityDuration`

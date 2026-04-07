@@ -227,7 +227,7 @@ class TrafficPurchasedManagerTest
       val balanceF = loggerFactory.assertLogs(
         manager.getTrafficPurchasedAt(member, desiredTimestamp).value,
         _.warningMessage should include(
-          s"The desired timestamp $desiredTimestamp is more recent than the last update $timestamp, and no 'lastSeen' timestamp was provided. The provided balance may not be up to date if a balance update is being processed."
+          s"The desired timestamp $desiredTimestamp for $member is more recent than the last update $timestamp, and no 'lastSeen' timestamp was provided. The provided balance may not be up to date if a balance update is being processed."
         ),
       )
       balanceF.futureValueUS shouldBe Right(

@@ -21,10 +21,13 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   ExceededMaxSequencingTime,
   PayloadToEventTimeBoundExceeded,
-  SequencedBeforeOrAtLowerBound,
+  SequencingTimeNotAdmissible,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.*
-import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
+import com.digitalasset.canton.synchronizer.sequencer.time.{
+  DisasterRecoverySequencingTimeUpperBound,
+  LsuSequencingBounds,
+}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
@@ -195,6 +198,7 @@ object SequencerWriterSource {
       metrics: SequencerMetrics,
       blockSequencerMode: Boolean,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -264,6 +268,7 @@ object SequencerWriterSource {
           store,
           eventTimestampGenerator,
           lsuSequencingBounds,
+          drSequencingTimeUpperBound,
           loggerFactory,
           protocolVersion,
           blockSequencerMode,
@@ -512,6 +517,7 @@ object SequenceWritesFlow {
       store: SequencerWriterStore,
       eventTimestampGenerator: PartitionedTimestampGenerator,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
       blockSequencerMode: Boolean,
@@ -616,9 +622,26 @@ object SequenceWritesFlow {
                 sequencingTime = timestamp,
               ),
               (),
-              SequencedBeforeOrAtLowerBound.Error(
-                timestamp,
-                lsuSequencingBounds.lowerBoundSequencingTimeExclusive,
+              SequencingTimeNotAdmissible.Error.beforeOrAtLowerBound(
+                sequencingTime = timestamp,
+                lowerBound = lsuSequencingBounds.lowerBoundSequencingTimeExclusive,
+                event.event.description,
+              ),
+            )
+          case None => ().asRight
+        }
+
+      def checkDrSequencingTimeUpperBound(
+          event: Presequenced[StoreEvent[BytesPayload]]
+      ): Either[CantonBaseError, Unit] =
+        drSequencingTimeUpperBound match {
+          case Some(drSequencingTimeUpperBound) =>
+            Either.cond(
+              timestamp < drSequencingTimeUpperBound.ts,
+              (),
+              SequencingTimeNotAdmissible.Error.afterOrAtUpperBound(
+                sequencingTime = timestamp,
+                upperBound = drSequencingTimeUpperBound.ts,
                 event.event.description,
               ),
             )
@@ -694,6 +717,7 @@ object SequenceWritesFlow {
         _ <- checkPayloadToEventMargin(presequencedEvent)
         _ <- checkMaxSequencingTime(presequencedEvent)
         _ <- checkSequencingTimeLowerBound(presequencedEvent)
+        _ <- checkDrSequencingTimeUpperBound(presequencedEvent)
         checkedEvent = deliverErrorForInvalidTopologyTimestamp(presequencedEvent)
       } yield Sequenced(timestamp, checkedEvent.event, fromStore = false)
 

@@ -149,6 +149,7 @@ final case class InFlightAggregation private (
 }
 
 object InFlightAggregation {
+
   def create(
       aggregatedSenders: Map[Member, AggregationBySender],
       maxSequencingTimestamp: CantonTimestamp,

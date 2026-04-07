@@ -292,9 +292,11 @@ object ProtocolVersion {
     * @throws java.lang.RuntimeException
     *   if the environment variable's value cannot be parsed to a protocol version
     */
+  private val CANTON_PROTOCOL_VERSION = "CANTON_PROTOCOL_VERSION"
   val forSynchronizer: ProtocolVersion =
     sys.env
-      .get("CANTON_PROTOCOL_VERSION")
+      .get(CANTON_PROTOCOL_VERSION)
+      .orElse(sys.props.get(CANTON_PROTOCOL_VERSION))
       .map(ProtocolVersion.tryCreate)
       // TODO(i31167): When PV35 is stable, change the following line to use `latest` instead of `v35`
       .getOrElse(ProtocolVersion.v35)

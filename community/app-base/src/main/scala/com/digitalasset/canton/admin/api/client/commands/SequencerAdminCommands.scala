@@ -34,13 +34,13 @@ import com.digitalasset.canton.synchronizer.sequencer.{SequencerPruningStatus, S
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Member, SequencerId}
-import com.digitalasset.canton.util.GrpcStreamingUtils
+import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.google.protobuf.ByteString
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 
-import java.io.InputStream
+import java.io.{ByteArrayInputStream, InputStream}
 import scala.concurrent.Future
 
 object SequencerAdminCommands {
@@ -134,11 +134,13 @@ object SequencerAdminCommands {
         proto
           .TrafficControlStateRequest(members.map(_.toProtoPrimitive), timestampSelector.toProtoV30)
       )
+
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
         request: proto.TrafficControlStateRequest,
     ): Future[proto.TrafficControlStateResponse] =
       service.trafficControlState(request)
+
     override protected def handleResponse(
         response: proto.TrafficControlStateResponse
     ): Either[String, SequencerTrafficStatus] =
@@ -265,7 +267,7 @@ object SequencerAdminCommands {
           proto.InitializeSequencerFromOnboardingStateRequest(
             ByteString.copyFrom(onboardingState)
           ),
-        request.onboardingState,
+        new ByteArrayInputStream(request.onboardingState.toByteArray),
       )
 
     override protected def createRequest()
@@ -304,7 +306,7 @@ object SequencerAdminCommands {
           proto.InitializeSequencerFromOnboardingStateV2Request(
             ByteString.copyFrom(onboardingState)
           ),
-        request.onboardingState,
+        new ByteArrayInputStream(request.onboardingState.toByteArray),
       )
 
     override protected def createRequest()
@@ -348,7 +350,7 @@ object SequencerAdminCommands {
             topologySnapshot = ByteString.copyFrom(topologySnapshot),
             synchronizerParameters = Some(synchronizerParameters.toProtoV30),
           ),
-        request.topologySnapshot,
+        new ByteArrayInputStream(request.topologySnapshot.toByteArray),
       )
 
     override protected def createRequest()
@@ -373,7 +375,7 @@ object SequencerAdminCommands {
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
       ignorePsidCheck: Boolean,
   ) extends GrpcAdminCommand[
-        proto.InitializeSequencerFromLsuPredecessorRequest,
+        Unit,
         proto.InitializeSequencerFromLsuPredecessorResponse,
         Unit,
       ] {
@@ -387,39 +389,26 @@ object SequencerAdminCommands {
 
     override protected def submitRequest(
         service: proto.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
-        request: proto.InitializeSequencerFromLsuPredecessorRequest,
+        request: Unit,
     ): Future[proto.InitializeSequencerFromLsuPredecessorResponse] =
-      GrpcStreamingUtils.streamToServer(
-        service.initializeSequencerFromLsuPredecessor,
-        _ => {
-          GrpcStreamingUtils.readChunkBytes(topologySnapshotStream) match {
-            case Array() => None
-            case bytes =>
-              val request = proto.InitializeSequencerFromLsuPredecessorRequest(
-                topologySnapshot = ByteString.copyFrom(bytes),
-                synchronizerParameters = Some(synchronizerParameters.toProtoV30),
-                ignorePsidCheck = ignorePsidCheck,
-              )
-              Some(Right(request))
-          }
-        },
-      )
-
-    override protected def createRequest()
-        : Either[String, proto.InitializeSequencerFromLsuPredecessorRequest] =
-      Right(
-        // Unused, since we construct requests when streaming
-        proto.InitializeSequencerFromLsuPredecessorRequest(
-          topologySnapshot = ByteString.EMPTY,
-          synchronizerParameters = None,
-          ignorePsidCheck = ignorePsidCheck,
+      ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+        GrpcStreamingUtils.streamToServer(
+          service.initializeSequencerFromLsuPredecessor,
+          (topologySnapshot: Array[Byte]) =>
+            proto.InitializeSequencerFromLsuPredecessorRequest(
+              topologySnapshot = ByteString.copyFrom(topologySnapshot),
+              synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+              ignorePsidCheck = ignorePsidCheck,
+            ),
+          inputStream,
         )
-      )
+      }
+
+    override protected def createRequest(): Either[String, Unit] = Right(())
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromLsuPredecessorResponse
-    ): Either[String, Unit] =
-      Right(())
+    ): Either[String, Unit] = Right(())
 
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
   }
@@ -451,7 +440,7 @@ object SequencerAdminCommands {
             topologySnapshot = ByteString.copyFrom(topologySnapshot),
             Some(synchronizerParameters.toProtoV30),
           ),
-        request.topologySnapshot,
+        new ByteArrayInputStream(request.topologySnapshot.toByteArray),
       )
 
     override protected def createRequest()

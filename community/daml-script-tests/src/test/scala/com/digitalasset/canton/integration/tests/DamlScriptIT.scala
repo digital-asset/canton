@@ -758,7 +758,7 @@ class DamlScriptPV35NoContractKeyIT extends DamlScriptPV35IT(ContractStateMachin
     "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
     "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
     "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:queryCrashes" -> Failure("Command QueryContractKey failed"),
+    "ContractIdInContractKeySkipCheck:queryCrashes" -> Failure("Command QueryByKey failed"),
     "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
     "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
     "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> commandSubmissionFailure,

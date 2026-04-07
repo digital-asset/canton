@@ -89,7 +89,7 @@ private[participant] object AutomaticAssignment {
             ),
             id,
             targetTopology,
-          )(TraceContext.empty)
+          )
           .mapK(FutureUnlessShutdown.outcomeK)
         AssignmentProcessingSteps.SubmissionResult(completionF) = submissionResult
         status <- EitherT.right(completionF).mapK(FutureUnlessShutdown.outcomeK)

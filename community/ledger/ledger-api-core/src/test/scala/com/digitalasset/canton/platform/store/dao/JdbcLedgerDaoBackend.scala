@@ -22,7 +22,7 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.StorageBackendFactory
-import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
+import com.digitalasset.canton.platform.store.cache.{AchsStateCache, MutableLedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoBackend.TestParticipantId
 import com.digitalasset.canton.platform.store.dao.events.{
   CompressionStrategy,
@@ -174,6 +174,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         ),
         pruningOffsetService = pruningOffsetService,
         contractStore = contractStore,
+        achsStateCache = new AchsStateCache(loggerFactory),
       )
     }
   }

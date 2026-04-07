@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import cats.kernel.Semigroup
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.connection.GrpcApiInfoService
@@ -24,6 +25,7 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   SequencerTrafficInspectionServiceGrpc,
 }
 import com.digitalasset.canton.sequencer.api.v30
+import com.digitalasset.canton.sequencing.UnthrottledAsync
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
@@ -69,6 +71,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerCounter, config}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
@@ -407,7 +410,9 @@ class SequencerRuntime(
         timeouts,
         loggerFactory,
       )
-  if (!producePostOrderingTopologyTicks) {
+  if (
+    !producePostOrderingTopologyTicks || staticSynchronizerParameters.protocolVersion <= ProtocolVersion.v34
+  ) {
     logger.info("Subscribing to topology transactions for time-advancing broadcast")
     topologyProcessor.subscribe(timeAdvancingTopologySubscriber)
   }
@@ -423,8 +428,11 @@ class SequencerRuntime(
 
   sequencer.rateLimitManager.foreach(rlm => trafficProcessor.subscribe(rlm.balanceUpdateSubscriber))
 
+  private val unthrottledAsyncSemigroup = Semigroup[UnthrottledAsync]
   private val eventHandler = StripSignature(
-    broadcastTimeTracker.combineWith(topologyHandler).combineWith(trafficProcessor)
+    broadcastTimeTracker
+      .combineWith(topologyHandler)(unthrottledAsyncSemigroup.combine)
+      .combineWith(trafficProcessor)(unthrottledAsyncSemigroup.combine)
   )
 
   private val sequencerAdministrationService =

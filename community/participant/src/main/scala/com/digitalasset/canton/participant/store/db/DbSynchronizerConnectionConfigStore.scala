@@ -301,14 +301,14 @@ class DbSynchronizerConnectionConfigStore private[store] (
       } yield ()
     }
 
-  private def putInternal(
+  private def putInternalQuery(
       config: SynchronizerConnectionConfig,
       status: SynchronizerConnectionConfigStore.Status,
       configuredPsid: ConfiguredPhysicalSynchronizerId,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, Unit] = {
+  ): EitherT[DBIO, Error, Unit] = {
     val alias = config.synchronizerAlias
     val id = ConfigIdentifier.WithAlias(config.synchronizerAlias, configuredPsid)
 
@@ -357,7 +357,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         )
     }
 
-    val queries = for {
+    for {
       _ <- EitherT.fromEither[DBIO](
         predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
       )
@@ -378,6 +378,21 @@ class DbSynchronizerConnectionConfigStore private[store] (
       nrRows <- dbEitherT[Error](insertAction)
       _ <- checkInsertion(nrRows)
     } yield ()
+  }
+
+  private def putInternal(
+      config: SynchronizerConnectionConfig,
+      status: SynchronizerConnectionConfigStore.Status,
+      configuredPsid: ConfiguredPhysicalSynchronizerId,
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Error, Unit] = {
+    val alias = config.synchronizerAlias
+
+    logger.debug(s"Inserting connection for ($alias, $configuredPsid) into the store")
+
+    val queries = putInternalQuery(config, status, configuredPsid, synchronizerPredecessor)
 
     EitherT(
       storage.queryAndUpdate(
@@ -436,6 +451,82 @@ class DbSynchronizerConnectionConfigStore private[store] (
     }
   }
 
+  override def upsert(
+      psid: PhysicalSynchronizerId,
+      insert: (
+          SynchronizerConnectionConfig,
+          SynchronizerConnectionConfigStore.Status,
+          Option[SynchronizerPredecessor],
+      ),
+      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
+    val configId = ConfigIdentifier.WithPsid(psid)
+
+    val queries = for {
+      storedConfigO <- dbEitherT[Error](getInternalQuery(configId)).map { configs =>
+        configs.headOption
+          .map((StoredSynchronizerConnectionConfig.apply _).tupled)
+      }
+
+      newStoredConfig <- storedConfigO match {
+        case Some(storedConfig) =>
+          val updatedConnectionConfig = transform(storedConfig.config)
+
+          dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
+              set config=$updatedConnectionConfig
+              where physical_synchronizer_id=$psid""")
+            .map(_ => storedConfig.copy(config = updatedConnectionConfig))
+
+        case None =>
+          val (config, status, predecessor) = insert
+
+          putInternalQuery(
+            config = config,
+            status = status,
+            configuredPsid = KnownPhysicalSynchronizerId(psid),
+            synchronizerPredecessor = predecessor,
+          ).map(_ =>
+            StoredSynchronizerConnectionConfig(
+              config,
+              status,
+              KnownPhysicalSynchronizerId(psid),
+              predecessor,
+            )
+          )
+      }
+    } yield newStoredConfig
+
+    val result: FutureUnlessShutdown[Either[Error, StoredSynchronizerConnectionConfig]] =
+      storage.queryAndUpdate(
+        queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
+        functionFullName,
+      )
+
+    EitherT(result).map { newStoredConfig =>
+      synchronizerConfigCache
+        .updateWith(newStoredConfig.config.synchronizerAlias) {
+          case Some(existingEntriesForAlias) =>
+            existingEntriesForAlias
+              .updatedWith(KnownPhysicalSynchronizerId(psid)) {
+                case Some(existingCacheEntry) =>
+                  existingCacheEntry.copy(config = newStoredConfig.config).some
+                case None => Some(newStoredConfig)
+              }
+              .some
+
+          case None =>
+            Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig](
+              KnownPhysicalSynchronizerId(psid) -> newStoredConfig
+            ).some
+        }
+        .discard
+
+      newStoredConfig
+    }
+  }
+
   override def setSequencerIds(
       psid: PhysicalSynchronizerId,
       sequencerIds: Map[SequencerAlias, SequencerId],
@@ -462,7 +553,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         storedConfig.config
           .subsumeMerge(updatedConnectionConfig)
           .leftMap[Error](
-            InconsistentSequencerIds(configId, sequencerIds, _)
+            InconsistentSequencerIds(psid, sequencerIds, _)
           )
       )
 

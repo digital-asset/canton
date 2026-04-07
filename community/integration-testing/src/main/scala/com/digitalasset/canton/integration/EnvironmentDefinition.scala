@@ -15,13 +15,19 @@ import com.digitalasset.canton.config.{
   ApiLoggingConfig,
   CantonConfig,
   CantonFeatures,
+  ClockConfig,
   DefaultPorts,
   LoggingConfig,
   MonitoringConfig,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.console.{ConsoleEnvironment, InstanceReference, TestConsoleOutput}
-import com.digitalasset.canton.environment.Environment
+import com.digitalasset.canton.console.{
+  BaseInspection,
+  ConsoleEnvironment,
+  InstanceReference,
+  TestConsoleOutput,
+}
+import com.digitalasset.canton.environment.{CantonNode, Environment}
 import com.digitalasset.canton.integration.bootstrap.{
   InitializedSynchronizer,
   NetworkBootstrapper,
@@ -72,6 +78,10 @@ final case class EnvironmentDefinition(
     copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
 
   /** Enable traffic control on all configured synchronizers
+    * @param syncSynchronizerOwnersTime
+    *   function that takes a synchronizer node (sequencer or mediator) and waits for its observed
+    *   synchronizer time to be close to wall clock time. This avoids issues when enabling traffic
+    *   control.
     * @param trafficControlParameters
     *   parameters to use
     * @param topUpAllMembers
@@ -80,8 +90,9 @@ final case class EnvironmentDefinition(
     *   whether to disable ACS commitments to avoid background traffic being used
     */
   def withTrafficControl(
+      syncSynchronizerOwnersTime: InstanceReference & BaseInspection[? <: CantonNode] => Unit,
       trafficControlParameters: TrafficControlParameters =
-        // Give max base traffic by default which is virtually equivalent to unlimited traffic
+        // By default, give max base traffic which is virtually equivalent to unlimited traffic
         // This works better than topping up members because it works for members not yet connected to the network
         // as it is not possible to top up unknown members
         TrafficControlParameters.default.copy(maxBaseTrafficAmount = NonNegativeLong.maxValue),
@@ -91,8 +102,22 @@ final case class EnvironmentDefinition(
     withSetup { implicit env =>
       import env.*
 
+      val isSimClock = env.actualConfig.parameters.clock match {
+        case ClockConfig.SimClock => true
+        case _ => false
+      }
+
       // We first do all updates async
       runOnEachInitializedSynchronizer { sync =>
+        // If we're not in simclock, wait for synchronizer owners to catch up with a recent wall clock time
+        if (!isSimClock) {
+          sync.synchronizerOwners
+            .collect { case owner: InstanceReference with BaseInspection[CantonNode] =>
+              owner
+            }
+            .foreach(syncSynchronizerOwnersTime)
+        }
+
         sync.synchronizerOwners.foreach {
           _.topology.synchronizer_parameters.propose_update(
             synchronizerId = sync.synchronizerId,

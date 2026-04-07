@@ -348,7 +348,7 @@ class RecordOrderPublisher private (
       if (successor.upgradeTime <= initTimestamp) {
         lsuAutomaticAttemptAlreadyDone.set(true)
         // Upon node restart past the upgrade time, we attempt an automatic LSU
-        scheduleLsu(successor)(TraceContext.createNew("startup-automatic-lsu"))
+        performLsu(successor)(TraceContext.createNew("startup-automatic-lsu"))
       }
     }
   }
@@ -501,7 +501,7 @@ class RecordOrderPublisher private (
         event match {
           case synchronizerUpdate: SynchronizerUpdate =>
             if (lsuAutomaticAttemptAlreadyDone.compareAndSet(false, true)) {
-              scheduleLsu(successor)
+              performLsu(successor)
             } else {
               logger.debug(
                 s"LSU has been already scheduled for upgrade to ${successor.psid}, skipping automatic LSU for $event"
@@ -529,7 +529,7 @@ class RecordOrderPublisher private (
     }
   }
 
-  private def scheduleLsu(
+  private def performLsu(
       successor: SynchronizerSuccessor
   )(implicit traceContext: TraceContext): Unit = {
     val performLsuResultFUS = lsuHandler

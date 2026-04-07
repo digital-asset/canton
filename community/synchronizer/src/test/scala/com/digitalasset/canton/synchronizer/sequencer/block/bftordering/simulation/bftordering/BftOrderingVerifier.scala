@@ -8,12 +8,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.PeanoQueue
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.memory.SimulationOutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
   SimulationSettings,
   SimulationVerifier,
@@ -31,7 +30,7 @@ import BftOrderingVerifier.{LivenessState, OffboardingStatus}
 
 final class BftOrderingVerifier(
     queue: mutable.Queue[(BftNodeId, Traced[BlockFormat.Block])],
-    stores: Map[BftNodeId, OutputMetadataStore[SimulationEnv]],
+    stores: Map[BftNodeId, SimulationOutputMetadataStore],
     onboardingTimes: Map[BftNodeId, TopologyActivationTime],
     offboardingTimes: Map[BftNodeId, CantonTimestamp],
     initialNodes: Seq[BftNodeId],
@@ -106,7 +105,7 @@ final class BftOrderingVerifier(
       simulationSettings: SimulationSettings,
       newOnboardingTimes: Map[BftNodeId, TopologyActivationTime],
       newOffboardingTimes: Map[BftNodeId, CantonTimestamp],
-      newStores: Map[BftNodeId, OutputMetadataStore[SimulationEnv]],
+      newStores: Map[BftNodeId, SimulationOutputMetadataStore],
   ): BftOrderingVerifier = {
     val newVerifier =
       new BftOrderingVerifier(

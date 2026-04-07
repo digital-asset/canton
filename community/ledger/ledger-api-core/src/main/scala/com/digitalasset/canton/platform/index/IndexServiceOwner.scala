@@ -80,6 +80,7 @@ final class IndexServiceOwner(
   def acquire()(implicit context: ResourceContext): Resource[IndexService] = {
     val ledgerDao = createLedgerReadDao(
       ledgerEndCache = inMemoryState.ledgerEndCache,
+      achsStateCache = inMemoryState.achsStateCache,
       stringInterning = inMemoryState.stringInterningView,
       contractLoader = contractLoader,
       lfValueTranslation = lfValueTranslation,
@@ -198,6 +199,7 @@ final class IndexServiceOwner(
 
   private def createLedgerReadDao(
       ledgerEndCache: LedgerEndCache,
+      achsStateCache: AchsStateCache,
       stringInterning: StringInterning,
       contractLoader: ContractLoader,
       pruningOffsetService: PruningOffsetService,
@@ -227,6 +229,7 @@ final class IndexServiceOwner(
       lfValueTranslation = lfValueTranslation,
       pruningOffsetService = pruningOffsetService,
       contractStore = participantContractStore,
+      achsStateCache = achsStateCache,
     )(queryExecutionContext)
 
   private object InMemoryStateNotInitialized extends NoStackTrace

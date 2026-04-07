@@ -267,7 +267,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
               val model =
                 new BftOrderingVerifier(
                   sendQueue,
-                  allNodes.view.mapValues(_.stores.outputStore).toMap,
+                  allNodes.view
+                    .mapValues(_.stores.outputStore)
+                    .toMap
+                    .asInstanceOf[Map[BftNodeId, SimulationOutputMetadataStore]],
                   allNodes.view.mapValues(_.simulationTopologyData.onboardingTime).toMap,
                   allNodes.view.flatMap { case (node, sim) =>
                     sim.simulationTopologyData.offboardingTime.map(node -> _)
@@ -311,7 +314,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                   newlyOnboardedAll.view.flatMap { case (node, sim) =>
                     sim.simulationTopologyData.offboardingTime.map(node -> _)
                   }.toMap,
-                  newlyOnboardedAll.view.mapValues(_.stores.outputStore).toMap,
+                  newlyOnboardedAll.view
+                    .mapValues(_.stores.outputStore)
+                    .toMap
+                    .asInstanceOf[Map[BftNodeId, SimulationOutputMetadataStore]],
                 )
               val newOnboardingManager = stage.onboardingManager.newStage(
                 newlyOnboardedAll.view.mapValues(_.simulationTopologyData.onboardingTime).toMap,

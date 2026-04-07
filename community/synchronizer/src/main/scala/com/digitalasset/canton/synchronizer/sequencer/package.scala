@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer
 import com.digitalasset.canton.sequencing.protocol.AggregationId
 
 package object sequencer {
-
   type InFlightAggregations = Map[AggregationId, InFlightAggregation]
   type InFlightAggregationUpdates = Map[AggregationId, InFlightAggregationUpdate]
 }

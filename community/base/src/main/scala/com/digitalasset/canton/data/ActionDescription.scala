@@ -23,15 +23,16 @@ import com.digitalasset.canton.protocol.{
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
-  LfNodeLookupByKey,
+  LfNodeQueryByKey,
   LfTemplateId,
   RefIdentifierSyntax,
   v30,
+  v31,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
 import com.google.common.annotations.VisibleForTesting
@@ -42,11 +43,7 @@ import monocle.{Lens, Prism}
 /** Summarizes the information that is needed in addition to the other fields of
   * [[ViewParticipantData]] for determining the root action of a view.
   */
-sealed trait ActionDescription
-    extends Product
-    with Serializable
-    with PrettyPrinting
-    with HasProtocolVersionedWrapper[ActionDescription] {
+sealed trait ActionDescription extends Product with Serializable with PrettyPrinting {
 
   /** Whether the root action was a byKey action (exerciseByKey, fetchByKey, lookupByKey) */
   def byKey: Boolean
@@ -54,24 +51,19 @@ sealed trait ActionDescription
   /** The node seed for the root action of a view. Empty for fetch and lookupByKey nodes */
   def seedOption: Option[LfHash]
 
-  @transient override protected lazy val companionObj: ActionDescription.type =
-    ActionDescription
-
   protected def toProtoDescriptionV30: v30.ActionDescription.Description
+
+  protected def toProtoDescriptionV31: v31.ActionDescription.Description
 
   def toProtoV30: v30.ActionDescription =
     v30.ActionDescription(description = toProtoDescriptionV30)
+
+  def toProtoV31: v31.ActionDescription =
+    v31.ActionDescription(description = toProtoDescriptionV31)
+
 }
 
-object ActionDescription extends VersioningCompanion[ActionDescription] {
-  override lazy val name: String = "ActionDescription"
-
-  val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ActionDescription)(
-      supportedProtoVersion(_)(fromProtoV30),
-      _.toProtoV30,
-    )
-  )
+object ActionDescription {
 
   final case class InvalidActionDescription(message: String)
       extends RuntimeException(message)
@@ -85,11 +77,8 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       actionNode: LfActionNode,
       seedO: Option[LfHash],
       packagePreference: Set[LfPackageId],
-      protocolVersion: ProtocolVersion,
   ): ActionDescription =
-    fromLfActionNode(actionNode, seedO, packagePreference, protocolVersion).valueOr(err =>
-      throw err
-    )
+    fromLfActionNode(actionNode, seedO, packagePreference).valueOr(err => throw err)
 
   /** Extracts the action description from an LF node and the optional seed.
     * @param seedO
@@ -100,7 +89,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       actionNode: LfActionNode,
       seedO: Option[LfHash],
       packagePreference: Set[LfPackageId],
-      protocolVersion: ProtocolVersion,
   ): Either[InvalidActionDescription, ActionDescription] =
     actionNode match {
       case LfNodeCreate(
@@ -115,9 +103,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           ) =>
         for {
           seed <- seedO.toRight(InvalidActionDescription("No seed for a Create node given"))
-        } yield CreateActionDescription(contractId, seed)(
-          protocolVersionRepresentativeFor(protocolVersion)
-        )
+        } yield CreateActionDescription(contractId, seed)
 
       case LfNodeExercises(
             inputContract,
@@ -151,7 +137,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
             byKey,
             seed,
             failed = exerciseResult.isEmpty, // absence of exercise result indicates failure
-            protocolVersionRepresentativeFor(protocolVersion),
           )
         } yield actionDescription
 
@@ -178,33 +163,21 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
             actingParties,
             InvalidActionDescription("Fetch node without acting parties"),
           )
-        } yield FetchActionDescription(inputContract, actors, byKey, templateId, interfaceId)(
-          protocolVersionRepresentativeFor(protocolVersion)
-        )
+        } yield FetchActionDescription(inputContract, actors, byKey, templateId, interfaceId)
 
-      case LfNodeLookupByKey(_, _, keyWithMaintainers, _result, version) =>
-        for {
-          _ <- Either.cond(
-            seedO.isEmpty,
-            (),
-            InvalidActionDescription("No seed should be given for a LookupByKey node"),
-          )
-          actionDescription <- LookupByKeyActionDescription.create(
-            LfVersioned(version, keyWithMaintainers.globalKey),
-            protocolVersionRepresentativeFor(protocolVersion),
-          )
-        } yield actionDescription
+      case _: LfNodeQueryByKey =>
+        Left(InvalidActionDescription("QueryByKey nodes are not supported as root nodes of views"))
+
     }
 
   private def fromCreateProtoV30(
-      c: v30.ActionDescription.CreateActionDescription,
-      pv: RepresentativeProtocolVersion[ActionDescription.type],
+      c: v30.ActionDescription.CreateActionDescription
   ): ParsingResult[CreateActionDescription] = {
     val v30.ActionDescription.CreateActionDescription(contractIdP, seedP) = c
     for {
       contractId <- ProtoConverter.parseLfContractId(contractIdP)
       seed <- LfHash.fromProtoPrimitive("node_seed", seedP)
-    } yield CreateActionDescription(contractId, seed)(pv)
+    } yield CreateActionDescription(contractId, seed)
   }
 
   private def choiceFromProto(choiceP: String): ParsingResult[LfChoiceName] =
@@ -213,8 +186,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       .leftMap(err => ValueDeserializationError("choice", err))
 
   private def fromExerciseProtoV30(
-      e: v30.ActionDescription.ExerciseActionDescription,
-      pv: RepresentativeProtocolVersion[ActionDescription.type],
+      e: v30.ActionDescription.ExerciseActionDescription
   ): ParsingResult[ExerciseActionDescription] = {
     val v30.ActionDescription.ExerciseActionDescription(
       inputContractIdP,
@@ -254,15 +226,13 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           byKey,
           seed,
           failed,
-          pv,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromLookupByKeyProtoV30(
-      k: v30.ActionDescription.LookupByKeyActionDescription,
-      pv: RepresentativeProtocolVersion[ActionDescription.type],
+      k: v30.ActionDescription.LookupByKeyActionDescription
   ): ParsingResult[LookupByKeyActionDescription] = {
     val v30.ActionDescription.LookupByKeyActionDescription(keyP) = k
     for {
@@ -270,14 +240,13 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         .required("key", keyP)
         .flatMap(GlobalKeySerialization.fromProtoV30)
       actionDescription <- LookupByKeyActionDescription
-        .create(key, pv)
+        .create(key)
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromFetchProtoV30(
-      f: v30.ActionDescription.FetchActionDescription,
-      pv: RepresentativeProtocolVersion[ActionDescription.type],
+      f: v30.ActionDescription.FetchActionDescription
   ): ParsingResult[FetchActionDescription] = {
     val v30.ActionDescription.FetchActionDescription(
       inputContractIdP,
@@ -291,7 +260,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       actors <- actorsP.traverse(ProtoConverter.parseLfPartyId(_, field = "actors")).map(_.toSet)
       templateId <- RefIdentifierSyntax.fromProtoPrimitive(templateIdP)
       interfaceId <- interfaceIdP.traverse(RefIdentifierSyntax.fromProtoPrimitive)
-    } yield FetchActionDescription(inputContractId, actors, byKey, templateId, interfaceId)(pv)
+    } yield FetchActionDescription(inputContractId, actors, byKey, templateId, interfaceId)
   }
 
   private[data] def fromProtoV30(
@@ -300,15 +269,28 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
     import v30.ActionDescription.Description.*
     val v30.ActionDescription(description) = actionDescriptionP
 
-    val pv = protocolVersionRepresentativeFor(ProtoVersion(30))
-
     description match {
-      case Create(create) => pv.flatMap(fromCreateProtoV30(create, _))
-      case Exercise(exercise) => pv.flatMap(fromExerciseProtoV30(exercise, _))
-      case Fetch(fetch) => pv.flatMap(fromFetchProtoV30(fetch, _))
-      case LookupByKey(lookup) => pv.flatMap(fromLookupByKeyProtoV30(lookup, _))
+      case Create(create) => fromCreateProtoV30(create)
+      case Exercise(exercise) => fromExerciseProtoV30(exercise)
+      case Fetch(fetch) => fromFetchProtoV30(fetch)
+      case LookupByKey(lookup) => fromLookupByKeyProtoV30(lookup)
       case Empty => Left(FieldNotSet("description"))
     }
+  }
+
+  private[data] def fromProtoV31(
+      actionDescriptionP: v31.ActionDescription
+  ): ParsingResult[ActionDescription] = {
+    import v31.ActionDescription.Description.*
+    val v31.ActionDescription(description) = actionDescriptionP
+
+    description match {
+      case Create(create) => fromCreateProtoV30(create)
+      case Exercise(exercise) => fromExerciseProtoV30(exercise)
+      case Fetch(fetch) => fromFetchProtoV30(fetch)
+      case Empty => Left(FieldNotSet("description"))
+    }
+
   }
 
   def serializeChosenValue(
@@ -322,22 +304,22 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
   final case class CreateActionDescription(
       contractId: LfContractId,
       seed: LfHash,
-  )(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        ActionDescription.type
-      ]
   ) extends ActionDescription {
     override def byKey: Boolean = false
 
     override def seedOption: Option[LfHash] = Some(seed)
 
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Create =
-      v30.ActionDescription.Description.Create(
-        v30.ActionDescription.CreateActionDescription(
-          contractId = contractId.toProtoPrimitive,
-          nodeSeed = seed.toProtoPrimitive,
-        )
+    private def toCreateActionDescriptionV30 =
+      v30.ActionDescription.CreateActionDescription(
+        contractId = contractId.toProtoPrimitive,
+        nodeSeed = seed.toProtoPrimitive,
       )
+
+    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Create =
+      v30.ActionDescription.Description.Create(toCreateActionDescriptionV30)
+
+    override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Create =
+      v31.ActionDescription.Description.Create(toCreateActionDescriptionV30)
 
     override protected def pretty: Pretty[CreateActionDescription] = prettyOfClass(
       param("contract Id", _.contractId),
@@ -357,10 +339,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       override val byKey: Boolean,
       seed: LfHash,
       failed: Boolean,
-  )(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        ActionDescription.type
-      ]
   ) extends ActionDescription {
 
     private val serializedChosenValue: ByteString = serializeChosenValue(chosenValue)
@@ -369,19 +347,23 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
     override def seedOption: Option[LfHash] = Some(seed)
 
     override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Exercise =
-      v30.ActionDescription.Description.Exercise(
-        v30.ActionDescription.ExerciseActionDescription(
-          inputContractId = inputContractId.toProtoPrimitive,
-          templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
-          packagePreference = packagePreference.toSeq,
-          choice = choice,
-          interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
-          chosenValue = serializedChosenValue,
-          actors = actors.toSeq,
-          byKey = byKey,
-          nodeSeed = seed.toProtoPrimitive,
-          failed = failed,
-        )
+      v30.ActionDescription.Description.Exercise(toExerciseActionDescriptionV30)
+
+    override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Exercise =
+      v31.ActionDescription.Description.Exercise(toExerciseActionDescriptionV30)
+
+    private def toExerciseActionDescriptionV30: v30.ActionDescription.ExerciseActionDescription =
+      v30.ActionDescription.ExerciseActionDescription(
+        inputContractId = inputContractId.toProtoPrimitive,
+        templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
+        packagePreference = packagePreference.toSeq,
+        choice = choice,
+        interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
+        chosenValue = serializedChosenValue,
+        actors = actors.toSeq,
+        byKey = byKey,
+        nodeSeed = seed.toProtoPrimitive,
+        failed = failed,
       )
 
     override protected def pretty: Pretty[ExerciseActionDescription] = prettyOfClass(
@@ -420,7 +402,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         byKey,
         seed,
         failed,
-      )(representativeProtocolVersion)
+      )
 
   }
 
@@ -436,7 +418,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         byKey: Boolean,
         seed: LfHash,
         failed: Boolean,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): ExerciseActionDescription = create(
       inputContractId,
       templateId,
@@ -448,7 +429,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       byKey,
       seed,
       failed,
-      protocolVersion,
     ).fold(err => throw err, identity)
 
     def create(
@@ -462,7 +442,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         byKey: Boolean,
         seed: LfHash,
         failed: Boolean,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): Either[InvalidActionDescription, ExerciseActionDescription] =
       Either.catchOnly[InvalidActionDescription](
         ExerciseActionDescription(
@@ -476,7 +455,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           byKey,
           seed,
           failed,
-        )(protocolVersion)
+        )
       )
 
     /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
@@ -497,10 +476,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       override val byKey: Boolean,
       templateId: LfTemplateId,
       interfaceId: Option[LfTemplateId],
-  )(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        ActionDescription.type
-      ]
   ) extends ActionDescription
       with NoCopy {
 
@@ -510,16 +485,20 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
     def packagePreference: Set[LfPackageId] =
       if (interfaceId.nonEmpty) Set(templateId.packageId) else Set.empty
 
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Fetch =
-      v30.ActionDescription.Description.Fetch(
-        v30.ActionDescription.FetchActionDescription(
-          inputContractId = inputContractId.toProtoPrimitive,
-          actors = actors.toSeq,
-          byKey = byKey,
-          templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
-          interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
-        )
+    private def toFetchActionDescriptionV30: v30.ActionDescription.FetchActionDescription =
+      v30.ActionDescription.FetchActionDescription(
+        inputContractId = inputContractId.toProtoPrimitive,
+        actors = actors.toSeq,
+        byKey = byKey,
+        templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
+        interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
       )
+
+    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Fetch =
+      v30.ActionDescription.Description.Fetch(toFetchActionDescriptionV30)
+
+    override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Fetch =
+      v31.ActionDescription.Description.Fetch(toFetchActionDescriptionV30)
 
     override protected def pretty: Pretty[FetchActionDescription] = prettyOfClass(
       param("input contract id", _.inputContractId),
@@ -529,13 +508,8 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
     )
   }
 
-  final case class LookupByKeyActionDescription private (
-      key: LfVersioned[LfGlobalKey]
-  )(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        ActionDescription.type
-      ]
-  ) extends ActionDescription {
+  final case class LookupByKeyActionDescription(key: LfVersioned[LfGlobalKey])
+      extends ActionDescription {
 
     private val serializedKey =
       GlobalKeySerialization
@@ -546,30 +520,32 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
 
     override def seedOption: Option[LfHash] = None
 
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.LookupByKey =
+    protected def toProtoDescriptionV30: v30.ActionDescription.Description.LookupByKey =
       v30.ActionDescription.Description.LookupByKey(
         v30.ActionDescription.LookupByKeyActionDescription(
           key = Some(serializedKey)
         )
       )
 
+    override protected def toProtoDescriptionV31: v31.ActionDescription.Description =
+      throw InvalidActionDescription(
+        s"LookupByKey is not supported as root view action in ${ProtocolVersion.v35} or above"
+      )
+
     override protected def pretty: Pretty[LookupByKeyActionDescription] = prettyOfClass(
       param("key", _.key)
     )
+
   }
 
   object LookupByKeyActionDescription {
-    def tryCreate(
-        key: LfVersioned[LfGlobalKey],
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
-    ): LookupByKeyActionDescription =
-      new LookupByKeyActionDescription(key)(protocolVersion)
+    def tryCreate(key: LfVersioned[LfGlobalKey]): LookupByKeyActionDescription =
+      new LookupByKeyActionDescription(key)
 
     def create(
-        key: LfVersioned[LfGlobalKey],
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
+        key: LfVersioned[LfGlobalKey]
     ): Either[InvalidActionDescription, LookupByKeyActionDescription] =
-      Either.catchOnly[InvalidActionDescription](tryCreate(key, protocolVersion))
+      Either.catchOnly[InvalidActionDescription](tryCreate(key))
 
   }
 
@@ -581,8 +557,6 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       GenPrism[ActionDescription, ExerciseActionDescription]
     val fetch: Prism[ActionDescription, FetchActionDescription] =
       GenPrism[ActionDescription, FetchActionDescription]
-    val lookupByKey: Prism[ActionDescription, LookupByKeyActionDescription] =
-      GenPrism[ActionDescription, LookupByKeyActionDescription]
   }
 
 }

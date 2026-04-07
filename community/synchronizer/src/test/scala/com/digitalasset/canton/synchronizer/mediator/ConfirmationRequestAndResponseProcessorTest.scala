@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject}
+import com.digitalasset.canton.sequencing.UnthrottledAsyncF
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.mediator.store.{
@@ -281,7 +282,6 @@ class ConfirmationRequestAndResponseProcessorTest
       timeouts,
       loggerFactory,
     )
-    mediatorState.initialize(CantonTimestamp.MinValue).futureValueUS
     val processor = new ConfirmationRequestAndResponseProcessor(
       mediatorId,
       verdictSender,
@@ -295,6 +295,7 @@ class ConfirmationRequestAndResponseProcessorTest
       loggerFactory,
       timeouts,
       BatchingConfig(),
+      futureSupervisor,
     )
   }
 
@@ -959,7 +960,8 @@ class ConfirmationRequestAndResponseProcessorTest
         }
 
       for {
-        _ <- sut.processor
+        // The innerFuture will complete when the request is finalized and stored, not before
+        unthrottledAsync <- sut.processor
           .processRequest(
             requestId,
             notSignificantCounter,
@@ -990,9 +992,13 @@ class ConfirmationRequestAndResponseProcessorTest
             mockTopologySnapshot,
             BatchingConfig(),
             participantResponseDeadlineTick = None,
+            requestState.asInstanceOf[ResponseAggregation[?]].finalizedPromise,
           )
 
         _ = requestState shouldBe responseAggregation
+        _ = inside(unthrottledAsync) { case UnthrottledAsyncF(future) =>
+          future.isCompleted shouldBe false
+        }
         // receiving the confirmation response
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
         responses = List(
@@ -1033,6 +1039,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     _,
                     actualVersion,
                     Right(_states),
+                    _,
                   )
                 ) =>
               actualRequestId shouldBe requestId
@@ -1060,6 +1067,7 @@ class ConfirmationRequestAndResponseProcessorTest
             _,
             `ts1`,
             Right(states),
+            _,
           ) = updatedState.value
           assert(
             states === Map(
@@ -1106,6 +1114,10 @@ class ConfirmationRequestAndResponseProcessorTest
             )
           )
         }
+        // We're still missing one confirmation response, the innerFuture should still not be completed
+        _ = inside(unthrottledAsync) { case UnthrottledAsyncF(future) =>
+          future.isCompleted shouldBe false
+        }
         // receiving the final confirmation response
         ts2 = CantonTimestamp.Epoch.plusMillis(2L)
         responses = List(
@@ -1131,6 +1143,10 @@ class ConfirmationRequestAndResponseProcessorTest
             Some(requestId.unwrap),
             Recipients.cc(mediatorGroupRecipient),
           )
+        // Now the innerFuture should be completed as we get a finalized response
+        _ <- inside(unthrottledAsync) { case UnthrottledAsyncF(future) =>
+          future
+        }
         // records the request
         finalState <- sut.mediatorState
           .fetch(requestId)

@@ -52,7 +52,7 @@ class SpanningTest extends AnyWordSpec with BaseTest with BeforeAndAfterEach {
       withNewTrace("Outer.nestedFuture") { _ => span =>
         span.addEvent("running Outer.foo")
         EitherT.pure(
-          HandlerResult.asynchronous(FutureUnlessShutdown.outcomeF(inner))
+          HandlerResult.asynchronousUnit(FutureUnlessShutdown.outcomeF(inner))
         )
       }
     }

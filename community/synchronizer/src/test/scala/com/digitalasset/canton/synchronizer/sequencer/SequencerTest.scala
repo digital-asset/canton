@@ -136,6 +136,7 @@ class SequencerTest
         storage,
         sequencerStore,
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         clock,
         topologyClientMember,
         crypto,

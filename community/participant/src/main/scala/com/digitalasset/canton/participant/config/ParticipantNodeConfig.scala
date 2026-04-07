@@ -380,6 +380,8 @@ object TestingTimeServiceConfig {
   *   counters.
   *   - false (Default): Uses Create/Archive; resets reassignment counters to zero.
   *   - true: Uses Assign/Unassign; preserves existing reassignment counters.
+  * @param commitAfterFailedActivenessCheck
+  *   For internal testing only. Do not enable this in production.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -389,9 +391,6 @@ final case class ParticipantNodeParameterConfig(
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(ProtocolVersion.v34)
-    ),
-    initialProtocolVersion: ParticipantProtocolVersion = ParticipantProtocolVersion(
-      ProtocolVersion.latest
     ),
     alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
@@ -423,6 +422,7 @@ final case class ParticipantNodeParameterConfig(
     commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
     alphaMultiSynchronizerSupport: Boolean = false,
+    commitAfterFailedActivenessCheck: Boolean = false,
 ) extends LocalNodeParametersConfig
 
 /** Parameters for the participant node's stores

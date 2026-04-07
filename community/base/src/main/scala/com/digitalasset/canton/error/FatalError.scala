@@ -25,7 +25,11 @@ object FatalError {
       case None => logger.error(message)
     }
 
-    sys.exit(117)
+    // Using runtime halt instead of sys.exit to forcefully exit the process without running shutdown hooks
+    sys.runtime.halt(117)
+
+    // This is needed to satisfy the return type of Nothing, but it will never be reached due to the runtime halt above.
+    throw new Throwable()
   }
 
   def exitOnFatalError(error: RpcError, logger: TracedLogger)(implicit

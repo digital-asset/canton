@@ -9,30 +9,33 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.sequencing.PossiblyIgnoredApplicationHandler
+import com.digitalasset.canton.sequencing.ApplicationHandler
 import com.digitalasset.canton.sequencing.handlers.ThrottlingApplicationEventHandler.{
   AtLimit,
   BelowCapacity,
   ThrottlingState,
 }
-import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
-class ThrottlingApplicationEventHandler(override val loggerFactory: NamedLoggerFactory)
-    extends NamedLogging {
+class ThrottlingApplicationEventHandler(
+    override val loggerFactory: NamedLoggerFactory
+) extends NamedLogging {
 
-  def throttle(
+  def throttle[Box[+_ <: Envelope[?]], Env <: Envelope[?], A](
       maximumInFlightEventBatches: PositiveInt,
-      handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      handler: ApplicationHandler[Lambda[
+        `+e <: Envelope[?]` => Traced[Seq[Box[e]]]
+      ], Env, A],
       metrics: SequencerClientMetrics,
   )(implicit
       ec: ExecutionContext
-  ): PossiblyIgnoredApplicationHandler[ClosedEnvelope] = {
+  ): ApplicationHandler[Lambda[`+e <: Envelope[?]` => Traced[Seq[Box[e]]]], Env, A] = {
 
     def acquirePermit(s: ThrottlingState)(implicit traceContext: TraceContext) =
       s match {

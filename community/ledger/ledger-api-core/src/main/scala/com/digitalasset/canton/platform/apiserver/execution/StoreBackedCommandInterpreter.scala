@@ -35,7 +35,7 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.transaction.{
-  GlobalKeyWithMaintainers,
+  GlobalKey,
   NeedKeyProgression,
   NextGenContractStateMachine,
   Node,
@@ -269,14 +269,14 @@ final class StoreBackedCommandInterpreter(
     val lookupContractKeyTime = new AtomicLong(0L)
     val lookupContractKeyCount = new AtomicLong(0L)
 
-    val disclosedContractsByKey: Map[GlobalKeyWithMaintainers, Vector[LfFatContractInst]] =
-      disclosedContracts.foldLeft(Map.empty[GlobalKeyWithMaintainers, Vector[LfFatContractInst]]) {
+    val disclosedContractsByKey: Map[GlobalKey, Vector[LfFatContractInst]] =
+      disclosedContracts.foldLeft(Map.empty[GlobalKey, Vector[LfFatContractInst]]) {
         case (map, disclosedContract) =>
           disclosedContract.fatContractInstance.contractKeyWithMaintainers match {
             case Some(key) =>
               map.+(
-                key -> map
-                  .getOrElse(key, Vector.empty)
+                key.globalKey -> map
+                  .getOrElse(key.globalKey, Vector.empty)
                   .appended(disclosedContract.fatContractInstance)
               )
             case None =>
@@ -311,7 +311,7 @@ final class StoreBackedCommandInterpreter(
     }
 
     def disclosedOrStoreNKeyLookup(
-        key: GlobalKeyWithMaintainers,
+        key: GlobalKey,
         limit: Int,
         progression: NeedKeyProgression.CanContinue,
     ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] = {
@@ -355,7 +355,7 @@ final class StoreBackedCommandInterpreter(
     }
 
     def timedNKeyLookup(
-        key: GlobalKeyWithMaintainers,
+        key: GlobalKey,
         limit: Int,
         continuationToken: StoreNeedKeyContinuationToken.ContinueFromStore,
     ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] =
@@ -374,7 +374,7 @@ final class StoreBackedCommandInterpreter(
               contractStore
                 .lookupNonUniqueContractKey(
                   readers = readers,
-                  key = key.globalKey,
+                  key = key,
                   pageToken = continuationToken.token,
                   limit = limit,
                 )
@@ -522,11 +522,8 @@ final class StoreBackedCommandInterpreter(
                 case (acc, ContractState.Active(ci)) => ci.collectCids(acc)
                 case (acc, _) => acc
               })
-          // prefetch the contract keys via the mutable state cache / batch aggregator
-          val initialLoadKeyF =
-            keys
-              .parTraverse(key => contractStore.lookupContractKey(Set.empty, key))
-              .map(_.flattenOption)
+          // TODO(#30398): restore the prefetching of keys
+          val initialLoadKeyF = Future.successful(Seq.empty[ContractId])
           // then prefetch the found referenced or key contracts recursively
           val loadContractsF = initialLoadCidF.flatMap { referencedCids =>
             initialLoadKeyF.flatMap { keyCids =>

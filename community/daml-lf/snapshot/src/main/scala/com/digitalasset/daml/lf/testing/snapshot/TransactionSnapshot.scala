@@ -17,7 +17,7 @@ import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
-  GlobalKeyWithMaintainers,
+  GlobalKey,
   NextGenContractStateMachine as ContractStateMachine,
   Node,
   SubmittedTransaction as SubmittedTx,
@@ -40,7 +40,7 @@ final case class TransactionSnapshot(
     preparationTime: Time.Timestamp,
     submissionSeed: crypto.Hash,
     contracts: Map[ContractId, FatContractInstance],
-    contractKeys: Map[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
+    contractKeys: Map[GlobalKey, Vector[FatContractInstance]],
     pkgs: Map[Ref.PackageId, Ast.Package],
     profileDir: Option[Path],
     contractIdVersion: ContractIdVersion,
@@ -263,11 +263,11 @@ private[snapshot] object TransactionSnapshot {
         )
       }.toMap
       val contractKeys = contracts.values.foldLeft(
-        Map.empty[GlobalKeyWithMaintainers, Vector[FatContractInstance]]
+        Map.empty[GlobalKey, Vector[FatContractInstance]]
       ) { case (acc, contract) =>
         contract.contractKeyWithMaintainers match {
           case Some(key) =>
-            acc.updated(key, contract +: acc.getOrElse(key, Vector.empty))
+            acc.updated(key.globalKey, contract +: acc.getOrElse(key.globalKey, Vector.empty))
           case None => acc
         }
       }

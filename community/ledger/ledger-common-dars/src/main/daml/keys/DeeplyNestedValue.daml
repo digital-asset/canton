@@ -9,8 +9,6 @@ module DeeplyNestedValue where
 
 #ifdef DAML_CONTRACT_KEYS
 
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 data Nat = Z | S Nat
   deriving (Eq, Show)

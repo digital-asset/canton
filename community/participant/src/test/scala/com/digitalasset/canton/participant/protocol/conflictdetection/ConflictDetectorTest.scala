@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.data.{Chain, NonEmptyChain}
+import cats.data.NonEmptyChain
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
@@ -29,9 +29,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Active,
   Archived,
-  ChangeAfterArchival,
   ContractState as AcsContractState,
-  DoubleContractArchival,
   DoubleContractCreation,
   ReassignedAway,
   Status,
@@ -720,8 +718,8 @@ final class ConflictDetectorTest
           .flatten
 
         _ = assert(
-          fin0 == Left(NonEmptyChain(AcsError(DoubleContractArchival(coid00, tor1, tor)))),
-          s"double archival of $coid00 is reported",
+          fin0 == Right(()),
+          s"double archival of $coid00 is tolerated",
         )
         _ <- checkContractState(acs, coid00, (Archived, tor1))(
           s"contract $coid00 is double archived by request $rc"
@@ -733,8 +731,8 @@ final class ConflictDetectorTest
         // Finalize third request
         fin2 <- cd.finalizeRequest(mkCommitSet(arch = Set(coid10)), tor2).flatten
         _ = assert(
-          fin2 == Left(NonEmptyChain(AcsError(DoubleContractArchival(coid10, tor, tor2)))),
-          s"double archival of $coid01 is reported",
+          fin2 == Right(()),
+          s"double archival of $coid01 is tolerated",
         )
         _ <- checkContractState(acs, coid10, (Archived, tor2))(
           s"contract archival for $coid10 is overwritten"
@@ -762,7 +760,7 @@ final class ConflictDetectorTest
           .finalizeRequest(mkCommitSet(arch = Set(coid00, coid01)), tor1)
           .flatten
 
-        _ = assert(fin0 == Left(Chain.one(AcsError(DoubleContractArchival(coid01, tor0, tor1)))))
+        _ = assert(fin0 == Right(()))
         _ = checkContractStateAbsent(cd, coid01)(s"Double archived contract remains archived")
         _ <- checkContractState(acs, coid00, (Archived, tor1))(s"contract $coid00 gets archived")
       } yield succeed
@@ -786,8 +784,7 @@ final class ConflictDetectorTest
 
         _ = assert(
           fin1.left.value.toList.toSet == Set(
-            AcsError(DoubleContractCreation(coid01, tor0, tor1)),
-            AcsError(ChangeAfterArchival(coid01, tor0, tor1)),
+            AcsError(DoubleContractCreation(coid01, tor0, tor1))
           )
         )
         _ <- checkContractState(acs, coid10, (active, tor1))(s"contract $coid10 is created")
@@ -910,7 +907,7 @@ final class ConflictDetectorTest
         }
         commitSet0 = mkCommitSet(create = Set(coid00, coid01, coid10), arch = Set(coid10))
         fin0 <- cd.finalizeRequest(commitSet0, tor0).flatten
-        _ = fin0 shouldBe Left(NonEmptyChain(AcsError(DoubleContractArchival(coid10, tor1, tor0))))
+        _ = fin0 shouldBe Right(())
         _ <- checkContractState(acs, coid00, (Archived, tor1))(s"contract $coid00 remains archived")
         _ <- checkContractState(acs, coid01, (active, tor0))(s"contract $coid01 is active")
         _ <- checkContractState(acs, coid10, (Archived, tor1))(
@@ -1067,9 +1064,7 @@ final class ConflictDetectorTest
           finF1 <- cd.finalizeRequest(commitSet1, tor1)
           _ = finF1Complete.success(())
           fin1 <- finF1
-          _ = assert(
-            fin1 == Left(NonEmptyChain(AcsError(DoubleContractArchival(coid20, tor3, tor1))))
-          )
+          _ = assert(fin1 == Right(()))
           _ = checkContractState(cd, coid00, Archived, tor1, 0, 1, 1)(
             s"Archived contract $coid00 remains locked."
           )
@@ -1134,14 +1129,7 @@ final class ConflictDetectorTest
         finF0 <- cd.finalizeRequest(commitSet0, tor0)
         _ = finF0Complete.success(())
         fin0 <- finF0
-        _ =
-          fin0.leftMap(_.toList.toSet) shouldBe Left(
-            Set(
-              AcsError(DoubleContractArchival(coid00, tor1, tor0)),
-              AcsError(DoubleContractArchival(coid11, tor1, tor0)),
-              AcsError(DoubleContractArchival(coid20, tor1, tor0)),
-            )
-          )
+        _ = fin0 shouldBe Right(())
         _ = checkContractState(cd, coid00, Archived, tor1, 0, 1, 0)(
           s"Contract $coid00 remains locked."
         )
@@ -1264,8 +1252,8 @@ final class ConflictDetectorTest
           s"Report that $coid00 was already archived.",
         )
         assert(
-          fin == Left(NonEmptyChain(AcsError(ChangeAfterArchival(coid00, tor0, tor1)))),
-          s"Report assignment after archival.",
+          fin == Right(()),
+          s"Tolerate assignment after archival.",
         )
         assert(
           fetch00.contains(AcsContractState(active, tor1)),
@@ -1626,10 +1614,7 @@ final class ConflictDetectorTest
         fin1 <- cd.finalizeRequest(commitSet1, tor1).flatten
       } yield {
         assert(fin2 == Either.unit, s"First commit goes through")
-        fin1
-          .leftOrFail("Double (de)activations are reported.")
-          .toList should contain(AcsError(ChangeAfterArchival(coid00, tor1, tor2)))
-
+        fin1 shouldBe Right(())
       }
     }
 

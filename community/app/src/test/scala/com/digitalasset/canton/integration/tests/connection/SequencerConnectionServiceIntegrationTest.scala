@@ -23,7 +23,10 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.sequencing.{SequencerConnectionXPool, SequencerSubscriptionPool}
+import com.digitalasset.canton.sequencing.client.pool.{
+  SequencerConnectionPool,
+  SequencerSubscriptionPool,
+}
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
@@ -95,7 +98,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
       clue("reconfigure mediator's trust threshold") {
         loggerFactory.assertLogsSeq(
           SuppressionRule.LevelAndAbove(INFO) && (SuppressionRule
-            .forLogger[SequencerConnectionXPool] || SuppressionRule
+            .forLogger[SequencerConnectionPool] || SuppressionRule
             .forLogger[SequencerSubscriptionPool])
         )(
           mediator1.sequencer_connection.modify_connections {

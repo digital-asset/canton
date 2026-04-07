@@ -8,14 +8,22 @@ import com.digitalasset.canton.crypto.{HashOps, Salt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
-import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfVersioned}
-import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  LfPackageId,
+  LfVersioned,
+  ProtocolVersionChecksAnyWordSpec,
+}
 import org.scalatest.wordspec.AnyWordSpec
 
-class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class TransactionViewTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec {
 
   private val factory = new ExampleTransactionFactory()()
 
@@ -33,15 +41,6 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   private val otherAbsoluteId: LfContractId = ExampleTransactionFactory.suffixedId(1, 1)
   private val salt: Salt = factory.transactionSalt
   private val nodeSeed: LfHash = ExampleTransactionFactory.lfHash(1)
-  private val globalKey: LfGlobalKey =
-    LfGlobalKey
-      .build(
-        LfTransactionBuilder.defaultTemplateId,
-        LfTransactionBuilder.defaultPackageName,
-        Value.ValueInt64(100L),
-        crypto.Hash.hashPrivateKey("dummy-key-hash"),
-      )
-      .value
 
   private val defaultPackagePreference = Set(ExampleTransactionFactory.packageId)
 
@@ -50,7 +49,6 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
       ExampleTransactionFactory.createNode(createdId, contractInst),
       Some(ExampleTransactionFactory.lfHash(5)),
       defaultPackagePreference,
-      testedProtocolVersion,
     )
 
   forEvery(factory.standardHappyCases) { example =>
@@ -165,7 +163,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         coreInputs: Map[LfContractId, GenContractInstance] = Map.empty,
         createdIds: Seq[LfContractId] = Seq(createdId),
         archivedInSubviews: Set[LfContractId] = Set.empty,
-        resolvedKeys: Map[LfGlobalKey, LfVersioned[SerializableKeyResolution]] = Map.empty,
+        resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] = Map.empty,
     ): Either[String, ViewParticipantData] = {
 
       val created = createdIds.map { id =>
@@ -253,7 +251,6 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
             ExampleTransactionFactory.exerciseNodeWithoutChildren(absoluteId),
             Some(nodeSeed),
             defaultPackagePreference,
-            testedProtocolVersion,
           )
         ).left.value should startWith(
           show"Input contract $absoluteId of the Exercise root action is not declared as core input."
@@ -270,37 +267,42 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
             ),
             None,
             defaultPackagePreference,
-            testedProtocolVersion,
           )
         ).left.value should startWith(
           show"Input contract $absoluteId of the Fetch root action is not declared as core input."
         )
       }
 
-      "reject creation with lookup action" in {
-        create(
-          actionDescription = ActionDescription.tryFromLfActionNode(
-            ExampleTransactionFactory.lookupByKeyNode(
-              globalKey,
-              maintainers = Set(ExampleTransactionFactory.submitter),
-            ),
-            None,
-            defaultPackagePreference,
-            testedProtocolVersion,
-          )
-        ).left.value should startWith(
-          show"Key $globalKey of LookupByKey root action is not resolved."
-        )
-
-      }
     }
 
     "deserialized" must {
-      "reconstruct the original view participant data" in {
+
+      "reconstruct unkeyed view participant data" in {
+
+        val usedContract = ExampleContractFactory.build(
+          overrideContractId = Some(absoluteId)
+        )
+        val vpd = create(
+          consumed = Set(absoluteId),
+          createdIds = Seq(createdId),
+          coreInputs = Map(absoluteId -> usedContract),
+          archivedInSubviews = Set(otherAbsoluteId),
+        ).value
+
+        ViewParticipantData
+          .fromByteString(testedProtocolVersion, hashOps)(
+            vpd.getCryptographicEvidence
+          )
+          .map(_.unwrap) shouldBe Right(Right(vpd))
+      }
+
+      "reconstruct the original keyed view participant data" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+
+        val key = ExampleTransactionFactory.globalKeyWithMaintainers()
 
         val usedContract = ExampleContractFactory.build(
           overrideContractId = Some(absoluteId),
-          keyOpt = Some(ExampleTransactionFactory.globalKeyWithMaintainers().unversioned),
+          keyOpt = Some(key.unversioned),
         )
         val vpd = create(
           consumed = Set(absoluteId),
@@ -309,7 +311,13 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           archivedInSubviews = Set(otherAbsoluteId),
           resolvedKeys = Map(
             ExampleTransactionFactory.defaultGlobalKey ->
-              LfVersioned(ExampleTransactionFactory.serializationVersion, AssignedKey(absoluteId))
+              LfVersioned(
+                key.version,
+                KeyResolutionWithMaintainers(
+                  Vector(usedContract.contractId),
+                  key.unversioned.maintainers,
+                ),
+              )
           ),
         ).value
 

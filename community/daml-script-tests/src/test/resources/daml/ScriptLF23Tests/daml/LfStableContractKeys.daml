@@ -7,8 +7,6 @@ module LfStableContractKeys where
 
 import Daml.Script
 import DA.Optional (isNone)
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template TextKey
   with

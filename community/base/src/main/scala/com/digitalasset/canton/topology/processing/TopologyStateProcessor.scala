@@ -183,7 +183,7 @@ class TopologyStateProcessorImpl private[processing] (
               // Reduces caches if they become too large
               cache.evict().discard
               authValidator.evict()
-              AsyncResult.immediate
+              AsyncResult.immediateUnit
             }
       }
     } yield (validatedTx, asyncResult)
@@ -191,7 +191,7 @@ class TopologyStateProcessorImpl private[processing] (
     // Therefore we merge the left (failed validations) with the right (successful or failed validations, in case !abortOnError.
     // The caller of this method must anyway deal with rejections.
     ret
-      .leftMap(_ -> AsyncResult.immediate)
+      .leftMap(_ -> AsyncResult.immediateUnit)
       .merge
       .thereafter { _ =>
         // Unlock the Topology state cache eviction lock (cache is thread safe / eviction not)

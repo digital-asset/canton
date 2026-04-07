@@ -7,12 +7,11 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{SynchronizerCrypto, SynchronizerCryptoClient}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientConfig}
 import com.digitalasset.canton.sequencing.{
@@ -40,9 +39,9 @@ final class SequencerChannelClientFactory(
     synchronizerParameters: StaticSynchronizerParameters,
     processingTimeout: ProcessingTimeout,
     clock: Clock,
-    loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
     supportedProtocolVersions: Seq[ProtocolVersion],
-) {
+) extends NamedLogging {
   def create(
       member: Member,
       sequencerConnections: SequencerConnections,
@@ -71,7 +70,8 @@ final class SequencerChannelClientFactory(
       member: Member,
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
-      executionContext: ExecutionContextExecutor
+      traceContext: TraceContext,
+      executionContext: ExecutionContextExecutor,
   ): Either[String, NonEmpty[Map[SequencerId, SequencerChannelClientTransport]]] = for {
     _ <- {
       val unexpectedSequencers = sequencerConnections.connections.collect {
@@ -101,14 +101,28 @@ final class SequencerChannelClientFactory(
       sequencerId: SequencerId,
       member: Member,
   )(implicit
-      executionContext: ExecutionContextExecutor
+      traceContext: TraceContext,
+      executionContext: ExecutionContextExecutor,
   ): SequencerChannelClientTransport = {
     val loggerFactoryWithSequencerId =
       SequencerClient.loggerFactoryWithSequencerId(loggerFactory, sequencerId)
     conn match {
       case connection: GrpcSequencerConnection =>
+        // TODO(i31759): Remove multiple endpoints from `SequencerConnection`
+        if (connection.endpoints.sizeIs > 1) {
+          logger.warn(
+            s"Configuration for sequencer ${connection.sequencerAlias} defines more than one endpoint. " ++
+              "This is deprecated and not supported. Only the first endpoint will be used."
+          )
+        }
+
         val channel = createChannel(connection)
-        val auth = grpcSequencerClientAuth(connection, member)
+        val auth = grpcSequencerClientAuth(
+          connection.sequencerAlias,
+          connection.endpoints.head1,
+          channel,
+          member,
+        )
         new SequencerChannelClientTransport(
           channel,
           auth,
@@ -119,18 +133,17 @@ final class SequencerChannelClientFactory(
   }
 
   private def grpcSequencerClientAuth(
-      connection: GrpcSequencerConnection,
+      sequencerAlias: SequencerAlias,
+      endpoint: Endpoint,
+      channel: ManagedChannel,
       member: Member,
-  )(implicit executionContext: ExecutionContextExecutor): GrpcSequencerClientAuth = {
-    val channelPerEndpoint = connection.endpoints.map { endpoint =>
-      val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
-      endpoint -> createChannel(subConnection)
-    }.toMap
+  )(implicit executionContext: ExecutionContextExecutor): GrpcSequencerClientAuth =
     new GrpcSequencerClientAuth(
       synchronizerId,
       member,
       crypto,
-      channelPerEndpoint,
+      endpoint = endpoint,
+      channel = channel,
       supportedProtocolVersions,
       config.authToken,
       clock,
@@ -139,25 +152,26 @@ final class SequencerChannelClientFactory(
       processingTimeout,
       SequencerClient.loggerFactoryWithSequencerAlias(
         loggerFactory,
-        connection.sequencerAlias,
+        sequencerAlias,
       ),
     )
-  }
 
   /** Creates a GRPC-level managed channel (not to be confused with a sequencer channel).
     */
-  private def createChannel(conn: GrpcSequencerConnection)(implicit
+  private def createChannel(connection: GrpcSequencerConnection)(implicit
       executionContext: ExecutionContextExecutor
   ): ManagedChannel = {
     val channelBuilder = ClientChannelBuilder(
-      SequencerClient.loggerFactoryWithSequencerAlias(loggerFactory, conn.sequencerAlias)
+      SequencerClient.loggerFactoryWithSequencerAlias(loggerFactory, connection.sequencerAlias)
     )
-    GrpcSequencerChannelBuilder(
-      channelBuilder,
-      conn,
-      NonNegativeInt.maxValue, // TODO(#21339): Limit and enforce the maximum request/payload size in channels
-      traceContextPropagation,
-      config.keepAliveClient,
-    )
+    channelBuilder
+      .create(
+        connection.endpoints.head1,
+        connection.transportSecurity,
+        executionContext,
+        connection.customTrustCertificates,
+        config.clientChannelParams(traceContextPropagation),
+      )
+      .build()
   }
 }

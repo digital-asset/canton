@@ -287,10 +287,9 @@ class ProgrammableSequencer(
         logger.debug(s"Immediately allowing message ${submission.messageId}")
         sendAndCheck(signedSubmission)
 
-      case SendDecision.Reject =>
+      case SendDecision.Reject(error) =>
         semaphore.release()
         logger.debug(s"Rejecting message ${submission.messageId}")
-        val error = SequencerErrors.InternalTesting("Message rejected by send policy.")
         EitherT.leftT[FutureUnlessShutdown, Unit](error)
 
       case SendDecision.Drop =>

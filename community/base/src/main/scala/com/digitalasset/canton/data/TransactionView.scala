@@ -182,10 +182,15 @@ final case class TransactionView private (
     * @throws java.lang.IllegalStateException
     *   if the [[ViewParticipantData]] of this view or any subview is blinded
     */
-  def globalKeyInputs(implicit
+  def keyMaintainers(implicit
       loggingContext: NamedLoggingContext
   ): Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] =
     _globalKeyInputs.get
+
+  def legacyGlobalKeyInputs(implicit
+      loggingContext: NamedLoggingContext
+  ): Map[LfGlobalKey, LfVersioned[LegacyKeyResolutionWithMaintainers]] =
+    _globalKeyInputs.get.fmap(_.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen))
 
   private[this] val _globalKeyInputs
       : NamedLoggingLazyVal[Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
@@ -197,10 +202,10 @@ final case class TransactionView private (
           s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
         )
 
-        subviews.unblindedElements.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) {
-          (acc, subview) =>
-            val subviewGki = subview.globalKeyInputs
-            MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
+        subviews.unblindedElements.foldLeft(viewParticipantData.keyMaintainers) { (acc, subview) =>
+          val subviewGki = subview.keyMaintainers
+          // TODO(#31527): SPM review this use
+          MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
         }
     }
 

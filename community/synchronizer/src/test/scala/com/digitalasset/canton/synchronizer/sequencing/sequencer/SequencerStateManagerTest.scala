@@ -369,6 +369,7 @@ class SequencerStateManagerTest
       defaultRateLimiter,
       orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
       lsuSequencingBounds = None,
+      drSequencingTimeUpperBound = None,
       getAnnouncedLsu = None,
       producePostOrderingTopologyTicks = false,
       SequencerTestMetrics,

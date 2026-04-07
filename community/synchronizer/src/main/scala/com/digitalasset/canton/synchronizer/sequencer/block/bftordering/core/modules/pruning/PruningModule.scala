@@ -63,7 +63,7 @@ final class PruningModule[E <: Env[E]](
       case Pruning.KickstartPruning(retention, minBlocksToKeep, requestPromise) =>
         def kickStartPruning(): Unit = {
           logger.info(s"Kick-starting new pruning operation")
-          pipeToSelfOpt(stores.outputStore.getLastConsecutiveBlock) {
+          pipeToSelfOpt(stores.outputStore.getLastBlockInLatestCompletedEpoch) {
             case Success(Some(block)) =>
               Some(Pruning.ComputePruningPoint(block, retention, minBlocksToKeep))
             case Success(None) =>
@@ -187,7 +187,7 @@ final class PruningModule[E <: Env[E]](
         pipeToSelfOpt(
           context.zipFuture(
             stores.outputStore.getLowerBound(),
-            stores.outputStore.getLastConsecutiveBlock,
+            stores.outputStore.getLastBlockInLatestCompletedEpoch,
           )
         ) { result =>
           (result match {

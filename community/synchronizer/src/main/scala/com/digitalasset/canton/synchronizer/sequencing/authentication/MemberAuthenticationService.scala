@@ -289,8 +289,8 @@ class MemberAuthenticationService(
 
   protected def isParticipantActive(participant: ParticipantId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] = isMemberActive(
-    _.isParticipantActiveAndCanLoginAt(participant, clock.now)
+  ): FutureUnlessShutdown[Boolean] = isMemberActive(snapshot =>
+    snapshot.isParticipantActiveAndCanLoginAt(participant, snapshot.timestamp)
   )
 
   protected def isMediatorActive(mediator: MediatorId)(implicit
@@ -425,7 +425,7 @@ class MemberAuthenticationServiceImpl(
             ) =>
           val participant = cert.participantId
           // if the loginAfter is in the future, check the snapshot to confirm not active, revoke tokens. otherwise do nothing
-          if (cert.loginAfter.exists(_ > clock.now)) {
+          if (cert.loginAfter.exists(_ > effectiveTimestamp.value)) {
             logger.info(
               s"Received topology transaction shifting loginAfter for Participant $participant to the future. Calling invalidateAndExpire"
             )

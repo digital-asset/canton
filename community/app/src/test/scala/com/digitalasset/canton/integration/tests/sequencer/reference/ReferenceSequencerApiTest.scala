@@ -63,6 +63,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         FutureSupervisor.Noop,
         SequencerTrafficConfig(),
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         runtimeReady = FutureUnlessShutdown.unit,
       )
       .futureValueUS

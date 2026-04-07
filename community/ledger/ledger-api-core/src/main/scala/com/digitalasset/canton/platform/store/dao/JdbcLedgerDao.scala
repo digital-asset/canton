@@ -20,7 +20,7 @@ import com.digitalasset.canton.platform.config.{
 import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
-import com.digitalasset.canton.platform.store.cache.LedgerEndCache
+import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.platform.store.utils.QueueBasedConcurrencyLimiter
 import com.digitalasset.canton.tracing.TraceContext
@@ -54,6 +54,7 @@ private[platform] class JdbcLedgerDao(
     contractLoader: ContractLoader,
     lfValueTranslation: LfValueTranslation,
     contractStore: LedgerApiContractStore,
+    achsStateCache: AchsStateCache,
     pruningOffsetService: PruningOffsetService,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
@@ -193,6 +194,7 @@ private[platform] class JdbcLedgerDao(
     eventStorageBackend = readStorageBackend.eventStorageBackend,
     lfValueTranslation = lfValueTranslation,
     contractStore = contractStore,
+    achsStateCache = achsStateCache,
     incompleteOffsets = incompleteOffsets,
     metrics = metrics,
     tracer = tracer,

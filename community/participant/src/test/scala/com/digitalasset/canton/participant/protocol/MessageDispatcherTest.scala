@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.syntax.flatMap.*
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}

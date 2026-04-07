@@ -42,6 +42,7 @@ final case class ParticipantNodeParameters(
     commitmentUseDbSnapshotForParticipantLookup: Boolean,
     autoSyncProtocolFeatureFlags: Boolean,
     alphaMultiSynchronizerSupport: Boolean,
+    commitAfterFailedActivenessCheck: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -106,5 +107,6 @@ object ParticipantNodeParameters {
     commitmentUseDbSnapshotForParticipantLookup = false,
     autoSyncProtocolFeatureFlags = true,
     alphaMultiSynchronizerSupport = false,
+    commitAfterFailedActivenessCheck = false,
   )
 }

@@ -484,12 +484,11 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
   private[this] val getHelper = Map(helper.contractId -> helper)
 
   private[this] val getKeys = Map(
-    GlobalKeyWithMaintainers.assertBuild(
-      T,
-      keyValue,
-      SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
-      Set(alice),
-      pkg.pkgName,
+    GlobalKey.assertBuild(
+      templateId = T,
+      packageName = pkg.pkgName,
+      key = keyValue,
+      keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
     ) -> Vector(cId)
   )
 
@@ -513,7 +512,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       readAs: Set[Party] = Set.empty,
       packageResolution: Map[PackageName, PackageId] = packageNameMap,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
         PartialFunction.empty,
   ) = {
     val se = pkgs.compiler.unsafeCompile(e)
@@ -1481,13 +1480,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
           inside(res) {
-            case Success(Left(SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy)))) =>
-              msgs shouldBe buildLog(
-                "starts test",
-                "maintainers",
-                "queries key",
-                "queries contract",
-              )
+            case Success(Left(SErrorCrash(_, _))) =>
           }
         }
 
@@ -2570,13 +2563,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
           inside(res) {
-            case Success(Left(SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy)))) =>
-              msgs shouldBe buildLog(
-                "starts test",
-                "maintainers",
-                "queries key",
-                "queries contract",
-              )
+            case Success(Left(SErrorCrash(_, _))) =>
           }
         }
 

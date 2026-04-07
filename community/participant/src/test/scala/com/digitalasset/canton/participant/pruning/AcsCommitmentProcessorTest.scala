@@ -538,7 +538,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
     )
-    val acs2 = AcsChangeSupport.fromCommitSet(cs2).tryAcsChange(Map.empty)
+    val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
     val cs4 = CommitSet(
       creations = Map.empty[LfContractId, CreationCommit],
@@ -556,7 +556,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
-      .tryAcsChange(
+      .acsChange(
         Map[LfContractId, ReassignmentCounter](coid(0, 0) -> initialReassignmentCounter)
       )
 
@@ -578,7 +578,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
     )
-    val acs7 = AcsChangeSupport.fromCommitSet(cs7).tryAcsChange(Map.empty)
+    val acs7 = AcsChangeSupport.fromCommitSet(cs7).acsChange(Map.empty)
 
     val cs8 = CommitSet(
       creations = Map.empty[LfContractId, CreationCommit],
@@ -599,7 +599,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     val acs8 =
       AcsChangeSupport
         .fromCommitSet(cs8)
-        .tryAcsChange(
+        .acsChange(
           Map[LfContractId, ReassignmentCounter](coid(1, 0) -> reassignmentCounter2)
         )
 
@@ -620,7 +620,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     )
     val acs9 = AcsChangeSupport
       .fromCommitSet(cs9)
-      .tryAcsChange(
+      .acsChange(
         Map[LfContractId, ReassignmentCounter](coid(3, 0) -> initialReassignmentCounter)
       )
 
@@ -637,7 +637,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
     )
-    val acs10 = AcsChangeSupport.fromCommitSet(cs10).tryAcsChange(Map.empty)
+    val acs10 = AcsChangeSupport.fromCommitSet(cs10).acsChange(Map.empty)
 
     val cs12 = CommitSet(
       creations = Map.empty[LfContractId, CreationCommit],
@@ -651,7 +651,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
     )
-    val acs12 = AcsChangeSupport.fromCommitSet(cs12).tryAcsChange(Map.empty)
+    val acs12 = AcsChangeSupport.fromCommitSet(cs12).acsChange(Map.empty)
 
     val acsChanges = Map(
       ts(2) -> acs2,
@@ -791,7 +791,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
     )
-    val acs2 = AcsChangeSupport.fromCommitSet(cs2).tryAcsChange(Map.empty)
+    val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
     val cs4 = CommitSet(
       creations = Map.empty[LfContractId, CreationCommit],
@@ -808,7 +808,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
-      .tryAcsChange(
+      .acsChange(
         Map[LfContractId, ReassignmentCounter](
           coid(0, 0) -> initialReassignmentCounter,
           coid(3, 0) -> initialReassignmentCounter,
@@ -2209,7 +2209,7 @@ class AcsCommitmentProcessorTest
         Map[LfContractId, ReassignmentCounter](cid4 -> reassignmentCounter3)
 
       val acs1 =
-        AcsChangeSupport.fromCommitSet(cs).tryAcsChange(reassignmentCounterOfArchival)
+        AcsChangeSupport.fromCommitSet(cs).acsChange(reassignmentCounterOfArchival)
 
       // cid1 is a transient creation with reassignment counter initialReassignmentCounter and should not appear in the ACS change
       acs1.activations.get(cid1) shouldBe None

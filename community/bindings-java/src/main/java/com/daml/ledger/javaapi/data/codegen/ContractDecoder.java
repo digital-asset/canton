@@ -41,7 +41,8 @@ public class ContractDecoder {
                     }));
   }
 
-  public Contract<?, ?> fromCreatedEvent(CreatedEvent event) throws IllegalArgumentException {
+  public Contract<?, ?> fromCreatedEvent(CreatedEvent event, UnknownTrailingFieldPolicy policy)
+      throws IllegalArgumentException {
     Identifier templateId = event.getTemplateId();
     var companion = getContractCompanion(templateId);
     // If we do not recognise the template, and the event contains a package name, try looking up
@@ -54,7 +55,11 @@ public class ContractDecoder {
     if (!companion.isPresent()) {
       throw new IllegalArgumentException("No template found for identifier " + templateId);
     }
-    return companion.get().fromCreatedEvent(event);
+    return companion.get().fromCreatedEvent(event, policy);
+  }
+
+  public Contract<?, ?> fromCreatedEvent(CreatedEvent event) throws IllegalArgumentException {
+    return fromCreatedEvent(event, UnknownTrailingFieldPolicy.STRICT);
   }
 
   public Optional<? extends ContractCompanion<? extends Contract<?, ?>, ?, ? extends DamlRecord<?>>>

@@ -109,8 +109,9 @@ object CommitSet {
       consumedInputsOfHostedParties: Map[LfContractId, Set[LfPartyId]],
       transient: Map[LfContractId, Set[LfPartyId]],
       createdContracts: Map[LfContractId, GenContractInstance],
+      commitAfterFailedActivenessCheck: Boolean,
   )(implicit loggingContext: ErrorLoggingContext): CommitSet =
-    if (activenessResult.isSuccessful) {
+    if (activenessResult.isSuccessful || commitAfterFailedActivenessCheck) {
       val archivals = (consumedInputsOfHostedParties ++ transient).map {
         case (cid, hostedStakeholders) =>
           cid -> CommitSet.ArchivalCommit(hostedStakeholders)

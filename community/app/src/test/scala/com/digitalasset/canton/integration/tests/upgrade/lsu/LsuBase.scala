@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
+  LocalInstanceReference,
   LocalSequencerReference,
   ParticipantReference,
   SequencerReference,
@@ -25,7 +26,8 @@ import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.EntitySyntax
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.metrics.MetricValue
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
 
@@ -306,7 +308,23 @@ private[lsu] trait LsuBase
   }
 }
 
-private[lsu] object LsuBase {
+object LsuBase {
+  import org.scalatest.OptionValues.*
+  import org.scalatest.EitherValues.*
+
+  // Returns the number of received messages per sender
+  def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] = {
+    val metricName = "daml.received-lsu-sequencing-test-messages"
+    node.metrics
+      .list(metricName)
+      .get(metricName)
+      .value
+      .collect { case metric: MetricValue.LongPoint =>
+        Member.fromProtoPrimitive_(metric.attributes.get("sender").value).value -> metric.value
+      }
+      .toMap
+  }
+
   final case class Fixture(
       currentPsid: PhysicalSynchronizerId,
       upgradeTime: CantonTimestamp,

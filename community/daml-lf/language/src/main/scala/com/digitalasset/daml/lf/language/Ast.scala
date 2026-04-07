@@ -1286,8 +1286,8 @@ object Ast {
       } else {
         false
       }
-    private[lf] def pkgName: Ref.PackageName = metadata.name
-    private[lf] def pkgVersion: Ref.PackageVersion = metadata.version
+    private[digitalasset] def pkgName: Ref.PackageName = metadata.name
+    private[digitalasset] def pkgVersion: Ref.PackageVersion = metadata.version
 
     def importsWithStablePkgs: Set[PackageId] =
       // TODO[RB]: when we have our bazel-maintained stable packages list, we

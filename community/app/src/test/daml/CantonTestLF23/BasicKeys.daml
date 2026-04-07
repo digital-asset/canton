@@ -8,8 +8,6 @@ import qualified DA.Set as S
 import DA.Set (Set)
 import DA.Action(replicateA_)
 import DA.Foldable(mapA_)
-import DA.ContractKeys (lookupByKey)
-import Prelude hiding (lookupByKey)
 
 template BasicKey
   with

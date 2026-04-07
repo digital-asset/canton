@@ -29,7 +29,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerEvents
 import com.digitalasset.canton.sequencing.client.ReplayConfig
-import com.digitalasset.canton.sequencing.client.transports.replay.ReplaySequencerSubscriptionX
+import com.digitalasset.canton.sequencing.client.transports.replay.ReplaySequencerSubscription
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeBootstrap
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.util.ShowUtil.*
@@ -112,21 +112,21 @@ class MediatorReplayBenchmark
       sequencerClient.flush().futureValueUS
       lastFlushTs.set(Instant.now())
 
-      ReplaySequencerSubscriptionX.replayStatistics should not be empty withClue
+      ReplaySequencerSubscription.replayStatistics should not be empty withClue
         "Missing replay statistics. Apparently, the sequencer client has not yet finished replaying events."
     }
 
-    val ReplaySequencerSubscriptionX.ReplayStatistics(
+    val ReplaySequencerSubscription.ReplayStatistics(
       inputPath,
       numberOfEvents,
       startTime,
       handoverDuration,
     ) =
       Option(
-        ReplaySequencerSubscriptionX.replayStatistics.poll(1, TimeUnit.SECONDS)
+        ReplaySequencerSubscription.replayStatistics.poll(1, TimeUnit.SECONDS)
       ).value
 
-    ReplaySequencerSubscriptionX.replayStatistics shouldBe empty withClue "Too many replay statistics. The test setup seems broken."
+    ReplaySequencerSubscription.replayStatistics shouldBe empty withClue "Too many replay statistics. The test setup seems broken."
 
     val duration = JDuration.between(startTime.toInstant, lastFlushTs.get())
 

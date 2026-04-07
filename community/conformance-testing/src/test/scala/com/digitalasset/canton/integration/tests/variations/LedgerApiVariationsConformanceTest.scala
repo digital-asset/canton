@@ -10,6 +10,7 @@ import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
 import com.digitalasset.canton.integration.tests.ledgerapi.SingleVersionLedgerApiConformanceBase
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.config.{ParticipantNodeConfig, TestingTimeServiceConfig}
@@ -38,6 +39,7 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
         }
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected val numShards: Int = 3
 
@@ -104,6 +106,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
         }
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected val numShards: Int = 4
 
@@ -164,6 +167,7 @@ trait LedgerApiCachesDisabledConformanceTest extends SingleVersionLedgerApiConfo
         }
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   "A participant with caches disabled" can {
     "pass integration tests" in { implicit env =>
@@ -206,6 +210,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
         c => c.focus(_.parameters.clock).replace(ClockConfig.SimClock),
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   "A participant with static time" can {
     "pass integration tests" in { implicit env =>
@@ -306,6 +311,7 @@ trait LedgerApiTlsConformanceBase extends SingleVersionLedgerApiConformanceBase 
         )
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
+      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 }
 
 // not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer

@@ -6,8 +6,6 @@ module Universal where
 import Daml.Script
 import DA.Assert
 import DA.List
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 {-
 Template allowing to configure maintainers, signatories, observers, actors, and key separately.

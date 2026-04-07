@@ -112,8 +112,8 @@ object IndexerConfig {
   val DefaultPostgresDataSourceConfig: PostgresDataSourceConfig =
     PostgresDataSourceConfig(networkTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(20)))
   val DefaultAchsConfig: Option[AchsConfig] = None
-  val DefaultAchsPopulationParallelism: Int = 2
-  val DefaultAchsRemovalParallelism: Int = 2
+  val DefaultAchsPopulationParallelism: Int = 4
+  val DefaultAchsRemovalParallelism: Int = 4
   val DefaultAchsAggregationThreshold: Long = 10000L
 
   /** Configuration for the Active Contracts Head Snapshot (ACHS). See

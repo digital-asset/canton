@@ -203,26 +203,50 @@ object SequencerError extends SequencerErrorGroup {
         )
   }
 
-  @Explanation("""
-                 |This error indicates that a request was not sequenced because the sequencing time of the request would have
-                 |been before the sequencer's configured lower bound of the sequencing time.""")
-  @Resolution(
-    """Wait for the time to advance beyond the sequencing time lower bound."""
+  @Explanation(
+    """
+     |This error indicates that a sequenced message was not delivered because the sequencing time is outside of the admissible sequencing bounds."""
   )
-  object SequencedBeforeOrAtLowerBound
+  @Resolution(
+    """Wait for the time to advance beyond the sequencing time lower bound or reconfigure the sequencer."""
+  )
+  object SequencingTimeNotAdmissible
       extends ErrorCode(
-        "SEQUENCED_BEFORE_OR_AT_LOWER_BOUND",
+        "SEQUENCING_TIME_NOT_ADMISSIBLE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
     override def exposedViaApi: Boolean = false
     final case class Error(
         ts: CantonTimestamp,
-        sequencingTimeLowerBoundExclusive: CantonTimestamp,
-        message: String,
+        sequencedMessage: String,
+        details: String,
     ) extends CantonBaseError.Impl(
-          cause =
-            s"The sequencer time [$ts] is before or at the exclusive sequencing time lower bound $sequencingTimeLowerBoundExclusive: $message"
+          cause = s"The sequencing time [$ts] is not admissible ($details) for $sequencedMessage"
         )
+
+    object Error {
+      def beforeOrAtLowerBound(
+          sequencingTime: CantonTimestamp,
+          lowerBound: CantonTimestamp,
+          sequencedMessage: String,
+      ): Error =
+        Error(
+          sequencingTime,
+          sequencedMessage,
+          s"sequencing time is before the lower bound ($lowerBound)",
+        )
+
+      def afterOrAtUpperBound(
+          sequencingTime: CantonTimestamp,
+          upperBound: CantonTimestamp,
+          sequencedMessage: String,
+      ): Error =
+        Error(
+          sequencingTime,
+          sequencedMessage,
+          s"sequencing time is at or after the upper bound ($upperBound)",
+        )
+    }
   }
 
   @Explanation("""This warning indicates that the time difference between storing the payload and writing the"

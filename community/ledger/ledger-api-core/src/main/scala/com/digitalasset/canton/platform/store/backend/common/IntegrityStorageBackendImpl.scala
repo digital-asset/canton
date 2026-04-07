@@ -321,6 +321,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
             and achs.template_id = activate.template_id
             and achs.party_id = activate.party_id
         )
+        order by event_sequential_id
         ${QueryStrategy.limitClause(Some(maxReportedDuplicates))}
       """.asVectorOf(long("event_sequential_id"))(connection)
 
