@@ -1,0 +1,17 @@
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
+build-options:
+- --target=2.dev
+- --typecheck-upgrades=no
+- -Wno-deprecated-exceptions
+name: ExternalCallTest
+source: daml
+version: 1.0.0
+dependencies:
+- daml-prim
+- daml-stdlib

@@ -11,6 +11,7 @@ import com.digitalasset.daml.lf.interpretation.{Error => IErr}
 import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
 import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine => ContractStateMachine,
+  ExternalCallResult,
   GlobalKeyWithMaintainers,
   KeyMapping,
   Node,
@@ -197,6 +198,7 @@ private[lf] object PartialTransaction {
     contractState = ContractStateMachine.empty(csmMode),
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
+    externalCallResults = HashMap.empty,
   )
 
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
@@ -222,6 +224,7 @@ private[speedy] case class PartialTransaction(
     contractState: CSMState,
     actionNodeLocations: BackStack[Option[Location]],
     authorizationChecker: AuthorizationChecker,
+    externalCallResults: HashMap[NodeId, BackStack[ExternalCallResult]],
 ) {
 
   import PartialTransaction._
@@ -383,6 +386,7 @@ private[speedy] case class PartialTransaction(
           nid,
           cid,
           createNode.gkeyOpt,
+          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
@@ -426,7 +430,7 @@ private[speedy] case class PartialTransaction(
           coid,
           contract.gkeyOpt,
           byKey,
-        ),
+        )
       )
       authorizationChecker.authorizeFetch(optLocation, node)(auth) match {
         case fa :: _ =>
@@ -522,7 +526,7 @@ private[speedy] case class PartialTransaction(
           contract.gkeyOpt,
           byKey,
           consuming,
-        ),
+        )
       )
       authorizationChecker.authorizeExercise(optLocation, makeExNode(ec))(auth) match {
         case fa :: _ =>
@@ -602,8 +606,53 @@ private[speedy] case class PartialTransaction(
       exerciseResult = None,
       keyOpt = ec.contractKey,
       byKey = normByKey(ec.version, ec.byKey),
+      externalCallResults = externalCallResults.getOrElse(ec.nodeId, BackStack.empty).toImmArray,
       version = ec.version,
     )
+  }
+
+  /** Record an external call result in the nearest enclosing exercise context.
+    * Walks up the context parent chain through try/catch scopes to find the
+    * enclosing exercise. Returns None if not within any exercise context
+    * (e.g., at the root/transaction level).
+    */
+  def recordExternalCallResult(
+      extensionId: String,
+      functionId: String,
+      configHash: String,
+      inputHex: String,
+      outputHex: String,
+  ): Option[PartialTransaction] = {
+    findEnclosingExercise(context.info) match {
+      case Some(ec) =>
+        val nodeId = ec.nodeId
+        val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
+        val result = ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = data.Bytes.fromString(configHash).getOrElse(data.Bytes.Empty),
+          input = data.Bytes.fromString(inputHex).getOrElse(data.Bytes.Empty),
+          output = data.Bytes.fromString(outputHex).getOrElse(data.Bytes.Empty),
+        )
+        val updated = existing :+ result
+        Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
+      case None =>
+        // External calls outside of exercise context are not stored
+        // (they would be at the root level, which is not supported)
+        None
+    }
+  }
+
+  /** Walk up the context parent chain to find the nearest enclosing exercise context.
+    * This allows external calls to work inside try/catch (rollback) scopes.
+    */
+  @scala.annotation.tailrec
+  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] = {
+    info match {
+      case ec: ExercisesContextInfo => Some(ec)
+      case tc: TryContextInfo => findEnclosingExercise(tc.parent.info)
+      case _: RootContextInfo => None
+    }
   }
 
   /** Open a Try context.
@@ -648,6 +697,10 @@ private[speedy] case class PartialTransaction(
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
+        // Note: external call results are NOT discarded on rollback. The validator
+        // re-executes the code inside rollback scopes and needs the results at the
+        // same call indices. Rolled-back results are kept so submission and validation
+        // produce the same sequence of external call lookups.
         contractState.endRollback match {
           case Right(newState) =>
             Right(

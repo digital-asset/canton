@@ -30,6 +30,7 @@ import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandProgressTracker,
   DynamicSynchronizerParameterGetter,
+  ExternalCallHandler,
 }
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
@@ -116,6 +117,7 @@ object ApiServiceOwner {
       apiLoggingConfig: ApiLoggingConfig,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -212,6 +214,7 @@ object ApiServiceOwner {
         safeToPruneCommitmentState = safeToPruneCommitmentState,
         logger = loggerFactory.getTracedLogger(this.getClass),
         apiContractService = apiContractService,
+        externalCallHandler = externalCallHandler,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(

@@ -78,6 +78,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -541,6 +542,30 @@ final class StoreBackedCommandInterpreter(
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
+
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, storedResult, resume) =>
+          storedResult match {
+            case Some(output) =>
+              // Use stored result (for replay/validation)
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(Right(output))),
+                )
+              )
+            case None =>
+              // Make actual external call during submission
+              externalCallHandler
+                .handleExternalCall(extensionId, functionId, configHash, input, "submission")
+                .flatMap { result =>
+                  resolveStep(
+                    Tracked.value(
+                      metrics.execution.engineRunning,
+                      trackSyncExecution(interpretationTimeNanos)(resume(result)),
+                    )
+                  )
+                }
+          }
       }
 
     resolveStep(result).thereafter { _ =>

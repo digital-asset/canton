@@ -280,6 +280,18 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       } yield builder.build()
     }
 
+    private[this] def encodeExternalCallResult(
+        result: ExternalCallResult
+    ): TransactionOuterClass.ExternalCallResult =
+      TransactionOuterClass.ExternalCallResult
+        .newBuilder()
+        .setExtensionId(result.extensionId)
+        .setFunctionId(result.functionId)
+        .setConfig(result.config.toByteString)
+        .setInput(result.input.toByteString)
+        .setOutput(result.output.toByteString)
+        .build()
+
     private[this] def encodeExercise(
         node: Node.Exercise
     ): Either[EncodeError, TransactionOuterClass.Node.Exercise] = {
@@ -323,6 +335,23 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           case None =>
             Right(())
         }
+        _ <-
+          if (node.externalCallResults.nonEmpty) {
+            if (node.version < SerializationVersion.minExternalCallResults)
+              Left(
+                EncodeError(
+                  s"external call results are not supported by version ${node.version}"
+                )
+              )
+            else {
+              node.externalCallResults.foreach { result =>
+                discard(builder.addExternalCallResults(encodeExternalCallResult(result)))
+              }
+              Right(())
+            }
+          } else {
+            Right(())
+          }
       } yield builder.build()
     }
 
@@ -510,6 +539,17 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       )
     }
 
+    private[this] def decodeExternalCallResult(
+        proto: TransactionOuterClass.ExternalCallResult
+    ): ExternalCallResult =
+      ExternalCallResult(
+        extensionId = proto.getExtensionId,
+        functionId = proto.getFunctionId,
+        config = data.Bytes.fromByteString(proto.getConfig),
+        input = data.Bytes.fromByteString(proto.getInput),
+        output = data.Bytes.fromByteString(proto.getOutput),
+      )
+
     private[this] def decodeExercise(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
@@ -536,6 +576,21 @@ class TransactionCoder(allowNullCharacters: Boolean) {
             Left(DecodeError(s"Exercise Authorizer not supported by version $nodeVersion"))
           else
             toPartySet(msg.getAuthorizersList).map(Some(_))
+        externalCallResults <-
+          if (msg.getExternalCallResultsCount == 0)
+            Right(ImmArray.empty[ExternalCallResult])
+          else if (nodeVersion < SerializationVersion.minExternalCallResults)
+            Left(
+              DecodeError(
+                s"External call results not supported by version $nodeVersion"
+              )
+            )
+          else
+            Right(
+              ImmArray.from(
+                msg.getExternalCallResultsList.asScala.map(decodeExternalCallResult)
+              )
+            )
       } yield Node.Exercise(
         targetCoid = fetch.coid,
         packageName = fetch.packageName,
@@ -553,6 +608,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         exerciseResult = result,
         keyOpt = fetch.keyOpt,
         byKey = fetch.byKey,
+        externalCallResults = externalCallResults,
         version = fetch.version,
       )
     }

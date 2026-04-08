@@ -36,6 +36,10 @@ import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.ledger.api.{
   AcsCommitmentPublicationPostProcessor,
   LedgerApiIndexer,
@@ -58,7 +62,7 @@ import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.Submission
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.synchronizer.grpc.GrpcSynchronizerRegistry
 import com.digitalasset.canton.participant.topology.*
-import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.execution.{CommandProgressTracker, ExternalCallHandler}
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.platform.store.LedgerApiContractStoreImpl
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
@@ -671,8 +675,29 @@ class ParticipantNodeBootstrap(
             )
             .mapK(FutureUnlessShutdown.outcomeK)
 
+        // Create extension service manager early so it can be shared with both CantonSyncService and LedgerApiServer
+        extensionServiceManagerOpt: Option[ExtensionServiceManager] = if (parameters.engine.extensions.nonEmpty) {
+          val manager = new ExtensionServiceManager(
+            extensionConfigs = parameters.engine.extensions,
+            engineExtensionsConfig = parameters.engine.extensionSettings,
+            loggerFactory = loggerFactory,
+          )
+          logger.info(
+            s"Extension service manager initialized with ${parameters.engine.extensions.size} extension(s): " +
+              s"${parameters.engine.extensions.keys.mkString(", ")}"
+          )
+          Some(manager)
+        } else {
+          None
+        }
+
+        // Create external call handler from extension service manager for use in transaction reinterpretation
+        externalCallHandler: Option[ExternalCallHandler] = extensionServiceManagerOpt.map(manager =>
+          new ExtensionServiceExternalCallHandler(manager)
+        )
+
         // Sync Service
-        sync = CantonSyncService.create(
+        sync: CantonSyncService = CantonSyncService.create(
           participantId,
           synchronizerRegistry,
           synchronizerConnectionConfigStore,
@@ -700,6 +725,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer,
           connectedSynchronizersLookupContainer,
           () => triggerDeclarativeChange(),
+          externalCallHandler,
         )
 
         _ <-
@@ -717,7 +743,7 @@ class ParticipantNodeBootstrap(
           connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
         }
 
-        ledgerApiServerContainer = new LifeCycleContainer[LedgerApiServer](
+        ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer] = new LifeCycleContainer[LedgerApiServer](
           stateName = "ledger-api-server",
           create = () =>
             FutureUnlessShutdown.outcomeF(
@@ -738,6 +764,7 @@ class ParticipantNodeBootstrap(
                 sync = sync,
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
+                extensionServiceManagerOpt = extensionServiceManagerOpt,
               )
             ),
           loggerFactory = loggerFactory,

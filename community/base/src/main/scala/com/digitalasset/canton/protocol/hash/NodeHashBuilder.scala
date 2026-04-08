@@ -73,7 +73,8 @@ private object NodeBuilder {
   private[hash] val HashingVersionToSupportedLFSerializationVersionMapping
       : Map[HashingSchemeVersion, Set[SerializationVersion]] =
     Map(
-      HashingSchemeVersion.V2 -> Set(SerializationVersion.V1)
+      HashingSchemeVersion.V2 -> Set(SerializationVersion.V1),
+      HashingSchemeVersion.V3 -> Set(SerializationVersion.V1, SerializationVersion.VDev),
     )
 
   private[hash] sealed abstract class NodeTag(val tag: Byte)
@@ -105,6 +106,7 @@ private class NodeBuilderV1(
     purpose: HashPurpose,
     hashTracer: HashTracer,
     enforceNodeSeedForCreateNodes: Boolean,
+    hashingSchemeVersion: HashingSchemeVersion = HashingSchemeVersion.V2,
 ) extends NodeHashBuilder(purpose, hashTracer) {
 
   override private[hash] def hashNode(
@@ -117,10 +119,10 @@ private class NodeBuilderV1(
     node.optVersion
       .foreach(
         NodeBuilder
-          .assertHashingVersionSupportsLfSerializationVersion(_, HashingSchemeVersion.V2)
+          .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
       )
 
-    new NodeBuilderV1(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+    new NodeBuilderV1(purpose, hashTracer, enforceNodeSeedForCreateNodes, hashingSchemeVersion)
       .addNodeEncodingVersion(NodeEncodingV1)
       .addNode(node, nodeSeed, nodes, nodeSeeds)
       .finish()
@@ -202,6 +204,11 @@ private class NodeBuilderV1(
           exerciseResult,
           keyOpt,
           byKey,
+          _, // externalCallResults - not included in the LF node hash.
+             // Security: external call results ARE included in the Canton protocol hash
+             // via ViewParticipantData -> ActionDescription -> ExerciseActionDescription,
+             // which is serialized into the MerkleTreeLeaf and covered by the view signature.
+             // Excluding them from the LF hash avoids upstream changes to the LF hash spec.
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)

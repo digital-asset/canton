@@ -270,6 +270,78 @@ object LocalRejectError extends LocalRejectionGroup {
             _resourcesType = Some(ErrorResource.ContractId),
           )
     }
+
+    @Explanation(
+      """This rejection is made by a participant if external calls with the same arguments
+        |returned inconsistent results across the transaction. Each party validates consistency
+        |of all external calls where they are a signatory of the exercised contract."""
+    )
+    @Resolution("This indicates either malicious or faulty behaviour.")
+    object ExternalCallInconsistency
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_INCONSISTENCY"
+        ) {
+      final case class Reject(override val _details: String)
+          extends Malformed(
+            _causePrefix = "Rejected transaction due to inconsistent external call results: "
+          )
+    }
+
+    @Explanation(
+      """This rejection is made by a confirming participant when its independent re-execution
+        |of an external call produces a different result than what the submitter recorded.
+        |This means the external service returned non-deterministic results."""
+    )
+    @Resolution(
+      "Ensure the external service is deterministic. Check for race conditions or state changes between submission and confirmation."
+    )
+    object ExternalCallResultMismatch
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_RESULT_MISMATCH"
+        ) {
+      final case class Reject(override val _details: String)
+          extends Malformed(
+            _causePrefix =
+              "Rejected transaction due to external call result mismatch between submitter and confirmer: "
+          )
+    }
+
+    @Explanation(
+      """This rejection is made by a confirming participant when it fails to execute
+        |an external call during transaction confirmation. The extension service may
+        |be down, unreachable, or returning errors."""
+    )
+    @Resolution(
+      "Ensure the extension service is running and reachable from the confirming participant."
+    )
+    object ExternalCallFailed
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_FAILED"
+        ) {
+      final case class Reject(override val _details: String)
+          extends Malformed(
+            _causePrefix = "Rejected transaction due to external call failure during confirmation: "
+          )
+    }
+
+    @Explanation(
+      """This rejection is made when an observer participant cannot find a stored
+        |external call result for replay. This indicates either transaction tampering
+        |or a mismatch between the transaction and its metadata."""
+    )
+    @Resolution(
+      "This indicates either malicious or faulty behaviour. Investigate the transaction source."
+    )
+    object ExternalCallReplayMissing
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_REPLAY_MISSING"
+        ) {
+      final case class Reject(override val _details: String)
+          extends Malformed(
+            _causePrefix =
+              "Rejected transaction due to missing external call result for replay: "
+          )
+    }
   }
 
   object UnassignmentRejects extends ErrorGroup() {

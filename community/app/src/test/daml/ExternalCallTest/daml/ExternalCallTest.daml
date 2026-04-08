@@ -1,0 +1,423 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module ExternalCallTest where
+
+import DA.External (externalCall, BytesHex)
+import DA.Exception (GeneralError(..), ArithmeticError(..))
+import DA.Text (length)
+
+-- | Basic template with external call choices for testing
+template ExternalCallContract
+  with
+    signatory_ : Party
+    observers_ : [Party]
+  where
+    signatory signatory_
+    observer observers_
+
+    interface instance ExternalCallInterface for ExternalCallContract where
+      view = ExternalCallInterfaceView with owner = signatory_
+      getSignatory = signatory_
+
+    -- Basic external call
+    choice CallExternal : BytesHex
+      with
+        extensionId : Text
+        functionId : Text
+        configHash : BytesHex
+        input : BytesHex
+      controller signatory_
+      do
+        externalCall extensionId functionId configHash input
+
+    -- Multiple external calls in sequence
+    choice CallMultiple : (BytesHex, BytesHex, BytesHex)
+      with
+        input1 : BytesHex
+        input2 : BytesHex
+        input3 : BytesHex
+      controller signatory_
+      do
+        r1 <- externalCall "test-ext" "echo" "00000000" input1
+        r2 <- externalCall "test-ext" "echo" "00000000" input2
+        r3 <- externalCall "test-ext" "echo" "00000000" input3
+        pure (r1, r2, r3)
+
+    -- Nested external call - creates multiple views if innerActor differs
+    nonconsuming choice NestedExternalCall : (BytesHex, BytesHex)
+      with
+        innerActor : Party
+        input1 : BytesHex
+        input2 : BytesHex
+      controller signatory_
+      do
+        -- External call in root (this view)
+        r1 <- externalCall "test-ext" "echo" "00000000" input1
+        -- Delegate to inner actor (potentially new view)
+        r2 <- exercise self (DelegatedExternalCall innerActor input2)
+        pure (r1, r2)
+
+    -- Delegated choice for nested exercises (signatory-controlled for cross-participant compat)
+    nonconsuming choice DelegatedExternalCall : BytesHex
+      with
+        actor : Party
+        input : BytesHex
+      controller signatory_
+      do
+        externalCall "test-ext" "echo" "00000000" input
+
+    -- External call only in leaf node
+    nonconsuming choice CallInLeafOnly : BytesHex
+      with
+        input : BytesHex
+      controller signatory_
+      do
+        -- No external call here (root)
+        exercise self (LeafExternalCall input)
+
+    nonconsuming choice LeafExternalCall : BytesHex
+      with
+        input : BytesHex
+      controller signatory_
+      do
+        -- External call in leaf
+        externalCall "test-ext" "echo" "00000000" input
+
+    -- External calls at root, middle, and leaf
+    nonconsuming choice CallAtAllLevels : (BytesHex, BytesHex, BytesHex)
+      with
+        input : BytesHex
+      controller signatory_
+      do
+        -- Root level
+        r1 <- externalCall "test-ext" "echo" "00000000" (input <> "2d726f6f74") -- "-root"
+        -- Middle level
+        (r2, r3) <- exercise self (MiddleLevelCall input)
+        pure (r1, r2, r3)
+
+    nonconsuming choice MiddleLevelCall : (BytesHex, BytesHex)
+      with
+        input : BytesHex
+      controller signatory_
+      do
+        -- Middle level
+        r2 <- externalCall "test-ext" "echo" "00000000" (input <> "2d6d6964") -- "-mid"
+        -- Leaf level
+        r3 <- exercise self (LeafExternalCall (input <> "2d6c656166")) -- "-leaf"
+        pure (r2, r3)
+
+-- | Template for deep transaction tests
+template DeepExternalCallContract
+  with
+    owner : Party
+    depth : Int
+  where
+    signatory owner
+
+    choice DeepCall : BytesHex
+      with
+        input : BytesHex
+      controller owner
+      do
+        if depth <= 0
+        then externalCall "test-ext" "echo" "00000000" input
+        else do
+          childCid <- create DeepExternalCallContract with owner, depth = depth - 1
+          exercise childCid (DeepCall input)
+
+    -- Deep call with external call at every level
+    choice DeepCallAllLevels : [BytesHex]
+      with
+        input : BytesHex
+      controller owner
+      do
+        -- External call at this level
+        myResult <- externalCall "test-ext" "echo" "00000000" (input <> intToHex depth)
+        if depth <= 0
+        then pure [myResult]
+        else do
+          childCid <- create DeepExternalCallContract with owner, depth = depth - 1
+          childResults <- exercise childCid (DeepCallAllLevels input)
+          pure (myResult :: childResults)
+
+-- | Template for rollback tests
+template RollbackTestContract
+  with
+    owner : Party
+  where
+    signatory owner
+
+    -- External call before a rollback
+    choice ExternalCallThenRollback : BytesHex
+      with
+        input : BytesHex
+      controller owner
+      do
+        -- This external call should persist
+        result <- externalCall "test-ext" "echo" "00000000" input
+        -- This will rollback (divide by zero)
+        try do
+          let _ = 1 / 0
+          pure ()
+        catch
+          ArithmeticError _ -> pure ()
+        pure result
+
+    -- External call inside a rollback scope
+    choice ExternalCallInRollback : Optional BytesHex
+      with
+        input : BytesHex
+        shouldFail : Bool
+      controller owner
+      do
+        try do
+          result <- externalCall "test-ext" "echo" "00000000" input
+          if shouldFail
+          then error "Intentional failure"
+          else pure (Some result)
+        catch
+          GeneralError _ -> pure None
+
+-- | Proposal template for creating multi-party contracts
+template MultiPartyProposal
+  with
+    proposer : Party
+    acceptor : Party
+    observers_ : [Party]
+  where
+    signatory proposer
+    observer acceptor
+
+    choice Accept : ContractId MultiPartyExternalCall
+      controller acceptor
+      do
+        create MultiPartyExternalCall with
+          signatory1 = proposer
+          signatory2 = acceptor
+          observers_ = observers_
+
+-- | Helper contract for multi-party scenarios
+template MultiPartyExternalCall
+  with
+    signatory1 : Party
+    signatory2 : Party
+    observers_ : [Party]
+  where
+    signatory signatory1, signatory2
+    observer observers_
+
+    choice BothSignatoriesCall : (BytesHex, BytesHex)
+      with
+        input1 : BytesHex
+        input2 : BytesHex
+      controller signatory1, signatory2
+      do
+        r1 <- externalCall "test-ext" "echo" "00000000" input1
+        r2 <- externalCall "test-ext" "echo" "00000000" input2
+        pure (r1, r2)
+
+    -- Choice that makes the same external call twice (for consistency testing)
+    choice SameCallTwice : (BytesHex, BytesHex)
+      with
+        input : BytesHex
+      controller signatory1, signatory2
+      do
+        r1 <- externalCall "test-ext" "inconsistent" "00000000" input
+        r2 <- externalCall "test-ext" "inconsistent" "00000000" input
+        pure (r1, r2)
+
+    -- Single external call for visibility testing
+    nonconsuming choice SingleExternalCall : BytesHex
+      with
+        input : BytesHex
+      controller signatory1, signatory2
+      do
+        externalCall "test-ext" "visibility-test" "00000000" input
+
+-- | Template for three-party scenarios with varied visibility
+template ThreePartyExternalCall
+  with
+    alice : Party
+    bob : Party
+    charlie : Party
+  where
+    signatory alice
+    observer bob, charlie
+
+    choice CallVisibleToAll : BytesHex
+      with
+        input : BytesHex
+      controller alice
+      do
+        externalCall "test-ext" "echo" "00000000" input
+
+    -- Nested call where bob exercises
+    nonconsuming choice NestedCallWithBob : (BytesHex, BytesHex)
+      with
+        input1 : BytesHex
+        input2 : BytesHex
+      controller alice
+      do
+        r1 <- externalCall "test-ext" "echo" "00000000" input1
+        r2 <- exercise self (BobExternalCall input2)
+        pure (r1, r2)
+
+    nonconsuming choice BobExternalCall : BytesHex
+      with
+        input : BytesHex
+      controller alice
+      do
+        externalCall "test-ext" "echo" "00000000" input
+
+-- | Template for testing different signatory visibility of same call
+-- Alice is always signatory, Bob can optionally be added as signatory via nested exercise
+template DifferentSignatoryVisibility
+  with
+    alice : Party
+    bob : Party
+  where
+    signatory alice
+    observer bob
+
+    -- Alice-only call followed by Alice+Bob call (via delegation)
+    -- This creates two views: one with Alice as signatory, one with both
+    choice TwoCallsDifferentSignatories : (BytesHex, BytesHex)
+      with
+        aliceBobContractId : ContractId MultiPartyExternalCall
+        input : BytesHex
+      controller alice
+      do
+        -- Call 1: Alice is the only signatory (this view)
+        r1 <- externalCall "test-ext" "visibility-test" "00000000" input
+        -- Call 2: Both Alice and Bob are signatories (via the multi-party contract)
+        r2 <- exercise aliceBobContractId (SingleExternalCall input)
+        pure (r1, r2)
+
+
+-- | Template for edge case tests
+template EdgeCaseExternalCall
+  with
+    owner : Party
+  where
+    signatory owner
+
+    -- Call with empty input
+    choice CallWithEmptyInput : BytesHex
+      controller owner
+      do
+        externalCall "test-ext" "empty-input" "00000000" "00"
+
+    -- Call with specified config hash
+    choice CallWithConfigHash : BytesHex
+      with
+        configHash : BytesHex
+        input : BytesHex
+      controller owner
+      do
+        externalCall "test-ext" "echo" configHash input
+
+    -- Many sequential calls
+    choice ManySequentialCalls : [BytesHex]
+      with
+        count : Int
+        input : BytesHex
+      controller owner
+      do
+        forA [1..count] $ \i -> do
+          externalCall "test-ext" "concurrent" "00000000" (input <> intToHex i)
+
+-- | Template for multiple rollback scopes
+template MultipleRollbackContract
+  with
+    owner : Party
+  where
+    signatory owner
+
+    choice MultipleRollbackScopes : (BytesHex, Optional BytesHex, BytesHex)
+      with
+        input : BytesHex
+      controller owner
+      do
+        -- Scope 1: succeeds
+        r1 <- externalCall "test-ext" "echo" "00000000" (input <> "2d31")
+
+        -- Scope 2: fails and rolls back
+        r2 <- try do
+          r <- externalCall "test-ext" "echo" "00000000" (input <> "2d32")
+          error "fail scope 2"
+          pure (Some r)
+        catch
+          GeneralError _ -> pure None
+
+        -- Scope 3: succeeds
+        r3 <- externalCall "test-ext" "echo" "00000000" (input <> "2d33")
+
+        pure (r1, r2, r3)
+
+    choice NestedRollbackScopes : (BytesHex, Optional (BytesHex, Optional BytesHex))
+      with
+        input : BytesHex
+      controller owner
+      do
+        r1 <- externalCall "test-ext" "echo" "00000000" (input <> "2d6f75746572")
+
+        r2 <- try do
+          r2a <- externalCall "test-ext" "echo" "00000000" (input <> "2d6d6964")
+          r2b <- try do
+            r <- externalCall "test-ext" "echo" "00000000" (input <> "2d696e6e6572")
+            error "inner fail"
+            pure (Some r)
+          catch
+            GeneralError _ -> pure None
+          pure (Some (r2a, r2b))
+        catch
+          GeneralError _ -> pure None
+
+        pure (r1, r2)
+
+-- | Interface for testing external calls via interface exercises
+interface ExternalCallInterface where
+  viewtype ExternalCallInterfaceView
+  getSignatory : Party
+
+  choice DoExternalCall : BytesHex
+    with
+      extensionId : Text
+      functionId : Text
+      configHash : BytesHex
+      input : BytesHex
+    controller (getSignatory this)
+    do
+      externalCall extensionId functionId configHash input
+
+data ExternalCallInterfaceView = ExternalCallInterfaceView
+  with
+    owner : Party
+  deriving (Eq, Show)
+
+-- | Alternative template implementing ExternalCallInterface (for testing multiple implementations)
+template AlternativeExternalCallContract
+  with
+    owner : Party
+    label : Text
+  where
+    signatory owner
+
+    interface instance ExternalCallInterface for AlternativeExternalCallContract where
+      view = ExternalCallInterfaceView with owner
+      getSignatory = owner
+
+-- | Helper to convert Int to hex string (simple implementation)
+hexDigit : Int -> Text
+hexDigit d = if d < 10 then show d else case d of
+  10 -> "a"; 11 -> "b"; 12 -> "c"; 13 -> "d"; 14 -> "e"; 15 -> "f"; _ -> "0"
+
+toHexChars : Int -> Text -> Text
+toHexChars 0 acc = if acc == "" then "00" else acc
+toHexChars x acc = toHexChars (x / 16) (hexDigit (x % 16) <> acc)
+
+intToHex : Int -> Text
+intToHex n = 
+  let raw = toHexChars (if n < 0 then 0 else n) ""
+  in if DA.Text.length raw % 2 == 1 then "0" <> raw else raw

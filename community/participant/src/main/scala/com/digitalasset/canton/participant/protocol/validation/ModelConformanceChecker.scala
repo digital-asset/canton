@@ -49,6 +49,7 @@ import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
@@ -257,13 +258,51 @@ class ModelConformanceChecker(
 
     val seed = viewParticipantData.actionDescription.seedOption
 
+    // Extract stored external call results from the action description (if exercise)
+    // IMPORTANT: Also aggregate results from ALL subviews because external calls may occur
+    // in nested exercises (child views) but need to be replayed when reinterpreting the parent view.
+    val storedExternalCallResults: StoredExternalCallResults = {
+      // Helper to extract results from a single view's action description
+      def extractFromView(v: TransactionView): StoredExternalCallResults = {
+        v.viewParticipantData.unwrap match {
+          case Right(vpd) =>
+            vpd.actionDescription match {
+              case exercise: ExerciseActionDescription =>
+                StoredExternalCallResults.fromResults(exercise.externalCallResults)
+              case _ =>
+                StoredExternalCallResults.empty
+            }
+          case Left(_) =>
+            // Blinded view - no data available
+            StoredExternalCallResults.empty
+        }
+      }
+
+      // Collect results from this view AND all subviews (flatten includes this view as first element)
+      val allViewResults = view.flatten.map(extractFromView)
+      val allResults = allViewResults.foldLeft(StoredExternalCallResults.empty)(_ ++ _)
+
+      logger.info(
+        s"reInterpret: Aggregated ${allResults.size} external call results from ${view.flatten.size} views"
+      )
+      allResults
+    }
+
     val inputContracts = view.inputContracts.fmap(_.contract)
 
     val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, resolverFromView)
 
+    // Determine if this participant is a confirmer (signatory) for this view
+    // Confirmers must re-execute external calls; observers replay stored results
+    val confirmingParties = view.viewCommonData.tryUnwrap.viewConfirmationParameters.confirmers
+    val isConfirmerF: FutureUnlessShutdown[Boolean] =
+      topologySnapshot.canConfirm(participantId, confirmingParties).map(_.nonEmpty)
+
     for {
 
       packagePreference <- buildPackageNameMap(packageIdPreference, topologySnapshot, ledgerTime)
+
+      isConfirmer <- EitherT.right[Error](isConfirmerF)
 
       lfTxAndMetadata <- reinterpreter
         .reinterpret(
@@ -278,6 +317,8 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
+          storedExternalCallResults,
+          isConfirmer,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

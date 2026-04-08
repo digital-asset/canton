@@ -5,6 +5,8 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive.
 
 import cats.data.EitherT
 import cats.syntax.either.*
+
+import scala.annotation.unused
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PreparedTransaction
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -32,8 +34,8 @@ import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.daml.lf.transaction.{SubmittedTransaction, Transaction}
+import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.daml.lf.transaction.{SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.util.UUID
@@ -199,14 +201,14 @@ class ExternalTransactionProcessor(
       )
         .leftMap(CommandExecutionErrors.InteractiveSubmissionPreparationError.Reject(_))
       // The participant needs to be connected to this synchronizer ID for the transaction to be submitted successfully
-      psid = commandExecutionResult.synchronizerRank.synchronizerId
+      synchronizerId = commandExecutionResult.synchronizerRank.synchronizerId
       transactionData = PrepareTransactionData(
         submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
         transactionMeta = commandExecutionResult.commandInterpretationResult.transactionMeta,
         transaction = SubmittedTransaction(enrichedTransaction),
         globalKeyMapping = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
         inputContracts = inputContracts,
-        synchronizer = psid.forExternalTransactionHashing,
+        synchronizer = synchronizerId,
         mediatorGroup = 0,
         transactionUUID = UUID.randomUUID(),
         maxRecordTime = maxRecordTime,
@@ -221,7 +223,7 @@ class ExternalTransactionProcessor(
       contractLookupParallelism: PositiveInt,
       hashTracer: HashTracer,
       maxRecordTime: Option[LfTimestamp],
-      hashingSchemeVersion: HashingSchemeVersion,
+      @unused hashingSchemeVersion: HashingSchemeVersion, // Reserved for future use; currently computed from tx version
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -247,15 +249,23 @@ class ExternalTransactionProcessor(
         ](encoder.encode(enriched))
         .mapK(FutureUnlessShutdown.outcomeK)
       // Compute the pre-computed hash for convenience
-      protocolVersion = commandExecutionResult.synchronizerRank.synchronizerId.protocolVersion
-      hash <- EitherT
-        .fromEither[FutureUnlessShutdown](
-          enriched
-            .computeHash(hashingSchemeVersion, protocolVersion, hashTracer)
-            .leftMap(error => InteractiveSubmissionPreparationError.Reject(error.message))
-        )
+      // Use V3 for VDev transactions (required for externalCall support)
+      hashVersionAndHash <- {
+        val protocolVersion = commandExecutionResult.synchronizerRank.synchronizerId.protocolVersion
+        // Use the transaction's serialization version to select hashing scheme
+        val txVersion = enriched.transaction.version
+        val hashVersion: HashingSchemeVersion = if (txVersion == SerializationVersion.VDev) HashingSchemeVersion.V3 else HashingSchemeVersion.V2
+        EitherT
+          .fromEither[FutureUnlessShutdown](
+            enriched
+              .computeHash(hashVersion, protocolVersion, hashTracer)
+              .leftMap(error => InteractiveSubmissionPreparationError.Reject(error.message))
+          )
+          .map(hash => (hashVersion, hash): (HashingSchemeVersion, Hash))
+      }
     } yield {
-      PrepareResult(encoded, hash, hashingSchemeVersion)
+      val (hashVersion: HashingSchemeVersion, hash: Hash) = hashVersionAndHash
+      PrepareResult(encoded, hash, hashVersion)
     }
 
   /** Decodes a prepared transaction, verify its signature and convert it to CommandExecutionResult
@@ -282,29 +292,6 @@ class ExternalTransactionProcessor(
           decoder.decode(executeRequest)
         )
         .mapK(FutureUnlessShutdown.outcomeK)
-      // Check upfront if the synchronizerID format is correct for the PV of the target synchronizer
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        syncService
-          .physicalSynchronizerIdForSynchronizerId(decoded.synchronizer.logical)
-          .filter(_.forExternalTransactionHashing != decoded.synchronizer)
-          .map { physicalSynchronizerId =>
-            InteractiveSubmissionExecuteError.Reject(
-              {
-                val protocolVersionOfSelectedSync =
-                  s"The selected synchronizer $physicalSynchronizerId is on Protocol Version ${physicalSynchronizerId.protocolVersion}."
-                physicalSynchronizerId.protocolVersion match {
-                  case atOrBefore34 if atOrBefore34 <= ProtocolVersion.v34 =>
-                    protocolVersionOfSelectedSync +
-                      s" Please use a Logical Synchronizer ID in the prepared transaction metadata on PVs <= 34"
-                  case _ =>
-                    protocolVersionOfSelectedSync +
-                      s" Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
-                }
-              }
-            )
-          }
-          .toLeft(())
-      )
       _ <- decoded
         .verifySignature(routingSynchronizerState, logger)
         .leftMap(err => InteractiveSubmissionExecuteError.Reject(err))

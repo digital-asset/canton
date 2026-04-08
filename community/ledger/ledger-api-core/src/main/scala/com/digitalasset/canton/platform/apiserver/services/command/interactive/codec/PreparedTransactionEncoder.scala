@@ -139,6 +139,16 @@ final class PreparedTransactionEncoder(
    * V1 Transformers
    */
   object v1 {
+    // Transformer for LfBytes -> ByteString (used by external call results)
+    private implicit val lfBytesToByteStringTransformer
+        : Transformer[lf.data.Bytes, ByteString] =
+      (bytes: lf.data.Bytes) => bytes.toByteString
+
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : Transformer[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult] =
+      Transformer.derive[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult]
+
     private implicit def createNodeTransformer(implicit
         SerializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
@@ -159,6 +169,10 @@ final class PreparedTransactionEncoder(
       .withFieldComputed(_.stakeholders, _.stakeholders.toSeq.sorted)
       .withFieldComputed(_.actingParties, _.actingParties.toSeq.sorted)
       .withFieldComputed(_.choiceObservers, _.choiceObservers.toSeq.sorted)
+      .withFieldComputed(
+        _.externalCallResults,
+        _.externalCallResults.toSeq.map(_.transformInto[isdv1.ExternalCallResult]),
+      )
       .withFieldConst(_.lfVersion, SerializationVersion.transformInto[String])
       .buildTransformer
 

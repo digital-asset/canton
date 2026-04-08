@@ -476,6 +476,7 @@ object Hash {
             exerciseResult,
             keyOpt,
             byKey,
+            _, // externalCallResults - excluded from LF hash (covered by Canton protocol hash)
             version,
           ) =>
         if (choiceAuthorizers.nonEmpty)
