@@ -31,6 +31,11 @@ import java.nio.file.Path
   *   path to the directory used for Daml profiling
   * @param snapshotDir
   *   path to the directory used for saving transaction tree snapshots
+  * @param extensions
+  *   Configuration for external extension services that can be called from Daml contracts.
+  *   Map from extension ID to extension service configuration.
+  * @param extensionSettings
+  *   Global settings for engine extensions
   */
 final case class CantonEngineConfig(
     enableEngineStackTraces: Boolean = false,
@@ -42,4 +47,6 @@ final case class CantonEngineConfig(
     contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
     profileDir: Option[Path] = None,
     snapshotDir: Option[Path] = None,
+    extensions: Map[String, ExtensionServiceConfig] = Map.empty,
+    extensionSettings: EngineExtensionsConfig = EngineExtensionsConfig.default,
 )
