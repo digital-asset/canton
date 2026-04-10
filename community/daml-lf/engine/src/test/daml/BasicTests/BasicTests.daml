@@ -5,8 +5,6 @@
 
 module BasicTests where
 
-import DA.ContractKeys (lookupByKey)
-import Prelude hiding (lookupByKey)
 
 data MyRec = MyRec { foo: Text }
 

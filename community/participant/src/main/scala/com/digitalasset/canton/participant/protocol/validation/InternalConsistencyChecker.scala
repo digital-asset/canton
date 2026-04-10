@@ -316,7 +316,7 @@ object InternalConsistencyChecker {
   ): FutureUnlessShutdown[Map[LfPartyId, Option[ParticipantAttributes]]] = {
     val parties =
       rootViewTrees.forgetNE
-        .flatMap(_.view.globalKeyInputs.values.flatMap(_.unversioned.maintainers))
+        .flatMap(_.view.keyMaintainers.values.flatMap(_.unversioned.maintainers))
         .toSet
     ExtractUsedAndCreated.fetchHostedParties(
       parties,

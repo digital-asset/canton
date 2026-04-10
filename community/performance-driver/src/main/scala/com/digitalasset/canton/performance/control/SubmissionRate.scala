@@ -298,8 +298,9 @@ object SubmissionRate extends NoTracing {
     *   what is the minimum bandwidth usage before we start increasing
     */
   class TargetLatencyViaPending(
+      startPending: Double = 5.0,
       targetLatencyMs: Int = 5000,
-      stepFactor: Double = 0.02,
+      stepFactor: Double = 0.03,
       cutFactor: Double = 0.9,
       targetLatencyTolerance: Double = 0.05,
       increaseThreshold: Double = 0.75,
@@ -314,7 +315,7 @@ object SubmissionRate extends NoTracing {
 
     override protected def startMaxRate: Double = 0.0
 
-    private val targetPending = new AtomicDouble(1.45)
+    private val targetPending = new AtomicDouble(startPending)
     private val targetLatencyMs_ = new AtomicDouble(targetLatencyMs.toDouble)
     private val stepFactor_ = new AtomicDouble(stepFactor)
     private val cutFactor_ = new AtomicDouble(cutFactor)

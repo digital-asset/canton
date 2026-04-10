@@ -49,7 +49,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractHasher, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import scala.concurrent.ExecutionContext
 
@@ -127,7 +126,7 @@ class TransactionConfirmationRequestFactory(
           transactionUuid,
           cryptoSnapshot.ipsSnapshot,
           contractInstanceOfId,
-          keyResolver.asCidOptionMap,
+          keyResolver,
           maxSequencingTime,
           validatePackageVettings = true,
         )
@@ -387,16 +386,15 @@ object TransactionConfirmationRequestFactory {
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): TransactionConfirmationRequestFactory = {
 
-    val transactionTreeFactory =
-      TransactionTreeFactoryImpl(
-        submitterNode,
-        synchronizerId,
-        // TODO(#23971): Make this dependent on the protocol version when introducing V2 contract IDs
-        AuthenticatedContractIdVersionV12,
-        cryptoOps,
-        hasher,
-        loggerFactory,
-      )
+    val transactionTreeFactory = TransactionTreeFactory(
+      submitterNode,
+      synchronizerId,
+      // TODO(#23971): Make this dependent on the protocol version when introducing V2 contract IDs
+      AuthenticatedContractIdVersionV12,
+      cryptoOps,
+      hasher,
+      loggerFactory,
+    )
 
     new TransactionConfirmationRequestFactory(submitterNode, loggingConfig, loggerFactory)(
       transactionTreeFactory,

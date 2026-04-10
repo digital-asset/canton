@@ -23,14 +23,15 @@ import com.typesafe.scalalogging.LazyLogging
 import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.metrics.Meter
 import io.opentelemetry.exporter.prometheus.PrometheusHttpServer
-import io.opentelemetry.instrumentation.runtimemetrics.java8.*
-import io.opentelemetry.instrumentation.runtimemetrics.java8.internal.ExperimentalBufferPools
+import io.opentelemetry.instrumentation.runtimetelemetry.RuntimeTelemetry
+import io.opentelemetry.instrumentation.runtimetelemetry.internal.Experimental
 import io.opentelemetry.sdk.metrics.SdkMeterProviderBuilder
 import io.opentelemetry.sdk.metrics.`export`.{MetricExporter, MetricReader, PeriodicMetricReader}
 import io.opentelemetry.sdk.metrics.internal.state.MetricStorage
 
 import java.io.File
 import java.util.concurrent.ScheduledExecutorService
+import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 
 /** Configure metric instrumentiation
@@ -38,7 +39,7 @@ import scala.collection.concurrent.TrieMap
   * @param reporters
   *   which reports should be used to report metric output
   * @param jvmMetrics
-  *   if true, then JvmMetrics will be reported
+  *   JVM metrics report configuration
   * @param histograms
   *   customized histogram definitions
   * @param qualifiers
@@ -70,13 +71,43 @@ final case class MetricsConfig(
 object MetricsConfig {
 
   /** Control and enable jvm metrics */
+  @nowarn("cat=deprecation")
   final case class JvmMetrics(
       enabled: Boolean = false,
+      experimental: Boolean = false,
+      // Since OTel instrumentation 2.26.0, individual JVM metric classes were unified into
+      // RuntimeTelemetry. All standard metrics (classes, cpu, memory, threads, gc) are always
+      // registered. Experimental metrics (e.g. buffer pools) are controlled via the
+      // experimental flag. See https://github.com/open-telemetry/opentelemetry-java-instrumentation/pull/16087 for details.s
+      @deprecated(
+        "Per-metric granularity no longer supported. All standard JVM metrics are always enabled.",
+        since = "3.5.0",
+      )
       classes: Boolean = true,
+      @deprecated(
+        "Per-metric granularity no longer supported. All standard JVM metrics are always enabled.",
+        since = "3.5.0",
+      )
       cpu: Boolean = true,
+      @deprecated(
+        "Per-metric granularity no longer supported. All standard JVM metrics are always enabled.",
+        since = "3.5.0",
+      )
       memoryPools: Boolean = true,
+      @deprecated(
+        "Per-metric granularity no longer supported. All standard JVM metrics are always enabled.",
+        since = "3.5.0",
+      )
       threads: Boolean = true,
+      @deprecated(
+        "Per-metric granularity no longer supported. All standard JVM metrics are always enabled.",
+        since = "3.5.0",
+      )
       gc: Boolean = true,
+      @deprecated(
+        "Per-metric granularity no longer supported. Use 'experimental' instead.",
+        since = "3.5.0",
+      )
       buffers: Boolean = true,
   )
 
@@ -84,12 +115,10 @@ object MetricsConfig {
 
     def setup(config: JvmMetrics, openTelemetry: OpenTelemetry): Unit =
       if (config.enabled) {
-        if (config.classes) Classes.registerObservers(openTelemetry).discard
-        if (config.cpu) Cpu.registerObservers(openTelemetry).discard
-        if (config.memoryPools) MemoryPools.registerObservers(openTelemetry).discard
-        if (config.threads) Threads.registerObservers(openTelemetry).discard
-        if (config.gc) GarbageCollector.registerObservers(openTelemetry).discard
-        if (config.buffers) ExperimentalBufferPools.registerObservers(openTelemetry).discard
+        val builder = RuntimeTelemetry.builder(openTelemetry)
+        if (config.experimental || (config.buffers: @nowarn("cat=deprecation")))
+          Experimental.setEmitExperimentalMetrics(builder, true)
+        builder.build().discard
       }
   }
 

@@ -42,6 +42,7 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -425,7 +426,7 @@ final class AssignmentValidationTest
           .commonValidationResult
           .multiSynchronizerFeatureFlagCheckResult
       }
-      "be enabled on all participants hosting a stakeholder" in {
+      "be enabled on all participants hosting a stakeholder" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
         val contract = ExampleContractFactory.build(
           signatories = Set(alice),
           stakeholders = Set(alice, bob),

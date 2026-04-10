@@ -4,12 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.data.{
-  AssignedKey,
-  FreeKey,
-  SerializableKeyResolution,
-  ViewParticipantData,
-}
+import com.digitalasset.canton.data.{KeyResolutionWithMaintainers, ViewParticipantData}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.protocol.{
@@ -41,12 +36,12 @@ class LedgerEffectAbsolutizer(absolutizer: ContractIdAbsolutizer) {
       createdInSubviewArchivedInCore <- vpd.createdInSubviewArchivedInCore.toSeq
         .traverse(absolutizer.absolutizeContractId)
         .map(_.toSet)
-      resolvedKeys <- vpd.resolvedKeys.toSeq.traverse { case (gkey, resolution) =>
+      resolvedKeys <- vpd.keyMaintainers.toSeq.traverse { case (gKey, resolution) =>
         for {
-          absolutizedKey <- gkey.key.traverseCid(absolutizer.absolutizeContractId)
+          absolutizedKey <- gKey.key.traverseCid(absolutizer.absolutizeContractId)
           absolutizedResolution <- absolutizeKeyResolution(resolution.unversioned)
         } yield (
-          LfGlobalKey.assertBuild(gkey.templateId, gkey.packageName, absolutizedKey, gkey.hash),
+          LfGlobalKey.assertBuild(gKey.templateId, gKey.packageName, absolutizedKey, gKey.hash),
           resolution.copy(unversioned = absolutizedResolution),
         )
       }
@@ -75,12 +70,10 @@ class LedgerEffectAbsolutizer(absolutizer: ContractIdAbsolutizer) {
     } yield absolutizedCreated
 
   def absolutizeKeyResolution(
-      resolution: SerializableKeyResolution
-  ): Either[String, SerializableKeyResolution] =
-    resolution match {
-      case AssignedKey(cid) =>
-        absolutizer.absolutizeContractId(cid).map(AssignedKey.apply)
-      case free: FreeKey => Right(free)
+      resolution: KeyResolutionWithMaintainers
+  ): Either[String, KeyResolutionWithMaintainers] =
+    resolution.contracts.traverse(absolutizer.absolutizeContractId).map { absolutizedContracts =>
+      resolution.copy(contracts = absolutizedContracts)
     }
 }
 
@@ -93,7 +86,7 @@ object LedgerEffectAbsolutizer {
       coreInputs: Map[LfContractId, InputContract],
       createdCore: Seq[CreatedContract],
       createdInSubviewArchivedInCore: Set[LfContractId],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[SerializableKeyResolution]],
+      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       inRollback: Boolean,
       informees: Set[LfPartyId],
   ) extends PrettyPrinting {

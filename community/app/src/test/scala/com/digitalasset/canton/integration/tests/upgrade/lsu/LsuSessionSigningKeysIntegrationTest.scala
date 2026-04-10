@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 
@@ -37,7 +38,7 @@ final class LsuSessionSigningKeysIntegrationTest extends LsuBase {
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
   override protected def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms :+ ConfigTransforms.setSessionSigningKeys(
+    super.configTransforms :+ ConfigTransforms.setSigningKeysIfPV35OrHigher(
       SessionSigningKeysConfig.default
     )
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -47,39 +48,40 @@ final class LsuSessionSigningKeysIntegrationTest extends LsuBase {
       .withSetup(implicit env => defaultEnvironmentSetup())
 
   "Logical synchronizer upgrade" should {
-    "work with session signing keys" in { implicit env =>
-      import env.*
+    "work with session signing keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      implicit env =>
+        import env.*
 
-      Seq[LocalInstanceReference](participant1, sequencer1, mediator1).foreach { node =>
-        withClue(s"${node.id} should have session signing keys enabled before LSU") {
-          node.config.crypto.sessionSigningKeys.enabled shouldBe true
+        Seq[LocalInstanceReference](participant1, sequencer1, mediator1).foreach { node =>
+          withClue(s"${node.id} should have session signing keys enabled before LSU") {
+            node.config.crypto.sessionSigningKeys.enabled shouldBe true
+          }
         }
-      }
 
-      val alice = participant1.parties.enable("Alice")
-      val bank = participant1.parties.enable("Bank")
-      val fixture = fixtureWithDefaults()
+        val alice = participant1.parties.enable("Alice")
+        val bank = participant1.parties.enable("Bank")
+        val fixture = fixtureWithDefaults()
 
-      withClue("perform LSU") {
-        performSynchronizerNodesLsu(fixture)
-        environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-        transferTraffic()
-        eventually() {
-          environment.simClock.value.advance(Duration.ofSeconds(1))
-          participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+        withClue("perform LSU") {
+          performSynchronizerNodesLsu(fixture)
+          environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+          transferTraffic()
+          eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
+            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+          }
+          oldSynchronizerNodes.all.stop()
+          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
         }
-        oldSynchronizerNodes.all.stop()
-        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
-      }
 
-      // Verify we can still successfully execute transactions.
-      IouSyntax.createIou(participant1)(bank, alice)
+        // Verify we can still successfully execute transactions.
+        IouSyntax.createIou(participant1)(bank, alice)
 
-      Seq[LocalInstanceReference](participant1, sequencer2, mediator2).foreach { node =>
-        withClue(s"${node.id} should have session signing keys enabled after LSU") {
-          node.config.crypto.sessionSigningKeys.enabled shouldBe true
+        Seq[LocalInstanceReference](participant1, sequencer2, mediator2).foreach { node =>
+          withClue(s"${node.id} should have session signing keys enabled after LSU") {
+            node.config.crypto.sessionSigningKeys.enabled shouldBe true
+          }
         }
-      }
     }
   }
 }

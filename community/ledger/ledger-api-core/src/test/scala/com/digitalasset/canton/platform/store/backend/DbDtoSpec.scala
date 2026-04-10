@@ -45,6 +45,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = Some(someExternalTransactionHashBinary),
+          traffic_cost = Some(1513L),
           event_sequential_id = 3,
           node_id = 4,
           additional_witnesses = Set(someParty2),
@@ -67,6 +68,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = Some(someExternalTransactionHashBinary),
+          traffic_cost = Some(1513L),
           event_type = PersistentEventType.Create.asInt,
           event_sequential_id = 3,
           node_id = 4,
@@ -119,6 +121,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           record_time = 2,
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
+          traffic_cost = Some(1513L),
           event_sequential_id = 3,
           node_id = 4,
           source_synchronizer_id = someSynchronizerId2,
@@ -143,6 +146,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = None,
+          traffic_cost = Some(1513L),
           event_type = PersistentEventType.Assign.asInt,
           event_sequential_id = 3,
           node_id = 4,
@@ -188,6 +192,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = Some(someExternalTransactionHashBinary),
+          traffic_cost = Some(1513L),
           event_sequential_id = 3,
           node_id = 4,
           deactivated_event_sequential_id = Some(10),
@@ -218,6 +223,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = Some(someExternalTransactionHashBinary),
+          traffic_cost = Some(1513L),
           event_type = PersistentEventType.ConsumingExercise.asInt,
           event_sequential_id = 3,
           node_id = 4,
@@ -290,6 +296,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           record_time = 2,
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
+          traffic_cost = Some(1513L),
           event_sequential_id = 3,
           node_id = 4,
           deactivated_event_sequential_id = Some(10),
@@ -314,6 +321,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           synchronizer_id = someSynchronizerId,
           trace_context = serializableTraceContext,
           external_transaction_hash = None,
+          traffic_cost = Some(1513L),
           event_type = PersistentEventType.Unassign.asInt,
           event_sequential_id = 3,
           node_id = 4,
@@ -396,6 +404,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = someTemplateId,
           package_id = somePackageId,
           ledger_effective_time = 13,
+          traffic_cost = Some(186L),
         )
         .toList should contain theSameElementsInOrderAs List(
         DbDto.EventVariousWitnessed(
@@ -427,6 +436,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(someTemplateId),
           package_id = Some(somePackageId),
           ledger_effective_time = Some(13),
+          traffic_cost = Some(186L),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -470,6 +480,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = someTemplateId,
           package_id = somePackageId,
           ledger_effective_time = 13,
+          traffic_cost = Some(186L),
         )
         .toList should contain theSameElementsInOrderAs List(
         DbDto.EventVariousWitnessed(
@@ -501,6 +512,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = Some(someTemplateId),
           package_id = Some(somePackageId),
           ledger_effective_time = Some(13),
+          traffic_cost = Some(186L),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(
@@ -532,6 +544,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           additional_witnesses = Set(someParty2),
           representative_package_id = someRepresentativePackageId,
           internal_contract_id = 3,
+          traffic_cost = Some(186L),
         )(template_id = someTemplateId)
         .toList should contain theSameElementsInOrderAs List(
         DbDto.EventVariousWitnessed(
@@ -563,6 +576,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = None,
           package_id = None,
           ledger_effective_time = None,
+          traffic_cost = Some(186L),
         ),
         DbDto.IdFilterVariousWitness(
           IdFilter(

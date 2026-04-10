@@ -11,8 +11,6 @@ import Daml.Script
 import Daml.Script.Internal
 import DA.Assert
 import DA.Text
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 data View = View with
   i_p : Party

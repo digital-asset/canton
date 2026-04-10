@@ -72,7 +72,6 @@ class MediatorEventDeduplicatorTest
       timeouts,
       loggerFactory,
     )
-    state.initialize(CantonTimestamp.MinValue).futureValueUS
 
     val deduplicator = new DefaultMediatorEventDeduplicator(
       state,
@@ -363,8 +362,6 @@ class MediatorEventDeduplicatorTest
       timeouts,
       loggerFactory,
     )
-
-    state.initialize(CantonTimestamp.MinValue).futureValueUS
 
     val verdictSender = new VerdictSender {
       override def sendResult(

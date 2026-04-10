@@ -99,7 +99,7 @@ class TrafficControlProcessor(
                 )
             }
 
-          HandlerResult.synchronous(
+          HandlerResult.synchronousUnit(
             processSetTrafficPurchasedEnvelopes(ts, topologyTimestampO, synchronizerEnvelopes)
           )
 

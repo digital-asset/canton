@@ -43,6 +43,7 @@ import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 
+import java.io.ByteArrayInputStream
 import java.time.Instant
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -877,7 +878,7 @@ object TopologyAdminCommands {
               Some(store.toProtoV30),
               waitToBecomeEffective.map(_.toProtoPrimitive),
             ),
-          topologySnapshot,
+          new ByteArrayInputStream(topologySnapshot.toByteArray),
         )
       override protected def handleResponse(
           response: ImportTopologySnapshotResponse
@@ -913,7 +914,7 @@ object TopologyAdminCommands {
               Some(store.toProtoV30),
               waitToBecomeEffective.map(_.toProtoPrimitive),
             ),
-          topologySnapshot,
+          new ByteArrayInputStream(topologySnapshot.toByteArray),
         )
       override protected def handleResponse(
           response: ImportTopologySnapshotV2Response

@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.examples.java.divulgence.DivulgeIouByExercise
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -88,7 +89,10 @@ final class InteractiveSubmissionTrafficCostEstimationTest
         bankE = ppn.parties.testing.external.enable("Bank")
         localEmily = participant1.parties.enable("Emily")
       }
-      .withTrafficControl(trafficControlParams)
+      .withTrafficControl(
+        TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+        trafficControlParams,
+      )
       .withSetup { implicit env =>
         import env.*
         // Top up all members with max traffic

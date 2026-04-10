@@ -165,6 +165,37 @@ class TransactionServiceCorrectnessIT extends LedgerTestSuite {
   })
 
   test(
+    "TXExposesPaidTrafficCost",
+    "Traffic cost should be exposed correctly",
+    allocate(SingleParty, SingleParty),
+  )(implicit ec => {
+    case p @ Participants(Participant(alpha, Seq(alice)), Participant(beta, Seq(bob))) =>
+      for {
+        _ <- alpha.create(alice, new AgreementFactory(bob, alice))
+        _ <- p.synchronize
+        alphaView <- alpha.transactions(AcsDelta, alice)
+        alphaBobView <- alpha.transactions(AcsDelta, bob)
+        betaView <- beta.transactions(AcsDelta, bob)
+      } yield {
+        assert(
+          alphaView.headOption.flatMap(_.paidTrafficCost).exists(_ > 0L),
+          s"Submitting node for a submitting party should have a positive paid traffic cost, got ${alphaView.headOption
+              .flatMap(_.paidTrafficCost)}",
+        )
+        assert(
+          alphaBobView.headOption.map(_.paidTrafficCost).exists(_.isEmpty),
+          s"Submitting node for a non submitting party should have an unset paid traffic cost, got ${alphaBobView.headOption
+              .flatMap(_.paidTrafficCost)}",
+        )
+        assert(
+          betaView.headOption.map(_.paidTrafficCost).exists(_.isEmpty),
+          s"Non submitting node should have an unset paid traffic cost, got ${betaView.headOption
+              .flatMap(_.paidTrafficCost)}",
+        )
+      }
+  })
+
+  test(
     "TXSingleMultiSameLedgerEffectsStakeholders",
     "The same ledger effects transactions should be served to all stakeholders",
     allocate(SingleParty, SingleParty),
@@ -452,7 +483,7 @@ object TransactionServiceCorrectnessIT {
       case _ => parentTraceId
     }
 
-  // Strip command id, offset, event id, node id and transaction id to yield a transaction comparable across participants
+  // Strip command id, offset, event id, node id, traffic cost and transaction id to yield a transaction comparable across participants
   // Furthermore, makes sure that the order is not relevant for witness parties
   // Sort by updateId as on distributed ledgers updates can occur in different orders
   // Even if updateIds are not the same across distributes ledgers, we still can use them for sorting
@@ -475,6 +506,9 @@ object TransactionServiceCorrectnessIT {
             .map(e => e.copy(event = stripEventFields(e.event)).modifyWitnessParties(_.sorted)),
           updateId = "updateId",
           traceContext = t.traceContext.map(tc => tc.copy(tc.traceparent.map(eraseSpanId))),
+          // clear the traffic cost as we can't know it ahead of time for comparison, and it will
+          // be different on different nodes (only the submitting node exposes the cost)
+          paidTrafficCost = None,
         )
       )
   }

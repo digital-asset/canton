@@ -42,11 +42,12 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
   SuppressingLogger,
+  SuppressionRule,
   TracedLogger,
 }
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelParams}
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
@@ -60,15 +61,15 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConnectionXPoolConfig
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.client.pool.GrpcSequencerConnectionPoolFactory
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolConfig
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
@@ -79,7 +80,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.namespace
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, PekkoUtil}
 import com.digitalasset.canton.version.{
   IgnoreInSerializationTestExhaustivenessCheck,
@@ -100,7 +101,11 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.*
 
-class Env(override val loggerFactory: SuppressingLogger)(implicit
+class Env(
+    override val loggerFactory: SuppressingLogger,
+    protocolVersion: ProtocolVersion,
+    enableTrafficControl: Boolean,
+)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
@@ -120,6 +125,14 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   private val cryptoApi =
     TestingTopology()
       .withSimpleParticipants(participant, anotherParticipant)
+      .withDynamicSynchronizerParameters(
+        DynamicSynchronizerParameters
+          .defaultValues(protocolVersion)
+          .tryUpdate(trafficControlParameters =
+            Option.when(enableTrafficControl)(TrafficControlParameters())
+          ),
+        validFrom = CantonTimestamp.MinValue,
+      )
       .build()
       .forOwnerAndSynchronizer(participant, synchronizerId)
   val clock = new SimClock(loggerFactory = loggerFactory)
@@ -291,7 +304,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   private val sendTrackerStore = new InMemorySendTrackerStore()
   def makeConnection(port: Port, alias: SequencerAlias = SequencerAlias.Default) =
     GrpcSequencerConnection(
-      NonEmpty(Seq, Endpoint("localhost", port)),
+      NonEmpty(Set, Endpoint("localhost", port)),
       transportSecurity = false,
       None,
       alias,
@@ -300,11 +313,11 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   val connection = makeConnection(serverPort)
   private val connections = SequencerConnections.single(connection)
 
-  val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+  val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
     clientProtocolVersions = NonEmpty(Seq, BaseTest.testedProtocolVersion),
     minimumProtocolVersion = None,
     authConfig = authConfig,
-    keepAliveClientConfigO = None,
+    params = ClientChannelParams.ForTesting,
     member = participant,
     clock = clock,
     crypto = cryptoApi.crypto.crypto,
@@ -342,9 +355,8 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
       loggerFactory,
     )
 
-    val poolConfig = SequencerConnectionXPoolConfig.fromSequencerConnections(
+    val poolConfig = SequencerConnectionPoolConfig.fromSequencerConnections(
       sequencerConnections = connections,
-      tracingConfig = TracingConfig(TracingConfig.Propagation.Disabled),
       expectedPsidO = None,
     )
 
@@ -443,7 +455,7 @@ class GrpcSequencerIntegrationTest
   override type FixtureParam = Env
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new Env(loggerFactory)
+    val env = new Env(loggerFactory, testedProtocolVersion, enableTrafficControl = true)
     try super.withFixture(test.toNoArgTest(env))
     finally env.close()
   }
@@ -466,7 +478,7 @@ class GrpcSequencerIntegrationTest
       val initF = client.subscribeAfter(
         CantonTimestamp.MinValue,
         None,
-        ApplicationHandler.success(),
+        ApplicationHandler.success(UnthrottledAsync.immediate),
         synchronizerTimeTracker,
         PeriodicAcknowledgements.noAcknowledgements,
       )
@@ -550,35 +562,32 @@ class GrpcSequencerIntegrationTest
 
         env.spinUpSequencer(service2, sequencer2ConnectService, port2)
 
-        // We need an event in the event store otherwise the factory will skip the traffic state call
-        val now = clock.now
-        val dummyEvent = SequencedEventWithTraceContext(
-          SignedContent(
-            SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
-            SymbolicCrypto.emptySignature,
-            None,
-            testedProtocolVersion,
-          )
+        env.loggerFactory.assertLogs(
+          SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerClientFactory]
         )(
-          TraceContext.empty
+          makeClient(
+            SequencerConnections
+              .many(
+                NonEmpty.mk(Seq, connection, makeConnection(port2, sequencerAlias2)),
+                sequencerTrustThreshold = PositiveInt.two,
+                sequencerLivenessMargin = NonNegativeInt.zero,
+                submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
+                sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+              )
+              .value
+          ).futureValueUS.isRight shouldBe true,
+          assertions = _.infoMessage should include(
+            "Initializing traffic state at timestamp: Some(1970-01-01T00:00:00Z)"
+          ),
+          _.infoMessage should include(
+            "Cannot reach threshold for Retrieving traffic state from synchronizer"
+          ),
+          _.infoMessage should include(
+            "The operation 'Traffic State Initialization' was not successful"
+          ),
+          _.infoMessage should include("Now retrying operation 'Traffic State Initialization'"),
         )
-        sequencedEventStore.store(Seq(dummyEvent))(traceContext, closeContext).futureValueUS
 
-        val result = makeClient(
-          SequencerConnections
-            .many(
-              NonEmpty.mk(Seq, connection, makeConnection(port2, sequencerAlias2)),
-              sequencerTrustThreshold = PositiveInt.two,
-              sequencerLivenessMargin = NonNegativeInt.zero,
-              submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
-              sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
-            )
-            .value
-        ).leftOrFail("Expected client creation to fail due to traffic state mismatch")
-
-        result.futureValueUS should (include("RetryableError") and not(
-          include("NonRetryableError")
-        ))
     }
   }
 
@@ -601,11 +610,14 @@ class GrpcSequencerIntegrationTest
   }
 }
 
-final class EnvWithFailingTokenRefresh(override val loggerFactory: SuppressingLogger)(implicit
+final class EnvWithFailingTokenRefresh(
+    override val loggerFactory: SuppressingLogger,
+    protocolVersion: ProtocolVersion,
+)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
-) extends Env(loggerFactory) {
+) extends Env(loggerFactory, protocolVersion, enableTrafficControl = false) {
   override lazy val authConfig =
     AuthenticationTokenManagerConfig(minRetryInterval =
       config.NonNegativeFiniteDuration.ofMillis(10)
@@ -636,7 +648,7 @@ class GrpcSequencerIntegrationWithFailingTokenRefreshTest
   override type FixtureParam = EnvWithFailingTokenRefresh
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new EnvWithFailingTokenRefresh(loggerFactory)
+    val env = new EnvWithFailingTokenRefresh(loggerFactory, testedProtocolVersion)
     try super.withFixture(test.toNoArgTest(env))
     finally env.close()
   }

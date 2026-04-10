@@ -317,7 +317,22 @@ final class GeneratorsProtocol(
     )
   )
 
-  def contractInstanceWithMetadataArb(
+  def contractInstanceWithMetadataArb[Time <: CreationTime](
+      metadataList: List[ContractMetadata],
+      genTime: Gen[Time],
+  ): Arbitrary[GenContractInstance { type InstCreatedAtTime <: Time }] = Arbitrary(
+    for {
+      metadata <- Gen.oneOf(metadataList)
+      createdAt <- genTime
+    } yield ExampleContractFactory.build[Time](
+      createdAt = createdAt,
+      signatories = metadata.signatories,
+      stakeholders = metadata.stakeholders,
+      keyOpt = metadata.maybeKeyWithMaintainers,
+    )
+  )
+
+  def contractInstanceWithGivenMetadataArb(
       metadata: ContractMetadata
   ): Arbitrary[ContractInstance] = Arbitrary(
     for {
@@ -392,7 +407,7 @@ final class GeneratorsProtocol(
 
     def tuple(metadata: ContractMetadata) = Arbitrary(
       for {
-        contract <- Arbitrary(contractInstanceWithMetadataArb(metadata).arbitrary).arbitrary
+        contract <- Arbitrary(contractInstanceWithGivenMetadataArb(metadata).arbitrary).arbitrary
         // TODO(#26468): Use lfPackageId.arbitrary for PV>=35
         sourceValidationId = contract.templateId.packageId // lfPackageId.arbitrary
         targetValidationId = contract.templateId.packageId // lfPackageId.arbitrary

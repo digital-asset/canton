@@ -8,8 +8,6 @@ module RaceTests where
 #ifdef DAML_CONTRACT_KEYS
 
 import DA.Optional (isSome)
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 type RaceKey = Text
 

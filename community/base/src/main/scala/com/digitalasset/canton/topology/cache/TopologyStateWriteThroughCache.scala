@@ -479,7 +479,7 @@ class TopologyStateWriteThroughCache(
       // only remove if the size increase was significant enough
       if (numToRemove > 0) {
         val (excess, kept) = go(todo = numToRemove, index = 0, kept = 0, maxIdx = oldSize)
-        metrics.evictionCount.inc((numToRemove - kept).toLong)
+        metrics.evictionCount.inc((numToRemove - excess).toLong)
         logger.debug(
           s"Completed topology cache eviction: now=${cachedKeys.size + newItemsSize}, fresh=${newItems.size}, cached=$oldSize, kept=$kept, excess=$excess"
         )

@@ -26,10 +26,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 // Split the Upgrade unit tests over four suites, which seems to be the sweet
 // spot (~95s instead of ~185s runtime)
-class UpgradesMatrixUnit0 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 2, 0)
-class UpgradesMatrixUnit1 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 2, 1)
-class UpgradesMatrixUnit2 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2, 0)
-class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2, 1)
+class UpgradesMatrixUnit0 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 0)
+class UpgradesMatrixUnit1 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 1)
+class UpgradesMatrixUnit2 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 2)
+class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 1, 0)
 
 /** A test suite to run the UpgradesMatrix matrix directly in the engine
   *
@@ -47,11 +47,11 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   defineTestCases()
 
   override def nk = Some((n, k))
-  override def createTestCase(
-      name: String,
+  override def testHelperToDeclaration(
+      testHelper: UpgradesMatrixCases#TestHelper,
       assertion: ExecutionContext => Future[Assertion],
   ): Unit =
-    name in assertion(executionContext)
+    testHelper.title in assertion(executionContext)
 
   def toContractId(s: String): ContractId =
     ContractId.V1.assertBuild(crypto.Hash.hashPrivateKey(s), Bytes.assertFromString("00"))
@@ -158,11 +158,11 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
     val lookupContractByKey = contractOrigin match {
       case UpgradesMatrixCases.Global | UpgradesMatrixCases.Disclosed =>
         (
-            (kwm: GlobalKeyWithMaintainers) =>
+            (gkey: GlobalKey) =>
               testHelper
                 .globalContractKeyWithMaintainers(setupData)
                 .flatMap(helperKey =>
-                  Option.when(helperKey.globalKey == kwm.globalKey)(Vector(globalContract))
+                  Option.when(helperKey.globalKey == gkey)(Vector(globalContract))
                 )
         ).unlift
       case _ => PartialFunction.empty

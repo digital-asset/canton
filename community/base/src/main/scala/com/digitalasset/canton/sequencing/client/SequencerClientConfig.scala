@@ -5,7 +5,9 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
+import com.digitalasset.canton.tracing.TracingConfig.Propagation
 
 /** Client configured options for how to connect to a sequencer
   *
@@ -40,7 +42,8 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenMana
   *   know what you are doing, you shouldn't touch this setting.
   * @param overrideMaxRequestSize
   *   overrides the maxRequestSize configured in the dynamic synchronizer parameters. If
-  *   overrideMaxRequestSize, is set, modifying the maxRequestSize won't have any effect.
+  *   overrideMaxRequestSize is set, modifying the maxRequestSize won't have any effect. This is
+  *   only used for testing.
   * @param maximumInFlightEventBatches
   *   The maximum number of event batches that the system will process concurrently. Setting the
   *   `maximumInFlightEventBatches` parameter limits the number of event batches that the system
@@ -66,6 +69,10 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenMana
   *     immediately continue to the next step of amplification.
   *   - Scheduling of the next amplification takes into account the time taken by the transport to
   *     provide a response.
+  * @param channelMaxInboundMessageSize
+  *   max inbound request size for the grpc channel to the sequencer.
+  * @param channelFlowControlWindow
+  *   flow control window for the grpc channel to the sequencer.
   */
 final case class SequencerClientConfig(
     eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
@@ -94,4 +101,16 @@ final case class SequencerClientConfig(
     useNewConnectionPool: Boolean = true,
     timeReadingsRetention: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
     enableAmplificationImprovements: Boolean = true,
-)
+    amplifyOnMaxSequencingTimeTooFar: Boolean = true,
+    channelMaxInboundMessageSize: NonNegativeInt = ClientChannelParams.DefaultMaxInboundMessageSize,
+    channelFlowControlWindow: PositiveInt = ClientChannelParams.DefaultFlowControlWindow,
+) {
+
+  def clientChannelParams(tracePropagation: Propagation): ClientChannelParams = ClientChannelParams(
+    maxInboundMessageSize = channelMaxInboundMessageSize,
+    keepAliveClient = keepAliveClient,
+    flowControlWindow = channelFlowControlWindow,
+    traceContextPropagation = tracePropagation,
+  )
+
+}

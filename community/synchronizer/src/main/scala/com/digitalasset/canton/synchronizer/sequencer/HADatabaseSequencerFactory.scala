@@ -16,7 +16,10 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageBuilder.ExclusiveStorage
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageNotifier.FailoverNotification
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
-import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
+import com.digitalasset.canton.synchronizer.sequencer.time.{
+  DisasterRecoverySequencingTimeUpperBound,
+  LsuSequencingBounds,
+}
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
@@ -65,6 +68,7 @@ class HADatabaseSequencerFactory(
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
       authenticationServices: Option[AuthenticationServices],
@@ -125,6 +129,7 @@ class HADatabaseSequencerFactory(
       loggerFactory,
       blockSequencerMode = false,
       lsuSequencingBounds,
+      drSequencingTimeUpperBound,
       rateLimitManagerO = None,
     ) {
       override def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = {

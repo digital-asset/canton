@@ -8,11 +8,11 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
-import com.digitalasset.daml.lf.speedy.SExpr._
+import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SResult.{SResultError, SResultFinal}
 import com.digitalasset.daml.lf.speedy.SValue.{SContractId, SParty, SUnit}
 import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
@@ -20,12 +20,7 @@ import com.digitalasset.daml.lf.testing.parser
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
-  FatContractInstance,
-  GlobalKeyWithMaintainers,
-  SerializationVersion,
-}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, GlobalKeyWithMaintainers, SerializationVersion, NextGenContractStateMachine as ContractStateMachine}
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -58,7 +53,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
   private def runUpdateExpr(
       compiledPackages: PureCompiledPackages,
       expr: Expr,
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = Map.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = Map.empty,
   ): Either[SError, SValue] = {
     runUpdateExpr(
       compiledPackages,
@@ -75,7 +70,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       expr: Expr,
       args: ArraySeq[SValue],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
   ) = {
     runUpdateExpr(
       compiledPackages,
@@ -91,7 +86,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       packageResolution: Map[PackageName, PackageId],
       sexpr: SExpr,
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
   ) = {
     val machine = Speedy.Machine
       .fromUpdateSExpr(
@@ -1345,7 +1340,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
                         case Global => Map(globalContract.contractId -> globalContract)
                         case Local => Map.empty
                       },
-                      getKeys = Map(globalKey -> Vector(globalContract)),
+                      getKeys = Map(globalKey.globalKey -> Vector(globalContract)),
                     )
                   } {
                     case Left(

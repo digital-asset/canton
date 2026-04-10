@@ -30,6 +30,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggingContext,
 }
 import com.digitalasset.canton.metrics.*
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
@@ -108,7 +109,6 @@ import com.digitalasset.canton.{
   WorkflowId,
   checked,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.CreationTime
 import monocle.PLens
 
@@ -138,8 +138,8 @@ class TransactionProcessingSteps(
     tracker: CommandProgressTracker,
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-    messagePayloadLoggingEnabled: Boolean,
     onlyForTestingTransactionInMemoryStore: Option[OnlyForTestingTransactionInMemoryStore],
+    participantNodeParameters: ParticipantNodeParameters,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       SubmissionParam,
@@ -786,7 +786,6 @@ class TransactionProcessingSteps(
               modelConformanceChecker
                 .reInterpret(
                   viewTree.view,
-                  keyResolverFor(viewTree.view),
                   ledgerTime,
                   parsedRequest.preparationTime,
                   () => engineController.abortStatus,
@@ -804,7 +803,7 @@ class TransactionProcessingSteps(
           transactionEnricher,
           createNodeEnricher,
           logger,
-          messagePayloadLoggingEnabled,
+          participantNodeParameters.loggingConfig.api.messagePayloads,
         )
 
         consistencyResultE = ContractConsistencyChecker
@@ -846,7 +845,6 @@ class TransactionProcessingSteps(
         conformanceResultET = modelConformanceChecker
           .check(
             parsedRequest.rootViewTreesWithEffects,
-            keyResolverFor(_),
             ipsSnapshot,
             commonData,
             getEngineAbortStatus = () => engineController.abortStatus,
@@ -946,6 +944,8 @@ class TransactionProcessingSteps(
         replayCheckResult = parallelChecksResult.replayCheckResult,
         validatedExternalTransactionHash =
           parallelChecksResult.authenticationValidatorResult.externalHash,
+        commitAfterFailedActivenessCheck =
+          participantNodeParameters.commitAfterFailedActivenessCheck,
       )
     }
 
@@ -1282,6 +1282,8 @@ class TransactionProcessingSteps(
         consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         transient = usedAndCreated.contracts.transient,
         createdContracts = createdContracts,
+        commitAfterFailedActivenessCheck =
+          participantNodeParameters.commitAfterFailedActivenessCheck,
       )
 
       commitAndContractsAndEvent = computeCommitAndContractsAndEvent(
@@ -1590,7 +1592,7 @@ object TransactionProcessingSteps {
   def keyResolverFor(
       rootView: TransactionView
   )(implicit loggingContext: NamedLoggingContext): LfKeyResolver =
-    rootView.globalKeyInputs.fmap(_.unversioned.resolution.asCidVector)
+    rootView.keyMaintainers.fmap(_.unversioned.contracts.toVector)
 
   /** @throws java.lang.IllegalArgumentException
     *   if `receivedViewTrees` contains views with different transaction root hashes

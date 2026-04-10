@@ -17,14 +17,16 @@ import com.digitalasset.canton.mediator.admin.v30
 import com.digitalasset.canton.mediator.admin.v30.SequencerConnectionServiceGrpc.SequencerConnectionService
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
-import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConnectionXPoolError
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
+import com.digitalasset.canton.sequencing.client.pool.{
+  SequencerConnectionPool,
+  SequencerConnectionPoolFactory,
+}
 import com.digitalasset.canton.sequencing.client.{RichSequencerClient, SequencerClient}
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   SequencerConnectionValidation,
-  SequencerConnectionXPool,
-  SequencerConnectionXPoolFactory,
   SequencerConnections,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -156,7 +158,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       fetchConfig: () => FutureUnlessShutdown[Option[C]],
       saveConfig: C => FutureUnlessShutdown[Unit],
       sequencerConnectionLens: Lens[C, SequencerConnections],
-      connectionPoolFactory: SequencerConnectionXPoolFactory,
+      connectionPoolFactory: SequencerConnectionPoolFactory,
       sequencerClient: SequencerClient,
       tracingConfig: TracingConfig,
       loggerFactory: NamedLoggerFactory,
@@ -240,7 +242,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
   }
 
   def waitUntilSequencerConnectionIsValidWithPool(
-      connectionPoolFactory: SequencerConnectionXPoolFactory,
+      connectionPoolFactory: SequencerConnectionPoolFactory,
       tracingConfig: TracingConfig,
       flagCloseable: FlagCloseable,
       loadConfig: => FutureUnlessShutdown[Option[SequencerConnections]],
@@ -249,13 +251,13 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       actorSystem: ActorSystem,
-  ): EitherT[FutureUnlessShutdown, String, (SequencerConnectionXPool, SequencerConnections)] = {
+  ): EitherT[FutureUnlessShutdown, String, (SequencerConnectionPool, SequencerConnections)] = {
     implicit val traceContext: TraceContext = namedLoggingContext.traceContext
 
     def tryNewConfig: EitherT[
       FutureUnlessShutdown,
       String,
-      (SequencerConnectionXPool, SequencerConnections),
+      (SequencerConnectionPool, SequencerConnections),
     ] =
       for {
         sequencerConnections <- OptionT(loadConfig).toRight("No sequencer connection config")
@@ -287,17 +289,17 @@ object GrpcSequencerConnectionService extends HasLoggerName {
   }
 
   private def validateConfig(
-      connectionPoolFactory: SequencerConnectionXPoolFactory,
+      connectionPoolFactory: SequencerConnectionPoolFactory,
       sequencerConnections: SequencerConnections,
       poolName: String,
       tracingConfig: TracingConfig,
-      logErrorFn: SequencerConnectionXPoolError => Unit = _ => (),
+      logErrorFn: SequencerConnectionPoolError => Unit = _ => (),
   )(implicit
       namedLoggingContext: NamedLoggingContext,
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
-  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionXPool] = {
+  ): EitherT[FutureUnlessShutdown, String, SequencerConnectionPool] = {
     implicit val traceContext: TraceContext = namedLoggingContext.traceContext
 
     for {

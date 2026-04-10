@@ -51,6 +51,11 @@ object TracingConfig {
   sealed trait Exporter
   object Exporter {
     case object Disabled extends Exporter
+
+    /** Zipkin exporter is deprecated from opentelemetry, with removal planned for mid-2026. See
+      * https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/ for more details.
+      */
+    @deprecated("Use OTLP exporter instead.", since = "3.5.0")
     final case class Zipkin(address: String = "localhost", port: Int = 9411) extends Exporter
     final case class Otlp(
         address: String = "localhost",

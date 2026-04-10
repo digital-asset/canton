@@ -38,6 +38,7 @@ import com.digitalasset.canton.sequencing.{
   HandlerResult,
   OrdinaryProtocolEvent,
   PossiblyIgnoredProtocolEvent,
+  UnthrottledAsync,
 }
 import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
@@ -82,19 +83,19 @@ class ParallelMessageDispatcher(
 
   import MessageDispatcher.*
 
-  override protected type ProcessingAsyncResult = AsyncResult[Unit]
+  override protected type ProcessingAsyncResult = AsyncResult[UnthrottledAsync]
   override protected def processingAsyncResultMonoid: Monoid[ProcessingAsyncResult] =
     Monoid[ProcessingAsyncResult]
 
   override protected def doProcess(
       kind: MessageKind
   ): ProcessingResult = {
-    @inline def runSynchronously[A](run: () => FutureUnlessShutdown[A])(
+    @inline def runSynchronously(run: () => FutureUnlessShutdown[Unit])(
         tickDecision: TickDecision,
         futureEventPublication: Option[FutureEventPublication],
-    ): FutureUnlessShutdown[(AsyncResult[A], TicksAfter)] =
-      run().map { result =>
-        val asyncF = AsyncResult.pure(result)
+    ): FutureUnlessShutdown[(AsyncResult[UnthrottledAsync], TicksAfter)] =
+      run().map { _ =>
+        val asyncF = AsyncResult.immediate
         asyncF -> TicksAfter.fromTickDecision(tickDecision, asyncF, futureEventPublication)
       }
 
@@ -103,9 +104,13 @@ class ParallelMessageDispatcher(
         override def apply(
             tickDecision: TickDecision,
             futureEventPublication: Option[FutureEventPublication],
-        ): FutureUnlessShutdown[(AsyncResult[Unit], TicksAfter)] =
+        ): FutureUnlessShutdown[(AsyncResult[UnthrottledAsync], TicksAfter)] =
           run().map { result =>
-            result -> TicksAfter.fromTickDecision(tickDecision, result, futureEventPublication)
+            result -> TicksAfter.fromTickDecision(
+              tickDecision,
+              result,
+              futureEventPublication,
+            )
           }
       }
 
@@ -114,11 +119,11 @@ class ParallelMessageDispatcher(
         override def apply(
             tickDecision: TickDecision,
             futureEventPublication: Option[FutureEventPublication],
-        ): FutureUnlessShutdown[(AsyncResult[Unit], TicksAfter)] = {
-          val flattenedRun: () => FutureUnlessShutdown[Unit] =
-            () => run().flatMap(_.unwrap)
-          runSynchronously(flattenedRun)(tickDecision, futureEventPublication)
-        }
+        ): FutureUnlessShutdown[(AsyncResult[UnthrottledAsync], TicksAfter)] =
+          run().flatMap(_.unwrap).map { unthrottledAsync =>
+            val asyncF = AsyncResult.pure(unthrottledAsync)
+            asyncF -> TicksAfter.fromTickDecision(tickDecision, asyncF, futureEventPublication)
+          }
       }
 
     // Explicitly enumerate all cases for type safety
@@ -198,8 +203,10 @@ class ParallelMessageDispatcher(
           ts = eventE.event.timestamp,
           ticksObserveSequencing.combine(ticksAfter),
         )
-        asyncResult.flatMapFUS { (_: Unit) =>
-          ticksF
+        // TODO(i31797): This needs to be reworked if / when we start making use of
+        // UnthrottledAsync in the protocol processor
+        asyncResult.flatMapFUS { (unthrottled: UnthrottledAsync) =>
+          ticksF.map(_ => unthrottled)
         }
       }
     }(traceContext, tracer)
@@ -308,7 +315,7 @@ object ParallelMessageDispatcher {
     def apply(
         tickDecision: TickDecision,
         futureEventPublication: Option[FutureEventPublication],
-    ): FutureUnlessShutdown[(AsyncResult[Unit], TicksAfter)]
+    ): FutureUnlessShutdown[(AsyncResult[UnthrottledAsync], TicksAfter)]
   }
 
   private val NoEventPublication: Option[FutureEventPublication] = None

@@ -11,8 +11,6 @@ module ExceptionSemantics where
 import Daml.Script
 import DA.Exception
 import DA.Assert ((===))
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 exception E
   where

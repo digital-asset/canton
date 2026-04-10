@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
+import com.digitalasset.canton.data.ViewType.{AssignmentViewType, UnassignmentViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RequestProcessor, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -25,6 +26,11 @@ sealed trait ViewType extends Product with Serializable with PrettyPrinting {
   def toProtoEnum: v30.ViewType
 
   override protected def pretty: Pretty[ViewType.this.type] = prettyOfObject[ViewType.this.type]
+
+  def isReassignment: Boolean = this match {
+    case UnassignmentViewType | AssignmentViewType => true
+    case _ => false
+  }
 }
 
 // This trait is not sealed so that we can extend it for unit testing

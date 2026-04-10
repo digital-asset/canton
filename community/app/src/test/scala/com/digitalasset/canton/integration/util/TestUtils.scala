@@ -7,6 +7,7 @@ import com.daml.ledger.javaapi
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.{
+  BaseInspection,
   InstanceReference,
   LocalMediatorReference,
   LocalSequencerReference,
@@ -16,6 +17,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, TimeProof}
+import com.digitalasset.canton.synchronizer.mediator.MediatorNode
+import com.digitalasset.canton.synchronizer.sequencer.SequencerNode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FutureHelpers}
 import org.scalatest.Assertion
@@ -45,29 +48,37 @@ object TestUtils extends FutureHelpers {
       scalaSet.map((_, javaapi.data.Unit.getInstance())).toMap.asJava
     )
 
+  def waitForTargetTimeOnSynchronizerNode(
+      targetTime: CantonTimestamp,
+      logger: TracedLogger,
+  )(
+      node: InstanceReference & BaseInspection[?]
+  ): Assertion =
+    waitForTargetTime(
+      node,
+      node.underlying.value match {
+        case mediator: MediatorNode =>
+          mediator.replicaManager.mediatorRuntime.value.mediator.sequencerClient
+        case sequencer: SequencerNode =>
+          sequencer.sequencer.client
+        case other => fail(s"Unsupported node $other")
+      },
+      targetTime,
+      logger,
+    )
+
   def waitForTargetTimeOnSequencer(
       sequencer: LocalSequencerReference,
       targetTime: CantonTimestamp,
       logger: TracedLogger,
-  ): Assertion =
-    waitForTargetTime(
-      sequencer,
-      sequencer.underlying.value.sequencer.client,
-      targetTime,
-      logger,
-    )
+  ): Assertion = waitForTargetTimeOnSynchronizerNode(targetTime, logger)(sequencer)
 
   def waitForTargetTimeOnMediator(
       mediator: LocalMediatorReference,
       targetTime: CantonTimestamp,
       logger: TracedLogger,
   ): Assertion =
-    waitForTargetTime(
-      mediator,
-      mediator.underlying.value.replicaManager.mediatorRuntime.value.mediator.sequencerClient,
-      targetTime,
-      logger,
-    )
+    waitForTargetTimeOnSynchronizerNode(targetTime, logger)(mediator)
 
   def waitForTargetTime(
       forNode: InstanceReference,

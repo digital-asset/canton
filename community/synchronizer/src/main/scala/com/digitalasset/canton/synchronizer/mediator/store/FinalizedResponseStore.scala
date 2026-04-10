@@ -40,8 +40,7 @@ import scala.concurrent.ExecutionContext
 private[mediator] trait FinalizedResponseStore extends AutoCloseable {
 
   /** Stores finalized mediator verdict. In the event of a crash we may attempt to store an existing
-    * finalized request so the store should behave in an idempotent manner. TODO(#4335): If there is
-    * an existing value ensure that it matches the value we want to insert
+    * finalized request so the store should behave in an idempotent manner.
     */
   def store(
       finalizedResponse: FinalizedResponse

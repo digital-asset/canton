@@ -203,19 +203,16 @@ class InMemoryActiveContractStore(
     FutureUnlessShutdown.pure {
       contractIds
         .to(LazyList)
-        .map(contractId =>
-          table
-            .get(contractId)
-            .flatMap(_.activeBy(TimeOfChange.immediatePredecessor(timestampExclusive)))
-            .fold(
-              ErrorUtil.internalError(
-                new IllegalStateException(
-                  s"Archived non-transient contract $contractId should have been active in the ACS"
-                )
-              )
-            ) { case (_, reassignmentCounter) =>
-              contractId -> reassignmentCounter
-            }
+        .flatMap(contractId =>
+          for {
+            contractStatus <- table.get(contractId)
+            tocAndCounter <- contractStatus.activeBy(
+              TimeOfChange.immediatePredecessor(timestampExclusive)
+            )
+          } yield {
+            val (_, reassignmentCounter) = tocAndCounter
+            contractId -> reassignmentCounter
+          }
         )
         .toMap
     }

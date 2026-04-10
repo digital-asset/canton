@@ -53,9 +53,10 @@ trait SandboxRequiringAuthorizationFuns {
     scope = Some(defaultScope),
   )
 
+  def defaultExpiresIn = Duration.ofMinutes(5)
   protected def standardToken(
       userId: String,
-      expiresIn: Option[Duration] = Some(Duration.ofMinutes(5)),
+      expiresIn: Option[Duration] = Some(defaultExpiresIn),
       participantId: Option[String] = None,
       issuer: Option[String] = None,
   ): StandardJWTPayload =
@@ -143,10 +144,11 @@ trait SandboxRequiringAuthorizationFuns {
       tokenIssuer: Option[String] = None,
       secret: Option[String] = None,
       primaryParty: String = "",
+      expiresIn: Option[Duration] = Some(defaultExpiresIn),
   )(implicit ec: ExecutionContext): Future[(proto.User, ServiceCallContext)] = {
     val userToken = Option(
       toHeader(
-        tokenModifier(standardToken(userId, issuer = tokenIssuer)),
+        tokenModifier(standardToken(userId, issuer = tokenIssuer, expiresIn = expiresIn)),
         secret = secret.getOrElse(jwtSecret.unwrap),
       )
     )

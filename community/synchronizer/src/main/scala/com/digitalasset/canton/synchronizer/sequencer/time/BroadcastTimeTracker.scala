@@ -28,8 +28,8 @@ trait BroadcastTimeTracker {
 }
 
 class BroadcastTimeTrackerImpl(override protected val loggerFactory: NamedLoggerFactory)
-    extends BroadcastTimeTracker
-    with UnsignedProtocolEventHandler
+    extends UnsignedProtocolEventHandler
+    with BroadcastTimeTracker
     with NamedLogging {
 
   private val lastBroadcastSequencingTime: AtomicReference[CantonTimestamp] =

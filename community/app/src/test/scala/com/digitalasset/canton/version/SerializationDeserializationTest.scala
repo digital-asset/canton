@@ -134,8 +134,6 @@ final class SerializationDeserializationTest
           generators.protocol.serializableContractArb(canHaveEmptyKey = true)
         )
 
-        test(ActionDescription, version)
-
         // Merkle tree leaves
         testContext(CommonMetadata, TestHash, version)
         testContext(ParticipantMetadata, TestHash, version)

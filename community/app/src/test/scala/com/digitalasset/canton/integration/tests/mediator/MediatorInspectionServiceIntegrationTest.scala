@@ -45,6 +45,11 @@ sealed trait MediatorInspectionServiceIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
+      .withSetup { implicit env =>
+        import env.*
+        participant1.synchronizers.connect_local(sequencer1, daName)
+        participant1.dars.upload(CantonExamplesPath)
+      }
 
   // helper methods to access mediator internals
   private def mediator(implicit env: TestConsoleEnvironment) =
@@ -87,14 +92,6 @@ sealed trait MediatorInspectionServiceIntegrationTest
   }
 
   "Mediator" should {
-    "connect participant and upload examples dar" in { implicit env =>
-      import env.*
-      clue("participant1 connects to sequencer1") {
-        participant1.synchronizers.connect_local(sequencer1, daName)
-        participant1.dars.upload(CantonExamplesPath)
-      }
-    }
-
     "detect timeouts on any sequenced time and properly serve verdicts" in { implicit env =>
       import env.*
 
@@ -273,7 +270,17 @@ sealed trait MediatorInspectionServiceIntegrationTest
         verdict1.finalizationTime.value should be < verdict3.finalizationTime.value
         verdict3.finalizationTime.value should be < verdict2.finalizationTime.value
 
-        recordTime3
+        // The nextFromTimestamp is at least equal to the finalization time of request 2
+        // because that's the last confirmation response that was received and no other
+        // request is still pending
+        // Technically ths is a lower bound as other NON confirmation request events
+        // received afterward may also safely advance the nextFromTimestamp
+        mediator.state.finalizedResponseStore
+          .fetch(RequestId(recordTime2))
+          .value
+          .futureValueUS
+          .value
+          .finalizationTime
       }
 
       // restart the mediator
@@ -281,9 +288,7 @@ sealed trait MediatorInspectionServiceIntegrationTest
       mediator1.start()
 
       // now check the mediator state after initialization
-      mediatorState.youngestFinalizedRequest.get shouldBe nextFromTimestamp
-      mediatorState.recordOrderTimeAwaiter.getCurrentKnownTime() shouldBe nextFromTimestamp
-      highestRecordTime() shouldBe nextFromTimestamp
+      mediator.getCurrentWatermark should be >= nextFromTimestamp
     }
 
     "reinitialize mediator state" in { implicit env =>
@@ -319,15 +324,6 @@ sealed trait MediatorInspectionServiceIntegrationTest
         val recordTimeOfRequest2 = highestRecordTime()
         // wait to see a new highest record time in the finalized response store
         recordTimeOfRequest2 should be > highestRecordTimeAtStart
-        // and wait that the mediator has fully processed the send-receipt for the verdict,
-        // to avoid a race between updating the mediator's prehead sequencer counter
-        // and rewinding it here in the test for the sake of testing the re-initialization procedure
-        val verdictOfRequest2 = mediatorState.finalizedResponseStore
-          .fetch(RequestId(recordTimeOfRequest2))
-          .value
-          .futureValueUS
-          .value
-        mediatorPrehead().timestamp should be > verdictOfRequest2.finalizationTime
       }
 
       // now set the mediator's prehead to the prehead of request 1.

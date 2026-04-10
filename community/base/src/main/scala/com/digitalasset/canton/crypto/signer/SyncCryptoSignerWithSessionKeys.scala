@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{EitherTUtil, Mutex}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.github.benmanes.caffeine.cache.Scheduler
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
@@ -75,6 +76,9 @@ class SyncCryptoSignerWithSessionKeys(
     extends SyncCryptoSigner
     with FlagCloseable
     with HasCloseContext {
+
+  // session signing keys can only be used with PV35+
+  require(staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v35)
 
   private val scheduledExecutorService = Threading.singleThreadScheduledExecutor(
     "session-signing-key-cache",

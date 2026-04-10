@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -93,7 +94,6 @@ sealed trait SynchronizerConnectivityIntegrationTest
           participant1.synchronizers.connect_local(sequencer1, alias = daName),
           _.shouldBeCommandFailure(SyncServiceInconsistentConnectivity),
         )
-
       }
 
       "Still reported as not available on a second attempt" in { implicit env =>
@@ -466,6 +466,7 @@ sealed trait SynchronizerConnectivityIntegrationTest
 //  registerPlugin(new UseH2(loggerFactory))
 //}
 
+@UnstableTest // TODO(#28493) Remove annotation
 class SynchronizerConnectivityBftOrderingIntegrationTestPostgres
     extends SynchronizerConnectivityIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

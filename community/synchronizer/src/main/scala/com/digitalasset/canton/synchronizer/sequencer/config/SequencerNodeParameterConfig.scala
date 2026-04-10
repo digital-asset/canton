@@ -58,7 +58,7 @@ final case class SequencerNodeParameterConfig(
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),
     timeAdvancingTopology: TimeAdvancingTopologyConfig = TimeAdvancingTopologyConfig(),
     // TODO(#30769) remove this flag once the feature is complete
-    producePostOrderingTopologyTicks: Boolean = false,
+    producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
@@ -67,9 +67,15 @@ final case class SequencerNodeParameterConfig(
   *   Override the LSU sequencing bounds computed from the topology store. Should be used ONLY in a
   *   disaster recovery scenario (roll forward) and the value MUST be identical across sequencer
   *   nodes.
+  * @param globalMaxSequencingTimeInclusive
+  *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
+  *   strictly greater to this value will not be delivered. Important notes:
+  *   - SHOULD be set only in disaster recovery scenarios.
+  *   - MUST be the same value in all sequencers of a synchronizer.
   */
 final case class LsuRepair(
-    lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None
+    lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None,
+    globalMaxSequencingTimeInclusive: Option[CantonTimestamp] = None,
 )
 
 /** Used to override values usually derived from the LSU announcement. MUST be used only for roll

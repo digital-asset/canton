@@ -504,7 +504,7 @@ class LedgerApiServer(
     GrpcTelemetry
       .builder(tracerProvider.openTelemetry)
       .build()
-      .newServerInterceptor(),
+      .createServerInterceptor(),
   ) ::: (serverConfig.rateLimit
     .map(rateLimit =>
       RateLimitingInterceptorFactory.create(

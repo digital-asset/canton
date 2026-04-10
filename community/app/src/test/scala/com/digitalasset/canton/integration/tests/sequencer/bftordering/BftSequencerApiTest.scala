@@ -87,6 +87,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         FutureSupervisor.Noop,
         SequencerTrafficConfig(),
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         runtimeReady = FutureUnlessShutdown.unit,
       )
       .futureValueUS

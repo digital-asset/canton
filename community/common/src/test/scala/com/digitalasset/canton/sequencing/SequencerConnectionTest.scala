@@ -11,7 +11,7 @@ import com.digitalasset.canton.{BaseTest, SequencerAlias}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
-class SequencerConnectionTest extends AnyWordSpec with BaseTest {
+final class SequencerConnectionTest extends AnyWordSpec with BaseTest {
   import SequencerConnectionTest.*
 
   "SequencerConnection.merge" should {
@@ -29,25 +29,25 @@ class SequencerConnectionTest extends AnyWordSpec with BaseTest {
   }
 }
 
-object SequencerConnectionTest {
-  def endpoint(n: Int) = Endpoint(s"host$n", Port.tryCreate(100 * n))
+private object SequencerConnectionTest {
+  def endpoint(n: Int): Endpoint = Endpoint(s"host$n", Port.tryCreate(100 * n))
 
-  val grpc1 = GrpcSequencerConnection(
-    NonEmpty(Seq, endpoint(1), endpoint(2)),
+  val grpc1: GrpcSequencerConnection = GrpcSequencerConnection(
+    NonEmpty(Set, endpoint(1), endpoint(2)),
     transportSecurity = false,
     Some(ByteString.copyFromUtf8("certificates")),
     SequencerAlias.Default,
     None,
   )
-  val grpc2 = GrpcSequencerConnection(
-    NonEmpty(Seq, endpoint(3), endpoint(4)),
+  val grpc2: GrpcSequencerConnection = GrpcSequencerConnection(
+    NonEmpty(Set, endpoint(3), endpoint(4)),
     transportSecurity = false,
     None,
     SequencerAlias.Default,
     Some(DefaultTestIdentities.sequencerId),
   )
-  val grpcMerged = GrpcSequencerConnection(
-    NonEmpty(Seq, endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
+  val grpcMerged: GrpcSequencerConnection = GrpcSequencerConnection(
+    NonEmpty(Set, endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
     transportSecurity = false,
     Some(ByteString.copyFromUtf8("certificates")),
     SequencerAlias.Default,

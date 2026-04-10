@@ -157,7 +157,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
 
       val (tcp, observedTs, updates) = mkTrafficProcessor()
 
-      tcp(events).futureValueUS.unwrap.futureValueUS
+      tcp(events).futureValueUS.unwrap.futureValueUS.future.futureValueUS
 
       observedTs.get().result() shouldBe Seq(ts1, ts2, ts3)
       updates.get().result() shouldBe Seq.empty

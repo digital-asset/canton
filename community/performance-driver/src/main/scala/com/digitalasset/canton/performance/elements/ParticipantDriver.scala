@@ -127,6 +127,7 @@ abstract class ParticipantDriver(
   protected val rate: SubmissionRate = role.settings.submissionRateSettings match {
     case rs: SubmissionRateSettings.TargetLatencyNew =>
       new SubmissionRate.TargetLatencyViaPending(
+        startPending = rs.startPending,
         targetLatencyMs = rs.targetLatencyMs,
         stepFactor = rs.stepFactor,
         cutFactor = rs.cutFactor,

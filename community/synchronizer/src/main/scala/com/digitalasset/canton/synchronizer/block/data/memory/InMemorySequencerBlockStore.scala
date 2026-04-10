@@ -32,9 +32,9 @@ class InMemorySequencerBlockStore(
 ) extends SequencerBlockStore
     with NamedLogging {
 
-  override protected val stateManagerStore = new InMemorySequencerStateManagerStore(loggerFactory)
   implicit override protected val executionContext: ExecutionContext =
     DirectExecutionContext(noTracingLogger)
+  override protected val stateManagerStore = new InMemorySequencerStateManagerStore(loggerFactory)
 
   /** Stores for each block height the timestamp of the last event and the last topology client
     * timestamp up to and including this block

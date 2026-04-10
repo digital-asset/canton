@@ -664,9 +664,11 @@ abstract class ParticipantReference(
       topology.participant_synchronizer_permissions.find(synchronizerId, participantId)
 
     // notice the `exists`, expressing the requirement of a permission to exist
-    val hasRequiredSynchronizerPermission = synchronizerPermission.exists(noLoginRestriction)
+    val hasRequiredSynchronizerPermission =
+      synchronizerPermission.exists(noLoginRestrictionApproximate)
     // notice the forall, expressing optionality for the permission to exist
-    val hasOptionalSynchronizerPermission = synchronizerPermission.forall(noLoginRestriction)
+    val hasOptionalSynchronizerPermission =
+      synchronizerPermission.forall(noLoginRestrictionApproximate)
 
     // for a participant to be considered active, it must have a synchronizer trust certificate
     hasSynchronizerTrustCertificate &&
@@ -678,7 +680,18 @@ abstract class ParticipantReference(
     )
   }
 
-  private def noLoginRestriction(result: ListParticipantSynchronizerPermissionResult): Boolean =
+  /** Evaluates whether the participant is currently under a time-based login restriction.
+    *
+    * Note that the result returned is only an estimate because this method uses the console's local
+    * clock for comparison, whereas the sequencer's decision is based on a comparison with the
+    * timestamp of the last sequenced event.
+    *
+    * @return
+    *   true if there is no time-based login restriction
+    */
+  private def noLoginRestrictionApproximate(
+      result: ListParticipantSynchronizerPermissionResult
+  ): Boolean =
     result.item.loginAfter
       .forall(
         _ <= consoleEnvironment.environment.clock.now

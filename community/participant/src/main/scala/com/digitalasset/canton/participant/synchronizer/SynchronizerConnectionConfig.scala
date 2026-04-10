@@ -134,7 +134,7 @@ final case class SynchronizerConnectionConfig(
                       )
                     } yield thisConnection
                       .focus(_.endpoints)
-                      .modify(_.++(otherEndPoints).distinct)
+                      .modify(_.++(otherEndPoints))
                       .focus(_.sequencerId)
                       .replace(updatedSequencerId)
                   case otherConnection =>
@@ -164,7 +164,7 @@ final case class SynchronizerConnectionConfig(
     */
   private def mergeOrRequireEqual[A](a: Option[A], b: Option[A]): Either[String, Option[A]] =
     (a, b) match {
-      case (Some(aa), Some(bb)) => Either.cond(aa == bb, a, "Mismatch")
+      case (Some(aa), Some(bb)) => Either.cond(aa == bb, a, s"Mismatch ($a != $b)")
       case _ => Right(a.orElse(b))
     }
 

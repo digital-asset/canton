@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.sequencing.client.pool.ConnectionPoolTestHelpers
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 

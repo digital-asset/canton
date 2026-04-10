@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.store.interfaces
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.Hash as CantonHash
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
@@ -26,6 +25,18 @@ import com.digitalasset.daml.lf.value.Value as LfValue
   */
 sealed trait TransactionLogUpdate extends Product with Serializable with HasTraceContext {
   def offset: Offset
+  def completionStreamResponseO: Option[CompletionStreamResponse]
+
+  /** Traffic cost paid by this node for the ordering of the corresponding confirmation request.
+    * Only provided if the requesting parties are submitting parties (actAs)
+    */
+  def paidTrafficCost(requestingParties: Option[Set[Party]]): Option[EventSequentialId] =
+    completionStreamResponseO
+      .flatMap(_.completionResponse.completion)
+      .filter { completion =>
+        requestingParties.fold(true)(_.exists(completion.actAs.toSet))
+      }
+      .map(_.paidTrafficCost)
 }
 
 object TransactionLogUpdate {
@@ -48,8 +59,6 @@ object TransactionLogUpdate {
     *   The time at which the transaction was recorded.
     * @param externalTransactionHash
     *   Hash of the transaction (for externall signed transactions only)
-    * @param paidTrafficCost
-    *   Traffic cost paid by this node for the ordering of the corresponding confirmation request
     */
   final case class TransactionAccepted(
       updateId: String,
@@ -58,11 +67,10 @@ object TransactionLogUpdate {
       effectiveAt: Timestamp,
       offset: Offset,
       events: Vector[Event],
-      completionStreamResponse: Option[CompletionStreamResponse],
+      completionStreamResponseO: Option[CompletionStreamResponse],
       synchronizerId: String,
       recordTime: Timestamp,
       externalTransactionHash: Option[CantonHash],
-      paidTrafficCost: NonNegativeLong,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate
 
@@ -77,7 +85,11 @@ object TransactionLogUpdate {
       offset: Offset,
       completionStreamResponse: CompletionStreamResponse,
   )(implicit override val traceContext: TraceContext)
-      extends TransactionLogUpdate
+      extends TransactionLogUpdate {
+    override def completionStreamResponseO: Option[CompletionStreamResponse] = Some(
+      completionStreamResponse
+    )
+  }
 
   final case class ReassignmentAccepted(
       updateId: String,
@@ -85,13 +97,12 @@ object TransactionLogUpdate {
       workflowId: String,
       offset: Offset,
       recordTime: Timestamp,
-      completionStreamResponse: Option[CompletionStreamResponse],
+      completionStreamResponseO: Option[CompletionStreamResponse],
       reassignmentInfo: ReassignmentInfo,
       reassignment: Reassignment.Batch,
       synchronizerId: String,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
-
     def stakeholders: Set[Ref.Party] = reassignment.iterator.flatMap(_.stakeholders).toSet
   }
 
@@ -102,7 +113,9 @@ object TransactionLogUpdate {
       synchronizerId: String,
       events: Vector[PartyToParticipantAuthorization],
   )(implicit override val traceContext: TraceContext)
-      extends TransactionLogUpdate
+      extends TransactionLogUpdate {
+    override def completionStreamResponseO: Option[CompletionStreamResponse] = None
+  }
 
   /* Models all but divulgence events */
   sealed trait Event extends Product with Serializable {
@@ -188,5 +201,4 @@ object TransactionLogUpdate {
       participant: Ref.ParticipantId,
       authorizationEvent: AuthorizationEvent,
   )
-
 }

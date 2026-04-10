@@ -72,7 +72,11 @@ import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
-import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnectionValidation}
+import com.digitalasset.canton.sequencing.{
+  SequencerConnection,
+  SequencerConnectionValidation,
+  SequencerConnections,
+}
 import com.digitalasset.canton.store.SequencedEventStore.SearchCriterion
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -673,16 +677,21 @@ private[sync] class SynchronizerConnectionsManager(
         filteredConfigs.map(_.maxBy1(_.configuredPsid))
     }
 
-  // TODO(#28724) Use subsumeMerge instead of replace
-  private def updateSynchronizerConnectionConfig(
+  /** Sets the sequencer ids in the synchronizer connection config store.
+    */
+  private def updateSequencerIds(
       psid: PhysicalSynchronizerId,
-      config: SynchronizerConnectionConfig,
+      alias: SynchronizerAlias,
+      connections: SequencerConnections,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     synchronizerConnectionConfigStore
-      .replace(KnownPhysicalSynchronizerId(psid), config)
+      .setSequencerIds(
+        psid,
+        connections.aliasToConnection.forgetNE.mapFilter(_.sequencerId),
+      )
       .leftMap[SyncServiceError](err =>
         SyncServiceError.SyncServicePhysicalIdRegistration
-          .Error(config.synchronizerAlias, psid, err.message)
+          .Error(alias, psid, err.message)
       )
 
   /** MUST be synchronized using the [[connectQueue]]
@@ -760,7 +769,7 @@ private[sync] class SynchronizerConnectionsManager(
             .leftMap[SyncServiceError](err =>
               SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
             )
-          (synchronizerHandle, updatedConfig) = synchronizerHandleAndUpdatedConfig
+          (synchronizerHandle, updatedSequencerConnections) = synchronizerHandleAndUpdatedConfig
 
           psid = synchronizerHandle.psid
           _ = logger.debug(
@@ -773,7 +782,7 @@ private[sync] class SynchronizerConnectionsManager(
                 .Error(synchronizerAlias, psid, err.message)
             )
 
-          _ <- updateSynchronizerConnectionConfig(psid, updatedConfig)
+          _ <- updateSequencerIds(psid, synchronizerAlias, updatedSequencerConnections)
 
           // Attempt to grab and store *all* the sequencer ids to increase chances to have them all
           _ <- retrieveAndStoreMissingSequencerIds(psid)
@@ -893,7 +902,7 @@ private[sync] class SynchronizerConnectionsManager(
               alias,
               conn,
               timeouts,
-              parameters.tracing.propagation,
+              parameters.sequencerClient.clientChannelParams(parameters.tracing.propagation),
               loggerFactory,
             ).getSynchronizerClientBootstrapInfo()
               .leftMap(_.message)
@@ -928,7 +937,7 @@ private[sync] class SynchronizerConnectionsManager(
     ): EitherT[
       FutureUnlessShutdown,
       SyncServiceFailedSynchronizerConnection,
-      (SynchronizerHandle, SynchronizerConnectionConfig),
+      (SynchronizerHandle, SequencerConnections),
     ] =
       EitherT(synchronizerRegistry.connect(config, synchronizerPredecessor)).leftMap(err =>
         SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
@@ -966,11 +975,12 @@ private[sync] class SynchronizerConnectionsManager(
           _ = logger.debug(
             s"Connecting to synchronizer with id ${synchronizerConnectionConfig.configuredPsid} config: ${synchronizerConnectionConfig.config}"
           )
-          synchronizerHandleAndUpdatedConfig <- connect(
+          synchronizerHandleAndUpdatedConnnections <- connect(
             synchronizerConnectionConfig.config,
             synchronizerConnectionConfig.predecessor,
           )
-          (synchronizerHandle, updatedConfig) = synchronizerHandleAndUpdatedConfig
+          (synchronizerHandle, updatedSequencerConnections) =
+            synchronizerHandleAndUpdatedConnnections
           psid = synchronizerHandle.psid
 
           _ = logger.debug(
@@ -982,7 +992,7 @@ private[sync] class SynchronizerConnectionsManager(
               SyncServiceError.SyncServicePhysicalIdRegistration
                 .Error(synchronizerAlias, psid, err.message)
             )
-          _ <- updateSynchronizerConnectionConfig(psid, updatedConfig)
+          _ <- updateSequencerIds(psid, synchronizerAlias, updatedSequencerConnections)
 
           // Attempt to grab and store *all* the sequencer ids to increase chances to have them all
           _ <- retrieveAndStoreMissingSequencerIds(psid)

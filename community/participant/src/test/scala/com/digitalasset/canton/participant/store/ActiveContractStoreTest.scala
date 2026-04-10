@@ -323,8 +323,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
         assert(created.successful, "creation succeeds")
         assert(
           archived.isResult && archived.nonaborts.toList.toSet == Set(
-            ChangeBeforeCreation(coid00, toc1, toc),
-            ChangeAfterArchival(coid00, toc, toc1),
+            ChangeBeforeCreation(coid00, toc1, toc)
           ),
           "archival fails",
         )
@@ -369,32 +368,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
       }
     }
 
-    "archival is idempotent" inUS {
-      val acs = mk()
-      val tocCreation = TimeOfChange(ts, rc)
-      val tocArchival = TimeOfChange(ts1, rc1)
-      for {
-        created <- acs
-          .markContractCreated(coid00 -> initialReassignmentCounter, tocCreation)
-          .value
-        archived1 <- acs.archiveContract(coid00, tocArchival).value
-        archived2 <- acs.archiveContract(coid00, tocArchival).value
-        fetch <- acs.fetchState(coid00)
-        snapshotBeforeArchival <- acs.snapshot(tocArchival.timestamp.addMicros(-1))
-      } yield {
-        created shouldBe Symbol("successful")
-        archived1 shouldBe Symbol("successful")
-        archived2 shouldBe Symbol("successful")
-
-        assert(
-          fetch.contains(ContractState(Archived, ts1, rc1)),
-          "mark it as Archived",
-        )
-        snapshotBeforeArchival shouldBe Map(coid00 -> (tocCreation, initialReassignmentCounter))
-      }
-    }
-
-    "earlier archival wins in irregularity reporting" inUS {
+    "double archivals are not reported even if timestamps differ" inUS {
       val acs = mk()
       val toc = TimeOfChange(ts, rc)
       val toc2 = TimeOfChange(ts1, rc1)
@@ -407,23 +381,34 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
         archived2 <- acs.archiveContract(coid00, toc).value
         archived3 <- acs.archiveContract(coid00, toc3).value
         fetch <- acs.fetchState(coid00)
+        snapshot1 <- acs.snapshot(ts)
+        snapshot2 <- acs.snapshot(ts.timestamp.immediatePredecessor)
+        snapshot3 <- acs.snapshot(toc3)
       } yield {
         assert(created.successful && archived1.successful, "succeed")
         assert(
-          archived2.isResult && archived2.nonaborts == Chain(
-            DoubleContractArchival(coid00, toc2, toc)
-          ),
-          "second archival reports error",
+          archived2.isResult && archived2.nonaborts == Chain.empty,
+          "second archival succeeds without error",
         )
         assert(
-          archived3.isResult && archived3.nonaborts == Chain(
-            DoubleContractArchival(coid00, toc, toc3)
-          ),
-          "third archival reports error",
+          archived3.isResult && archived3.nonaborts == Chain.empty,
+          "third archival succeeds without error",
         )
         assert(
           fetch.contains(ContractState(Archived, toc3.timestamp, toc3.counterO)),
           "third archival is the latest",
+        )
+        assert(
+          snapshot1 == Map.empty,
+          "snapshot after updated archival does not contain the contract",
+        )
+        assert(
+          snapshot2 == Map.empty,
+          "snapshot before creation does not contain the contract",
+        )
+        assert(
+          snapshot3 == Map.empty,
+          "snapshot after duplicate archivals does not contain the contract",
         )
       }
     }
@@ -499,54 +484,6 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
         assert(
           snapshot == Map(coid00 -> (tocTs, initialReassignmentCounter)),
           "snapshot contains the latest create",
-        )
-      }
-    }
-
-    "double archival fails if the timestamp or repair counter differs" inUS {
-      val acs = mk()
-      val tocCreation = TimeOfChange(ts, rc)
-      val toc = TimeOfChange(ts2, rc1)
-      val tocTs = TimeOfChange(ts2.addMicros(-2), rc1)
-      val tocRc = TimeOfChange(ts2, rc2)
-
-      for {
-        archived1 <- acs.archiveContract(coid00, toc).value
-        archived2 <- acs.archiveContract(coid00, tocTs).value
-        archived3 <- acs.archiveContract(coid00, tocRc).value
-        created <- acs
-          .markContractCreated(coid00 -> initialReassignmentCounter, tocCreation)
-          .value
-        fetch <- acs.fetchState(coid00)
-        snapshot1 <- acs.snapshot(tocTs)
-        snapshot2 <- acs.snapshot(tocTs.timestamp.immediatePredecessor)
-      } yield {
-        assert(archived1.successful && created.successful, "succeed")
-        assert(
-          archived2.isResult && archived2.nonaborts == Chain(
-            DoubleContractArchival(coid00, toc, tocTs)
-          ),
-          "fail if timestamp differs",
-        )
-        assert(
-          archived3.isResult && archived3.nonaborts.toList.toSet == Set(
-            DoubleContractArchival(coid00, tocTs, tocRc)
-          ),
-          "fail if repair counter differs",
-        )
-        assert(
-          fetch.contains(
-            ContractState(Archived, tocRc.timestamp, tocRc.counterO)
-          ),
-          "timestamp and repair counter are as expected",
-        )
-        assert(
-          snapshot1 == Map.empty,
-          "snapshot after updated archival does not contain the contract",
-        )
-        assert(
-          snapshot2 == Map(coid00 -> (tocCreation, initialReassignmentCounter)),
-          "snapshot before archival contains the contract",
         )
       }
     }
@@ -670,7 +607,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
       }
     }
 
-    "bulk archivals report all errors" inUS {
+    "bulk archival allows for duplicate archivals" inUS {
       val acs = mk()
       val toc = TimeOfChange(ts, rc)
       val toc2 = TimeOfChange(ts1, rc1)
@@ -685,24 +622,14 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
       } yield {
         archived1 shouldBe Symbol("successful")
         archived2 shouldBe Symbol("isResult")
-        archived2.nonaborts.toList.toSet shouldBe Set(
-          DoubleContractArchival(coid00, toc, toc2),
-          DoubleContractArchival(coid01, toc, toc2),
-        )
+        archived2.nonaborts.toList shouldBe empty
 
+        // archive all contracts
+        val tocArchival = ContractState(Archived, toc2)
         fetch shouldBe Map(
-          coid00 -> ContractState(
-            Archived,
-            toc2,
-          ), // return the latest archival
-          coid01 -> ContractState(
-            Archived,
-            toc2,
-          ), // keep the second archival
-          coid10 -> ContractState(
-            Archived,
-            toc2,
-          ), // archive the contract even if some archivals fail
+          coid00 -> tocArchival,
+          coid01 -> tocArchival,
+          coid10 -> tocArchival,
         )
       }
     }
@@ -831,9 +758,8 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
           assert(purge.successful, "create is successful")
 
           assert(
-            addAfterArchive.nonaborts.toList
-              .contains(ChangeAfterArchival(coid00, toc1, toc2)),
-            "cannot add an archived contract",
+            addAfterArchive.nonaborts.toList.isEmpty,
+            "can add an archived contract",
           )
           assert(addAfterPurge.successful, "add after purge is successful")
           assert(
@@ -1312,68 +1238,6 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
           "assignment is flagged",
         )
         assert(fetch.contains(ContractState(active, ts, rc)))
-      }
-    }
-
-    "complain about changes after archival" inUS {
-      val acs = mk()
-      val toc1 = TimeOfChange(ts, rc)
-      val toc2 = TimeOfChange(ts.plusSeconds(1), rc1)
-      val toc3 = TimeOfChange(ts.plusSeconds(2), rc3)
-      val toc4 = TimeOfChange(ts.plusSeconds(3), rc2)
-      for {
-        archive <- acs.archiveContract(coid00, toc2).value
-        unassignment4 <- acs
-          .unassignContracts(coid00, toc4, targetSynchronizer1, reassignmentCounter4)
-          .value
-        fetch4 <- acs.fetchState(coid00)
-        unassignment1 <- acs
-          .unassignContracts(coid00, toc1, targetSynchronizer2, reassignmentCounter1)
-          .value
-        assignment3 <- acs
-          .assignContract(coid00, toc3, sourceSynchronizer1, reassignmentCounter3)
-          .value
-        snapshot1 <- acs.snapshot(toc1)
-        snapshot3 <- acs.snapshot(toc3)
-        snapshot4 <- acs.snapshot(toc4)
-        assignment4 <- acs
-          .assignContract(coid01, toc4, sourceSynchronizer2, reassignmentCounter1)
-          .value
-        archive2 <- acs.archiveContract(coid01, toc2).value
-      } yield {
-        assert(archive.successful, "archival succeeds")
-        assert(
-          unassignment4.isResult && unassignment4.nonaborts == Chain(
-            ChangeAfterArchival(coid00, toc2, toc4)
-          ),
-          s"unassignment after archival fails",
-        )
-        assert(
-          fetch4.contains(
-            ContractState(
-              ReassignedAway(targetSynchronizer1, reassignmentCounter4),
-              toc4.timestamp,
-              toc4.counterO,
-            )
-          )
-        )
-        assert(unassignment1.successful, "unassignment before archival succeeds")
-        assert(
-          assignment3.isResult && assignment3.nonaborts == Chain(
-            ChangeAfterArchival(coid00, toc2, toc3)
-          )
-        )
-        assert(snapshot1 == Map.empty, "contract is inactive after the first unassignment")
-        assert(
-          snapshot3 == Map(coid00 -> (toc3, reassignmentCounter3)),
-          "archival deactivates assigned contract",
-        )
-        assert(snapshot4 == Map.empty, "second unassignment deactivates the contract again")
-        assert(assignment4.successful, s"assignment of $coid01 succeeds")
-        assert(
-          archive2.isResult && archive2.nonaborts == Chain(ChangeAfterArchival(coid01, toc2, toc4)),
-          s"archival of $coid01 reports later assignment",
-        )
       }
     }
 

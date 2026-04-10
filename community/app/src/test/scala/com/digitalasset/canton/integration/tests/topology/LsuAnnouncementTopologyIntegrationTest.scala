@@ -171,7 +171,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // sequencer1 announces its connection details for the successor synchronizer
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5000")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5000")),
       successorSynchronizerId = successorPsid,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
@@ -190,7 +190,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // sequencer2 announces its connection details for the successor synchronizer
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
-      endpoints = NonEmpty(Seq, new URI("http://localhost:6000"), new URI("http://localhost:7000")),
+      endpoints = NonEmpty(Set, new URI("http://localhost:6000"), new URI("http://localhost:7000")),
       successorSynchronizerId = successorPsid,
     )
 
@@ -206,7 +206,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // sequencer2 changes its connection details for the successor synchronizer
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
-      endpoints = NonEmpty(Seq, new URI("http://localhost:6000")),
+      endpoints = NonEmpty(Set, new URI("http://localhost:6000")),
       successorSynchronizerId = successorPsid,
     )
     // check that participant2 updated the synchronizer config for the successor synchronizer
@@ -216,7 +216,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // sequencer1 changes its connection details for the successor synchronizer
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5005")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5005")),
       successorSynchronizerId = successorPsid,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
@@ -378,7 +378,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       sequencer1.topology.lsu.sequencer_successors.propose_successor(
         sequencer1.id,
-        endpoints = NonEmpty(Seq, new URI("https://localhost:5001")),
+        endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
         successorSynchronizerId = successor2,
         customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
       ),
@@ -395,7 +395,7 @@ final class LsuAnnouncementTopologyIntegrationTest
 
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5001")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
       successorSynchronizerId = successor1,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
@@ -412,7 +412,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       sequencer1.topology.lsu.sequencer_successors.propose_successor(
         sequencer1.id,
-        endpoints = NonEmpty(Seq, new URI("https://localhost:5002")),
+        endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
         successorSynchronizerId = successor2,
         customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
       ),
@@ -428,7 +428,7 @@ final class LsuAnnouncementTopologyIntegrationTest
 
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5002")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
       successorSynchronizerId = successor2,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
@@ -437,7 +437,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // Update to a new value
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5003")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5003")),
       successorSynchronizerId = successor2,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
@@ -452,7 +452,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     }
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
-      endpoints = NonEmpty(Seq, new URI("https://localhost:5004")),
+      endpoints = NonEmpty(Set, new URI("https://localhost:5004")),
       successorSynchronizerId = successor3,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )

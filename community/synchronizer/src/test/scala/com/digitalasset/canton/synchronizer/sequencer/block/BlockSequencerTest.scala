@@ -189,6 +189,7 @@ class BlockSequencerTest
         blockRateLimitManager = defaultRateLimiter,
         orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         processingTimeouts = BlockSequencerTest.this.timeouts,
         logEventDetails = true,
         prettyPrinter = new CantonPrettyPrinter(

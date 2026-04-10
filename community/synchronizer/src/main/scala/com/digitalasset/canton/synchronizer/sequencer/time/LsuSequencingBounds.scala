@@ -24,9 +24,18 @@ import scala.concurrent.ExecutionContext
   *   Strict lower bound on sequencing times. Defined as the highest effective time of the topology
   *   store on the predecessor.
   *
-  * The following inequality holds:
+  * The following inequality holds: LSUAnnouncement.effective <= lowerBoundSequencingTimeExclusive <
+  * upgradeTime
   *
-  * LSUAnnouncement.effective <= lowerBoundSequencingTimeExclusive < upgradeTime
+  * Context on the two timestamps:
+  *   - lowerBoundSequencingTimeExclusive acts as:
+  *     - strict lower bound for every thing that happens on the sequencer:
+  *       - topology snapshots
+  *       - subscriptions
+  *       - watermark
+  *     - strict lower bound for messages that can be delivered to synchronizer nodes.
+  *   - upgradeTime serves as a strict lower bound for messages that can be delivered to participant
+  *     nodes.
   */
 final case class LsuSequencingBounds private (
     lowerBoundSequencingTimeExclusive: CantonTimestamp,

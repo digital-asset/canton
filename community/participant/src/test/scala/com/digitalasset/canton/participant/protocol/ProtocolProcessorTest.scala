@@ -63,7 +63,6 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
-import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.sequencing.client.SendResult.Success
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
@@ -73,6 +72,7 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
+import com.digitalasset.canton.sequencing.{AsyncResult, UnthrottledAsync}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{IndexedPhysicalSynchronizer, IndexedSynchronizer}
 import com.digitalasset.canton.time.{SynchronizerTimeTracker, WallClock}
@@ -233,8 +233,8 @@ class ProtocolProcessorTest
       TestProcessingSteps.TestProcessingError,
     ]
 
-  private def waitForAsyncResult(asyncResult: AsyncResult[Unit]) =
-    asyncResult.unwrap.unwrap.futureValue
+  private def waitForAsyncResult(asyncResult: AsyncResult[UnthrottledAsync]) =
+    asyncResult.unwrap.flatMap(_.future).futureValueUS
 
   private def testProcessingSteps(
       overrideConstructedPendingRequestDataO: Option[TestPendingRequestData] = None,

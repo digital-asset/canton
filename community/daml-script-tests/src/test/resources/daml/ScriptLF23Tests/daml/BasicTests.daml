@@ -9,8 +9,6 @@ module BasicTests where
 
 import Daml.Script
 import DA.Time
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 data MyRec = MyRec { foo: Text }
 

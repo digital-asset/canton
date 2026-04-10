@@ -18,13 +18,13 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.protocol.v30
-import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   DbSequencerStorePruning,
   RegisteredMember,
   SequencerStore,
 }
+import com.digitalasset.canton.synchronizer.sequencer.{InFlightAggregations, *}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
@@ -87,7 +87,7 @@ class DbSequencerStateManagerStore(
       sequencingTimeLowerBound: CantonTimestamp,
       sequencingTimeUpperBound: CantonTimestamp,
   ): DBIOAction[
-    InFlightAggregations,
+    Map[AggregationId, InFlightAggregation],
     NoStream,
     Effect.Read with Effect.Transactional,
   ] = {

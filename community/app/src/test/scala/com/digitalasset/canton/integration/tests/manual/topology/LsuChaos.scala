@@ -25,16 +25,16 @@ import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperati
   TransactionProgress,
   topologyChangeTimeout,
 }
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.{LogicalUpgradeUtils, LsuBase}
 import com.digitalasset.canton.integration.{
   ConfigTransform,
   ConfigTransforms,
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
-import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import monocle.macros.syntax.lens.*
@@ -271,23 +271,10 @@ private[topology] class LsuChaos(
       transferTraffic(lsuId, upgradeTime, currentSequencer, newSequencer)
 
       // assert on the outcome of test_lsu_sequencing above: it should bump metrics
-      getLsuSequencingTestMetricValues(newMediator) shouldBe Map(newSequencer.id -> 1)
+      LsuBase.getLsuSequencingTestMetricValues(newMediator) shouldBe Map(newSequencer.id -> 1)
     }
 
     logger.info(s"[$lsuId] All operations scheduled")
-  }
-
-  // Returns the number of received messages per sender
-  private def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] = {
-    val metricName = "daml.received-lsu-sequencing-test-messages"
-    node.metrics
-      .list(metricName)
-      .get(metricName)
-      .value
-      .collect { case metric: MetricValue.LongPoint =>
-        Member.fromProtoPrimitive_(metric.attributes.get("sender").value).value -> metric.value
-      }
-      .toMap
   }
 
   private def transferTraffic(

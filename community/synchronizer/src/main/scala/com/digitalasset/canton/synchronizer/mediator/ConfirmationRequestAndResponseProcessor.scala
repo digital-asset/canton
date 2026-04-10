@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.semigroup.*
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{
@@ -17,12 +18,17 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, ViewConfirmationParameters, ViewType}
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  PromiseUnlessShutdownFactory,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.{HandlerResult, UnthrottledAsync}
 import com.digitalasset.canton.synchronizer.mediator.store.MediatorState
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
@@ -36,6 +42,7 @@ import org.slf4j.event.Level
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.DurationConverters.JavaDurationOps
 
 /** Scalable service to validate the received MediatorConfirmationRequests and
   * ConfirmationResponses, derive a verdict, and send ConfirmationResultMessages to informee
@@ -51,6 +58,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     batchingConfig: BatchingConfig,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with Spanning
@@ -92,8 +100,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       asyncTimeoutHandling <- handleTimeouts(event.sequencingTimestamp)
       _ <- asyncTimeoutHandling.unwrap
       asyncEventHandling <- doHandleMediatorEvent(event)
-      _ <- asyncEventHandling.unwrap
-    } yield ()
+      unthrottledAsync <- asyncEventHandling.unwrap
+    } yield unthrottledAsync
     HandlerResult.synchronous(future)
   }
 
@@ -131,18 +139,22 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               event.requestId,
               participantResponseDeadline,
             )
+            // processRequest returns FutureUnlessShutdown[FutureUnlessShutdown[Unit]]:
+            //   outer future: completes once the request is registered (releases the queue slot)
+            //   inner future: finalizedPromise — completes only after the verdict is persisted to DB
             HandlerResult.asynchronous(
-              processingQueue.enqueueForProcessing(event.requestId)(
-                processRequest(
-                  event.requestId,
-                  counter,
-                  participantResponseDeadline,
-                  decisionTime,
-                  requestEnvelope,
-                  rootHashMessages,
-                  batchAlsoContainsTopologyTransaction,
+              processingQueue
+                .enqueueForProcessing(event.requestId)(
+                  processRequest(
+                    event.requestId,
+                    counter,
+                    participantResponseDeadline,
+                    decisionTime,
+                    requestEnvelope,
+                    rootHashMessages,
+                    batchAlsoContainsTopologyTransaction,
+                  )
                 )
-              )
             )
           case MediatorEvent.Response(
                 counter,
@@ -151,7 +163,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                 topologyTimestamp,
                 recipients,
               ) =>
-            HandlerResult.asynchronous(
+            HandlerResult.asynchronousUnit(
               processingQueue.enqueueForProcessing(responses.message.requestId)(
                 processResponses(
                   responseTimestamp,
@@ -181,7 +193,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         // ... but perform the actual timeout handling in the asynchronous processing stage.
         // This allows us to wait for the individual requests' previous processing to finish without blocking
         // the synchronous processing stage of subsequent events.
-        HandlerResult.asynchronous(nonEmptyTimeouts.map(handleTimeout(_, timestamp)).sequence_)
+        HandlerResult.asynchronousUnit(nonEmptyTimeouts.map(handleTimeout(_, timestamp)).sequence_)
     }
 
   @VisibleForTesting
@@ -219,6 +231,14 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
   /** Stores the incoming request in the MediatorStore. Sends a result message if no responses need
     * to be received or if the request is malformed, including if it declares a different mediator.
+    *
+    * Returns a nested future: the outer future completes once the request has been registered in
+    * the mediator state (so the sequential processing queue slot is released). The inner future
+    * completes only after the finalized response has been persisted to the DB — it is
+    * [[ResponseAggregation.finalizedFuture]]. This inner future must be chained into the
+    * [[HandlerResult]] async result *outside* the processing queue, so that the queue slot is free
+    * to accept the confirmation responses that will eventually complete the promise. Awaiting the
+    * inner future inside the queue would deadlock.
     */
   @VisibleForTesting
   private[mediator] def processRequest(
@@ -229,7 +249,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       requestEnvelope: OpenEnvelope[MediatorConfirmationRequest],
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       batchAlsoContainsTopologyTransaction: Boolean,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnthrottledAsync] =
     withSpan("ConfirmationRequestAndResponseProcessor.processRequest") {
       val request = requestEnvelope.protocolMessage
       implicit traceContext =>
@@ -249,11 +269,12 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             )
 
             // Take appropriate actions based on unitOrVerdictO
-            _ <- unitOrVerdictO match {
+            persistedF <- unitOrVerdictO match {
               // Request is well-formed, but not yet finalized
               case Right(()) =>
                 val participantResponseDeadlineTick =
                   timeTracker.requestTick(participantResponseDeadline)
+
                 for {
                   aggregation <- ResponseAggregation.fromRequest(
                     requestId,
@@ -263,6 +284,17 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                     snapshot.ipsSnapshot,
                     batchingConfig,
                     Some(participantResponseDeadlineTick),
+                    mkPromise(
+                      s"Request $requestId finalized",
+                      futureSupervisor,
+                      logAfter =
+                        // Extend the default logAfter duration by participantResponseDeadline - requestId.unwrap
+                        // such that we wait until the maximum allowed time for the request to be finalized before
+                        // logging
+                        (participantResponseDeadline - requestId.unwrap)
+                          .plus(PromiseUnlessShutdownFactory.DefaultLogAfterDuration.duration)
+                          .toScala,
+                    ),
                   )
                   _ <- aggregation.asFinalized(
                     crypto.staticSynchronizerParameters.protocolVersion
@@ -272,8 +304,12 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                       mediatorState.registerPendingRequest(aggregation)
                       FutureUnlessShutdown.unit
                     case Some(finalizedResponse) =>
-                      // if the request is finalized, we write the result
-                      mediatorState.add(finalizedResponse)
+                      // if the request is immediately finalized (e.g. zero-threshold), write the result and
+                      // complete the promise ourselves since the aggregation was never registered as pending
+                      // (storeFinalized only completes promises for pending aggregations).
+                      mediatorState.add(finalizedResponse).map { _ =>
+                        aggregation.completeFinalizedPromise()
+                      }
                   }
                 } yield {
                   logger.info(
@@ -282,6 +318,9 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                   logger.debug(
                     show"Phase 2: Initial state for request=${requestId.unwrap}: ${aggregation.showMergedState}"
                   )
+                  // Return the inner future wrapped in an UnthrottledAsync: completes only after the verdict is persisted to DB.
+                  // This is chained into the HandlerResult OUTSIDE the processing queue.
+                  UnthrottledAsync(aggregation.finalizedFuture)
                 }
 
               // Request is finalized, approve / reject immediately
@@ -300,14 +339,14 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                   _ <- mediatorState.add(
                     FinalizedResponse(requestId, request, requestId.unwrap, verdict)(traceContext)
                   )
-                } yield ()
+                } yield UnthrottledAsync.immediate // Already persisted above; nothing more to wait for
 
               // Discard request
               case Left(None) =>
                 logger.debug(show"$requestId: discarding request...")
-                FutureUnlessShutdown.unit
+                FutureUnlessShutdown.pure(UnthrottledAsync.immediate)
             }
-          } yield ()
+          } yield persistedF
     }
 
   /** Validate a mediator confirmation request
@@ -750,7 +789,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           }
 
           responseAggregation <- mediatorState.fetch(responses.requestId).orElse {
-            // This can happen after a fail-over or as part of an attack.
+            // This can happen as part of an attack.
             val cause =
               s"Received a confirmation response at $ts by ${responses.sender} with an unknown request id ${responses.requestId}. Discarding response..."
             val error = MediatorError.InvalidMessage.Reject(cause)

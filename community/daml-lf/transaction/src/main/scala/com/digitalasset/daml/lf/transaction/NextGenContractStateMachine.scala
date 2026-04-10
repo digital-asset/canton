@@ -9,7 +9,6 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.{View, immutable}
-
 case class NeedContract[+X](resume: Option[GlobalKey] => ErrOr[X])
 
 sealed abstract class NeedKeyProgression

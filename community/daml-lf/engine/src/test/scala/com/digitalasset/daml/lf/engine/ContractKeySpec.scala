@@ -166,13 +166,11 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
   }
 
   private[this] val lookupKey
-      : PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = {
-    case GlobalKeyWithMaintainers(
-          GlobalKey(
-            BasicTests_WithKey,
-            ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
-          ),
-          _,
+      : PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
+    case
+        GlobalKey(
+          BasicTests_WithKey,
+          ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
         ) =>
       Vector(withKeyContractInst)
   }
@@ -343,8 +341,8 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
       )
       val contracts =
         List(keyedInst(cid1), keyedInst(cid2)).map(inst => inst.contractId -> inst).toMap
-      val lookupKey: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = {
-        case GlobalKeyWithMaintainers(GlobalKey(`keyedId`, ValueParty(`party`)), _) =>
+      val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
+        case GlobalKey(`keyedId`, ValueParty(`party`)) =>
           Vector(keyedInst(cid1))
       }
 

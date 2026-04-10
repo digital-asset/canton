@@ -30,6 +30,7 @@ import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, Lsu, Physi
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
+import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
@@ -127,35 +128,29 @@ class SequencerConnectionSuccessorListener(
       currentSuccessorConfigO =
         configStore.get(alias, KnownPhysicalSynchronizerId(successorPsid)).toOption
 
-      updatedSuccessorConfig <- currentSuccessorConfigO match {
-        case None =>
-          val updated = activeConfig.config
-            .copy(
-              synchronizerId = Some(successorPsid),
-              sequencerConnections = sequencerConnections,
-            )
-          // TODO(#28724) Can we have races leading to failures here?
-          configStore
-            .put(
-              config = updated,
-              status = SynchronizerConnectionConfigStore.LsuTarget,
-              configuredPsid = KnownPhysicalSynchronizerId(successorPsid),
-              synchronizerPredecessor = Some(
-                SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
-              ),
-            )
-            .toOption
-            .map(_ => updated)
+      successorConfig = activeConfig.config.copy(
+        synchronizerId = Some(successorPsid),
+        sequencerConnections = sequencerConnections,
+      )
+      successorPredecessor = Some(
+        SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
+      )
 
-        // TODO(#28724) Use subsumeMerge to reduce impact of races
-        case Some(currentSuccessorConfig) =>
-          val updated =
-            currentSuccessorConfig.config.copy(sequencerConnections = sequencerConnections)
-          configStore
-            .replace(currentSuccessorConfig.configuredPsid, updated)
-            .toOption
-            .map(_ => updated)
-      }
+      updatedSuccessorConfig <- configStore
+        .upsert(
+          psid = successorPsid,
+          insert =
+            (successorConfig, SynchronizerConnectionConfigStore.LsuTarget, successorPredecessor),
+          transform = _.focus(_.synchronizerId)
+            .replace(Some(successorPsid))
+            .focus(_.sequencerConnections)
+            .replace(sequencerConnections),
+        )
+        .tapLeft(err =>
+          logger.warn(s"Unable to upsert synchronizer config of $successorPsid: $err")
+        )
+        .toOption
+        .map(_.config)
 
       sequencerConnectionsChanged = !currentSuccessorConfigO
         .map(_.config.sequencerConnections)

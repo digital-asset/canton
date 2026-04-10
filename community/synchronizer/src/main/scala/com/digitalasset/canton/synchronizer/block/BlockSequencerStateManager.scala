@@ -863,6 +863,7 @@ object BlockSequencerStateManager {
       traceContext: TraceContext,
   ): BlockSequencerStateManager = {
     val logger = loggerFactory.getTracedLogger(getClass)
+
     val headBlock = initialHeadBlockO.getOrElse(BlockEphemeralState.empty)
     val headState = new AtomicReference[HeadState]({
       logger.debug(

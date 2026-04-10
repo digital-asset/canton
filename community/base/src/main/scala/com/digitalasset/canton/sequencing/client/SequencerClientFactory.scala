@@ -20,6 +20,7 @@ import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, Synchroni
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerSends
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.sequencing.client.transports.replay.ReplayClientImpl
 import com.digitalasset.canton.sequencing.protocol.{GetTrafficStateForMemberRequest, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.{EventCostCalculator, TrafficStateController}
@@ -28,8 +29,11 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.retry
+import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
+import org.slf4j.event.Level
 
 import scala.concurrent.*
 
@@ -41,7 +45,7 @@ trait SequencerClientFactory {
       requestSigner: RequestSigner,
       sequencerConnections: SequencerConnections,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
-      connectionPool: SequencerConnectionXPool,
+      connectionPool: SequencerConnectionPool,
   )(implicit
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
@@ -86,7 +90,7 @@ object SequencerClientFactory {
           requestSigner: RequestSigner,
           sequencerConnections: SequencerConnections,
           synchronizerPredecessor: Option[SynchronizerPredecessor],
-          connectionPool: SequencerConnectionXPool,
+          connectionPool: SequencerConnectionPool,
       )(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
@@ -199,21 +203,75 @@ object SequencerClientFactory {
               .map(_.map(_.timestamp))
           )
 
-          getTrafficStateFromSynchronizerFn = getTrafficStateWithConnectionPool _
+          // Use the current snapshot approximation to determine if traffic control is enabled on the synchronizer
+          // at this time
+          trafficControlEnabled <- EitherT[FutureUnlessShutdown, CreateError, Boolean](
+            syncCryptoApi.currentSnapshotApproximation
+              .flatMap(
+                _.ipsSnapshot.findDynamicSynchronizerParameters().map {
+                  case Left(failure) =>
+                    // This happens the first time a node connects to a synchronizer and has not synced its topology yet
+                    // In that case assume traffic control is enabled, so that we initialize our traffic state in case it is in fact enabled
+                    logger.info(
+                      s"Failed to retrieve dynamic synchronizer parameters during sequencer client initialization. Assuming traffic control is enabled. $failure"
+                    )
+                    Right(true)
+                  case Right(value) =>
+                    Right(value.parameters.trafficControl.isDefined)
+                }
+              )
+          )
+
+          getTrafficStateFromSynchronizerFn =
+            // If traffic control is not enabled, there's no need to even ask the sequencers to initialize the traffic state
+            // If it gets enabled later, the node will become aware by receiving the topology change
+            // and start receiving traffic receipts from the sequencer for messages it sends
+            if (!trafficControlEnabled) { (_: CantonTimestamp) =>
+              EitherT.pure[FutureUnlessShutdown, CreateError](None)
+            } else getTrafficStateWithConnectionPool _
 
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
-          trafficInitTimestampO = latestSequencedTimestampO.orElse(
-            synchronizerPredecessor.map(
-              _.upgradeTime
+          trafficInitTimestampO = latestSequencedTimestampO
+            .orElse(
+              synchronizerPredecessor.map(
+                _.upgradeTime
+              )
             )
-          )
+            // If there's no timestamp, in most cases the participant will have no traffic state as it probably is connecting
+            // to the synchronizer for the first time. However in rare cases it can happen: for example if the node
+            // was onboarded entirely by another node and traffic was purchased for it before it even connected for the first time.
+            // In that case, we fallback to clock.now() which is the next best timestamp we can use
+            // Note: Only do this for participants. Mediators are given unlimited traffic anyway, and this won't work
+            // during an LSU because mediators connect to the sequencer before upgrade time (and thus before the traffic state is transferred).
+            .orElse(Option.when(member.code == ParticipantId.Code)(clock.now))
+
           _ = logger.info(
             s"Initializing traffic state at timestamp: $trafficInitTimestampO"
           )
+
+          getTrafficStateFromSynchronizerWithRetryFn = { (ts: CantonTimestamp) =>
+            EitherT[FutureUnlessShutdown, CreateError, Option[TrafficState]](
+              retry
+                .Backoff(
+                  logger,
+                  closeContext.context,
+                  retry.Forever,
+                  config.startupConnectionRetryDelay.asFiniteApproximation,
+                  config.maxConnectionRetryDelay.asFiniteApproximation,
+                  "Traffic State Initialization",
+                  s"Initialize traffic state from a BFT read with threshold ${sequencerConnections.sequencerTrustThreshold} from ${sequencerConnections.connections.length} total connections",
+                  retryLogLevel = Some(Level.INFO),
+                )
+                .unlessShutdown(
+                  getTrafficStateFromSynchronizerFn(ts).value,
+                  AllExceptionRetryPolicy,
+                )
+            )
+          }
+
           trafficStateO <- trafficInitTimestampO
-            .traverse(getTrafficStateFromSynchronizerFn)
-            .map(_.flatten)
+            .flatTraverse(getTrafficStateFromSynchronizerWithRetryFn)
 
           // fetch the initial set of pending sends to initialize the client with.
           // as it owns the client that should be writing to this store it should not be racy.

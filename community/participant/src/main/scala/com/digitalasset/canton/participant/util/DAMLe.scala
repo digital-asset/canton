@@ -27,7 +27,6 @@ import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
-import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.{
@@ -291,13 +290,15 @@ class DAMLe(
       txNoRootRollback <- EitherT.fromEither[FutureUnlessShutdown](
         peeledTxE: Either[ReinterpretationError, LfVersionedTransaction]
       )
-    } yield ReInterpretationResult(
-      txNoRootRollback,
-      TransactionMetadata.fromLf(ledgerTime, metadata),
-      metadata.globalKeyMapping,
-      metadata.usedPackages,
-      LedgerTimeBoundaries(metadata.timeBoundaries),
-    )
+    } yield {
+      ReInterpretationResult(
+        txNoRootRollback,
+        TransactionMetadata.fromLf(ledgerTime, metadata),
+        metadata.globalKeyMapping,
+        metadata.usedPackages,
+        LedgerTimeBoundaries(metadata.timeBoundaries),
+      )
+    }
   }
 
   private[this] def handleResult[A](
@@ -344,41 +345,31 @@ class DAMLe(
                 FutureUnlessShutdown.failed(ex)
             }
         case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
+
+        // TODO(#31527): SPM in a follow up PR this code below is reworked to support multiple contract ids per key.
         case ResultNeedKey(key, _, _, resume) =>
-          // TODO(#30398) review this code once engine really supports NUCK
-          val gk = key.globalKey
           contracts
-            .lookupKey(gk)
-            .toRight(
-              EngineError(
-                Error.Interpretation(
-                  Error.Interpretation.DamlException(LfInterpretationError.ContractKeyNotFound(gk)),
-                  None,
-                )
-              ): ReinterpretationError
-            )
+            .lookupKey(key)
+            .value
+            .map(_.flatten)
             .flatMap {
               case Some(cid) =>
-                EitherT(
-                  contracts.lookupFatContract(cid).value.flatMap {
-                    case Some(fatContract) =>
-                      handleResultInternal(
-                        contracts,
-                        resume(Vector(fatContract), NeedKeyProgression.Finished),
-                      )
-                    case None =>
-                      handleResultInternal(
-                        contracts,
-                        resume(Vector.empty, NeedKeyProgression.Finished),
-                      )
-                  }
-                )
+                contracts.lookupFatContract(cid).value.flatMap {
+                  case Some(fatContract) =>
+                    handleResultInternal(
+                      contracts,
+                      resume(Vector(fatContract), NeedKeyProgression.Finished),
+                    )
+                  case None =>
+                    handleResultInternal(
+                      contracts,
+                      resume(Vector.empty, NeedKeyProgression.Finished),
+                    )
+                }
               case None =>
-                EitherT(
-                  handleResultInternal(contracts, resume(Vector.empty, NeedKeyProgression.Finished))
-                )
+                handleResultInternal(contracts, resume(Vector.empty, NeedKeyProgression.Finished))
             }
-            .value
+
         case ResultNeedContract(acoid, resume) =>
           (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
             case Right(version) =>

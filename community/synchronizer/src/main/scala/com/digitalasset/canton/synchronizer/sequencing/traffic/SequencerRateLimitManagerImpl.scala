@@ -82,7 +82,7 @@ class SequencerRateLimitManagerImpl(
           .map(lastConsumed =>
             sequencerMemberRateLimiterFactory.create(
               member,
-              lastConsumed.getOrElse(TrafficConsumed.init(member)),
+              lastConsumed.getOrElse(TrafficConsumed.init(member, CantonTimestamp.MinValue)),
               loggerFactory,
               metrics.trafficControl.trafficConsumption,
             )
@@ -595,6 +595,7 @@ class SequencerRateLimitManagerImpl(
   override def validateRequestAndConsumeTraffic(
       request: SubmissionRequest,
       sequencingTime: CantonTimestamp,
+      sequencingTopologySnapshot: TopologySnapshot,
       submissionTimestampO: Option[CantonTimestamp],
       latestSequencerEventTimestamp: Option[CantonTimestamp],
       warnIfApproximate: Boolean,
@@ -662,13 +663,12 @@ class SequencerRateLimitManagerImpl(
         paramsO <- snapshotAtSequencingTime.trafficControlParameters(protocolVersion)
       } yield paramsO.map(params => tcm.updateAt(sequencingTime, params, logger))
 
-    def processWithTopologySnapshot(topologyAtSequencingTime: SyncCryptoApi) = {
-      val snapshotAtSequencingTime = topologyAtSequencingTime.ipsSnapshot
+    def processWithTopologySnapshot() = {
       val result = for {
         costToBeDeducted <- validateRequest(
           request,
           submissionTimestampO,
-          snapshotAtSequencingTime,
+          sequencingTopologySnapshot,
           Some(orderingSequencerId),
           latestSequencerEventTimestamp,
           warnIfApproximate,
@@ -692,7 +692,7 @@ class SequencerRateLimitManagerImpl(
                 EitherT
                   .liftF[FutureUnlessShutdown, SequencerRateLimitError, Option[TrafficReceipt]](
                     // Update the traffic consumed at sequencing time, and convert it to a receipt. Cost = 0 because we failed to consume traffic
-                    ensureTrafficConsumedAtSequencingTime(snapshotAtSequencingTime)
+                    ensureTrafficConsumedAtSequencingTime(sequencingTopologySnapshot)
                       .map(
                         _.map { trafficConsumed =>
                           require(
@@ -724,17 +724,9 @@ class SequencerRateLimitManagerImpl(
     }
 
     for {
-      cryptoApi <- EitherT.right(
-        SyncCryptoClient.getSnapshotForTimestamp(
-          synchronizerSyncCryptoApi,
-          sequencingTime,
-          latestSequencerEventTimestamp,
-          warnIfApproximate,
-        )
-      )
-      paramsO <- EitherT.liftF(cryptoApi.ipsSnapshot.trafficControlParameters(protocolVersion))
+      paramsO <- EitherT.liftF(sequencingTopologySnapshot.trafficControlParameters(protocolVersion))
       result <-
-        if (isSubjectToTraffic(request, paramsO)) processWithTopologySnapshot(cryptoApi)
+        if (isSubjectToTraffic(request, paramsO)) processWithTopologySnapshot()
         else EitherT.pure[FutureUnlessShutdown, SequencerRateLimitError](None)
     } yield result
   }
@@ -796,16 +788,17 @@ class SequencerRateLimitManagerImpl(
         .liftF(
           trafficConsumedStore.lookupLatestBeforeInclusiveForMember(member, timestamp)
         )
-      trafficStateO <- trafficConsumedO.traverse(
+      trafficState <-
         getTrafficState(
-          _,
+          trafficConsumedO.getOrElse(TrafficConsumed.init(member, timestamp)),
           member,
           Some(timestamp),
           lastSequencerEventTimestamp,
-          warnIfApproximate = true,
+          // If no lastSequencerEventTimestamp is known, don't warn
+          // This is assumed only to happen when we read the first block
+          warnIfApproximate = lastSequencerEventTimestamp.isDefined,
         )
-      )
-    } yield trafficStateO
+    } yield Some(trafficState)
 
   override def getStates(
       requestedMembers: Set[Member],

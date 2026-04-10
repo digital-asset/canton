@@ -246,10 +246,10 @@ object AchsMaintenancePipe {
       Future.successful(workRange)
     } else {
       logger.debug(s"Bumping ACHS validAt from $currentValidAt to $newValidAt.")
+      // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
+      achsStateCache
+        .updateValidAt(newValidAt)
       storeAchsValidAt(newValidAt)
-        .map { _ =>
-          achsStateCache.updateValidAt(newValidAt)
-        }(executionContext)
         .map(_ => workRange)(executionContext)
     }
   }
@@ -321,9 +321,10 @@ object AchsMaintenancePipe {
 
     if (lastRemoved > 0L) {
       val lastPointers = AchsLastPointers(lastRemoved = lastRemoved, lastPopulated = lastPopulated)
+      // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
+      achsStateCache.updateLastPointers(lastPointers)
       persistAchsLastPointersF(lastPointers)
         .map { _ =>
-          achsStateCache.updateLastPointers(lastPointers)
           logger.debug(
             s"updated ACHS last pointers: lastRemoved=$lastRemoved, lastPopulated=$lastPopulated."
           )

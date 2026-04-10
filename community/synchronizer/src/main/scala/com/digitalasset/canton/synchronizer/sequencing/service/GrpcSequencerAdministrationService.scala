@@ -159,9 +159,7 @@ class GrpcSequencerAdministrationService(
           .flatMap { states =>
             val (errors, trafficStates) = states.trafficStatesOrErrors.partitionMap {
               case (member, trafficStateE) =>
-                trafficStateE
-                  .map(member -> _)
-                  .leftMap(member -> _)
+                trafficStateE.map(member -> _).leftMap(member -> _)
             }
             val res: EitherT[FutureUnlessShutdown, TrafficControlError, Map[String, TrafficState]] =
               if (errors.nonEmpty) {

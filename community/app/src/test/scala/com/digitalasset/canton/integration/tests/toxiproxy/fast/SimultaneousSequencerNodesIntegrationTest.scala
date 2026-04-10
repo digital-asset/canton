@@ -33,8 +33,6 @@ import com.digitalasset.canton.integration.{
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.macros.syntax.lens.*
 
-import scala.concurrent.duration.*
-
 /** Two simultaneous block-based sequencers must not write to the database. The one that does not
   * acquire the lock (passive) should get killed.
   */
@@ -72,6 +70,7 @@ class SimultaneousSequencerNodesIntegrationTest
             .replace(Some(ReplicationConfig(connectionPool = lowerTimeoutConfig)))
         )
       }
+      .addConfigTransform(ConfigTransforms.setExitOnFatalFailures(true))
       .withSetup { implicit env =>
         import env.*
         logger.debug(s"Starting sequencer ${remoteSequencer1.name}")
@@ -118,10 +117,8 @@ class SimultaneousSequencerNodesIntegrationTest
         externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
       }
 
-      // even though the process has crashed, the plugin still thinks it is running, so we explicitly kill it
-      externalPlugin.isRunning(remoteSequencer2.name) shouldBe true
-      externalPlugin.kill(remoteSequencer2.name)
-      externalPlugin.isRunning(remoteSequencer2.name) shouldBe false
+      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it
+      externalPlugin.crashed(remoteSequencer2.name)
     }
 
     "stopping the first sequencer should allow the second to start" in { implicit env =>
@@ -169,14 +166,15 @@ class SimultaneousSequencerNodesIntegrationTest
         )
         participant1.health.ping(participant1)
       }
-      eventually(30.seconds) {
+
+      eventually() {
         remoteSequencer2.health.is_running() shouldBe false
         externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
       }
-      // even though the process has crashed, the plugin still thinks it is running, so we explicitly kill it
-      externalPlugin.isRunning(remoteSequencer2.name) shouldBe true
-      externalPlugin.kill(remoteSequencer2.name)
-      externalPlugin.isRunning(remoteSequencer2.name) shouldBe false
+
+      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it
+      externalPlugin.crashed(remoteSequencer2.name)
+
       toxic.remove()
     }
   }

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.Monoid
+import cats.{Functor, Monoid, Semigroupal}
 import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.lifecycle.{
   CanAbortDueToShutdown,
@@ -16,15 +16,10 @@ import scala.util.Try
 
 /** The asynchronous part of processing an event (or of a stage of its processing). */
 @DoNotDiscardLikeFuture
-final case class AsyncResult[T](unwrap: FutureUnlessShutdown[T]) {
-  def andThenF(f: Unit => FutureUnlessShutdown[Unit])(implicit
+final case class AsyncResult[+T](unwrap: FutureUnlessShutdown[T]) {
+  def transform[U](f: Try[UnlessShutdown[T]] => Try[UnlessShutdown[U]])(implicit
       ec: ExecutionContext
-  ): AsyncResult[T] =
-    AsyncResult(unwrap.flatMap(res => f(()).map(_ => res)))
-
-  def transform(f: Try[UnlessShutdown[T]] => Try[UnlessShutdown[T]])(implicit
-      ec: ExecutionContext
-  ): AsyncResult[T] =
+  ): AsyncResult[U] =
     AsyncResult(unwrap.transform(f))
 
   /** Analog to [[com.digitalasset.canton.util.Thereafter.thereafter]] We do not provide a
@@ -50,8 +45,35 @@ final case class AsyncResult[T](unwrap: FutureUnlessShutdown[T]) {
 
 object AsyncResult {
 
+  implicit def asyncResultFunctor(implicit
+      executionContext: ExecutionContext
+  ): Functor[AsyncResult] = new Functor[AsyncResult] {
+    override def map[A, B](fa: AsyncResult[A])(f: A => B): AsyncResult[B] = fa.map(f)
+  }
+
+  implicit def asyncResultSemigroupal(implicit
+      executionContext: ExecutionContext
+  ): Semigroupal[AsyncResult] = new Semigroupal[AsyncResult] {
+    override def product[A, B](fa: AsyncResult[A], fb: AsyncResult[B]): AsyncResult[(A, B)] =
+      AsyncResult {
+        for {
+          a <- fa.unwrap
+          b <- fb.unwrap
+        } yield (a, b)
+      }
+  }
+
   /** No asynchronous processing. */
-  val immediate: AsyncResult[Unit] = AsyncResult(FutureUnlessShutdown.unit)
+  val immediateUnit: AsyncResult[Unit] = AsyncResult(FutureUnlessShutdown.unit)
+
+  /** No asynchronous processing. */
+  val immediate: AsyncResult[UnthrottledAsync] = AsyncResult(
+    FutureUnlessShutdown.pure(UnthrottledAsync.immediate)
+  )
+
+  def apply(f: FutureUnlessShutdown[Unit])(implicit
+      ec: ExecutionContext
+  ): AsyncResult[UnthrottledAsync] = AsyncResult(f.map(_ => UnthrottledAsync.immediate))
 
   def pure[T](t: T): AsyncResult[T] = AsyncResult(FutureUnlessShutdown.pure(t))
 

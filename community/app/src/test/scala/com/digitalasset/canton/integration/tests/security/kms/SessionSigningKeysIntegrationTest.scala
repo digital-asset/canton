@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   SharedEnvironment,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 
 /** Test a scenario where we have a combination of non-KMS, KMS and KMS with session signing keys'
   * nodes and make sure communication is correct among all of them.
@@ -36,10 +37,9 @@ trait SessionSigningKeysIntegrationTest
   protected lazy val nodesWithSessionSigningKeysDisabled: Set[String] = Set.empty
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
-    // By default session signing keys are enabled for all integration tests
-    ConfigTransforms.setSessionSigningKeys(
-      SessionSigningKeysConfig.disabled,
-      nodeFilter = name => nodesWithSessionSigningKeysDisabled.contains(name),
+    ConfigTransforms.setSigningKeysIfPV35OrHigher(
+      SessionSigningKeysConfig.default,
+      nodeFilter = name => !nodesWithSessionSigningKeysDisabled.contains(name),
     )
   )
 
@@ -61,26 +61,27 @@ trait SessionSigningKeysIntegrationTest
     kmsMetrics.sessionSigningKeysFallback.valuesWithContext
   }
 
-  s"ping succeeds with nodes $protectedNodes using session signing keys" in { implicit env =>
-    import env.*
+  s"ping succeeds with nodes $protectedNodes using session signing keys" onlyRunWithOrGreaterThan
+    ProtocolVersion.v35 in { implicit env =>
+      import env.*
 
-    env.nodes.local.foreach { node =>
-      if (nodesWithSessionSigningKeysDisabled.contains(node.name))
-        node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.disabled
-      else
-        node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
+      env.nodes.local.foreach { node =>
+        if (nodesWithSessionSigningKeysDisabled.contains(node.name))
+          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.disabled
+        else
+          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
+      }
+
+      assertPingSucceeds(participant1, participant2)
+
+      val kmsMetrics = nodes.local.map(getSessionSigningKeysFallback)
+
+      // with our default validity parameters, we expect all protocol messages to be signed using session signing keys.
+      forAll(kmsMetrics)(_ shouldBe empty)
     }
 
-    assertPingSucceeds(participant1, participant2)
-
-    val kmsMetrics = nodes.local.map(getSessionSigningKeysFallback)
-
-    // with our default validity parameters, we expect all protocol messages to be signed using session signing keys.
-    forAll(kmsMetrics)(_ shouldBe empty)
-  }
-
-  "a longer `confirmationResponseTimeout` triggers a fallback to long-term signing keys" in {
-    implicit env =>
+  "a longer `confirmationResponseTimeout` triggers a fallback to long-term signing keys" onlyRunWithOrGreaterThan
+    ProtocolVersion.v35 in { implicit env =>
       import env.*
 
       // Increasing the `confirmationResponseTimeout` to 5 minutes increases the max sequencing time assigned
@@ -100,7 +101,7 @@ trait SessionSigningKeysIntegrationTest
 
       val kmsMetrics = nodes.local.map(getSessionSigningKeysFallback)
       forAtLeast(2, kmsMetrics)(_ should not be empty)
-  }
+    }
 }
 
 class AwsKmsSessionSigningKeysIntegrationTestPostgres

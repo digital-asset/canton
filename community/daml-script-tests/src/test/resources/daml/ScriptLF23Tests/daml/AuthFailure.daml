@@ -5,8 +5,6 @@ module AuthFailure where
 
 import Daml.Script
 import DA.Optional(fromSome)
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 -- Tests for various(all) different forms of authorization failure detected during execution.
 -- Five kinds of authorization failure are tested here.

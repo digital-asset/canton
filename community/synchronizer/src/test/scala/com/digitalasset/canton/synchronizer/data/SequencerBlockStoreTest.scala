@@ -367,7 +367,7 @@ trait SequencerBlockStoreTest
             Map.empty,
             InternalSequencerPruningStatus(CantonTimestamp.Epoch, Set.empty)
               .toSequencerPruningStatus(CantonTimestamp.now()),
-            Map(aggregationId1 -> agg1): InFlightAggregations,
+            Map(aggregationId1 -> agg1),
             None,
             protocolVersion = testedProtocolVersion,
             trafficPurchased = Seq.empty,

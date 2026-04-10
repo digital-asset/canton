@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
-import com.digitalasset.canton.crypto.{Salt, SaltSeed}
+import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   GenTransactionTree,
@@ -14,6 +14,8 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
@@ -26,11 +28,12 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithoutSuffixes,
 }
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine as ContractStateMachine
-import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors.KeyInputError
+import com.digitalasset.canton.util.ContractHasher
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.transaction.{LegacyTransactionErrors, NodeId, TransactionError}
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -58,7 +61,7 @@ trait TransactionTreeFactory {
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      keyResolver: ContractStateMachine.KeyResolver,
+      keyResolver: LfKeyResolver,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -83,7 +86,7 @@ trait TransactionTreeFactory {
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      keyResolver: ContractStateMachine.KeyResolver,
+      keyResolver: LfKeyResolver,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -103,6 +106,34 @@ object TransactionTreeFactory {
   type ContractInstanceOfId =
     LfContractId => EitherT[FutureUnlessShutdown, ContractLookupError, GenContractInstance]
 
+  def apply(
+      submittingParticipant: ParticipantId,
+      synchronizerId: PhysicalSynchronizerId,
+      cantonContractIdVersion: CantonContractIdVersion,
+      cryptoOps: HashOps & HmacOps,
+      hasher: ContractHasher,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ex: ExecutionContext): TransactionTreeFactory =
+    if (synchronizerId.protocolVersion >= ProtocolVersion.v35) {
+      new NextGenTransactionTreeFactory(
+        submittingParticipant,
+        synchronizerId,
+        cantonContractIdVersion,
+        cryptoOps,
+        hasher,
+        loggerFactory,
+      )
+    } else {
+      new LegacyTransactionTreeFactory(
+        submittingParticipant,
+        synchronizerId,
+        cantonContractIdVersion,
+        cryptoOps,
+        hasher,
+        loggerFactory,
+      )
+    }
+
   def contractInstanceLookup(
       contractStore: ContractLookup
   )(implicit ex: ExecutionContext, traceContext: TraceContext): ContractInstanceOfId =
@@ -115,6 +146,54 @@ object TransactionTreeFactory {
 
   /** Supertype for all errors than may arise during the conversion. */
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting
+
+  object TransactionTreeConversionError {
+    def toConversionError(error: TransactionError): TransactionTreeConversionError =
+      error match {
+        case TransactionError.DuplicateContractId(cid) =>
+          DuplicateContractIdError(cid)
+        case TransactionError.DuplicateContractKey(key) =>
+          DuplicateContractKeyError(key)
+        case TransactionError.AlreadyConsumed(cid, nodeId) =>
+          AlreadyConsumedContractError(cid, nodeId.toString)
+        case TransactionError.InconsistentContractKey(key) =>
+          InconsistentContractKeyError(key)
+        case TransactionError.EffectfulRollback(nodeIds) =>
+          EffectfulRollbackError(nodeIds)
+      }
+  }
+
+  final case class EffectfulRollbackError(nodeIds: Set[NodeId])
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[EffectfulRollbackError] =
+      prettyOfClass(unnamedParam(_.nodeIds))
+  }
+
+  final case class DuplicateContractIdError(contractId: LfContractId)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[DuplicateContractIdError] =
+      prettyOfClass(unnamedParam(_.contractId))
+  }
+
+  final case class DuplicateContractKeyError(key: LfGlobalKey)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[DuplicateContractKeyError] =
+      prettyOfClass(unnamedParam(_.key))
+  }
+
+  final case class AlreadyConsumedContractError(contractId: LfContractId, nodeId: String)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[AlreadyConsumedContractError] = prettyOfClass(
+      param("contractId", _.contractId),
+      param("nodeId", _.nodeId.unquoted),
+    )
+  }
+
+  final case class InconsistentContractKeyError(key: LfGlobalKey)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[InconsistentContractKeyError] =
+      prettyOfClass(unnamedParam(_.key))
+  }
 
   /** Indicates that a contract instance could not be looked up by an instance of
     * [[ContractInstanceOfId]].
@@ -147,7 +226,7 @@ object TransactionTreeFactory {
       prettyOfClass(unnamedParam(_.key))
   }
 
-  final case class ContractKeyResolutionError(error: KeyInputError)
+  final case class ContractKeyResolutionError(error: LegacyTransactionErrors.KeyInputError)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[ContractKeyResolutionError] = prettyOfClass(
       unnamedParam(_.error)

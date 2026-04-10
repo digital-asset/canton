@@ -14,7 +14,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -209,6 +209,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           topologySnapshot,
           BatchingConfig(),
           participantResponseDeadlineTick = None,
+          PromiseUnlessShutdown.unit,
         )
         .futureValueUS
 
@@ -301,6 +302,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   NonEmpty(List, (Set(alice), solo, testReject()))
                 )
               ),
+              PromiseUnlessShutdown.unit,
             )(TraceContext.empty, None)
           }
         }
@@ -368,6 +370,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 requestId.unwrap.plusSeconds(600),
                 changeTs2,
                 Left(rejection),
+                PromiseUnlessShutdown.unit,
               )(TraceContext.empty, None)
             }
 
@@ -481,6 +484,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId.unwrap.plusSeconds(600),
               changeTs,
               Left(MediatorApprove),
+              PromiseUnlessShutdown.unit,
             )(TraceContext.empty, None)
           }
 
@@ -596,6 +600,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 NonEmpty(List, (Set(alice), solo, localAbstain))
               )
             ),
+            PromiseUnlessShutdown.unit,
           )(TraceContext.empty, None)
         }
       }
@@ -694,6 +699,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           topologySnapshot,
           BatchingConfig(),
           participantResponseDeadlineTick = None,
+          PromiseUnlessShutdown.unit,
         )
         .futureValueUS
       lazy val changeTs = requestId.unwrap.plusSeconds(1)
@@ -1066,6 +1072,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           topologySnapshot,
           BatchingConfig(),
           participantResponseDeadlineTick = None,
+          PromiseUnlessShutdown.unit,
         )
         .futureValueUS
 
@@ -1392,6 +1399,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   NonEmpty(List, (Set(alice), two, testReject))
                 )
               ),
+              PromiseUnlessShutdown.unit,
             )(TraceContext.empty, None)
           }
         }
@@ -1520,6 +1528,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 requestId.unwrap.plusSeconds(600),
                 changeTs5,
                 Left(rejection),
+                PromiseUnlessShutdown.unit,
               )(TraceContext.empty, None)
             }
 
@@ -1917,6 +1926,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId.unwrap.plusSeconds(600),
               changeTs2,
               Left(MediatorApprove),
+              PromiseUnlessShutdown.unit,
             )(TraceContext.empty, None)
           }
 
@@ -2020,6 +2030,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           topologySnapshot,
           BatchingConfig(),
           participantResponseDeadlineTick = None,
+          PromiseUnlessShutdown.unit,
         )
         .futureValueUS
 

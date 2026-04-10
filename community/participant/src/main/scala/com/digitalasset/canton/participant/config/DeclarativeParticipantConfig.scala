@@ -242,7 +242,7 @@ final case class DeclarativeUserConfig(
   *   store can be provided
   */
 final case class DeclarativeSequencerConnectionConfig(
-    endpoints: NonEmpty[Seq[Endpoint]],
+    endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean = false,
     customTrustCertificates: Option[File] = None,
 )(customTrustCertificatesFromNode: Option[ByteString] = None) {
@@ -258,7 +258,7 @@ final case class DeclarativeSequencerConnectionConfig(
 
 object DeclarativeSequencerConnectionConfig {
   def create(endpoint: Endpoint): DeclarativeSequencerConnectionConfig =
-    DeclarativeSequencerConnectionConfig(endpoints = NonEmpty.mk(Seq, endpoint))()
+    DeclarativeSequencerConnectionConfig(endpoints = NonEmpty.mk(Set, endpoint))()
 }
 
 /** Declarative synchronizer connection configuration

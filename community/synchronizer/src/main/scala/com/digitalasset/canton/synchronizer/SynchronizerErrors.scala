@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.sequencing.client.{grpc as _, *}
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.TopologyManagerError.SynchronizerErrorGroup
 

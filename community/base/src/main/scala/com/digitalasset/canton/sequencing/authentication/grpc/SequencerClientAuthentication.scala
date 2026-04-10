@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.sequencing.authentication.grpc
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.getToken
 import com.digitalasset.canton.sequencing.authentication.grpc.SequencerClientTokenAuthentication.{
   ReauthorizationClientInterceptor,
@@ -24,7 +22,6 @@ import com.google.common.annotations.VisibleForTesting
 import io.grpc.*
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
-import io.grpc.internal.GrpcAttributes
 import io.grpc.stub.AbstractStub
 
 import java.util.concurrent.Executor
@@ -43,25 +40,18 @@ trait SequencerClientAuthentication {
 private[grpc] class SequencerClientTokenAuthentication(
     synchronizerId: PhysicalSynchronizerId,
     member: Member,
-    tokenManagerPerEndpoint: NonEmpty[Map[Endpoint, AuthenticationTokenManager]],
+    tokenManager: AuthenticationTokenManager,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends SequencerClientAuthentication
     with NamedLogging {
 
   @VisibleForTesting
-  private[grpc] val reauthorizationInterceptor = new ReauthorizationClientInterceptor(
-    tokenManagerPerEndpoint
-  )
+  private[grpc] val reauthorizationInterceptor = new ReauthorizationClientInterceptor(tokenManager)
 
   /** Apply the sequencer authentication components to a grpc client stub */
   def apply[S <: AbstractStub[S]](client: S): S =
     client.withCallCredentials(callCredentials).withInterceptors(reauthorizationInterceptor)
-
-  private def getTokenManager(maybeEndpoint: Option[Endpoint]) = (for {
-    endpoint <- maybeEndpoint
-    tokenManager <- tokenManagerPerEndpoint.get(endpoint)
-  } yield tokenManager).getOrElse(tokenManagerPerEndpoint.head1._2)
 
   /** Asks token manager for the current auth token and applies it to outgoing requests */
   @VisibleForTesting
@@ -71,16 +61,6 @@ private[grpc] class SequencerClientTokenAuthentication(
         appExecutor: Executor,
         applier: CallCredentials.MetadataApplier,
     ): Unit = {
-      val maybeEndpoint = for {
-        clientEagAttrs <- Option(
-          requestInfo.getTransportAttrs.get(GrpcAttributes.ATTR_CLIENT_EAG_ATTRS)
-        )
-        endpoint <- Option(clientEagAttrs.get(Endpoint.ATTR_ENDPOINT))
-      } yield endpoint
-
-      logger.debug(s"Detected client endpoint $maybeEndpoint")(TraceContext.empty)
-      val tokenManager = getTokenManager(maybeEndpoint)
-
       implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
       getToken(tokenManager)
         .fold(
@@ -91,7 +71,6 @@ private[grpc] class SequencerClientTokenAuthentication(
                 synchronizerId,
                 member,
                 token,
-                maybeEndpoint,
               )
             ),
         )
@@ -105,25 +84,24 @@ object SequencerClientTokenAuthentication {
   def apply(
       synchronizerId: PhysicalSynchronizerId,
       member: Member,
-      obtainTokenPerEndpoint: NonEmpty[Map[Endpoint, TokenFetcher]],
+      tokenFetcher: TokenFetcher,
       isClosed: => Boolean,
       tokenManagerConfig: AuthenticationTokenManagerConfig,
       clock: Clock,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SequencerClientAuthentication = {
-    val tokenManagerPerEndpoint = obtainTokenPerEndpoint.transform { case (_, obtainToken) =>
-      new AuthenticationTokenManager(
-        obtainToken,
-        isClosed,
-        tokenManagerConfig,
-        clock,
-        loggerFactory,
-      )
-    }
+    val tokenManager = new AuthenticationTokenManager(
+      tokenFetcher,
+      isClosed,
+      tokenManagerConfig,
+      clock,
+      loggerFactory,
+    )
+
     new SequencerClientTokenAuthentication(
       synchronizerId,
       member,
-      tokenManagerPerEndpoint,
+      tokenManager,
       loggerFactory,
     )
   }
@@ -136,7 +114,7 @@ object SequencerClientTokenAuthentication {
     * invalidated the previous token.
     */
   final class ReauthorizationClientInterceptor(
-      tokenManagerPerEndpoint: NonEmpty[Map[Endpoint, AuthenticationTokenManager]]
+      tokenManager: AuthenticationTokenManager
   ) extends ClientInterceptor {
 
     override def interceptCall[ReqT, RespT](
@@ -157,9 +135,6 @@ object SequencerClientTokenAuthentication {
 
         override def onClose(status: Status, trailers: Metadata): Unit = {
           if (status.getCode == Status.UNAUTHENTICATED.getCode) {
-            val tokenManager = Option(trailers.get(Constant.ENDPOINT_METADATA_KEY))
-              .flatMap(tokenManagerPerEndpoint.get)
-              .getOrElse(tokenManagerPerEndpoint.head1._2)
             Option(trailers.get(Constant.AUTH_TOKEN_METADATA_KEY))
               .foreach(tokenManager.invalidateToken)
           }
@@ -174,13 +149,11 @@ object SequencerClientTokenAuthentication {
       synchronizerId: PhysicalSynchronizerId,
       member: Member,
       token: AuthenticationToken,
-      maybeEndpoint: Option[Endpoint] = None,
       into: Metadata = new Metadata(),
   ): Metadata = {
     into.put(Constant.SYNCHRONIZER_ID_METADATA_KEY, synchronizerId.toProtoPrimitive)
     into.put(Constant.MEMBER_ID_METADATA_KEY, member.toProtoPrimitive)
     into.put(Constant.AUTH_TOKEN_METADATA_KEY, token)
-    maybeEndpoint.foreach(endpoint => into.put(Constant.ENDPOINT_METADATA_KEY, endpoint))
     into
   }
 }

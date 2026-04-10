@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.memory.SimulationOutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -74,23 +75,30 @@ class SequencerSnapshotOnboardingManager(
       forNode: BftNodeId,
   ): BftOnboardingData = {
     val snapshot = nodeToSequencerSnapshotAdditionalInfo.get(forNode)
+    val blockFromSnapshotOrGenesis =
+      snapshot
+        .flatMap {
+          // technically the block we want is somewhere later than this, but this is good enough
+          _.nodeActiveAt.get(forNode).flatMap(_.firstBlockNumberInStartEpoch)
+        }
+        .getOrElse(BlockNumber(0L))
     BftOnboardingData(
-      model
-        .lastSequencerAcknowledgedBlock(forNode)
-        .getOrElse {
-          // if the model don't know it means this node is new so we get the block from the snapshot
-          val blockFromSnapshot =
-            snapshot
-              .flatMap {
-                // technically the block we want is somewhere later than this, but this is good enough
-                _.nodeActiveAt.get(forNode).flatMap(_.firstBlockNumberInStartEpoch)
-              }
+      reasonForProvide match {
+        case ReasonForProvide.ProvideForInit =>
+          blockFromSnapshotOrGenesis
+        case ReasonForProvide.ProvideForRestart =>
+          val upperBound = model
+            .lastSequencerAcknowledgedBlock(forNode)
+            .getOrElse(blockFromSnapshotOrGenesis)
 
-          blockFromSnapshot.getOrElse(
-            // If we don't have a snapshot the node is part of the genesis
-            BlockNumber(0L)
+          BlockNumber(
+            // the sequencer should be somewhere in between these two points
+            random.between(
+              blockFromSnapshotOrGenesis,
+              upperBound + 1L, // make it inclusive
+            )
           )
-        },
+      },
       reasonForProvide match {
         case ReasonForProvide.ProvideForInit => snapshot
         case ReasonForProvide.ProvideForRestart => None
@@ -170,7 +178,14 @@ class SequencerSnapshotOnboardingManager(
   ): Seq[(Command, FiniteDuration)] = {
     // Conservatively, find the most advanced store to increase certainty that it contains the right onboarding data.
     val nodeToAsk =
-      StorageHelpers.findMostAdvancedOutputStore(stores.view.mapValues(_.outputStore).toMap)._1
+      StorageHelpers
+        .findMostAdvancedOutputStore(
+          stores.view
+            .mapValues(_.outputStore)
+            .toMap
+            .asInstanceOf[Map[BftNodeId, SimulationOutputMetadataStore]]
+        )
+        ._1
 
     val sequencerActivationTime = newlyOnboardingNodesToTimes(node)
 

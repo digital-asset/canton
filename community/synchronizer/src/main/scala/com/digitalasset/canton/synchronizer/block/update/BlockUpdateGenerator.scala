@@ -3,20 +3,24 @@
 
 package com.digitalasset.canton.synchronizer.block.update
 
+import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.messages.{LsuSequencingTestMessage, ProtocolMessage}
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregationId,
+  AggregationRule,
   AllMembersOfSynchronizer,
+  Batch,
   MediatorGroupRecipient,
-  MemberRecipient,
   MemberRecipientOrBroadcast,
-  SequencerDeliverError,
   SequencersOfSynchronizer,
 }
 import com.digitalasset.canton.synchronizer.block.BlockEvents.TickTopology
@@ -28,10 +32,13 @@ import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmission
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidLedgerEvent,
-  SequencedBeforeOrAtLowerBound,
+  SequencingTimeNotAdmissible,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
-import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
+import com.digitalasset.canton.synchronizer.sequencer.time.{
+  DisasterRecoverySequencingTimeUpperBound,
+  LsuSequencingBounds,
+}
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.synchronizer.sequencer.{
   AnnouncedLsu,
@@ -39,6 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SubmissionOutcome,
 }
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.util.collection.IterableUtil
@@ -90,6 +98,7 @@ trait BlockUpdateGenerator {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[(InternalState, OrderedBlockUpdate)]
+
 }
 
 object BlockUpdateGenerator {
@@ -114,6 +123,7 @@ class BlockUpdateGeneratorImpl(
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
     lsuSequencingBounds: Option[LsuSequencingBounds],
+    drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     getAnnouncedLsu: => Option[AnnouncedLsu],
     producePostOrderingTopologyTicks: Boolean,
     metrics: SequencerMetrics,
@@ -154,24 +164,37 @@ class BlockUpdateGeneratorImpl(
     inFlightAggregations = state.inFlightAggregations,
   )
 
-  /*
-  False only for a send whose recipients are only synchronizer nodes
-   */
-  private def shouldRespectLsuLowerBound(event: LedgerBlockEvent): Boolean =
+  /** Return true if the event contains only [[LsuSequencingTestMessage]] and recipients are
+    * mediator groups. Since the method open envelopes, which is resources consuming, should be
+    * called only before upgrade time.
+    */
+  private def isAllowedBeforeUpgradeTime(event: LedgerBlockEvent) =
     event match {
       case Send(_, signedSubmissionRequest, _, _) =>
-        signedSubmissionRequest.content.batch.allRecipients.exists {
-          // cover participants
-          case MemberRecipient(_: ParticipantId) => true
-          case AllMembersOfSynchronizer => true
-          // only synchronizer nodes
-          case MemberRecipient(_: SequencerId) => false
-          case MemberRecipient(_: MediatorId) => false
-          case _: MediatorGroupRecipient => false
-          case SequencersOfSynchronizer => false
-        }
+        val (openEnvelopes, errors) = Batch.openEnvelopes(signedSubmissionRequest.content.batch)(
+          protocolVersion,
+          synchronizerSyncCryptoApi.pureCrypto,
+        )
 
-      case _: Acknowledgment => true
+        val lsuSequencingTestMessages = openEnvelopes.envelopes.mapFilter(
+          ProtocolMessage.select[LsuSequencingTestMessage]
+        )
+
+        val isNotTimeProof = openEnvelopes.envelopes.nonEmpty
+        val onlyLsuSequencingTestMessages = lsuSequencingTestMessages.sizeCompare(
+          openEnvelopes.envelopes
+        ) == 0
+
+        val hasNonMediatorGroupRecipient =
+          signedSubmissionRequest.content.batch.allRecipients.exists {
+            case _: MediatorGroupRecipient => false
+            case _ => true
+          }
+
+        // if there are only lsu sequencing test messages and if only recipients are mediator groups
+        isNotTimeProof && onlyLsuSequencingTestMessages && errors.isEmpty && !hasNonMediatorGroupRecipient
+
+      case _: Acknowledgment => false
     }
 
   override def extractBlockEvents(tracedBlock: Traced[RawLedgerBlock]): Traced[BlockEvents] =
@@ -191,32 +214,18 @@ class BlockUpdateGeneratorImpl(
               None
 
             case Right(event) =>
-              lsuSequencingBounds match {
-                case Some(lsuSequencingBounds) =>
-                  /*
-                    For an event with sequencing time `ts`:
-                    - If `ts <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive`, then message should be dropped
-                    - If `lsuSequencingBounds.lowerBoundSequencingTimeExclusive < ts <= lsuSequencingBounds.upgradeTime`,
-                      then message should be delivered only if `shouldRespectLsuLowerBound(event)` is true
-                      (basically deliver only if recipients are synchronizer nodes).
-                    - If `ts > upgradeTime`, then always deliver
-                   */
+              val checksResult = for {
+                _ <- checkLsuSequencingBounds(event, lsuSequencingBounds)
+                _ <- checkDrSequencingTimeUpperBound(event, drSequencingTimeUpperBound)
+              } yield ()
 
-                  if (event.timestamp <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive)
-                    None
-                  else if (event.timestamp <= lsuSequencingBounds.upgradeTime) {
-                    if (shouldRespectLsuLowerBound(event)) {
-                      SequencedBeforeOrAtLowerBound
-                        .Error(event.timestamp, lsuSequencingBounds.upgradeTime, event.toString)
-                        .log()
-                      None
-                    } else {
-                      Some(Traced(event))
-                    }
-                  } else Some(Traced(event))
-
-                case None => Some(Traced(event))
-              }
+              checksResult.fold(
+                err => {
+                  err.log()
+                  None
+                },
+                _ => Some(Traced(event)),
+              )
           }
         }(tracedEvent.traceContext, tracer)
       }
@@ -236,6 +245,59 @@ class BlockUpdateGeneratorImpl(
         )
       )(blockTraceContext)
     }(tracedBlock.traceContext, tracer)
+
+  private def checkDrSequencingTimeUpperBound(
+      event: LedgerBlockEvent,
+      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
+  ): Either[CantonBaseError, Unit] =
+    drSequencingTimeUpperBound match {
+      case Some(drSequencingTimeUpperBound) =>
+        Either.cond(
+          event.timestamp < drSequencingTimeUpperBound.ts,
+          (),
+          SequencingTimeNotAdmissible.Error
+            .afterOrAtUpperBound(event.timestamp, drSequencingTimeUpperBound.ts, event.toString),
+        )
+
+      case None => Right(())
+    }
+
+  /*
+    For an event with sequencing time `ts`:
+    - If `ts <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive`, then fail.
+    - If `lsuSequencingBounds.lowerBoundSequencingTimeExclusive < ts <= lsuSequencingBounds.upgradeTime`,
+      then the check should be successful only if `isAllowedBeforeUpgradeTime(event)` is true.
+    - If `ts > upgradeTime`, then success.
+   */
+  private def checkLsuSequencingBounds(
+      event: LedgerBlockEvent,
+      lsuSequencingBounds: Option[LsuSequencingBounds],
+  ): Either[CantonBaseError, Unit] =
+    lsuSequencingBounds match {
+      case Some(lsuSequencingBounds) =>
+        if (event.timestamp <= lsuSequencingBounds.lowerBoundSequencingTimeExclusive) {
+          SequencingTimeNotAdmissible.Error
+            .beforeOrAtLowerBound(
+              sequencingTime = event.timestamp,
+              lowerBound = lsuSequencingBounds.lowerBoundSequencingTimeExclusive,
+              event.toString,
+            )
+            .asLeft
+        } else if (event.timestamp <= lsuSequencingBounds.upgradeTime) {
+          Either.cond(
+            isAllowedBeforeUpgradeTime(event),
+            (),
+            SequencingTimeNotAdmissible.Error
+              .beforeOrAtLowerBound(
+                sequencingTime = event.timestamp,
+                lowerBound = lsuSequencingBounds.upgradeTime,
+                event.toString,
+              ),
+          )
+        } else ().asRight
+
+      case None => ().asRight
+    }
 
   override def chunkBlock(
       blockEvents: BlockEvents
@@ -368,10 +430,19 @@ class BlockUpdateGeneratorImpl(
             }
         }
     }
+
 }
 
 object BlockUpdateGeneratorImpl {
 
+  /** Internal state
+    *
+    * @param latestPendingTopologyTransactionTimestamp
+    *   is used to determine whether a topology tick should be emitted at the end of the block, so
+    *   it is updated whenever we see a topology transaction. We only use it to decide if we should
+    *   emit a tick at the end of a block. It may be incorrect if a topology tx was rejected, but
+    *   that doesn't matter much from the perspective of "ticking" the topology.
+    */
   private[block] final case class State(
       lastBlockTs: CantonTimestamp,
       lastChunkTs: CantonTimestamp,
@@ -380,12 +451,33 @@ object BlockUpdateGeneratorImpl {
       inFlightAggregations: InFlightAggregations,
   )
 
-  private[update] final case class SequencedValidatedSubmission(
+  /** Positive outcome of the pre-validation step
+    *
+    * Case class used to carry over data from the parallel validation into the sequential validation
+    * step
+    *
+    * @param recipients
+    *   the resolved recipients for this request
+    * @param aggregationInfo
+    *   the computed aggregation-id and the validated aggregation rule
+    */
+  private[update] final case class PrevalidationOutcome(
+      recipients: Set[MemberRecipientOrBroadcast],
+      aggregationInfo: Option[(AggregationId, AggregationRule)],
+  )
+
+  /** Result of the parallel validation
+    *
+    * This step contains all the validation results which can be performed independently and
+    * therefore can run in parallel
+    */
+  private[update] final case class SequencedPreValidatedSubmissionResult(
       sequencingTimestamp: CantonTimestamp,
       submissionRequest: SignedSubmissionRequest,
       orderingSequencerId: SequencerId,
-      topologyTimestampError: Option[SequencerDeliverError],
       consumeTraffic: SubmissionRequestValidator.TrafficConsumption,
-      errorOrRecipients: Either[SubmissionOutcome, Set[MemberRecipientOrBroadcast]],
+      errorOrPrevalidationOutcome: Either[SubmissionOutcome, PrevalidationOutcome],
+      sequencingSnapshot: TopologySnapshot,
   )(val traceContext: TraceContext)
+
 }

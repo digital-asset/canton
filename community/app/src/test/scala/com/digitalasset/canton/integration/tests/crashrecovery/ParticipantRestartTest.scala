@@ -489,7 +489,7 @@ abstract class ParticipantRestartTest
           synchronizerAlias = daName,
           sequencerConnections = SequencerConnections.single(
             GrpcSequencerConnection(
-              NonEmpty(Seq, Endpoint("not-relevant", Port.tryCreate(1))),
+              NonEmpty(Set, Endpoint("not-relevant", Port.tryCreate(1))),
               transportSecurity = false,
               customTrustCertificates = None,
               sequencerAlias = SequencerAlias.tryCreate("not used"),
@@ -945,8 +945,10 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
-      .addConfigTransform(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
-      .addConfigTransforms(ProgrammableSequencer.configOverride(getClass.toString, loggerFactory))
+      .addConfigTransforms(
+        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
+      )
 
   private def startSynchronizers(synchronizers: Seq[NetworkTopologyDescription])(implicit
       env: TestConsoleEnvironment
@@ -1889,7 +1891,7 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
         if (!droppedMessagePromise.isCompleted && submissionRequest.sender == participant1Id) {
           external.kill(participant1.name)
           droppedMessagePromise.success(())
-          SendDecision.Reject
+          SendDecision.Reject()
         } else SendDecision.Process
       }
     }
@@ -2242,7 +2244,7 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
             val dropIt = dropAliceConfirmationResponse.getAndSet(false)
             if (dropIt) {
               firstConfirmationResponseDropped.success(())
-              SendDecision.Reject
+              SendDecision.Reject()
             } else SendDecision.Process
           } else SendDecision.Process
         }

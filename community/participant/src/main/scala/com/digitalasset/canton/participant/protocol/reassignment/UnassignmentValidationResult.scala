@@ -77,6 +77,7 @@ final case class UnassignmentValidationResult(
   def createReassignmentAccepted(
       participantId: ParticipantId,
       recordTime: CantonTimestamp,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): AcsChangeFactory => InternalContractIds => Update.SequencedReassignmentAccepted = {
@@ -91,8 +92,7 @@ final case class UnassignmentValidationResult(
           commandId = submitterMetadata.commandId,
           optDeduplicationPeriod = None,
           submissionId = submitterMetadata.submissionId,
-          // TODO(i31036): support traffic cost for re-assignments
-          paidTrafficCost = NonNegativeLong.zero,
+          paidTrafficCost = trafficCost,
         )
       )
     (acsChangeFactory: AcsChangeFactory) =>

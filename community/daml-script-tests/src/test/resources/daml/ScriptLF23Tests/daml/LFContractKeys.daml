@@ -6,8 +6,6 @@
 module LFContractKeys where
 
 import Daml.Script
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 import DA.Optional
 

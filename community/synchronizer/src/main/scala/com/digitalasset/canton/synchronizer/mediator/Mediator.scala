@@ -9,6 +9,7 @@ import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
@@ -35,7 +36,7 @@ import com.digitalasset.canton.synchronizer.LsuSequencingTestMessageHandler
 import com.digitalasset.canton.synchronizer.mediator.Mediator.PruningError
 import com.digitalasset.canton.synchronizer.mediator.store.MediatorState
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
-import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
+import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker, TimeAwaiter}
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{
@@ -53,12 +54,33 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
 /** Responsible for events processing. Reads mediator confirmation requests and confirmation
   * responses from a sequencer and produces ConfirmationResultMessages. For scaling /
   * high-availability, several instances need to be created.
+  *
+  * ==Crash Recovery==
+  *
+  * The mediator is crash-fault tolerant: if it crashes before finalizing a request, crash recovery
+  * replays that request from the sequenced event store. This is achieved by chaining a
+  * [[com.digitalasset.canton.lifecycle.PromiseUnlessShutdown]] (`finalizedPromise`) into the
+  * confirmation request event's async processing result. The clean sequencer counter only advances
+  * once this promise completes, which happens only after the finalized response is persisted to the
+  * DB ([[com.digitalasset.canton.synchronizer.mediator.store.MediatorState.storeFinalized]]).
+  *
+  * Out-of-order finalization is handled by
+  * [[com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker]]'s Peano queue: the
+  * clean prehead only advances to the oldest unfinished event's predecessor, regardless of which
+  * later events complete first.
+  *
+  * '''Known limitation''': There is a narrow crash window between persisting the finalized response
+  * and confirming the verdict was sequenced. If the mediator crashes after `storeFinalized` but
+  * before the verdict send completes, on restart the verdict may not be re-sent (response event
+  * replays against an already-finalized DB entry, which no-ops). Impact: participants timeout and
+  * treat the transaction as rejected.
   */
 private[mediator] class Mediator(
     val mediatorId: MediatorId,
@@ -79,6 +101,7 @@ private[mediator] class Mediator(
     clock: Clock,
     val metrics: MediatorMetrics,
     protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with FlagCloseableAsync
@@ -88,6 +111,35 @@ private[mediator] class Mediator(
   def protocolVersion: ProtocolVersion = sequencerClient.protocolVersion
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
+
+  /** In-memory cache of the latest clean prehead timestamp. Seeded from the persisted prehead on
+    * startup, then kept in sync by [[onCleanSequencerCounterHandler]]. Allows the [[TimeAwaiter]]
+    * to read the current watermark without any DB lookup.
+    */
+  @VisibleForTesting
+  private[canton] val cleanPreheadTimestamp: AtomicReference[CantonTimestamp] =
+    new AtomicReference(CantonTimestamp.MinValue)
+
+  /** Watermark for the inspection service: safe to query verdicts with request time <= this value.
+    * Driven by the clean sequencer counter prehead, which advances only after every finalized
+    * response for requests up to that point has been persisted to the DB (via finalizedPromise).
+    */
+  private val recordOrderTimeAwaiter: TimeAwaiter = new TimeAwaiter(
+    getCurrentKnownTime = () => cleanPreheadTimestamp.get(),
+    timeouts = parameters.processingTimeouts,
+    loggerFactory = loggerFactory,
+  )
+
+  /** Return the current watermark until which verdicts are safe to be served on the API
+    */
+  def getCurrentWatermark: CantonTimestamp = recordOrderTimeAwaiter.getCurrentKnownTime()
+
+  /** Wait for the watermark to reach the provided timestamp. If it's already reached, returns a
+    * None, otherwise, a future that will complete when the watermark reaches the timestamp.
+    */
+  def awaitWatermark(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Option[FutureUnlessShutdown[Unit]] = recordOrderTimeAwaiter.awaitKnownTimestamp(timestamp)
 
   private val delayLogger =
     new DelayLogger(
@@ -110,6 +162,7 @@ private[mediator] class Mediator(
     loggerFactory,
     timeouts,
     parameters.batchingConfig,
+    futureSupervisor,
   )
 
   private val deduplicator = MediatorEventDeduplicator.create(
@@ -139,12 +192,10 @@ private[mediator] class Mediator(
       initializationTraceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = synchronizeWithClosing("start") {
     for {
-
       preheadO <- sequencerCounterTrackerStore.preheadSequencerCounter
+      _ = preheadO.map(_.timestamp).foreach(cleanPreheadTimestamp.set)
       nextTs = preheadO.fold(CantonTimestamp.MinValue)(_.timestamp.immediateSuccessor)
       _ <- state.deduplicationStore.initialize(nextTs)
-      _ <- state.initialize(nextTs)
-
       _ <-
         sequencerClient.subscribeTracking(
           sequencerCounterTrackerStore,
@@ -159,6 +210,10 @@ private[mediator] class Mediator(
   private def onCleanSequencerCounterHandler(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Unit = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
+    // Update the in memory clean pre-head
+    cleanPreheadTimestamp.set(newPrehead.timestamp)
+    // Advance the in-memory watermark and unblock any inspection service streams waiting on it.
+    recordOrderTimeAwaiter.notifyAwaitedFutures(newPrehead.timestamp)
     FutureUtil.doNotAwait(
       synchronizeWithClosing("prune mediator deduplication store")(
         state.deduplicationStore.prune(newPrehead.timestamp)
@@ -246,8 +301,8 @@ private[mediator] class Mediator(
     } yield ()
   }
 
-  private def handler: ApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] =
-    new ApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] {
+  private def handler: UnthrottledApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] =
+    new UnthrottledApplicationHandler[OrdinaryEnvelopeBox, ClosedEnvelope] {
 
       override def name: String = s"mediator-$mediatorId"
 
@@ -354,6 +409,7 @@ private[mediator] class Mediator(
           sequencerClient,
           topologyClient,
           sequencerCounterTrackerStore,
+          recordOrderTimeAwaiter,
           state,
         )(logger),
       )

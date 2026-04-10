@@ -83,4 +83,16 @@ message Transaction {
   //
   // Optional: can be empty
   optional bytes external_transaction_hash = 10;
+
+  // The traffic cost that this participant node paid for the confirmation
+  // request for this transaction.
+  //
+  // Not set for transactions that were
+  // - initiated by another participant
+  // - initiated offline via the repair service
+  // - processed before the participant started serving traffic cost on the Ledger API
+  // - returned as part of a query filtering for a non submitting party
+  //
+  // Optional
+  optional int64 paid_traffic_cost = 11;
 }

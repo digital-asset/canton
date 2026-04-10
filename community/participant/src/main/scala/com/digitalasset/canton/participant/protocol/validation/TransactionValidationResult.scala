@@ -39,6 +39,7 @@ final case class TransactionValidationResult(
     hostedWitnesses: Set[LfPartyId],
     replayCheckResult: Option[String],
     validatedExternalTransactionHash: Option[Hash],
+    commitAfterFailedActivenessCheck: Boolean,
 ) {
 
   def commitSet(
@@ -50,5 +51,6 @@ final case class TransactionValidationResult(
       consumedInputsOfHostedParties,
       transient,
       createdContracts,
+      commitAfterFailedActivenessCheck,
     )
 }

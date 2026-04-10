@@ -286,7 +286,7 @@ class ConnectedSynchronizer(
     packageResolver = packageResolver,
     testingConfig = testingConfig,
     promiseUSFactory,
-    parameters.loggingConfig.api.messagePayloads,
+    parameters,
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
@@ -780,7 +780,7 @@ class ConnectedSynchronizer(
           loggerFactory,
         )
         messageHandler =
-          new ApplicationHandler[
+          new UnthrottledApplicationHandler[
             Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
             ClosedEnvelope,
           ] {

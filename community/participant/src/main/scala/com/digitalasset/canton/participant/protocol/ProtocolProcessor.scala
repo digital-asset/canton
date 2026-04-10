@@ -59,10 +59,11 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
+import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult, UnthrottledAsync}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.{
   ParticipantId,
   PhysicalSynchronizerId,
@@ -73,6 +74,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
@@ -720,24 +722,9 @@ abstract class ProtocolProcessor[
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
-    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediator, isReceipt) = batch
+    val RequestAndRootHashMessage(_viewMessages, rootHashMessage, mediator, isReceipt) = batch
     val requestId = RequestId(ts)
     val rootHash = rootHashMessage.rootHash
-
-    def checkRootHash(
-        decryptedViews: Seq[(WithRecipients[steps.DecryptedView], Option[Signature])]
-    ): (Seq[MalformedPayload], Seq[(WithRecipients[steps.DecryptedView], Option[Signature])]) = {
-
-      val correctRootHash = rootHashMessage.rootHash
-      val (viewsWithCorrectRootHash, viewsWithWrongRootHash) =
-        decryptedViews.partition { case (view, _) => view.unwrap.rootHash == correctRootHash }
-      val malformedPayloads: Seq[MalformedPayload] =
-        viewsWithWrongRootHash.map { case (viewTree, _) =>
-          ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
-        }
-
-      (malformedPayloads, viewsWithCorrectRootHash)
-    }
 
     def observeSequencedRootHash(amSubmitter: Boolean): FutureUnlessShutdown[Unit] =
       if (amSubmitter && !isReceipt) {
@@ -753,226 +740,358 @@ abstract class ProtocolProcessor[
       } else FutureUnlessShutdown.unit
 
     synchronizeWithClosing(show"$functionFullName(rc=$rc, sc=$sc, traceId=$traceContext)") {
-      val preliminaryChecksET = for {
-        snapshot <- EitherT.right(
-          crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts)
-        )
-        synchronizerParameters <- EitherT(
-          snapshot.ipsSnapshot
-            .findDynamicSynchronizerParameters()
-            .map(
-              _.leftMap(_ =>
-                steps.embedRequestError(
-                  UnableToGetDynamicSynchronizerParameters(
-                    snapshot.psid,
-                    snapshot.ipsSnapshot.timestamp,
-                  )
-                )
-              )
-            )
-        )
-        uncheckedDecryptedViews <- steps
-          .decryptViews(viewMessages, snapshot, ephemeral.sessionKeyStore.convertStore)
-      } yield (snapshot, uncheckedDecryptedViews, synchronizerParameters)
-
-      for {
-        preliminaryChecks <- preliminaryChecksET.leftMap { err =>
+      preliminaryChecksET(ts, rc, sc, batch, requestDataHandle, publishUpdate)
+        .leftMap { err =>
           ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
           err
         }
-        (snapshot, uncheckedDecryptedViews, synchronizerParameters) = preliminaryChecks
-        DecryptedViews(decryptedViewsWithSignatures, rawDecryptionErrors) =
-          uncheckedDecryptedViews
-        _ = rawDecryptionErrors.foreach { decryptionError =>
-          logger.warn(s"Request $rc: Decryption error: $decryptionError")
-        }
-        decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
-
-        (incorrectRootHashes, viewsWithCorrectRootHash) = checkRootHash(
-          decryptedViewsWithSignatures
-        )
-        _ = incorrectRootHashes.foreach { incorrectRootHash =>
-          logger.warn(s"Request $rc: Found malformed payload: $incorrectRootHash")
-        }
-
-        submitterMetadataO = steps.getSubmitterInformation(
-          viewsWithCorrectRootHash.map { case (view, _) => view.unwrap }
-        )
-
-        submissionDataForTrackerO = submitterMetadataO.flatMap(_.submissionTrackerData)
-
-        submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
-        submissionTopologySnapshotO <- EitherT.right(
-          SubmissionTopologyHelper.getSubmissionTopologySnapshot(
-            timeouts,
-            ts,
-            submissionTopologyTimestamp,
-            crypto,
-          )
-        )
-
-        checkRecipientsResult <- EitherT.right(
-          recipientsValidator.retainInputsWithValidRecipients(
-            requestId,
-            viewsWithCorrectRootHash,
-            snapshot.ipsSnapshot,
-            submissionTopologySnapshotO.map(_.ipsSnapshot),
-          )
-        )
-        (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult
-
-        (
-          viewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
-          incorrectAbsolutizationViews,
-        ) = steps.absolutizeLedgerEffects(
-          viewsWithCorrectRootHashAndRecipients
-        )
-
-        (
-          fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
-          incorrectFullViews,
-        ) = steps.computeFullViews(viewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects)
-
-        malformedPayloads =
-          decryptionErrors ++ incorrectRootHashes ++ incorrectRecipients ++ incorrectAbsolutizationViews ++ incorrectFullViews
-
-        _ <- NonEmpty.from(
-          fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects
-        ) match {
+        .flatMap {
           case None =>
-            /*
-              If fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects is empty, it does not necessarily mean that we have a
-              malicious submitter (e.g., if there is concurrent topology change). Hence, if we have a submission data,
-              then we will aim to generate a command completion.
-             */
-            submissionDataForTrackerO match {
-              // TODO(i17075): study scenarios exploitable by honest-but-curious sequencers
-              case Some(submissionDataForTracker) =>
-                ephemeral.submissionTracker.provideSubmissionData(
-                  rootHash,
-                  requestId,
-                  submissionDataForTracker,
-                )
+            EitherT.rightT[FutureUnlessShutdown, steps.RequestError](())
 
-                val error =
-                  TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts)
+          case Some((snapshot, uncheckedDecryptedViews, synchronizerParameters)) =>
+            for {
+              result <- decryptAndValidateViews(
+                rc,
+                ts,
+                rootHashMessage,
+                uncheckedDecryptedViews,
+                snapshot,
+              )
 
-                for {
-                  _ <- EitherT
-                    .right(
+              (
+                fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
+                submitterMetadataO,
+                malformedPayloads,
+              ) = result
+              submissionDataForTrackerO = submitterMetadataO.flatMap(_.submissionTrackerData)
+              _ <- NonEmpty.from(
+                fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects
+              ) match {
+                case None =>
+                  /*
+                    If fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects is empty, it does not necessarily mean that we have a
+                    malicious submitter (e.g., if there is concurrent topology change). Hence, if we have a submission data,
+                    then we will aim to generate a command completion.
+                   */
+                  submissionDataForTrackerO match {
+                    // TODO(i17075): study scenarios exploitable by honest-but-curious sequencers
+                    case Some(submissionDataForTracker) =>
+                      ephemeral.submissionTracker.provideSubmissionData(
+                        rootHash,
+                        requestId,
+                        submissionDataForTracker,
+                      )
+
+                      val error =
+                        TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts)
+
+                      for {
+                        _ <- EitherT
+                          .right(
+                            observeSequencedRootHash(
+                              submissionDataForTracker.submittingParticipant == participantId
+                            )
+                          )
+                        _ <- stopRequestProcessing(
+                          ts,
+                          rc,
+                          sc,
+                          requestDataHandle,
+                          submitterMetadataO,
+                          rootHash,
+                          freshOwnTimelyTxF,
+                          error,
+                          publishUpdate,
+                          trafficCost,
+                        )
+                      } yield ()
+
+                    case None =>
+                      // We were not able to find submitter metadata within the decrypted views with correct root hash.
+                      // Either there is no such view, or none of them are root views.
+                      // In any case, we don't need to generate a command completion.
+                      ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
+                      trackAndSendResponsesMalformed(
+                        rc,
+                        sc,
+                        ts,
+                        rootHash,
+                        requestDataHandle,
+                        mediator,
+                        snapshot,
+                        malformedPayloads,
+                        publishUpdate,
+                      )
+                  }
+
+                case Some(goodViewsWithSignatures) =>
+                  // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
+                  val (firstView, _, _) = goodViewsWithSignatures.head1
+
+                  val observeFUS = submissionDataForTrackerO match {
+                    case Some(submissionDataForTracker) =>
+                      ephemeral.submissionTracker.provideSubmissionData(
+                        rootHash,
+                        requestId,
+                        submissionDataForTracker,
+                      )
+
                       observeSequencedRootHash(
                         submissionDataForTracker.submittingParticipant == participantId
                       )
+                    case None =>
+                      // There are no root views
+                      ephemeral.submissionTracker.cancelRegistration(
+                        rootHash,
+                        requestId,
+                      )
+
+                      FutureUnlessShutdown.unit
+                  }
+
+                  val declaredMediator = firstView.unwrap.mediator
+                  // Lazy so as to prevent this running concurrently with `observeF`
+                  lazy val processF = if (declaredMediator == mediator) {
+
+                    for {
+                      isFreshOwnTimelyRequest <- EitherT.right(freshOwnTimelyTxF)
+
+                      parsedRequest <- EitherT
+                        .right(
+                          steps.computeParsedRequest(
+                            rc,
+                            ts,
+                            sc,
+                            goodViewsWithSignatures,
+                            submitterMetadataO,
+                            isFreshOwnTimelyRequest,
+                            malformedPayloads,
+                            mediator,
+                            snapshot,
+                            synchronizerParameters,
+                            trafficCost,
+                          )
+                        )
+
+                      _ <- processRequestWithGoodViews(
+                        parsedRequest,
+                        requestDataHandle,
+                        publishUpdate,
+                      )
+                    } yield ()
+                  } else {
+                    // When the mediator `mediatorId` receives the root hash message,
+                    // it will either lack the full informee tree or find the wrong mediator ID in it.
+                    // The submitting participant is malicious (unless the sequencer is), so it is not this participant
+                    // and therefore we don't have to output a completion event
+                    logger.error(
+                      s"Mediator $declaredMediator declared in views is not the recipient $mediator of the root hash message"
                     )
-                  _ <- stopRequestProcessing(
-                    ts,
-                    rc,
-                    sc,
-                    requestDataHandle,
-                    submitterMetadataO,
-                    rootHash,
-                    freshOwnTimelyTxF,
-                    error,
-                    publishUpdate,
-                    trafficCost,
-                  )
-                } yield ()
+                    EitherT
+                      .right[steps.RequestError](
+                        prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
+                      )
+                      .thereafter(_ => requestDataHandle.complete(None))
+                  }
 
-              case None =>
-                // We were not able to find submitter metadata within the decrypted views with correct root hash.
-                // Either there is no such view, or none of them are root views.
-                // In any case, we don't need to generate a command completion.
-                ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
-                trackAndSendResponsesMalformed(
-                  rc,
-                  sc,
-                  ts,
-                  rootHash,
-                  requestDataHandle,
-                  mediator,
-                  snapshot,
-                  malformedPayloads,
-                  publishUpdate,
-                )
-            }
-
-          case Some(goodViewsWithSignatures) =>
-            // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
-            val (firstView, _, _) = goodViewsWithSignatures.head1
-
-            val observeFUS = submissionDataForTrackerO match {
-              case Some(submissionDataForTracker) =>
-                ephemeral.submissionTracker.provideSubmissionData(
-                  rootHash,
-                  requestId,
-                  submissionDataForTracker,
-                )
-
-                observeSequencedRootHash(
-                  submissionDataForTracker.submittingParticipant == participantId
-                )
-              case None =>
-                // There are no root views
-                ephemeral.submissionTracker.cancelRegistration(
-                  rootHash,
-                  requestId,
-                )
-
-                FutureUnlessShutdown.unit
-            }
-
-            val declaredMediator = firstView.unwrap.mediator
-            // Lazy so as to prevent this running concurrently with `observeF`
-            lazy val processF = if (declaredMediator == mediator) {
-
-              for {
-                isFreshOwnTimelyRequest <- EitherT.right(freshOwnTimelyTxF)
-
-                parsedRequest <- EitherT
-                  .right(
-                    steps.computeParsedRequest(
-                      rc,
-                      ts,
-                      sc,
-                      goodViewsWithSignatures,
-                      submitterMetadataO,
-                      isFreshOwnTimelyRequest,
-                      malformedPayloads,
-                      mediator,
-                      snapshot,
-                      synchronizerParameters,
-                      trafficCost,
-                    )
-                  )
-
-                _ <- processRequestWithGoodViews(
-                  parsedRequest,
-                  requestDataHandle,
-                  publishUpdate,
-                )
-              } yield ()
-            } else {
-              // When the mediator `mediatorId` receives the root hash message,
-              // it will either lack the full informee tree or find the wrong mediator ID in it.
-              // The submitting participant is malicious (unless the sequencer is), so it is not this participant
-              // and therefore we don't have to output a completion event
-              logger.error(
-                s"Mediator $declaredMediator declared in views is not the recipient $mediator of the root hash message"
-              )
-              EitherT
-                .right[steps.RequestError](
-                  prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
-                )
-                .thereafter(_ => requestDataHandle.complete(None))
-            }
-
-            for {
-              _ <- EitherT.right(observeFUS)
-              _ <- processF
+                  for {
+                    _ <- EitherT.right(observeFUS)
+                    _ <- processF
+                  } yield ()
+              }
             } yield ()
         }
-      } yield ()
+
     }
+  }
+
+  /** Performs preliminary checks for the request, such as decrypting the views, checking the root
+    * hash, and fetching synchronizer parameters. In case multi-synchronizer is not enabled for a
+    * reassignment request, we consider the request as malformed.
+    */
+  private def preliminaryChecksET(
+      ts: CantonTimestamp,
+      rc: RequestCounter,
+      sc: SequencerCounter,
+      batch: steps.RequestBatch,
+      requestDataHandle: Phase37Synchronizer.PendingRequestDataHandle[
+        steps.requestType.PendingRequestData
+      ],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[
+    FutureUnlessShutdown,
+    steps.RequestError,
+    Option[
+      (
+          SynchronizerSnapshotSyncCryptoApi,
+          DecryptedViews[steps.DecryptedView],
+          DynamicSynchronizerParametersWithValidity,
+      )
+    ],
+  ] = {
+    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediator, _isReceipt) = batch
+    val rootHash = rootHashMessage.rootHash
+
+    def isMultiSynchronizerEnabled(
+        snapshot: SynchronizerSnapshotSyncCryptoApi
+    ): EitherT[FutureUnlessShutdown, steps.RequestError, Boolean] =
+      EitherT.right[steps.RequestError](
+        snapshot.ipsSnapshot
+          .participantsWithSupportedFeature(
+            Set(participantId),
+            ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+          )
+          .map(_.headOption.nonEmpty)
+      )
+
+    def fetchSynchronizerParameters(
+        snapshot: SynchronizerSnapshotSyncCryptoApi
+    ): EitherT[
+      FutureUnlessShutdown,
+      steps.RequestError,
+      DynamicSynchronizerParametersWithValidity,
+    ] =
+      EitherT(
+        snapshot.ipsSnapshot
+          .findDynamicSynchronizerParameters()
+          .map(
+            _.leftMap(_ =>
+              steps.embedRequestError(
+                UnableToGetDynamicSynchronizerParameters(
+                  snapshot.psid,
+                  snapshot.ipsSnapshot.timestamp,
+                )
+              )
+            )
+          )
+      )
+
+    for {
+      snapshot <- EitherT.right(crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts))
+      multiSynchronizerEnabled <- isMultiSynchronizerEnabled(snapshot)
+      result <-
+        if (
+          rootHashMessage.viewType.isReassignment && !multiSynchronizerEnabled && protocolVersion >= ProtocolVersion.v35
+        ) {
+          // Whether an alarm is raised depends on each participant's feature flag setting.
+          // Participants with the flag enabled will still reject the request, but without triggering an alarm.
+          SyncServiceAlarm
+            .Warn(
+              s"(sequencer counter: $sc, timestamp: $ts): Received ${steps.requestKind} " +
+                s"but multi-synchronizer feature flag is not set. Ignoring the request."
+            )
+            .report()
+          ephemeral.submissionTracker.cancelRegistration(rootHash, RequestId(ts))
+          trackAndSendResponsesMalformed(
+            rc,
+            sc,
+            ts,
+            rootHash,
+            requestDataHandle,
+            mediator,
+            snapshot,
+            Nil,
+            publishUpdate,
+          ).map(_ => None)
+        } else {
+          for {
+            synchronizerParameters <- fetchSynchronizerParameters(snapshot)
+            uncheckedDecryptedViews <- steps.decryptViews(
+              viewMessages,
+              snapshot,
+              ephemeral.sessionKeyStore.convertStore,
+            )
+          } yield Option((snapshot, uncheckedDecryptedViews, synchronizerParameters))
+        }
+    } yield result
+  }
+
+  private def decryptAndValidateViews(
+      rc: RequestCounter,
+      ts: CantonTimestamp,
+      rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
+      uncheckedDecryptedViews: DecryptedViews[steps.DecryptedView],
+      snapshot: SynchronizerSnapshotSyncCryptoApi,
+  )(implicit traceContext: TraceContext): EitherT[
+    FutureUnlessShutdown,
+    steps.RequestError,
+    (
+        Seq[
+          (WithRecipients[steps.FullView], Option[Signature], steps.FullViewAbsoluteLedgerEffects)
+        ],
+        Option[steps.ViewSubmitterMetadata],
+        Seq[MalformedPayload],
+    ),
+  ] = {
+    val correctRootHash = rootHashMessage.rootHash
+
+    val DecryptedViews(decryptedViewsWithSignatures, rawDecryptionErrors) =
+      uncheckedDecryptedViews
+
+    rawDecryptionErrors.foreach { decryptionError =>
+      logger.warn(s"Request $rc: Decryption error: $decryptionError")
+    }
+
+    val decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
+
+    val (viewsWithCorrectRootHash, viewsWithWrongRootHash) =
+      decryptedViewsWithSignatures.partition { case (view, _) =>
+        view.unwrap.rootHash == correctRootHash
+      }
+
+    val incorrectRootHashes: Seq[MalformedPayload] =
+      viewsWithWrongRootHash.map { case (viewTree, _) =>
+        ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
+      }
+
+    incorrectRootHashes.foreach { incorrectRootHash =>
+      logger.warn(s"Request $rc: Found malformed payload: $incorrectRootHash")
+    }
+
+    val submitterMetadataO = steps.getSubmitterInformation(
+      viewsWithCorrectRootHash.map { case (view, _) => view.unwrap }
+    )
+
+    val submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
+    for {
+      submissionTopologySnapshotO <- EitherT.right(
+        SubmissionTopologyHelper.getSubmissionTopologySnapshot(
+          timeouts,
+          ts,
+          submissionTopologyTimestamp,
+          crypto,
+        )
+      )
+
+      checkRecipientsResult <- EitherT.right(
+        recipientsValidator.retainInputsWithValidRecipients(
+          RequestId(ts),
+          viewsWithCorrectRootHash,
+          snapshot.ipsSnapshot,
+          submissionTopologySnapshotO.map(_.ipsSnapshot),
+        )
+      )
+      (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult
+      (
+        viewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
+        incorrectAbsolutizationViews,
+      ) = steps.absolutizeLedgerEffects(viewsWithCorrectRootHashAndRecipients)
+
+      (
+        fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
+        incorrectFullViews,
+      ) = steps.computeFullViews(viewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects)
+
+      malformedPayloads =
+        decryptionErrors ++ incorrectRootHashes ++ incorrectRecipients ++ incorrectAbsolutizationViews ++ incorrectFullViews
+    } yield (
+      fullViewsWithCorrectRootHashAndRecipientsAndAbsoluteLedgerEffects,
+      submitterMetadataO,
+      malformedPayloads,
+    )
   }
 
   private def stopRequestProcessing(
@@ -1311,7 +1430,11 @@ abstract class ProtocolProcessor[
   )(implicit traceContext: TraceContext): HandlerResult =
     // We discard the lefts because they are logged by `logResultWarnings`
     logResultWarnings(ts, result)
-      .map(innerAsync => AsyncResult(innerAsync.getOrElse(())))
+      .map { innerAsync =>
+        AsyncResult(
+          innerAsync.map(_ => UnthrottledAsync.immediate).getOrElse(UnthrottledAsync.immediate)
+        )
+      }
       .getOrElse(AsyncResult.immediate)
 
   override def processResult(

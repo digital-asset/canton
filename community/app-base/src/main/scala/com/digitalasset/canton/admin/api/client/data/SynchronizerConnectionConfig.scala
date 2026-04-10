@@ -132,7 +132,7 @@ final case class SynchronizerConnectionConfig(
                       )
                     } yield thisConnection
                       .focus(_.endpoints)
-                      .modify(_.++(otherEndPoints).distinct)
+                      .modify(_.++(otherEndPoints))
                       .focus(_.sequencerId)
                       .replace(updatedSequencerId)
                   case otherConnection =>

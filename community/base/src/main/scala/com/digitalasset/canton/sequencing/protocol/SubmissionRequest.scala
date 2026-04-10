@@ -122,9 +122,9 @@ final case class SubmissionRequest private (
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  /** Returns the [[AggregationId]] for grouping if this is an aggregatable submission. The
-    * aggregation ID computationally authenticates the relevant contents of the submission request,
-    * namely,
+  /** Returns the [[AggregationId]] and associated [[AggregationRule]] for grouping if this is an
+    * aggregatable submission. The aggregation ID computationally authenticates the relevant
+    * contents of the submission request, namely,
     *   - Envelope contents
     *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.bytes]], the
     *     recipients

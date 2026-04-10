@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
@@ -47,15 +48,6 @@ import com.digitalasset.canton.protocol.{
   v31,
 }
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
-import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
-  ConnectionAttributes,
-  SequencerConnectionXHealth,
-}
-import com.digitalasset.canton.sequencing.SequencerConnectionXPool.{
-  SequencerConnectionXPoolConfig,
-  SequencerConnectionXPoolError,
-}
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.PreviousTimestampMismatch
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
@@ -71,6 +63,20 @@ import com.digitalasset.canton.sequencing.client.SequencerClientTest.SentSubmiss
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
   HandlerError,
   HandlerException,
+}
+import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionConfig
+import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnection.{
+  ConnectionAttributes,
+  SequencerConnectionHealth,
+}
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
+  SequencerConnectionPoolConfig,
+  SequencerConnectionPoolError,
+}
+import com.digitalasset.canton.sequencing.client.pool.{
+  SequencerConnection,
+  SequencerConnectionPool,
+  SequencerConnectionWithPekkoSubscribe,
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.{
@@ -101,7 +107,7 @@ import com.digitalasset.canton.time.{
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.{mediatorId, participant1}
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.version.{
@@ -194,7 +200,7 @@ final class SequencerClientTest
   )
 
   private lazy val alwaysSuccessfulHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
-    ApplicationHandler.success()
+    ApplicationHandler.success(UnthrottledAsync.immediate)
   private lazy val failureException = new IllegalArgumentException("application handler failed")
   private lazy val alwaysFailingHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
     ApplicationHandler.create("always-fails")(_ =>
@@ -397,7 +403,7 @@ final class SequencerClientTest
               val firstSc = e.value.head.counter
               val lastSc = e.value.last.counter
               logger.debug(s"Processing batch of events $firstSc to $lastSc")
-              HandlerResult.asynchronous(
+              HandlerResult.asynchronousUnit(
                 FutureUnlessShutdown.outcomeF(Future {
                   {
                     lock.exclusive {
@@ -431,7 +437,7 @@ final class SequencerClientTest
           initializeCounterAllocatorTo = Some(SequencerCounter(41)),
           storedEvents = Seq(deliver, nextDeliver, deliver44),
         )
-        val promise = Promise[AsyncResult[Unit]]()
+        val promise = Promise[AsyncResult[UnthrottledAsync]]()
 
         val testF = loggerFactory.assertLogs(
           env.subscribeAfter(
@@ -474,7 +480,7 @@ final class SequencerClientTest
                   ChronoUnit.NANOS,
                 )
               )
-              HandlerResult.asynchronous(FutureUnlessShutdown.outcomeF(promise.future))
+              HandlerResult.asynchronousUnit(FutureUnlessShutdown.outcomeF(promise.future))
             },
           ),
           _.errorMessage should include(
@@ -574,7 +580,7 @@ final class SequencerClientTest
         val syncError = ApplicationHandlerException(error, deliver.timestamp, deliver.timestamp)
         val handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
           ApplicationHandler.create("async-failure")(_ =>
-            FutureUnlessShutdown.failed[AsyncResult[Unit]](error)
+            FutureUnlessShutdown.failed[AsyncResult[UnthrottledAsync]](error)
           )
 
         val env = RichEnvFactory.create(
@@ -688,8 +694,90 @@ final class SequencerClientTest
         }
       }
 
+      "completes the sequencer client if unthrottled async event processing fails" in {
+        val error = new RuntimeException("asynchronous failure")
+        val asyncFailure = HandlerResult.asynchronous(
+          FutureUnlessShutdown.pure(UnthrottledAsync(FutureUnlessShutdown.failed(error)))
+        )
+        val asyncException =
+          ApplicationHandlerException(error, deliver.timestamp, deliver.timestamp)
+
+        val env = RichEnvFactory.create(
+          initializeCounterAllocatorTo = Some(SequencerCounter(41))
+        )
+        import env.*
+        val closeReasonF = for {
+          _ <- env.subscribeAfter(
+            eventHandler = ApplicationHandler.create("async-failure")(_ => asyncFailure)
+          )
+          closeReason <- loggerFactory.assertLogs(
+            for {
+              _ <- subscriber.value.sendToHandler(deliver)
+              // Make sure that the asynchronous error has been noticed
+              // We intentionally do two flushes. The first captures `handleReceivedEventsUntilEmpty` completing.
+              // During this it may addToFlush a future for capturing `asyncSignalledF` however this may occur
+              // after we've called `flush` and therefore won't guarantee completing all processing.
+              // So our second flush will capture `asyncSignalledF` for sure.
+              _ <- client.flush()
+              _ <- client.flush()
+              // Send the next event so that the client notices that an error has occurred.
+              _ <- subscriber.value.sendToHandler(nextDeliver)
+              _ <- client.flush()
+              // wait until client completed (will write an error)
+              closeReason <- client.completion
+              _ = client.close() // make sure that we can still close the sequencer client
+            } yield closeReason,
+            logEntry => {
+              logEntry.errorMessage should include(
+                s"Unthrottled event processing failed for event batch with sequencing timestamps ${deliver.timestamp} to ${deliver.timestamp}"
+              )
+              logEntry.throwable shouldBe Some(error)
+            },
+            _.errorMessage should include(
+              s"Permanently closing sequencer subscription due to handler exception (this indicates a bug): $asyncException"
+            ),
+          )
+        } yield closeReason
+
+        closeReasonF.futureValueUS should matchPattern {
+          case e: UnrecoverableError if e.cause == s"handler returned error: $asyncException" =>
+        }
+      }
+
       "completes the sequencer client if asynchronous event processing shuts down" in {
         val asyncShutdown = HandlerResult.asynchronous(FutureUnlessShutdown.abortedDueToShutdown)
+
+        val env = RichEnvFactory.create(
+          initializeCounterAllocatorTo = Some(SequencerCounter(41))
+        )
+        import env.*
+        val closeReasonF = for {
+          _ <- env.subscribeAfter(
+            CantonTimestamp.MinValue,
+            ApplicationHandler.create("async-shutdown")(_ => asyncShutdown),
+          )
+          closeReason <- {
+            for {
+              _ <- subscriber.value.sendToHandler(deliver)
+              _ <- client.flushClean() // Make sure that the asynchronous error has been noticed
+              // Send the next event so that the client notices that an error has occurred.
+              _ <- subscriber.value.sendToHandler(nextDeliver)
+              _ <- client.flush()
+              closeReason <- client.completion
+            } yield closeReason
+          }
+        } yield {
+          client.close() // make sure that we can still close the sequencer client
+          closeReason
+        }
+
+        closeReasonF.futureValueUS shouldBe ClientShutdown
+      }
+
+      "completes the sequencer client if unthrottled async event processing shuts down" in {
+        val asyncShutdown = HandlerResult.asynchronous(
+          FutureUnlessShutdown.pure(UnthrottledAsync(FutureUnlessShutdown.abortedDueToShutdown))
+        )
 
         val env = RichEnvFactory.create(
           initializeCounterAllocatorTo = Some(SequencerCounter(41))
@@ -928,7 +1016,8 @@ final class SequencerClientTest
             assert(events.value.sizeIs == 1)
             promises.get(events.value(0).counter) match {
               case None => HandlerResult.done
-              case Some(promise) => HandlerResult.asynchronous(FutureUnlessShutdown(promise.future))
+              case Some(promise) =>
+                HandlerResult.asynchronousUnit(FutureUnlessShutdown(promise.future))
             }
           }
 
@@ -1100,6 +1189,34 @@ final class SequencerClientTest
         env
           .sendAsync(Batch.empty(testedProtocolVersion), amplify = true)
           .futureValueUS shouldBe Left(overloadedError)
+
+        env.client.close()
+      }
+
+      "trigger amplification on 'max sequencing time too far' error and if the flag is set" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(amplifyOnMaxSequencingTimeTooFar = true),
+          amplificationConfig = amplificationConfig,
+          firstSendAsyncResponseO = Some(Left(maxSequencingTimeTooFarError)),
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion), amplify = true)
+          .futureValueUS shouldBe Right(())
+
+        env.client.close()
+      }
+
+      "not trigger amplification on 'max sequencing time too far' and if the flag is not set" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(amplifyOnMaxSequencingTimeTooFar = false),
+          amplificationConfig = amplificationConfig,
+          firstSendAsyncResponseO = Some(Left(maxSequencingTimeTooFarError)),
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion), amplify = true)
+          .futureValueUS shouldBe Left(maxSequencingTimeTooFarError)
 
         env.client.close()
       }
@@ -1465,7 +1582,7 @@ final class SequencerClientTest
       )
 
     def changeTransport(
-        newConnectionPoolConfig: SequencerConnectionXPoolConfig
+        newConnectionPoolConfig: SequencerConnectionPoolConfig
     )(implicit ev: Client <:< RichSequencerClient): FutureUnlessShutdown[Unit] =
       changeTransport(
         SequencerTransports.default,
@@ -1474,7 +1591,7 @@ final class SequencerClientTest
 
     def changeTransport(
         sequencerTransports: SequencerTransports,
-        newConnectionPoolConfig: SequencerConnectionXPoolConfig,
+        newConnectionPoolConfig: SequencerConnectionPoolConfig,
     )(implicit
         ev: Client <:< RichSequencerClient
     ): FutureUnlessShutdown[Unit] =
@@ -1535,19 +1652,18 @@ final class SequencerClientTest
       clock: SimClock,
       firstSendAsyncResponseO: Option[SendAsyncResponse],
   ) extends SequencerConnectionWithPekkoSubscribe {
-    override val health: SequencerConnectionXHealth =
-      new SequencerConnectionXHealth.AlwaysValidated(s"$name-health", logger)
+    override val health: SequencerConnectionHealth =
+      new SequencerConnectionHealth.AlwaysValidated(s"$name-health", logger)
 
     private val sendAsyncResponseRef =
       new AtomicReference[Option[SendAsyncResponse]](firstSendAsyncResponseO)
 
-    override def config: ConnectionXConfig = ConnectionXConfig(
+    override def config: ConnectionConfig = ConnectionConfig(
       name = name,
       endpoint = Endpoint("dummy-endpoint", Port.tryCreate(0)),
       transportSecurity = false,
       customTrustCertificates = None,
       expectedSequencerIdO = None,
-      tracePropagation = TracingConfig.Propagation.Disabled,
     )
 
     override def attributes: ConnectionAttributes =
@@ -1690,7 +1806,7 @@ final class SequencerClientTest
   }
 
   private class MockPool(clock: SimClock, firstSendAsyncResponseO: Option[SendAsyncResponse])
-      extends SequencerConnectionXPool {
+      extends SequencerConnectionPool {
     val acknowledgedTimestamps: AtomicReference[Set[CantonTimestamp]] = new AtomicReference(
       Set.empty
     )
@@ -1712,10 +1828,10 @@ final class SequencerClientTest
 
     override def start()(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SequencerConnectionXPoolError, Unit] = ???
+    ): EitherT[FutureUnlessShutdown, SequencerConnectionPoolError, Unit] = ???
 
-    override def config: SequencerConnectionXPool.SequencerConnectionXPoolConfig =
-      SequencerConnectionXPoolConfig(
+    override def config: SequencerConnectionPool.SequencerConnectionPoolConfig =
+      SequencerConnectionPoolConfig(
         connections = NonEmpty(Seq, connection.config),
         trustThreshold = PositiveInt.one,
         minRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
@@ -1723,11 +1839,11 @@ final class SequencerClientTest
         warnConnectionValidationDelay = NonNegativeFiniteDuration.Zero,
       )
 
-    override def updateConfig(newConfig: SequencerConnectionXPool.SequencerConnectionXPoolConfig)(
+    override def updateConfig(newConfig: SequencerConnectionPool.SequencerConnectionPoolConfig)(
         implicit traceContext: TraceContext
-    ): Either[SequencerConnectionXPool.SequencerConnectionXPoolError, Unit] = ???
+    ): Either[SequencerConnectionPool.SequencerConnectionPoolError, Unit] = ???
 
-    override def health: SequencerConnectionXPool.SequencerConnectionXPoolHealth = ???
+    override def health: SequencerConnectionPool.SequencerConnectionPoolHealth = ???
 
     override def getConnectionsHealthStatus: Seq[HealthQuasiComponent] = ???
 
@@ -1737,27 +1853,27 @@ final class SequencerClientTest
 
     override def getConnections(requester: String, nb: PositiveInt, exclusions: Set[SequencerId])(
         implicit traceContext: TraceContext
-    ): Set[SequencerConnectionX] = Set(connection)
+    ): Set[SequencerConnection] = Set(connection)
 
     override def getOneConnectionPerSequencer(requester: String)(implicit
         traceContext: TraceContext
-    ): Map[SequencerId, SequencerConnectionX] = ???
+    ): Map[SequencerId, SequencerConnection] = ???
 
     override def getAllConnections()(implicit
         traceContext: TraceContext
-    ): Seq[SequencerConnectionX] = ???
+    ): Seq[SequencerConnection] = ???
 
-    override def contents: Map[SequencerId, Set[SequencerConnectionX]] = ???
+    override def contents: Map[SequencerId, Set[SequencerConnection]] = ???
 
     override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
     override def isThresholdStillReachable(
         threshold: PositiveInt,
-        ignored: Set[ConnectionXConfig],
+        ignored: Set[ConnectionConfig],
         extraUndecided: NonNegativeInt,
     )(implicit
         traceContext: TraceContext
-    ): Either[SequencerConnectionXPoolError.ThresholdUnreachableError, Unit] = Either.unit
+    ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = Either.unit
   }
 
   private object MockPool {
@@ -1768,47 +1884,34 @@ final class SequencerClientTest
       new MockPool(clock, firstSendAsyncResponseO)
   }
 
-  private val overloadedError = SendAsyncClientError.RequestRefused(
-    SendAsyncError.SendAsyncErrorGrpc(
-      GrpcError.GrpcRequestRefusedByServer(
-        request = "test-request",
-        serverName = "test-server",
-        status = Status.UNAVAILABLE,
-        optTrailers = None,
-        decodedCantonError = Some(
-          DecodedCantonError(
-            code = SequencerErrors.Overloaded,
-            cause = "test-cause",
-            correlationId = None,
-            traceId = None,
-            context = Map.empty,
-            resources = Seq.empty,
-          )
-        ),
+  def clientErrorWithCantonErrorCode(errorCode: ErrorCode): SendAsyncClientError.RequestRefused =
+    SendAsyncClientError.RequestRefused(
+      SendAsyncError.SendAsyncErrorGrpc(
+        GrpcError.GrpcRequestRefusedByServer(
+          request = "test-request",
+          serverName = "test-server",
+          status = Status.UNAVAILABLE,
+          optTrailers = None,
+          decodedCantonError = Some(
+            DecodedCantonError(
+              code = errorCode,
+              cause = "test-cause",
+              correlationId = None,
+              traceId = None,
+              context = Map.empty,
+              resources = Seq.empty,
+            )
+          ),
+        )
       )
     )
-  )
 
-  private val senderUnknownError = SendAsyncClientError.RequestRefused(
-    SendAsyncError.SendAsyncErrorGrpc(
-      GrpcError.GrpcRequestRefusedByServer(
-        request = "test-request",
-        serverName = "test-server",
-        status = Status.UNAVAILABLE,
-        optTrailers = None,
-        decodedCantonError = Some(
-          DecodedCantonError(
-            code = SequencerErrors.SenderUnknown,
-            cause = "test-cause",
-            correlationId = None,
-            traceId = None,
-            context = Map.empty,
-            resources = Seq.empty,
-          )
-        ),
-      )
-    )
+  private val overloadedError = clientErrorWithCantonErrorCode(SequencerErrors.Overloaded.code)
+  private val senderUnknownError = clientErrorWithCantonErrorCode(
+    SequencerErrors.SenderUnknown.code
   )
+  private val maxSequencingTimeTooFarError =
+    clientErrorWithCantonErrorCode(SequencerErrors.MaxSequencingTimeTooFar.code)
 
   private implicit class EnrichedSequencerClient(client: RichSequencerClient) {
     // flush needs to be called twice in order to finish asynchronous processing

@@ -12,7 +12,7 @@ class AsyncResultTest extends AnyWordSpec with BaseTest {
   "DiscardedFuture" should {
     "detect discarded AsyncResult" in {
       val result = WartTestTraverser(DiscardedFuture) {
-        AsyncResult(FutureUnlessShutdown.unit)
+        AsyncResult[Unit](FutureUnlessShutdown.unit)
         ()
       }
       DiscardedFutureTest.assertErrors(result, 1)

@@ -7,6 +7,7 @@ import better.files.File
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -128,6 +129,18 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
           ledgerEndP1,
           aliceAcs.canonicalPath,
         )
+      }
+
+      /*
+      The ACS import requires the persistent state to be created.
+      The persistent state is created during the handshake with sequencer2.
+      Hence, we wait on the persistent state to be created before shutting down sequencer2.
+       */
+      eventually() {
+        participant2.underlying.value.sync.syncPersistentStateManager
+          .get(fixture.newPsid)
+          .value
+          .discard
       }
 
       sequencer2.stop() // to prevent reconnect to the synchronizer

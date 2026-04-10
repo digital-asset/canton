@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
+import com.daml.metrics.api.MetricHandle.Meter
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -10,7 +11,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -40,7 +41,6 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
 import java.util.UUID
-import scala.concurrent.Future
 
 class MediatorStateTest
     extends AsyncWordSpec
@@ -136,6 +136,7 @@ class MediatorStateTest
           mockTopologySnapshot,
           BatchingConfig(),
           participantResponseDeadlineTick = None,
+          PromiseUnlessShutdown.unit,
         )(traceContext, executorService)
         .futureValueUS // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
@@ -149,33 +150,11 @@ class MediatorStateTest
         timeouts,
         loggerFactory,
       )
-      sut.initialize(CantonTimestamp.MinValue).futureValueUS
       sut.registerTimeoutForRequest(requestId, requestId.unwrap.plusSeconds(30))
       currentVersion
         .asFinalized(testedProtocolVersion)
         .fold(sut.registerPendingRequest(currentVersion))(sut.add(_).futureValueUS)
       sut
-    }
-
-    "fetching unfinalized items" should {
-      val sut = mediatorState
-      "respect the limit filter" in {
-        sut.pendingRequestIdsBefore(CantonTimestamp.MinValue) shouldBe empty
-        sut.pendingRequestIdsBefore(
-          CantonTimestamp.MaxValue
-        ) should contain only currentVersion.requestId
-        Future.successful(succeed)
-      }
-      "have no more unfinalized after finalization" in {
-        for {
-          _ <- sut.replace(
-            currentVersion,
-            currentVersion.timeout(sut.metrics.timeoutNonResponsiveParticipants),
-          )
-        } yield {
-          sut.pendingRequestIdsBefore(CantonTimestamp.MaxValue) shouldBe empty
-        }
-      }
     }
 
     "fetching items" should {
@@ -213,6 +192,55 @@ class MediatorStateTest
         for {
           result <- sut.replace(currentVersion, newVersion)
         } yield result shouldBe true
+      }
+    }
+
+    "promise completion on finalization" should {
+      "complete finalizedPromise only after DB write when replace is called with finalized state" in {
+        val sut = new MediatorState(
+          new InMemoryFinalizedResponseStore(loggerFactory),
+          new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
+          mock[Clock],
+          MediatorTestMetrics,
+          testedProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
+
+        val req1 = RequestId(CantonTimestamp.Epoch.plusSeconds(1))
+        val promise1 = PromiseUnlessShutdown.unsupervised[Unit]()
+
+        val test = for {
+          agg1 <- ResponseAggregation.fromRequest(
+            req1,
+            informeeMessage,
+            req1.unwrap.plusSeconds(300),
+            req1.unwrap.plusSeconds(600),
+            mockTopologySnapshot,
+            BatchingConfig(),
+            participantResponseDeadlineTick = None,
+            promise1,
+          )
+          _ = sut.registerTimeoutForRequest(req1, req1.unwrap.plusSeconds(30))
+          _ = sut.registerPendingRequest(agg1)
+
+          // Promise should not be completed yet
+          _ = promise1.isCompleted shouldBe false
+
+          // Finalize the aggregation with a timeout
+          mockMeter = mock[Meter]
+          timedOut = agg1.timeout(mockMeter)
+
+          // Promise still not completed after creating finalized aggregation
+          _ = promise1.isCompleted shouldBe false
+
+          // Replace with finalized state (which calls storeFinalized)
+          replaced <- sut.replace(agg1, timedOut)
+          _ = replaced shouldBe true
+          _ <- promise1.futureUS // Should not block
+        } yield succeed
+
+        test.failOnShutdown
       }
     }
   }

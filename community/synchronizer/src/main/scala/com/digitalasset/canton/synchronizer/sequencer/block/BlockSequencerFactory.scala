@@ -18,7 +18,10 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.TestingInterceptor
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
-import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
+import com.digitalasset.canton.synchronizer.sequencer.time.{
+  DisasterRecoverySequencingTimeUpperBound,
+  LsuSequencingBounds,
+}
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficConfig,
@@ -219,6 +222,7 @@ abstract class BlockSequencerFactory(
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot] = None,
       authenticationServices: Option[AuthenticationServices] = None,

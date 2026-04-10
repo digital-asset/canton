@@ -286,29 +286,34 @@ class DbOutputMetadataStore(
           limit 1
           """.as[OutputBlockMetadata].headOption
 
-  override def getLastConsecutiveBlock(implicit
+  override def getLastBlockInLatestCompletedEpoch(implicit
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[Option[OutputBlockMetadata]] = {
-    val name = lastConsecutiveActionName
     val query = for {
-      initialBlock <-
-        sql"select block_number from ord_output_lower_bound"
-          .as[Long]
-          .headOption
-          .map(_.fold(BlockNumber.First)(BlockNumber(_)))
-      result <- sql"""
-                select
-                  t.epoch_number,
-                  t.block_number,
-                  t.bft_ts
-                from (select *, row_number() over (order by block_number) as idx from ord_metadata_output_blocks) t
-                where t.idx + $initialBlock = t.block_number + 1
-                order by t.block_number desc
-                limit 1
-                """.as[OutputBlockMetadata].headOption
+      latestStartedEpoch <-
+        sql"""
+            select epoch_number, could_alter_ordering_topology
+            from ord_metadata_output_epochs
+            order by epoch_number desc
+            limit 1
+        """.as[OutputEpochMetadata].headOption
+      result <- latestStartedEpoch match {
+        case Some(epochMetadata) =>
+          getSingleBlockDBIO(
+            EpochNumber(
+              epochMetadata.epochNumber - 1L
+            ), // we do the previous of the latest started to get last completed
+            order = "desc",
+          )
+        case None => DBIO.unit.map(_ => None)
+      }
     } yield result
     val future = () => storage.query(query, functionFullName)
-    PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
+    PekkoFutureUnlessShutdown(
+      lastBlockInLatestCompletedEpochName,
+      future,
+      orderingStage = Some(functionFullName),
+    )
   }
 
   override def loadNumberOfRecords(implicit

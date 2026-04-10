@@ -68,6 +68,8 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
 
   override def firstBlockWeNeedToAdd: Option[BlockNumber] = Some(state.startBlock)
 
+  override def currentEpoch: Option[EpochNumber] = Some(state.epochNumber)
+
   override def getLeaders(
       orderingTopology: OrderingTopology,
       epochNumber: EpochNumber,

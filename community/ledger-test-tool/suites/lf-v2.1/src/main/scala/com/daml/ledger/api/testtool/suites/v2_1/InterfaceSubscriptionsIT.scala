@@ -878,6 +878,7 @@ abstract class InterfaceSubscriptionsITBase(prefix: String) extends LedgerTestSu
         })
       },
       commandId = "",
+      paidTrafficCost = None,
     )
 
   private def hideTraceIdFromStatusMessages(

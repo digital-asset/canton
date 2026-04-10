@@ -137,7 +137,7 @@ class UpdateStreamingQueries(
       )
       .toFiltered(eventNotDeactivated(activeAtEventSeqId))
 
-  def fetchACHSIds(
+  def fetchAchsIds(
       stakeholderO: Option[Ref.Party],
       templateIdO: Option[NameTypeConRef],
       activeAtEventSeqId: Long,

@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.store.cache
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.ReassignmentInfo
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -655,12 +654,11 @@ class InMemoryFanoutBufferSpec
       effectiveAt = Time.Timestamp.Epoch,
       offset = offset,
       events = Vector.empty,
-      completionStreamResponse = None,
+      completionStreamResponseO = None,
       commandId = "",
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Time.Timestamp.Epoch,
       externalTransactionHash = None,
-      paidTrafficCost = NonNegativeLong.zero,
     )
 
   private def txRejected(idx: Long, offset: Offset) =
@@ -678,7 +676,7 @@ class InMemoryFanoutBufferSpec
       updateId = TestUpdateId(s"reassignment-$idx").toHexString,
       workflowId = s"workflow-$idx",
       offset = offset,
-      completionStreamResponse = None,
+      completionStreamResponseO = None,
       commandId = "",
       recordTime = Time.Timestamp.Epoch,
       reassignmentInfo = ReassignmentInfo(

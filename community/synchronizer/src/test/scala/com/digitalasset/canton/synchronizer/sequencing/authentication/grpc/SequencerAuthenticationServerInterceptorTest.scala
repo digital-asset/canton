@@ -4,13 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protobuf.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.sequencing.authentication.grpc.{
   AuthenticationTokenManagerTest,
@@ -137,21 +135,14 @@ class SequencerAuthenticationServerInterceptorTest
       store
         .saveToken(StoredAuthenticationToken(participantId, neverExpire, token.token))
 
-      val obtainToken = NonEmpty
-        .mk(
-          Seq,
-          (
-            Endpoint("localhost", Port.tryCreate(10)),
-            ((_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](token)): TokenFetcher,
-          ),
-        )
-        .toMap
+      val tokenFetcher =
+        ((_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](token)): TokenFetcher
 
       val clientAuthentication =
         SequencerClientTokenAuthentication(
           synchronizerId,
           participantId,
-          obtainToken,
+          tokenFetcher,
           isClosed = false,
           AuthenticationTokenManagerConfig(),
           AuthenticationTokenManagerTest.mockClock,
@@ -168,23 +159,15 @@ class SequencerAuthenticationServerInterceptorTest
       store
         .saveToken(StoredAuthenticationToken(participantId, neverExpire, token.token))
 
-      val obtainToken = NonEmpty
-        .mk(
-          Seq,
-          (
-            Endpoint("localhost", Port.tryCreate(10)),
-            (
-                (_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](incorrectToken)
-            ): TokenFetcher,
-          ),
-        )
-        .toMap
+      val tokenFetcher = (
+          (_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](incorrectToken)
+      ): TokenFetcher
 
       val clientAuthentication =
         SequencerClientTokenAuthentication(
           synchronizerId,
           participantId,
-          obtainToken,
+          tokenFetcher,
           isClosed = false,
           AuthenticationTokenManagerConfig(),
           AuthenticationTokenManagerTest.mockClock,

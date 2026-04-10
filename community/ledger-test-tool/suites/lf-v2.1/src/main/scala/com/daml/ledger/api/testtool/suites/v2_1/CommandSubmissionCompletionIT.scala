@@ -34,11 +34,16 @@ final class CommandSubmissionCompletionIT extends LedgerTestSuite {
       _ <- ledger.submit(request)
       completions <- ledger.firstCompletions(party)
     } yield {
-      val commandId =
-        assertSingleton("Expected only one completion", completions.map(_.commandId))
+      val completion =
+        assertSingleton("Expected only one completion", completions)
+      val commandId = completion.commandId
       assert(
         commandId == request.commands.value.commandId,
         "Wrong command identifier on completion",
+      )
+      assert(
+        completion.paidTrafficCost > 0L,
+        "Empty traffic cost",
       )
     }
   })

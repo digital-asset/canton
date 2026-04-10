@@ -273,12 +273,8 @@ object Node {
 
     override def packageIds: Iterable[PackageId] = Iterable(templateId.packageId)
 
-    final def informeesOfNode: Set[Party] =
-      // TODO(JM): In the successful case the informees should be the
-      // signatories of the fetch contract. The signatories should be
-      // added to the LookupByKey node, or a successful lookup should
-      // become a Fetch.
-      keyMaintainers
+    def informeesOfNode: Set[Party] = keyMaintainers
+
     def requiredAuthorizers: Set[Party] = keyMaintainers
   }
 

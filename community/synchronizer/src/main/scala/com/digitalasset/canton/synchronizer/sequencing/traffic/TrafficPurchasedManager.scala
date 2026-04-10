@@ -336,7 +336,7 @@ class TrafficPurchasedManager(
       case (lastUpdate, None) =>
         if (warnIfApproximate) {
           logger.warn(
-            s"The desired timestamp $desired is more recent than the last update ${lastUpdate.map(_.toString).getOrElse("N/A")}," +
+            s"The desired timestamp $desired for $member is more recent than the last update ${lastUpdate.map(_.toString).getOrElse("N/A")}," +
               s" and no 'lastSeen' timestamp was provided. The provided balance may not be up to date if a balance update is being processed."
           )
         }

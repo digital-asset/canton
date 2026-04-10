@@ -12,7 +12,9 @@ case class SyncDef(
 val syncDefs = mediators.local
   .zip(sequencers.local)
   .zipWithIndex
-  .map{case ((m,s),i)=>SyncDef(m,s,s"synchronizer-${i+1}")}
+  .map { case ((m, s), i) => SyncDef(m, s, s"synchronizer-${i + 1}") }
+
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
 
 syncDefs.foreach{ syncDef =>
   val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
@@ -21,7 +23,7 @@ syncDefs.foreach{ syncDef =>
     topologyChangeDelay=NonNegativeFiniteDuration.Zero
   )
   val synchronizerOwners = Seq(syncDef.sequencer, syncDef.mediator)
-  bootstrap.synchronizer(
+  val synchId = bootstrap.synchronizer(
     syncDef.name,
     Seq(syncDef.sequencer),
     Seq(syncDef.mediator),
@@ -30,7 +32,10 @@ syncDefs.foreach{ syncDef =>
     staticSynchronizerParameters
   )
 
-  participants.local.foreach(p => p.synchronizers.connect_local(syncDef.sequencer, syncDef.name))
+  participants.local.foreach(p => {
+    p.synchronizers.connect_local(syncDef.sequencer, syncDef.name)
+    p.topology.synchronizer_trust_certificates.propose(p, synchId.logical, featureFlags = featureFlag)
+  })
 }
 
 participants.local.foreach{p =>

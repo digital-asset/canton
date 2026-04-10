@@ -10,9 +10,10 @@ import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.CantonServerBuilder
+import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.tracing.TracingConfig
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import scala.concurrent.duration.DurationInt
@@ -138,7 +139,12 @@ final case class AdminServerConfig(
       address,
       port,
       tls = tls.map(_.clientConfig),
-      keepAliveClient = keepAliveServer.map(_.clientConfigFor),
+      channel = ClientChannelParams(
+        maxInboundMessageSize = maxInboundMessageSize,
+        keepAliveClient = keepAliveServer.map(_.clientConfigFor),
+        flowControlWindow = ClientChannelParams.DefaultFlowControlWindow,
+        traceContextPropagation = TracingConfig.Propagation.Enabled,
+      ),
     )
 
   override def sslContext: Option[SslContext] = tls.map(CantonServerBuilder.sslContext(_))
@@ -233,7 +239,7 @@ trait ClientConfig {
   def address: String
   def port: Port
   def tlsConfig: Option[TlsClientConfig]
-  def keepAliveClient: Option[KeepAliveClientConfig]
+  def channel: ClientChannelParams
   def endpointAsString: String = address + ":" + port.unwrap
 }
 
@@ -249,7 +255,7 @@ final case class FullClientConfig(
     override val address: String = "127.0.0.1",
     override val port: Port,
     override val tls: Option[TlsClientConfig] = None,
-    override val keepAliveClient: Option[KeepAliveClientConfig] = Some(KeepAliveClientConfig()),
+    override val channel: ClientChannelParams = ClientChannelParams.Default,
 ) extends ClientConfig
     with TlsField[TlsClientConfig] {
   override def tlsConfig: Option[TlsClientConfig] = tls
@@ -262,10 +268,9 @@ final case class SequencerApiClientConfig(
     override val address: String,
     override val port: Port,
     override val tls: Option[TlsClientConfigOnlyTrustFile] = None,
+    override val channel: ClientChannelParams = ClientChannelParams.Default,
 ) extends ClientConfig
     with TlsField[TlsClientConfigOnlyTrustFile] {
-
-  override def keepAliveClient: Option[KeepAliveClientConfig] = None
 
   override def tlsConfig: Option[TlsClientConfig] = tls.map(_.toTlsClientConfig)
 
@@ -275,7 +280,7 @@ final case class SequencerApiClientConfig(
   ): GrpcSequencerConnection = {
     val endpoint = Endpoint(address, port)
     GrpcSequencerConnection(
-      NonEmpty(Seq, endpoint),
+      NonEmpty(Set, endpoint),
       tls.exists(_.enabled),
       tls.flatMap(_.trustCollectionFile).map(_.pemBytes),
       sequencerAlias,

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.data.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -18,7 +17,6 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.transaction.Versioned
 
 import scala.concurrent.ExecutionContext
 
@@ -57,9 +55,7 @@ object ExtractUsedAndCreated {
         // Therefore, we don't have to explicitly add maintainers.
         parties ++= c.contract.metadata.stakeholders
       }
-      data.resolvedKeys.values
-        .collect { case Versioned(_, FreeKey(maintainers)) => maintainers }
-        .foreach(parties ++=)
+      data.resolvedKeys.values.foreach(r => parties ++= r.unversioned.maintainers)
     }
     parties.result()
   }

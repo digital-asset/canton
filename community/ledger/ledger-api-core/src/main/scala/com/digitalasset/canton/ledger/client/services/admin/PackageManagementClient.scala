@@ -83,6 +83,6 @@ final class PackageManagementClient(
       token: Option[String] = None,
   )(implicit traceContext: TraceContext): Future[UpdateVettedPackagesResponse] =
     LedgerClient
-      .stubWithTracing(service, token)
+      .stubWithTracing(service, token.orElse(getDefaultToken()))
       .updateVettedPackages(request)
 }

@@ -55,6 +55,7 @@ abstract class DatabaseSequencerApiTest extends SequencerApiTest {
       storage,
       sequencerStore,
       lsuSequencingBounds = None,
+      drSequencingTimeUpperBound = None,
       clock,
       sequencerId,
       crypto,

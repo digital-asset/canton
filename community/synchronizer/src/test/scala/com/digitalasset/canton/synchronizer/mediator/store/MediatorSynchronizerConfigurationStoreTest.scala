@@ -37,7 +37,7 @@ trait MediatorSynchronizerConfigurationStoreTest {
     "when set returns set value" in {
       val store = mkStore
       val connection = GrpcSequencerConnection(
-        NonEmpty(Seq, Endpoint("sequencer", Port.tryCreate(100))),
+        NonEmpty(Set, Endpoint("sequencer", Port.tryCreate(100))),
         transportSecurity = true,
         None,
         SequencerAlias.Default,
@@ -65,7 +65,7 @@ trait MediatorSynchronizerConfigurationStoreTest {
       val defaultParams = defaultStaticSynchronizerParameters
       def connection(sequencerId: Option[SequencerId] = None) = GrpcSequencerConnection(
         NonEmpty(
-          Seq,
+          Set,
           Endpoint("sequencer", Port.tryCreate(200)),
           Endpoint("sequencer", Port.tryCreate(300)),
         ),

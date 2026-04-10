@@ -5910,6 +5910,19 @@ components:
 
             Required
           type: string
+        paidTrafficCost:
+          description: |-
+            The traffic cost that this participant node paid for the corresponding (un)assignment request.
+
+            Not set for transactions that were
+            - initiated by another participant
+            - initiated offline via the repair service
+            - processed before the participant started serving traffic cost on the Ledger API
+            - returned as part of a query filtering for a non submitting party
+
+            Optional
+          type: integer
+          format: int64
     JsReassignmentEvent:
       title: JsReassignmentEvent
       oneOf:
@@ -6153,6 +6166,20 @@ components:
 
             Optional: can be empty
           type: string
+        paidTrafficCost:
+          description: |-
+            The traffic cost that this participant node paid for the confirmation
+            request for this transaction.
+
+            Not set for transactions that were
+            - initiated by another participant
+            - initiated offline via the repair service
+            - processed before the participant started serving traffic cost on the Ledger API
+            - returned as part of a query filtering for a non submitting party
+
+            Optional
+          type: integer
+          format: int64
     JsTransactionTree:
       title: JsTransactionTree
       description: |-

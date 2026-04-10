@@ -179,6 +179,7 @@ final class SequencerWriterSourceTest
         testedProtocolVersion,
         SequencerMetrics.noop(suiteName),
         lsuSequencingBounds = None,
+        drSequencingTimeUpperBound = None,
         blockSequencerMode = blockSequencerMode,
       )(executorService, implicitly[TraceContext], implicitly[ErrorLoggingContext])
         .toMat(Sink.ignore)(Keep.both),

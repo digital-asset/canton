@@ -7,7 +7,7 @@ import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.console.{CommandFailure, LocalInstanceReference}
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
@@ -18,10 +18,10 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.getLsuSequencingTestMetricValues
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule
-import com.digitalasset.canton.topology.Member
 import monocle.macros.syntax.lens.*
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.slf4j.event.Level
@@ -73,19 +73,6 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
       }
-
-  // Returns the number of received messages per sender
-  private def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] = {
-    val metricName = "daml.received-lsu-sequencing-test-messages"
-    node.metrics
-      .list(metricName)
-      .get(metricName)
-      .value
-      .collect { case metric: MetricValue.LongPoint =>
-        Member.fromProtoPrimitive_(metric.attributes.get("sender").value).value -> metric.value
-      }
-      .toMap
-  }
 
   "LSU successor" should {
     "be testable before upgrade time" in { implicit env =>

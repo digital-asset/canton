@@ -42,10 +42,6 @@ class RestartMediatorsChaos(val logger: TracedLogger)
 }
 
 object RestartMediatorsChaos extends TopologyOperationsCompanion {
-  override def acceptableNonRetryableLogEntries: Seq[String] = Seq(
-    "MEDIATOR_INVALID_MESSAGE"
-  )
-
   override def acceptableLogEntries: Seq[String] = Seq(
     "The operation 'class com.digitalasset.canton.synchronizer.mediator.store.DbFinalizedResponseStore",
     "Now retrying operation 'class",

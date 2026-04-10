@@ -295,7 +295,7 @@ abstract class BaseDriver(
   }
 
   private def processUpdates(transaction: Transaction): Boolean = {
-    logger.debug(
+    logger.info(
       s"Observed transaction with commandId=${transaction.commandId} and updateId=${transaction.updateId} and offset=${transaction.offset}"
     )
     if (transaction.commandId.nonEmpty) {

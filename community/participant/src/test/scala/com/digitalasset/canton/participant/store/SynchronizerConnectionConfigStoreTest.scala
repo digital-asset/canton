@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
@@ -49,6 +50,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
 }
 import com.google.protobuf.ByteString
+import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.util.Random
@@ -75,7 +77,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val sequencerAlias2 = SequencerAlias.tryCreate("sequencer2")
 
   private val connection1 = GrpcSequencerConnection(
-    NonEmpty(Seq, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
+    NonEmpty(Set, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
     transportSecurity = false,
     Some(ByteString.copyFrom("stuff".getBytes)),
     sequencerAlias1,
@@ -83,7 +85,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   )
 
   private val connection2 = GrpcSequencerConnection(
-    NonEmpty(Seq, Endpoint("host3", Port.tryCreate(501)), Endpoint("host4", Port.tryCreate(601))),
+    NonEmpty(Set, Endpoint("host3", Port.tryCreate(501)), Endpoint("host4", Port.tryCreate(601))),
     transportSecurity = false,
     Some(ByteString.copyFrom("stuff".getBytes)),
     sequencerAlias2,
@@ -462,7 +464,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
       "be able to replace a config" in {
         val connection = GrpcSequencerConnection(
           NonEmpty(
-            Seq,
+            Set,
             Endpoint("newHost1", Port.tryCreate(500)),
             Endpoint("newHost2", Port.tryCreate(600)),
           ),
@@ -773,13 +775,117 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             .value
 
           _ = failureInconsistent.left.value shouldBe InconsistentSequencerIds(
-            ConfigIdentifier.WithPsid(daStable),
+            daStable,
             Map(sequencerAlias1 -> s3Id),
-            "Mismatch",
+            "Mismatch (Some(SEQ::sequencer1::default) != Some(SEQ::sequencer3::default))",
           )
 
           retrievedIdFinal1 <- getSequencerId(sequencerAlias1).valueOrFail("get sequencer id")
           _ = retrievedIdFinal1.value shouldBe s1Id
+        } yield succeed
+      }
+
+      "allow to upsert" in {
+        val sutF = mk
+        val initialConfig = getConfig(daStable)
+
+        def queryPorts()
+            : EitherT[FutureUnlessShutdown, UnknownPsid, Map[SequencerAlias, Set[Int]]] =
+          for {
+            sut <- EitherT
+              .liftF[FutureUnlessShutdown, UnknownPsid, SynchronizerConnectionConfigStore](sutF)
+            storedConfig <- EitherT.fromEither[FutureUnlessShutdown](sut.get(daStable))
+          } yield getPorts(storedConfig)
+
+        def getPorts(c: StoredSynchronizerConnectionConfig): Map[SequencerAlias, Set[Int]] =
+          c.config.sequencerConnections.aliasToConnection.forgetNE
+            .fmap(_.asInstanceOf[GrpcSequencerConnection].endpoints.forgetNE.map(_.port.unwrap))
+
+        def addEndpoint(
+            alias: SequencerAlias,
+            endpoint: Endpoint,
+        ): SynchronizerConnectionConfig => SynchronizerConnectionConfig =
+          _.focus(_.sequencerConnections)
+            .modify(_.modify(alias, _.addEndpoints(endpoint.toURI(false)).value))
+
+        def removeEndpoint(
+            alias: SequencerAlias,
+            port: Int,
+        ): SynchronizerConnectionConfig => SynchronizerConnectionConfig =
+          _.focus(_.sequencerConnections)
+            .modify(
+              _.modify(
+                alias,
+                _.asInstanceOf[GrpcSequencerConnection]
+                  .focus(_.endpoints)
+                  .modify(endpoints =>
+                    NonEmpty.from(endpoints.filterNot(_.port.unwrap == port)).value
+                  ),
+              )
+            )
+
+        val key = (initialConfig, Active, None)
+
+        for {
+          sut <- sutF
+
+          // First insert
+          insertResult <- sut
+            .upsert(daStable, key, identity)
+            .valueOrFail("initial insert")
+            .map(getPorts)
+          queryAfterInsert <- queryPorts().valueOrFail("get initial ports")
+          _ = insertResult shouldBe Map(
+            sequencerAlias1 -> Set(500, 600),
+            sequencerAlias2 -> Set(501, 601),
+          )
+          _ = queryAfterInsert shouldBe insertResult
+
+          // Add endpoint for sequencer1
+          addEndpointResult <- sut
+            .upsert(
+              daStable,
+              key,
+              addEndpoint(sequencerAlias1, Endpoint("host3", Port.tryCreate(700))),
+            )
+            .valueOrFail("initial update")
+            .map(getPorts)
+          queryAfterAddEndpoint <- queryPorts().valueOrFail("get ports after update")
+          expectedResultAfterAddEndpoint = Map(
+            sequencerAlias1 -> Set(500, 600, 700),
+            sequencerAlias2 -> Set(501, 601),
+          )
+          _ = addEndpointResult shouldBe expectedResultAfterAddEndpoint
+          _ = queryAfterAddEndpoint shouldBe expectedResultAfterAddEndpoint
+
+          // Idempotency
+          idempotencyResult <- sut
+            .upsert(
+              daStable,
+              key,
+              addEndpoint(sequencerAlias1, Endpoint("host3", Port.tryCreate(700))),
+            )
+            .valueOrFail("idempotency")
+            .map(getPorts)
+          queryAfterIdempotency <- queryPorts().valueOrFail("get ports idempotency")
+          _ = idempotencyResult shouldBe expectedResultAfterAddEndpoint
+          _ = queryAfterIdempotency shouldBe expectedResultAfterAddEndpoint
+
+          // Remove endpoint for sequencer2
+          removeEndpointResult <- sut
+            .upsert(
+              daStable,
+              key,
+              removeEndpoint(sequencerAlias2, 501),
+            )
+            .valueOrFail("remove endpoint")
+            .map(getPorts)
+          queryAfterRemoveEndpoint <- queryPorts().valueOrFail("get ports remove endpoints")
+          _ = removeEndpointResult shouldBe Map(
+            sequencerAlias1 -> Set(500, 600, 700),
+            sequencerAlias2 -> Set(601),
+          )
+          _ = queryAfterRemoveEndpoint shouldBe removeEndpointResult
         } yield succeed
       }
 

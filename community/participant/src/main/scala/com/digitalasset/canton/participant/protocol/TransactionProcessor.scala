@@ -26,6 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.{ChangeId, SubmitterInfo
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.ProcessorError
@@ -81,7 +82,7 @@ class TransactionProcessor(
     packageResolver: PackageResolver,
     override val testingConfig: TestingConfigInternal,
     promiseFactory: PromiseUnlessShutdownFactory,
-    messagePayloadLoggingEnabled: Boolean,
+    participantNodeParameters: ParticipantNodeParameters,
 )(implicit val ec: ExecutionContext)
     extends ProtocolProcessor[
       TransactionProcessingSteps.SubmissionParam,
@@ -120,8 +121,8 @@ class TransactionProcessor(
         commandProgressTracker,
         loggerFactory,
         futureSupervisor,
-        messagePayloadLoggingEnabled,
         ephemeral.ledgerApiIndexer.onlyForTestingTransactionInMemoryStore,
+        participantNodeParameters,
       ),
       inFlightSubmissionSynchronizerTracker,
       ephemeral,

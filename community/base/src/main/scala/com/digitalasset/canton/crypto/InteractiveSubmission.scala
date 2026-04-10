@@ -6,8 +6,8 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.either.*
-import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -18,6 +18,7 @@ import com.digitalasset.canton.protocol.{LfContractId, LfHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PartyId, Synchronizer}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, NodeId, VersionedTransaction}
@@ -207,8 +208,12 @@ object InteractiveSubmission {
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, String, Unit] =
-    signatures.toList
-      .parTraverse_ { case (party, signatures) =>
+    // Parallelism is hardcoded to 10 arbitrarily.
+    // This provides maximum speed for a reasonably large number of signatures already while
+    // protecting against degenerated cases with huge number of signatures
+    // TODO(i31770): Make configurable and unify with other signature verification code locations
+    MonadUtil.parTraverseWithLimit_(PositiveInt.tryCreate(10))(signatures.view.toSeq) {
+      case (party, signatures) =>
         for {
           signingKeysWithThreshold <- EitherT(
             topologySnapshot
@@ -251,5 +256,5 @@ object InteractiveSubmission {
             s"Found ${validSignaturesSet.size} valid external signatures for $party with threshold ${signingKeysWithThreshold.threshold.unwrap}"
           )
         }
-      }
+    }
 }

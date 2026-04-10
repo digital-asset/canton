@@ -15,12 +15,11 @@ import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
   ClientConfig,
   JwksCacheConfig,
-  KeepAliveClientConfig,
   PemFileOrString,
   ServerConfig,
   StorageConfig,
 }
-import com.digitalasset.canton.networking.grpc.CantonServerBuilder
+import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
@@ -396,9 +395,8 @@ object BftBlockOrdererConfig {
       override val tlsConfig: Option[TlsClientConfig] = Some(
         TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = true)
       ),
-  ) extends ClientConfig {
-    override val keepAliveClient: Option[KeepAliveClientConfig] = None
-  }
+      channel: ClientChannelParams = ClientChannelParams.Default,
+  ) extends ClientConfig
 
   final case class EndpointId(
       address: String,

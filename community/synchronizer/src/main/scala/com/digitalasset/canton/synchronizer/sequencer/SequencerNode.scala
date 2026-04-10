@@ -778,6 +778,7 @@ class SequencerNodeBootstrap(
                 futureSupervisor,
                 config.trafficConfig,
                 lsuSequencingBounds,
+                parameters.drSequencingTimeUpperBound,
                 runtimeReadyPromise.futureUS,
                 topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
                   sequencerSnapshot
@@ -804,7 +805,7 @@ class SequencerNodeBootstrap(
           )
           _ = sequencerServiceCell.putIfAbsent(sequencerService)
 
-          directPool = new DirectSequencerConnectionXPool(
+          directPool = new DirectSequencerConnectionPool(
             sequencer,
             psid,
             sequencerId,
@@ -815,7 +816,7 @@ class SequencerNodeBootstrap(
 
           _ = addCloseable(sequencedEventStore)
           sequencerClient = new SequencerClientImplPekko[
-            DirectSequencerConnectionX.SubscriptionError
+            DirectSequencerConnection.SubscriptionError
           ](
             psid,
             sequencerId,

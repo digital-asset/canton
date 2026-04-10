@@ -500,7 +500,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       _ <- waitToBecomeEffective match {
         case Some(timeout) =>
           EitherT.pure[FutureUnlessShutdown, TopologyManagerError](
-            timeout.awaitUS(s"proposeAndAuthorize-wait-for-effective")(asyncResult.unwrap)
+            timeout.awaitUS("proposeAndAuthorize-wait-for-effective")(asyncResult.unwrap)
           )
         case None => EitherTUtil.unitUS[TopologyManagerError]
       }
@@ -851,7 +851,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 
         asyncResult <-
           if (newTransactionsOrAdditionalSignatures.isEmpty)
-            EitherT.pure[FutureUnlessShutdown, TopologyManagerError](AsyncResult.immediate)
+            EitherT.pure[FutureUnlessShutdown, TopologyManagerError](AsyncResult.immediateUnit)
           else {
             // validate incrementally and apply to in-memory state
             for {

@@ -77,7 +77,7 @@ final class LsuSequencingTestMessageHandler(
             .fold(FutureUnlessShutdown.unit)(handleInternal(ts, _))
 
           // This can be processed asynchronously
-          HandlerResult.asynchronous(resF)
+          HandlerResult.asynchronousUnit(resF)
 
         case _: DeliverError => HandlerResult.done
       }
@@ -115,9 +115,7 @@ final class LsuSequencingTestMessageHandler(
       )
 
       metrics.receivedTestingLsuSequencingMessages.mark()(
-        MetricsContext(
-          "sender" -> msg.content.sender.toProtoPrimitive
-        )
+        MetricsContext("sender" -> msg.content.sender.toProtoPrimitive)
       )
     }
   } yield ()

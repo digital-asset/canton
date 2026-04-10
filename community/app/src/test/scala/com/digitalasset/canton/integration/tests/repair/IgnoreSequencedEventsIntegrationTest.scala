@@ -371,7 +371,7 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
             // Feel free to adjust if the number of errors has changed.
             // Currently there is:
             // * `SequencedEventValidatorImpl` logging an ERROR
-            // * `SequencerSubscriptionX` / `ResilientSequencerSubscription` logging a WARN
+            // * `SequencerSubscription` / `ResilientSequencerSubscription` logging a WARN
             // * `SynchronizerConnectionsManager` logging an ERROR
             eventually() {
               loggerFactory.numberOfRecordedEntries should be >= 3

@@ -61,7 +61,7 @@ sealed trait SequencerConnection extends PrettyPrinting {
 }
 
 final case class GrpcSequencerConnection(
-    endpoints: NonEmpty[Seq[Endpoint]],
+    endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
     customTrustCertificates: Option[ByteString],
     sequencerAlias: SequencerAlias,
@@ -168,7 +168,7 @@ object SequencerConnection {
         case grpc @ GrpcSequencerConnection(endpoints, _, _, _, _) =>
           for {
             allMergedEndpoints <- connectionsNel.tail1.flatTraverse {
-              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.forgetNE)
+              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.forgetNE.toSeq)
               case _ => Left("Cannot merge grpc and http sequencer connections")
             }
           } yield grpc.copy(

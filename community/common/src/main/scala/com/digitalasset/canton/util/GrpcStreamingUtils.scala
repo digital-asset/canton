@@ -43,17 +43,8 @@ import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success, Try}
 
 object GrpcStreamingUtils {
-  private final val defaultChunkSize: Int =
+  private[util] final val defaultChunkSize: Int =
     1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
-
-  /** A blocking method that waits for a chunk of bytes from the input stream, or the end of the
-    * stream.
-    * @return
-    *   an array of bytes read from the input stream (with at most `chunkSize` bytes), or an empty
-    *   array if the end of the stream has been reached.
-    */
-  def readChunkBytes(inputStream: InputStream, chunkSize: Int = defaultChunkSize): Array[Byte] =
-    inputStream.readNBytes(chunkSize)
 
   def streamFromClient[Req, Resp, C](
       extractChunkBytes: Req => ByteString,
@@ -201,25 +192,28 @@ object GrpcStreamingUtils {
     }
   }
 
-  /** Stream the provided bytestring to the server. To avoid loading the whole byte string into
-    * memory, the other variant of `streamToServer` can be used.
+  /** Stream the provided input stream to the server, reading lazily in chunks of
+    * `defaultChunkSize`.
     *
     * @param load
     *   Loader (endpoint of the service)
     * @param requestBuilder
     *   Builds a request from an array of bytes
-    * @param byteString
-    *   The byte string to be streamed.
+    * @param inputStream
+    *   The input stream to be streamed. The caller is responsible for closing it after the returned
+    *   future completes.
     */
   def streamToServer[Req, Resp](
       load: StreamObserver[Resp] => StreamObserver[Req],
       requestBuilder: Array[Byte] => Req,
-      byteString: ByteString,
+      inputStream: InputStream,
   ): Future[Resp] = {
-    val it = byteString.toByteArray.grouped(defaultChunkSize)
-    def readNextChunk(): Option[Either[Throwable, Req]] =
-      it.nextOption().map(bytes => Right(requestBuilder(bytes)))
-
+    val buffer = new Array[Byte](defaultChunkSize)
+    def readNextChunk(): Option[Either[Throwable, Req]] = {
+      val bytesRead = inputStream.read(buffer)
+      if (bytesRead == -1) None
+      else Some(Right(requestBuilder(buffer.slice(0, bytesRead))))
+    }
     streamToServer(load, _ => readNextChunk())
   }
 
@@ -232,7 +226,7 @@ object GrpcStreamingUtils {
     *   - If Some(Left()) is encountered, the stream is terminated with an error.
     *   - When None is encountered, the stream is completed.
     */
-  def streamToServer[Req, Resp](
+  private def streamToServer[Req, Resp](
       load: StreamObserver[Resp] => StreamObserver[Req],
       readNextChunk: Unit => Option[Either[Throwable, Req]],
   ): Future[Resp] = {

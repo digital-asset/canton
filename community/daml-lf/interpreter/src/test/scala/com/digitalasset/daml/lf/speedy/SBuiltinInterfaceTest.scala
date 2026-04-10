@@ -6,21 +6,17 @@ package speedy
 
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SValue.{SValue => _, _}
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SValue.{SValue as _, *}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  GlobalKeyWithMaintainers,
-  SerializationVersion,
-}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -758,7 +754,7 @@ object EvalHelpers {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       getPkg: PartialFunction[Ref.PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
         PartialFunction.empty,
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
@@ -778,7 +774,7 @@ object EvalHelpers {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       getPkg: PartialFunction[Ref.PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
   )(implicit loggingContext: NamedLoggingContext): Try[Either[SError, SValue]] = {

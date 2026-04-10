@@ -13,6 +13,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPar
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
+import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   CostEstimationHints,
@@ -106,6 +107,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
@@ -115,7 +117,8 @@ import io.grpc.stub.StreamObserver
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.ExecutionContext
+import scala.annotation.tailrec
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -559,6 +562,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |
           |To stop measuring, you need to close the returned `AutoCloseable`.
           |
+          |If the set of parties is empty, we will subscribe as any party.
+          |
           |Use the `onUpdate` parameter to register a callback that is called on every update tree.
           """
       )
@@ -576,25 +581,58 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             .forParticipant(name)
             .consoleThroughput
 
-          override def onNext(tx: UpdateWrapper): Unit = {
-            val (s, serializedSize) = tx match {
-              case TransactionWrapper(transaction) =>
-                Transaction
-                  .fromProto(ApiTransaction.toJavaProto(transaction))
-                  .getRootNodeIds
-                  .size
-                  .toLong -> transaction.serializedSize
-              case reassignmentWrapper: ReassignmentWrapper =>
-                1L -> reassignmentWrapper.reassignment.serializedSize
-              case topologyTransaction: TopologyTransactionWrapper =>
-                throw new RuntimeException(
-                  s"Unexpectedly received a topology transaction: $topologyTransaction."
-                )
+          private def countRootNodes(nodes: Iterator[(Int, Int)]): Int = {
+            @tailrec
+            def loop(remaining: Iterator[(Int, Int)], count: Int): Int = {
+              val fst = remaining.nextOption()
+              fst match {
+                case None =>
+                  count
+                case Some((_, lastDescId)) =>
+                  val nextPossibleRoot = remaining.dropWhile { case (id, _) => id <= lastDescId }
+                  loop(nextPossibleRoot, count + 1)
+              }
             }
-            consoleMetrics.metric.mark(s)
-            consoleMetrics.nodeCount.update(s)
-            consoleMetrics.transactionSize.update(serializedSize)
+            loop(nodes, 0)
+          }
+
+          override def onNext(tx: UpdateWrapper): Unit = {
             onUpdate(tx)
+            FutureUtil.doNotAwait(
+              Future {
+                val (s, serializedSize) = tx match {
+                  case TransactionWrapper(transaction) =>
+                    val num = countRootNodes(
+                      transaction.events.view
+                        .map(_.event)
+                        .flatMap {
+                          case Event.Empty => List.empty
+                          case Event.Created(value) => List((value.nodeId, value.nodeId))
+                          case Event.Archived(value) => List((value.nodeId, value.nodeId))
+                          case Event.Exercised(value) =>
+                            List((value.nodeId, value.lastDescendantNodeId))
+                        }
+                        .iterator
+                    )
+                    val rt =
+                      transaction.recordTime.flatMap(CantonTimestamp.fromProtoTimestamp(_).toOption)
+                    logger.info(
+                      s"Measured transaction update=${transaction.updateId} with rt=$rt and nodes=$num name=$metricName"
+                    )
+                    num.toLong -> transaction.serializedSize
+                  case reassignmentWrapper: ReassignmentWrapper =>
+                    1L -> reassignmentWrapper.reassignment.serializedSize
+                  case topologyTransaction: TopologyTransactionWrapper =>
+                    throw new RuntimeException(
+                      s"Unexpectedly received a topology transaction: $topologyTransaction."
+                    )
+                }
+                consoleMetrics.metric.mark(s)
+                consoleMetrics.nodeCount.update(s)
+                consoleMetrics.transactionSize.update(serializedSize)
+              },
+              "metrics-update",
+            )
           }
 
           override def onError(t: Throwable): Unit = t match {
@@ -621,7 +659,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
         val eventFormat = EventFormat(
           filtersByParty = parties.map(_.toLf -> Filters(Nil)).toMap,
-          filtersForAnyParty = None,
+          filtersForAnyParty = Option.when(parties.isEmpty)(Filters(Nil)),
           verbose = false,
         )
         val updateFormat = UpdateFormat(
@@ -830,6 +868,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           minLedgerTimeAbs: Option[Instant] = None,
           includeCreatedEventBlob: Boolean = false,
+          customEventFormat: Option[EventFormat] = None,
       ): ApiTransaction =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -843,6 +882,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               hashingSchemeVersion = hashingSchemeVersion,
               transactionShape = transactionShape,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              customEventFormat = customEventFormat,
             )
           )
         }.getTransaction
@@ -972,6 +1012,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           includeCreatedEventBlob: Boolean = false,
           tapsMaxPasses: Option[Int] = None,
+          customEventFormat: Option[EventFormat] = None,
       ): ApiTransaction = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -1003,6 +1044,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                */
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
               tapsMaxPasses = tapsMaxPasses,
+              customEventFormat = customEventFormat,
             )
 
           case _ =>
@@ -1025,6 +1067,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   includeCreatedEventBlob = includeCreatedEventBlob,
                   tapsMaxPasses,
                   optTimeout,
+                  customEventFormat = customEventFormat,
                 )
               )
             }
@@ -1479,6 +1522,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             // External party specifics
             verboseHashing: Boolean = false,
             tapsMaxPasses: Option[Int] = None,
+            customEventFormat: Option[EventFormat] = None,
         ): ApiTransaction = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1507,6 +1551,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId = userId,
             transactionShape = transactionShape,
             includeCreatedEventBlob = includeCreatedEventBlob,
+            customEventFormat = customEventFormat,
           )
         }
 
@@ -1551,6 +1596,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId: String = userId,
             transactionShape: TransactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
             includeCreatedEventBlob: Boolean = false,
+            customEventFormat: Option[EventFormat] = None,
         ): ApiTransaction = {
 
           val prepared = preparedTransaction.preparedTransaction.getOrElse(
@@ -1573,6 +1619,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               deduplicationPeriod = deduplicationPeriod,
               minLedgerTimeAbs = minLedgerTimeAbs,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              customEventFormat = customEventFormat,
             )
 
           optionallyAwait(tx, tx.updateId, tx.synchronizerId, optTimeout)
@@ -2921,6 +2968,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
             includeCreatedEventBlob: Boolean = false,
             tapsMaxPasses: Option[Int] = None,
+            customEventFormat: Option[EventFormat] = None,
         ): Transaction = {
           val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -2947,6 +2995,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userPackageSelectionPreference,
                 includeCreatedEventBlob = includeCreatedEventBlob,
                 tapsMaxPasses = tapsMaxPasses,
+                customEventFormat = customEventFormat,
               )
 
             case _ =>
@@ -2969,6 +3018,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                     includeCreatedEventBlob = includeCreatedEventBlob,
                     tapsMaxPasses,
                     optTimeout,
+                    customEventFormat = customEventFormat,
                   )
                 )
               }
@@ -3155,6 +3205,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
               includeCreatedEventBlob: Boolean = false,
               tapsMaxPasses: Option[Int] = None,
+              customEventFormat: Option[EventFormat] = None,
           ): Transaction = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -3175,6 +3226,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference = userPackageSelectionPreference,
               includeCreatedEventBlob = includeCreatedEventBlob,
               tapsMaxPasses = tapsMaxPasses,
+              customEventFormat = customEventFormat,
             )
 
             javab.data.Transaction.fromProto(ApiTransaction.toJavaProto(tx))

@@ -13,4 +13,4 @@ directories:
   - community/daml-lf/snapshot-proto/src/main/protobuf
   - community/daml-lf/archive/src/main/protobuf
   - community/daml-lf/transaction/src/main/protobuf
-  - community/daml-lf/ledger-api-value/src/main/protobuf
+  - community/daml-lf/ledger-api-value-proto/src/main/protobuf

@@ -100,8 +100,7 @@ object SessionSigningKeysConfig {
   val default: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = true)
 
   /** Short test-only configuration: durations are small enough to trigger key rotation and validity
-    * edge cases within a test, but not so small that normal scheduling jitter would make tests
-    * flaky.
+    * edge cases within a test.
     */
   @VisibleForTesting
   val short: SessionSigningKeysConfig = SessionSigningKeysConfig(

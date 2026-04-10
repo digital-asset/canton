@@ -246,10 +246,10 @@ case object TransactionViewDecompositionFactory {
     val itF = informeesParticipantsAndThreshold(node, topologySnapshot, submittingAdminPartyO)
     itF.map { case (i, t) =>
       nodeId -> ActionNodeInfo(
-        i.fmap { case (participants, _) => participants },
-        createQuorum(i, t),
-        childNodeIds,
-        transaction.seedFor(nodeId),
+        informees = i.fmap { case (participants, _) => participants },
+        quorum = createQuorum(i, t),
+        children = childNodeIds,
+        seed = transaction.seedFor(nodeId),
       )
     }
   }

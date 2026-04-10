@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, Processin
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
+import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat, TemplateWildcardFilter}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
@@ -220,6 +221,24 @@ trait IndexComponentTest
     }
   )
 
+  private val wildcardTemplates = CumulativeFilter(
+    templateFilters = Set.empty,
+    interfaceFilters = Set.empty,
+    templateWildcardFilter = Some(TemplateWildcardFilter(includeCreatedEventBlob = false)),
+  )
+  protected def eventFormat(party: Ref.Party) = EventFormat(
+    filtersByParty = Map(
+      party -> wildcardTemplates
+    ),
+    filtersForAnyParty = None,
+    verbose = false,
+  )
+  protected val allPartyEventFormat = EventFormat(
+    filtersByParty = Map.empty,
+    filtersForAnyParty = Some(wildcardTemplates),
+    verbose = false,
+  )
+
   protected def index: IndexService = testServices.index
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
@@ -231,152 +250,154 @@ trait IndexComponentTest
       _tc: TraceContext,
   ): FutureUnlessShutdown[Vector[Offset]] = FutureUnlessShutdown.pure(Vector.empty)
 
-  override protected def beforeAll(): Unit = {
-    super.beforeAll()
-    // We use the dispatcher here because the default Scalatest execution context is too slow.
-    implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
+  private lazy val engine =
+    new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
+  private lazy val participantId =
+    Ref.ParticipantId.assertFromString("index-component-test-participant-id")
+  private lazy val pruningOffsetService = new PruningOffsetService {
+    override def pruningOffset(implicit
+        traceContext: TraceContext
+    ): Future[Option[Offset]] = Future.successful(None)
+  }
 
-    val engine = new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
-    val mutableLedgerEndCache = MutableLedgerEndCache()
-    val stringInterningView = new StringInterningView(loggerFactory)
-    val participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id")
+  implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
-    val pruningOffsetService = new PruningOffsetService {
-      override def pruningOffset(implicit
-          traceContext: TraceContext
-      ): Future[Option[Offset]] = Future.successful(None)
-    }
-
-    implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
-
-    val indexResourceOwner =
-      for {
-        dbStorage <- ResourceOwner
-          .forCloseable(() =>
-            DbStorageSingle
-              .tryCreate(
-                config = dbConfig,
-                connectionPoolForParticipant = false,
-                logQueryCost = None,
-                clock = new SimClock(CantonTimestamp.Epoch, loggerFactory),
-                scheduler = None,
-                metrics = CommonMockMetrics.dbStorage,
-                timeouts = timeouts,
-                loggerFactory = loggerFactory,
-              )
-          )
-        contractStore <-
-          ResourceOwner
-            .forCloseable(() =>
-              ContractStore.create(
-                storage = dbStorage,
-                processingTimeouts = timeouts,
-                cachingConfigs = CachingConfigs(),
-                batchingConfig = BatchingConfig(),
-                loggerFactory = loggerFactory,
-              )
+  private def indexResourceOwner(
+      config: IndexerConfig
+  ): ResourceOwner[(IndexService, FutureQueue[Update], LedgerApiContractStoreImpl)] =
+    for {
+      dbStorage <- ResourceOwner
+        .forCloseable(() =>
+          DbStorageSingle
+            .tryCreate(
+              config = dbConfig,
+              connectionPoolForParticipant = false,
+              logQueryCost = None,
+              clock = new SimClock(CantonTimestamp.Epoch, loggerFactory),
+              scheduler = None,
+              metrics = CommonMockMetrics.dbStorage,
+              timeouts = timeouts,
+              loggerFactory = loggerFactory,
             )
-        participantContractStore = LedgerApiContractStoreImpl(
-          contractStore,
-          loggerFactory,
-          LedgerApiServerMetrics.ForTesting,
         )
-        (inMemoryState, updaterFlow) <- LedgerApiServerInternals.createInMemoryStateAndUpdater(
-          participantId = participantId,
-          commandProgressTracker = CommandProgressTracker.NoOp,
-          indexServiceConfig = IndexServiceConfig(),
-          maxCommandsInFlight = 1, // not used
-          metrics = LedgerApiServerMetrics.ForTesting,
-          executionContext = ec,
-          tracer = NoReportingTracerProvider.tracer,
-          loggerFactory = loggerFactory,
-        )(mutableLedgerEndCache, stringInterningView)
-        _ <- ResourceOwner.forFuture(() => new FlywayMigrations(jdbcUrl, loggerFactory).migrate())
-        dbSupport <- DbSupport
-          .owner(
-            serverRole = ServerRole.ApiServer,
-            metrics = LedgerApiServerMetrics.ForTesting,
-            dbConfig = DbConfig(
-              jdbcUrl = jdbcUrl,
-              connectionPool = ConnectionPoolConfig(
-                connectionPoolSize = indexReadConnectionPoolSize,
-                connectionTimeout = 250.millis,
-              ),
-            ),
-            loggerFactory = loggerFactory,
+      contractStore <-
+        ResourceOwner
+          .forCloseable(() =>
+            ContractStore.create(
+              storage = dbStorage,
+              processingTimeouts = timeouts,
+              cachingConfigs = CachingConfigs(),
+              batchingConfig = BatchingConfig(),
+              loggerFactory = loggerFactory,
+            )
           )
-        indexerF <- new JdbcIndexer.Factory(
-          participantId = participantId,
-          participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
-          config = indexerConfig,
+      participantContractStore = LedgerApiContractStoreImpl(
+        contractStore,
+        loggerFactory,
+        LedgerApiServerMetrics.ForTesting,
+      )
+      mutableLedgerEndCache = MutableLedgerEndCache()
+      stringInterningView = new StringInterningView(loggerFactory)
+      (inMemoryState, updaterFlow) <- LedgerApiServerInternals.createInMemoryStateAndUpdater(
+        participantId = participantId,
+        commandProgressTracker = CommandProgressTracker.NoOp,
+        indexServiceConfig = IndexServiceConfig(),
+        maxCommandsInFlight = 1, // not used
+        metrics = LedgerApiServerMetrics.ForTesting,
+        executionContext = ec,
+        tracer = NoReportingTracerProvider.tracer,
+        loggerFactory = loggerFactory,
+      )(mutableLedgerEndCache, stringInterningView)
+      _ <- ResourceOwner.forFuture(() => new FlywayMigrations(jdbcUrl, loggerFactory).migrate())
+      dbSupport <- DbSupport
+        .owner(
+          serverRole = ServerRole.ApiServer,
           metrics = LedgerApiServerMetrics.ForTesting,
-          inMemoryState = inMemoryState,
-          apiUpdaterFlow = updaterFlow,
-          executionContext = ec,
-          tracer = NoReportingTracerProvider.tracer,
-          loggerFactory = loggerFactory,
-          dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(indexerConfig),
-          highAvailability = HaConfig(),
-          indexServiceDbDispatcher = None,
-          clock = clock,
-          reassignmentOffsetPersistence = NoOpReassignmentOffsetPersistence,
-          postProcessor = (_, _) => Future.unit,
-          sequentialPostProcessor = sequentialPostProcessor,
-          contractStore = participantContractStore,
-        ).initialized()
-        indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(false)(_ => ()))
-        indexer <- ResourceOwner.forReleasable(() =>
-          new IndexingFutureQueue(indexerFutureQueueConsumer)
-        ) { indexer =>
-          indexer.shutdown()
-          indexer.done.map(_ => ())
-        }
-        contractLoader <- ContractLoader.create(
-          participantContractStore = participantContractStore,
-          contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
-            inMemoryState.stringInterningView,
-            inMemoryState.ledgerEndCache,
+          dbConfig = DbConfig(
+            jdbcUrl = jdbcUrl,
+            connectionPool = ConnectionPoolConfig(
+              connectionPoolSize = indexReadConnectionPoolSize,
+              connectionTimeout = 250.millis,
+            ),
           ),
-          dbDispatcher = dbSupport.dbDispatcher,
-          metrics = LedgerApiServerMetrics.ForTesting,
-          maxQueueSize = 10000,
-          maxBatchSize = 50,
-          parallelism = 5,
           loggerFactory = loggerFactory,
         )
-        indexService <- new IndexServiceOwner(
-          dbSupport = dbSupport,
-          config = indexServiceConfig,
-          participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
+      indexerF <- new JdbcIndexer.Factory(
+        participantId = participantId,
+        participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
+        config = config,
+        metrics = LedgerApiServerMetrics.ForTesting,
+        inMemoryState = inMemoryState,
+        apiUpdaterFlow = updaterFlow,
+        executionContext = ec,
+        tracer = NoReportingTracerProvider.tracer,
+        loggerFactory = loggerFactory,
+        dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(config),
+        highAvailability = HaConfig(),
+        indexServiceDbDispatcher = None,
+        clock = clock,
+        reassignmentOffsetPersistence = NoOpReassignmentOffsetPersistence,
+        postProcessor = (_, _) => Future.unit,
+        sequentialPostProcessor = sequentialPostProcessor,
+        contractStore = participantContractStore,
+      ).initialized()
+      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(false)(_ => ()))
+      indexer <- ResourceOwner.forReleasable(() =>
+        new IndexingFutureQueue(indexerFutureQueueConsumer)
+      ) { indexer =>
+        indexer.shutdown()
+        indexer.done.map(_ => ())
+      }
+      contractLoader <- ContractLoader.create(
+        participantContractStore = participantContractStore,
+        contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
+          inMemoryState.stringInterningView,
+          inMemoryState.ledgerEndCache,
+        ),
+        dbDispatcher = dbSupport.dbDispatcher,
+        metrics = LedgerApiServerMetrics.ForTesting,
+        maxQueueSize = 10000,
+        maxBatchSize = 50,
+        parallelism = 5,
+        loggerFactory = loggerFactory,
+      )
+      indexService <- new IndexServiceOwner(
+        dbSupport = dbSupport,
+        config = indexServiceConfig,
+        participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
+        metrics = LedgerApiServerMetrics.ForTesting,
+        inMemoryState = inMemoryState,
+        tracer = NoReportingTracerProvider.tracer,
+        loggerFactory = loggerFactory,
+        incompleteOffsets = incompleteOffsets,
+        contractLoader = contractLoader,
+        getPackageMetadataSnapshot = _ => PackageMetadata(),
+        lfValueTranslation = new LfValueTranslation(
           metrics = LedgerApiServerMetrics.ForTesting,
-          inMemoryState = inMemoryState,
-          tracer = NoReportingTracerProvider.tracer,
+          engineO = Some(engine),
+          // Not used
+          loadPackage = (_, _) => Future(None),
           loggerFactory = loggerFactory,
-          incompleteOffsets = incompleteOffsets,
-          contractLoader = contractLoader,
-          getPackageMetadataSnapshot = _ => PackageMetadata(),
-          lfValueTranslation = new LfValueTranslation(
-            metrics = LedgerApiServerMetrics.ForTesting,
-            engineO = Some(engine),
-            // Not used
-            loadPackage = (_, _) => Future(None),
-            loggerFactory = loggerFactory,
-          ),
-          queryExecutionContext = executorService,
-          commandExecutionContext = executorService,
-          getPackagePreference = (
-              _: PackageName,
-              _: Set[PackageId],
-              _: String,
-              _: LoggingContextWithTrace,
-          ) => FutureUnlessShutdown.pure(Left("not used")),
-          participantContractStore = participantContractStore,
-          pruningOffsetService = pruningOffsetService,
-        )
-      } yield (indexService, indexer, participantContractStore)
+        ),
+        queryExecutionContext = executorService,
+        commandExecutionContext = executorService,
+        getPackagePreference = (
+            _: PackageName,
+            _: Set[PackageId],
+            _: String,
+            _: LoggingContextWithTrace,
+        ) => FutureUnlessShutdown.pure(Left("not used")),
+        participantContractStore = participantContractStore,
+        pruningOffsetService = pruningOffsetService,
+      )
+    } yield (indexService, indexer, participantContractStore)
 
-    val indexResource = indexResourceOwner.acquire()
-    val (index, indexer, participantContractStore) = indexResource.asFuture.futureValue
+  private def acquireServices(
+      config: IndexerConfig
+  )(implicit resourceContext: ResourceContext): Unit = {
+    val indexResource = indexResourceOwner(config).acquire()
+    val (index, indexer, participantContractStore) =
+      indexResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
 
     testServicesRef.set(
       TestServices(
@@ -386,6 +407,22 @@ trait IndexComponentTest
         participantContractStore = participantContractStore,
       )
     )
+  }
+
+  /** Restarts the indexer and all related services by releasing and re-acquiring all resources.
+    * Optionally accepts a new IndexerConfig to change the configuration on restart.
+    */
+  protected def restartIndexer(config: IndexerConfig = indexerConfig): Unit = {
+    implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
+    testServices.indexResource.release().futureValue
+    acquireServices(config)
+  }
+
+  override protected def beforeAll(): Unit = {
+    super.beforeAll()
+    // We use the dispatcher here because the default Scalatest execution context is too slow.
+    implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
+    acquireServices(indexerConfig)
   }
 
   override def afterAll(): Unit = {

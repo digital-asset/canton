@@ -273,6 +273,17 @@ nightly_integration_test_bftordering_only:
         num_parallel_tasks: "1"
         timeout: "60m"
 
+nightly_test_upgrades_matrix:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.UpgradesMatrixIntegration"
+        timeout: "120m"
+        report_to_datadog: false
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: "U03HCPABC9M" # Dylan
+
 model_based_test:
   executor: canton-xlarge-docker-with-postgres
   steps:

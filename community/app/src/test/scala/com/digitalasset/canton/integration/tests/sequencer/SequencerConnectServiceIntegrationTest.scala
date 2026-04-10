@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
@@ -191,7 +192,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
   ): GrpcSequencerConnectClient = {
     val grpcSequencerConnection =
       GrpcSequencerConnection(
-        NonEmpty(Seq, endpoint),
+        NonEmpty(Set, endpoint),
         transportSecurity = false,
         customTrustCertificates = None,
         SequencerAlias.Default,
@@ -202,7 +203,8 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       sequencerConnection = grpcSequencerConnection,
       synchronizerAlias = alias,
       timeouts = timeouts,
-      traceContextPropagation = TracingConfig.Propagation.Enabled,
+      params = ClientChannelParams.ForTesting
+        .copy(traceContextPropagation = TracingConfig.Propagation.Enabled),
       loggerFactory = loggerFactory,
     )(env.executionContext)
   }

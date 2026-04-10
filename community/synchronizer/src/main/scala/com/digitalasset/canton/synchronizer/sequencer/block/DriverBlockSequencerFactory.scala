@@ -134,6 +134,7 @@ class DriverBlockSequencerFactory[C](
       rateLimitManager,
       orderingTimeFixMode,
       lsuSequencingBounds,
+      drSequencingTimeUpperBound = nodeParameters.drSequencingTimeUpperBound,
       nodeParameters.processingTimeouts,
       nodeParameters.loggingConfig.eventDetails,
       nodeParameters.loggingConfig.api.printer,

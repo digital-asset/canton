@@ -38,7 +38,7 @@ object Endpoint {
     */
   def fromUris(
       connections: NonEmpty[Seq[URI]]
-  ): Either[String, (NonEmpty[Seq[Endpoint]], Boolean)] =
+  ): Either[String, (NonEmpty[Set[Endpoint]], Boolean)] =
     for {
       endpointsWithTlsFlag <- connections.toNEF.traverse(fromUri)
       (endpoints, tlsFlags) = (endpointsWithTlsFlag.map(_._1), endpointsWithTlsFlag.map(_._2))
@@ -50,7 +50,7 @@ object Endpoint {
           s"All synchronizer connections must either use TLS or all not use TLS",
         )
       )
-    } yield (endpoints, useTls)
+    } yield (endpoints.toSet, useTls)
 
   private def fromUri(uri: URI): Either[String, (Endpoint, Boolean)] = {
     val (scheme, host, portO) = (

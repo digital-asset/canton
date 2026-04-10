@@ -417,7 +417,7 @@ object BuildCommon {
       )
 
       val damlLfLedgerApiValueProto: Seq[(File, String)] = packProtobufSourceFiles(
-        "community" / "daml-lf" / "ledger-api-value",
+        "community" / "daml-lf" / "ledger-api-value-proto",
         "ledger-api-value",
       )
 
@@ -477,6 +477,11 @@ object BuildCommon {
     case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
+    case PathList("META-INF", "okhttp.kotlin_module") => MergeStrategy.first
+    // TODO(i31788): Remove this merge strategy once zipkin exporter is removed
+    case PathList("okhttp3", _ @_*) => MergeStrategy.first
+    // h2 and opentelemetry-runtime-telemetry both provide native-image reflect-config.json, discard both as we don't use native-image
+    case PathList("META-INF", "native-image", "reflect-config.json") => MergeStrategy.discard
     case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }
@@ -1050,6 +1055,8 @@ object BuildCommon {
         excludeTranscodeConflictingDependencies,
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
         Test / scalacOptions ++= Seq("-Wconf:msg=match may not be exhaustive:s"),
+        Test / testOptions -= Tests.Argument("-oCHPGFK"),
+        Test / testOptions += Tests.Argument("-oDHPGFK"),
       )
       .dependsOn(
         DamlProjects.`daml-lf-archive`,
@@ -1904,7 +1911,7 @@ object BuildCommon {
       .dependsOn(
         `transcode-schema`,
         `transcode-test-utils` % Test,
-        DamlProjects.`ledger-api-value`,
+        DamlProjects.`ledger-api-value-proto`,
       )
       .settings(
         sharedCommunitySettings,
@@ -2623,6 +2630,7 @@ object BuildCommon {
     lazy val allProjects = Set(
       `daml-jwt`,
       `google-common-protos-scala`,
+      `ledger-api-value-proto`,
       `ledger-api-value`,
       `ledger-api-proto`,
       `ledger-api-scala`,
@@ -3196,39 +3204,64 @@ object BuildCommon {
         ),
       )
 
-    lazy val `ledger-api-value` = project
-      .in(file("community/daml-lf/ledger-api-value"))
-      .disablePlugins(WartRemover)
-      .dependsOn(
-        `google-common-protos-scala`
+    // Java-only version of `ledger-api-value`
+    lazy val `ledger-api-value-proto` = project
+      .in(file("community/daml-lf/ledger-api-value-proto"))
+      .disablePlugins(
+        ScalafmtPlugin,
+        WartRemover,
       )
       .settings(
-        libsScalaSettings,
-        scalacOptions += "-Wconf:src=protobuf/.*:silent",
-        javacOptions += "-Xlint:-options",
+        sharedSettings,
+        publishCommunitySettings,
+        javaOnlySettings,
+        organization := "com.daml",
         publish / skip := false,
-        Compile / bufLintCheck := {},
-        coverageEnabled := false,
+        Compile / bufLintCheck := (Compile / bufLintCheck)
+          .dependsOn(
+            // these proto files are loaded by buf.work.yaml
+            `google-common-protos-scala` / PB.unpackDependencies
+          )
+          .value,
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value,
-          scalapb.gen(
-            flatPackage = false,
-            javaConversions = true,
-          ) -> (Compile / sourceManaged).value / "protobuf",
           PB.gens.plugin("doc") -> (Compile / sourceManaged).value,
         ),
-        Compile / packageBin / packageOptions +=
-          Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/daml/ledger/api/v2/value.proto"
-          ),
         Compile / PB.protocOptions := Seq(
           // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
           "--doc_opt=" + file("community/docs/rst_lapi_value.tmpl") + "," + "proto-docs.rst.inc"
         ),
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
-          protoc_gen_doc asProtocPlugin ()
+          google_common_protos % "protobuf",
+          protoc_gen_doc.asProtocPlugin(),
         ),
+      )
+
+    lazy val `ledger-api-value` = project
+      .in(file("community/daml-lf/ledger-api-value"))
+      .disablePlugins(BufPlugin, WartRemover)
+      .dependsOn(
+        `google-common-protos-scala`,
+        `ledger-api-value-proto`,
+      )
+      .settings(
+        libsScalaSettings,
+        scalacOptions += "-Wconf:src=protobuf/.*:silent",
+        javacOptions += "-Xlint:-options",
+        publish / skip := false,
+        Compile / PB.protoSources ++= (`ledger-api-value-proto` / Compile / PB.protoSources).value,
+        Compile / PB.targets := Seq(
+          scalapb.gen(
+            flatPackage = false,
+            javaConversions = true,
+          ) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        Compile / packageBin / packageOptions +=
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/daml/ledger/api/scalapb/package.proto"
+          ),
+        addProtobufFilesToHeaderCheck(Compile),
       )
 
     val lf_scalaopts_stricter = List(
@@ -4112,24 +4145,21 @@ object BuildCommon {
 
     lazy val `ledger-api-proto` = project
       .in(file("community/ledger-api-proto"))
-      .dependsOn(
-        CommunityProjects.`wartremover-annotations`,
-        `google-common-protos-scala`,
-        `ledger-api-value`,
-      )
+      .dependsOn(`ledger-api-value-proto`)
       .disablePlugins(
-        ScalafmtPlugin
+        ScalafmtPlugin,
+        WartRemover,
       )
       .settings(
-        sharedCantonCommunitySettings,
+        sharedSettings,
+        publishCommunitySettings,
         javaOnlySettings,
         organization := "com.daml",
         publish / skip := false,
         Compile / bufLintCheck := (Compile / bufLintCheck)
           .dependsOn(
             // these proto files are loaded by buf.work.yaml
-            `google-common-protos-scala` / PB.unpackDependencies,
-            `ledger-api-value` / PB.unpackDependencies,
+            `google-common-protos-scala` / PB.unpackDependencies
           )
           .value,
         Compile / PB.targets := Seq(
@@ -4186,7 +4216,7 @@ object BuildCommon {
       .in(file("community/bindings-java"))
       .dependsOn(
         `ledger-api-proto`,
-        `ledger-api-value`,
+        `ledger-api-value-proto`,
         CommunityProjects.`community-testing` % Test,
       )
       .settings(

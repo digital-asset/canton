@@ -6,8 +6,6 @@
 module FetchByKey where
 
 import Daml.Script
-import Prelude hiding (lookupByKey)
-import DA.ContractKeys (lookupByKey)
 
 template WithKey
   with

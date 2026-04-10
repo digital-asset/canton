@@ -103,6 +103,7 @@ class ParallelIndexerSubscriptionSpec
   )
 
   private val someSynchronizerId: SynchronizerId = SynchronizerId.tryFromString("x::synchronizerId")
+  private val someTrafficCost: Option[Long] = Some(31000L)
   private val someSynchronizerId2: SynchronizerId =
     SynchronizerId.tryFromString("x::synchronizerId2")
   private val someSynchronizerId3: SynchronizerId =
@@ -155,6 +156,7 @@ class ParallelIndexerSubscriptionSpec
     notPersistedContractId = hashCid("1"),
     internal_contract_id = 1,
     create_key_hash = None,
+    traffic_cost = someTrafficCost,
   )
 
   private val someEventDeactivate = DbDto.EventDeactivate(
@@ -190,6 +192,7 @@ class ParallelIndexerSubscriptionSpec
     package_id = Ref.PackageId.assertFromString("p"),
     stakeholders = Set.empty,
     ledger_effective_time = None,
+    traffic_cost = someTrafficCost,
   )
 
   private val someEventWitnessed = DbDto.EventVariousWitnessed(
@@ -221,6 +224,7 @@ class ParallelIndexerSubscriptionSpec
     template_id = None,
     package_id = None,
     ledger_effective_time = None,
+    traffic_cost = someTrafficCost,
   )
 
   private val someCompletion = DbDto.CommandCompletion(

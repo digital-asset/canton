@@ -37,7 +37,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   OutputEpochMetadata,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.memory.GenericInMemoryOutputMetadataStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.SimpleLeaderSelectionPolicy
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.{
+  BlacklistLeaderSelectionPolicyState,
+  LeaderSelectionInitializer,
+  LeaderSelectionPolicy,
+  SimpleLeaderSelectionPolicy,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime.MinimumBlockTimeGranularity
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -52,6 +57,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
+  EpochLength,
   EpochNumber,
   ViewNumber,
 }
@@ -102,7 +108,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfTimestamp}
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.Sink
 import org.mockito.Mockito.clearInvocations
@@ -308,6 +314,9 @@ class OutputModuleTest
       when(
         orderedBlocksReader.loadOrderedBlocks(initialBlockNumber = BlockNumber.First)(traceContext)
       ).thenReturn(() => Seq(initialBlock))
+      when(
+        orderedBlocksReader.loadEpochInfo(EpochNumber.First)(traceContext)
+      ).thenReturn(() => None)
       val outputAfterRestart =
         createOutputModule[ProgrammableUnitTestEnv](
           initialHeight = secondBlockNumber,
@@ -356,7 +365,7 @@ class OutputModuleTest
 
     "recover from the correct block" in {
       Table(
-        "Last stored consecutive block number" -> "Initial block number to provide",
+        "Last stored completed block number" -> "Initial block number to provide",
         None -> BlockNumber.First,
         None -> secondBlockNumber,
         Some(BlockNumber.First) -> BlockNumber.First,
@@ -365,7 +374,7 @@ class OutputModuleTest
         Some(secondBlockNumber) -> secondBlockNumber,
       ).forEvery {
         case (
-              lastStoredConsecutiveBlockNumber: Option[BlockNumber],
+              lastStoredCompletedBlock: Option[BlockNumber],
               initialBlockNumberToProvide,
             ) =>
           implicit val context
@@ -379,7 +388,7 @@ class OutputModuleTest
               else Some(BlockNumber(initialBlockNumberToProvide - 1))
             Seq(
               lastAcknowledgedBlockNumber.getOrElse(BlockNumber.First),
-              lastStoredConsecutiveBlockNumber.getOrElse(BlockNumber.First),
+              lastStoredCompletedBlock.getOrElse(BlockNumber.First),
             ).min
           }
 
@@ -387,8 +396,8 @@ class OutputModuleTest
           when(store.getEpoch(EpochNumber.First)(traceContext)).thenReturn(() =>
             Some(OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true))
           )
-          when(store.getLastConsecutiveBlock(traceContext)).thenReturn(() =>
-            lastStoredConsecutiveBlockNumber.map { blockNumber =>
+          when(store.getLastBlockInLatestCompletedEpoch(traceContext)).thenReturn(() =>
+            lastStoredCompletedBlock.map { blockNumber =>
               OutputBlockMetadata(
                 epochNumber = secondEpochNumber,
                 blockNumber = blockNumber,
@@ -396,8 +405,17 @@ class OutputModuleTest
               )
             }
           )
+          when(store.getBlock(recoverFromBlockNumber)(traceContext)).thenReturn(() =>
+            Some(
+              OutputBlockMetadata(
+                epochNumber = secondEpochNumber,
+                blockNumber = recoverFromBlockNumber,
+                blockBftTime = aTimestamp,
+              )
+            )
+          )
           val lastStoredBlock =
-            lastStoredConsecutiveBlockNumber.map(blockNumber =>
+            lastStoredCompletedBlock.map(blockNumber =>
               anOrderedBlockForOutput(blockNumber = blockNumber)
             )
           // The output module will recover from the recovery block, if any, to rebuilt its volatile state.
@@ -405,6 +423,9 @@ class OutputModuleTest
           when(
             orderedBlocksReader.loadOrderedBlocks(recoverFromBlockNumber)(traceContext)
           ).thenReturn(() => Seq(lastStoredBlock).flatten)
+          when(
+            orderedBlocksReader.loadEpochInfo(secondEpochNumber)(traceContext)
+          ).thenReturn(() => None)
           // The previous block's BFT time will be rehydrated for BFT time computation.
           val previousStoredBlockNumber = BlockNumber(recoverFromBlockNumber - 1)
           val previousStoredBlockBftTime = aTimestamp.minusSeconds(1)
@@ -427,7 +448,7 @@ class OutputModuleTest
           )()
           output.receive(Output.Start)
 
-          verify(store, times(1)).getLastConsecutiveBlock(traceContext)
+          verify(store, times(1)).getLastBlockInLatestCompletedEpoch(traceContext)
           verify(orderedBlocksReader, times(1))
             .loadOrderedBlocks(initialBlockNumber = recoverFromBlockNumber)(
               traceContext
@@ -448,6 +469,112 @@ class OutputModuleTest
           )
           output.currentEpochCouldAlterOrderingTopology shouldBe true
       }
+    }
+
+    "uses the correct leader selection policy when restarting from older epoch" in {
+      val sequencerBlockIsAt = BlockNumber(101L)
+      val sequencerEpochIsAt = EpochNumber(10L)
+      val sequencerFirstBlockOfEpoch = BlockNumber(75L)
+      val sequencerTimestampOfEpoch = CantonTimestamp(LfTimestamp(10000L))
+      val outputBlockIsAt = BlockNumber(200L)
+      val outputEpochIsAt = EpochNumber(20L)
+
+      val previousBlockNumber = BlockNumber(sequencerFirstBlockOfEpoch - 1)
+      val previousTimestamp = CantonTimestamp(LfTimestamp(9000L))
+
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+      val store = mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
+      val epochStoreReader = mock[EpochStoreReader[ProgrammableUnitTestEnv]]
+      val orderingTopologyProvider = mock[OrderingTopologyProvider[ProgrammableUnitTestEnv]]
+      val leaderSelectionInitializer = mock[LeaderSelectionInitializer[ProgrammableUnitTestEnv]]
+      val output = createOutputModule(
+        initialHeight = sequencerBlockIsAt,
+        initialEpochWeHaveLeaderSelectionStateFor = outputEpochIsAt,
+        orderingTopologyProvider = orderingTopologyProvider,
+        store = store,
+        epochStoreReader = epochStoreReader,
+        leaderSelectionInitializer = Some(leaderSelectionInitializer),
+      )()
+
+      val blacklistState = BlacklistLeaderSelectionPolicyState.create(
+        sequencerEpochIsAt,
+        sequencerFirstBlockOfEpoch,
+        Map.empty,
+      )(testedProtocolVersion)
+      val orderingTopology = OrderingTopology.forTesting(nodes = Set(BftNodeId("node1")))
+      val oldCryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
+      val policy = mock[LeaderSelectionPolicy[ProgrammableUnitTestEnv]]
+
+      when(store.getLastBlockInLatestCompletedEpoch(traceContext)).thenReturn(() =>
+        Some(
+          OutputBlockMetadata(
+            outputEpochIsAt,
+            outputBlockIsAt,
+            aTimestamp,
+          )
+        )
+      )
+      when(store.getBlock(BlockNumber(sequencerBlockIsAt - 1))(traceContext)).thenReturn(() =>
+        Some(
+          OutputBlockMetadata(
+            sequencerEpochIsAt,
+            sequencerBlockIsAt,
+            aTimestamp,
+          )
+        )
+      )
+      when(epochStoreReader.loadEpochInfo(sequencerEpochIsAt)).thenReturn(() =>
+        Some(
+          EpochInfo(
+            sequencerEpochIsAt,
+            sequencerFirstBlockOfEpoch,
+            EpochLength(10), // arbitrary
+            TopologyActivationTime(sequencerTimestampOfEpoch),
+          )
+        )
+      )
+      when(epochStoreReader.loadOrderedBlocks(sequencerFirstBlockOfEpoch)).thenReturn(() =>
+        Seq(
+          anOrderedBlockForOutput(sequencerEpochIsAt, sequencerBlockIsAt)
+        )
+      )
+      when(store.getBlock(previousBlockNumber))
+        .thenReturn(() =>
+          Some(
+            OutputBlockMetadata(
+              EpochNumber(sequencerEpochIsAt - 1),
+              previousBlockNumber,
+              previousTimestamp,
+            )
+          )
+        )
+      when(store.getEpoch(sequencerEpochIsAt)).thenReturn(() =>
+        Some(
+          OutputEpochMetadata(
+            sequencerEpochIsAt,
+            couldAlterOrderingTopology = true,
+          )
+        )
+      )
+      when(
+        orderingTopologyProvider.getOrderingTopologyAt(
+          Some(TopologyActivationTime(sequencerTimestampOfEpoch)),
+          checkPendingChanges = true,
+        )
+      ).thenReturn(() => Some(orderingTopology -> oldCryptoProvider))
+      when(store.getLeaderSelectionPolicyState(sequencerEpochIsAt)).thenReturn(() =>
+        Some(blacklistState)
+      )
+      when(leaderSelectionInitializer.leaderSelectionPolicy(blacklistState, orderingTopology))
+        .thenReturn(policy)
+
+      output.receive(Output.Start)
+
+      output.previousStoredBlock.getBlockNumberAndBftTime shouldBe Some(
+        previousBlockNumber -> previousTimestamp
+      )
+      output.leaderSelectionPolicy shouldBe policy
     }
 
     "allow subscription from the initial block" in {
@@ -1348,12 +1475,13 @@ class OutputModuleTest
 
   private def createOutputModule[E <: BaseIgnoringUnitTestEnv[E]](
       initialHeight: Long = BlockNumber.First,
-      initialEpochForTopology: Long = Bootstrap.BootstrapEpochNumber,
+      initialEpochWeHaveLeaderSelectionStateFor: Long = Bootstrap.BootstrapEpochNumber,
       initialOrderingTopology: OrderingTopology = OrderingTopology.forTesting(nodes = Set.empty),
       availabilityRef: ModuleRef[Availability.Message[E]] = fakeModuleExpectingSilence,
       consensusRef: ModuleRef[Consensus.Message[E]] = fakeModuleExpectingSilence,
       store: OutputMetadataStore[E] = createOutputMetadataStore[E],
       epochStoreReader: EpochStoreReader[E] = createEpochStore[E],
+      leaderSelectionInitializer: Option[LeaderSelectionInitializer[E]] = None,
       orderingTopologyProvider: OrderingTopologyProvider[E] = new FakeOrderingTopologyProvider[E],
       previousBftTimeForOnboarding: Option[CantonTimestamp] = None,
       areTherePendingTopologyChangesInOnboardingEpoch: Boolean = false,
@@ -1361,11 +1489,12 @@ class OutputModuleTest
   )(
       blockSubscription: BlockSubscription = new EmptyBlockSubscription
   ): OutputModule[E] = {
+    val thisNode = BftNodeId("node1")
     val startupState =
       StartupState[E](
-        BftNodeId("node1"),
+        thisNode,
         BlockNumber(initialHeight),
-        EpochNumber(initialEpochForTopology),
+        EpochNumber(initialEpochWeHaveLeaderSelectionStateFor),
         previousBftTimeForOnboarding,
         areTherePendingTopologyChangesInOnboardingEpoch,
         failingCryptoProvider,
@@ -1373,9 +1502,22 @@ class OutputModuleTest
         initialLowerBound = None,
         new SimpleLeaderSelectionPolicy[E],
       )
+    val config = new BftBlockOrdererConfig()
     new OutputModule(
       startupState,
       orderingTopologyProvider,
+      leaderSelectionInitializer.getOrElse(
+        LeaderSelectionInitializer.create(
+          thisNode,
+          config,
+          testedProtocolVersion,
+          store,
+          timeouts,
+          error => _ => fail(error),
+          SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+          loggerFactory,
+        )
+      ),
       store,
       epochStoreReader,
       blockSubscription,
@@ -1386,7 +1528,7 @@ class OutputModuleTest
       timeouts,
       requestInspector,
     )(
-      new BftBlockOrdererConfig(),
+      config,
       synchronizerProtocolVersion,
       MetricsContext.Empty,
       NoReportingTracerProvider.tracer,

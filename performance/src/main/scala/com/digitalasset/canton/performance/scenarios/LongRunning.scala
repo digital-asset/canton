@@ -93,7 +93,8 @@ object LongRunning {
     myLogger.info(s"Available participants: ${participants.all.mkString(", ")}")
 
     val synchronizersConf =
-      if (singleSynchronizer) SynchronizersConfiguration.singleSynchronizer
+      if (singleSynchronizer || sequencers.all.sizeIs == 1)
+        SynchronizersConfiguration.singleSynchronizer
       else {
         val synchronizerName =
           // participant only mode
@@ -256,7 +257,7 @@ object LongRunning {
       events = List(),
       issuersPerNode = issuersPerNode,
       tradersPerNode = tradersPerNode,
-      settings = RateSettings(SubmissionRateSettings.TargetLatency(), batchSize = batchSize),
+      settings = RateSettings(SubmissionRateSettings.TargetLatencyNew(), batchSize = batchSize),
       baseSynchronizerId = baseSynchronizer.logical,
       otherSynchronizers = otherSynchronizers.map(_.logical),
       otherSynchronizersRatio = otherSynchronizersRatio,

@@ -229,7 +229,7 @@ class SequencerReader(
             }
 
             logger.debug(
-              s"For the  safeLatestTopologyClientRecipientTimestamp using max($fromStoreOrLowerBound, $lowerBoundSequencingTimeForMember)"
+              s"For the safeLatestTopologyClientRecipientTimestamp using max($fromStoreOrLowerBound, $lowerBoundSequencingTimeForMember)"
             )
             fromStoreOrLowerBound.max(lowerBoundSequencingTimeForMember)
           }
