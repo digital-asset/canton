@@ -4,6 +4,22 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
+## Until 2026-04-08
+### Minor Improvements
+- Instead of blocking directly, the `Mutex` class used throughout the codebase first does a spin-wait to avoid too much rescheduling of threads.
+- Allow customizing Canton's threadpool configuration in `canton.parameters.threading`. See `com.digitalasset.canton.config.ThreadingConfig`.
+- Topology transactions sent by sequencers are now exempt from rate limiting because sequencers broadcast time-advancing messages to efficiently activate pending topology transactions for members.
+  Other transaction types (e.g., confirmation requests) submitted by sequencers remain rate limited.
+
+### Bug Fixes
+- Now the nodes will correctly amplify on observing a `SEQUENCER_MAX_SEQUENCING_TIME_TOO_FAR` error code.
+  Previously nodes using BFT sequencer connections and request amplification configured would fail with `SEQUENCER_SUBMISSION_REQUEST_REFUSED`
+  error code without further amplification despite other sequencers potentially accepting the transaction.
+  Prior behaviour can be restored by setting `canton.sequencers.<node>.sequencer-client.amplify-on-max-sequencing-time-too-far` to `false`.
+    - *BREAKING:* `SequencerService.sendAsync` gRPC service will now return CantonError code `SEQUENCER_MAX_SEQUENCING_TIME_TOO_FAR`
+      instead of a generic code `SEQUENCER_SUBMISSION_REQUEST_REFUSED` for transactions with a `maxSequencingTime` too far in the future
+      from the sequencer view (usually when sequencer is catching up and is behind on processing).
+
 ## Until 2026-04-01
 ### Minor Improvements
 - Added a flag that makes the ACS commitment processor to always use a topology snapshot that goes directly to the topology store without any intermediate caching layers:

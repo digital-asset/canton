@@ -278,7 +278,7 @@ class BlockSequencer(
           )
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
             submission.maxSequencingTime < maxSequencingTimeUpperBound,
-            SequencerErrors.SubmissionRequestRefused(
+            SequencerErrors.MaxSequencingTimeTooFar(
               s"Max sequencing time ${submission.maxSequencingTime} for submission with id ${submission.messageId} is too far in the future, currently bounded at $maxSequencingTimeUpperBound"
             ): CantonBaseError,
           )
@@ -339,7 +339,7 @@ class BlockSequencer(
   ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
     EitherT
       .fromEither[FutureUnlessShutdown](
-        throughputCap.shouldRejectTransaction(submission.requestType, submission.sender, 0)
+        throughputCap.shouldAllowTransaction(submission.requestType, submission.sender, 0)
       )
       .leftMap { msg =>
         SequencerErrors.Overloaded(

@@ -25,7 +25,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroug
   SubmissionRequestEntry,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.google.common.annotations.VisibleForTesting
@@ -123,7 +123,7 @@ class BlockSequencerThroughputCap(
   private val enabled: AtomicBoolean = new AtomicBoolean(config.enabled)
   private var cancellable: Option[Cancellable] = None
 
-  def shouldRejectTransaction(
+  def shouldAllowTransaction(
       requestType: SubmissionRequestType,
       member: Member,
       requestLevel: Int,
@@ -133,7 +133,7 @@ class BlockSequencerThroughputCap(
       perMessageTypeCaps
         .get()
         .get(requestType)
-        .map(_.shouldRejectTransaction(member, requestLevel))
+        .map(_.shouldAllowTransaction(member, requestLevel))
         .getOrElse(Right(()))
 
   def addBlockUpdate(
@@ -284,16 +284,22 @@ object BlockSequencerThroughputCap {
         parentMetrics.openTelemetryMetricsFactory,
       )
 
-    def shouldRejectTransaction(member: Member, requestLevel: Int): Either[String, Unit] = {
-      val key = ThroughputCapKey(member)
+    def shouldAllowTransaction(member: Member, requestLevel: Int): Either[String, Unit] =
+      // Sequencers are exempt from rate limiting for topology transactions (because they broadcast them)
+      // See issue #29485
+      member match {
+        case _: SequencerId if requestType == SubmissionRequestType.TopologyTransaction =>
+          Right(())
+        case _ =>
+          val key = ThroughputCapKey(member)
 
-      if (!initialized) Right(())
-      else
-        for {
-          _ <- aboveMaxRate(key, requestLevel)
-          _ <- aboveThrottledRate(key)
-        } yield ()
-    }
+          if (!initialized) Right(())
+          else
+            for {
+              _ <- aboveMaxRate(key, requestLevel)
+              _ <- aboveThrottledRate(key)
+            } yield ()
+      }
 
     private def aboveMaxRate(key: ThroughputCapKey, requestLevel: Int): Either[String, Unit] = {
       val usageByMember = memberUsage.getOrElse(key, ThroughputCapValue(0, 0)) // N_i

@@ -426,7 +426,7 @@ abstract class SequencerApiTest
                 "A sendAsync of submission with maxSequencingTime in the past"
               )
           } yield {
-            tooFarInTheFuture.code.id shouldBe SequencerErrors.SubmissionRequestRefused.id
+            tooFarInTheFuture.code.id shouldBe SequencerErrors.MaxSequencingTimeTooFar.id
             tooFarInTheFuture.cause should (
               include("is too far in the future") and
                 include("Max sequencing time")

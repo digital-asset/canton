@@ -141,7 +141,7 @@ abstract class TransactionTimeoutsIntegrationTest
         submissionRequest.sender match {
           case _: MediatorId =>
             env.environment.simClock.value.advance(Duration.ofSeconds(10))
-            SendDecision.Reject
+            SendDecision.Reject()
           case _: ParticipantId | _: SequencerId => SendDecision.Process
         }
     })

@@ -147,6 +147,10 @@ object Threading {
       logger: Logger,
       parallelism: PositiveInt,
       maxExtraThreads: PositiveInt = PositiveInt.tryCreate(256),
+      keepAliveMillis: PositiveInt = PositiveInt.tryCreate(60000),
+      corePoolSize: Option[PositiveInt] = None,
+      maxPoolSize: Option[PositiveInt] = None,
+      minRunnable: Option[PositiveInt] = None,
       exitOnFatal: Boolean = true,
   ): ExecutionContextIdlenessExecutorService = {
     val reporter = createReporter(name, logger, exitOnFatal)(_)
@@ -165,7 +169,17 @@ object Threading {
       .newInstance(Boolean.box(true), Int.box(maxExtraThreads.value), name, handler)
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
-    val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
+    val forkJoinPool =
+      createForkJoinPool(
+        parallelism,
+        keepAliveMillis,
+        threadFactory,
+        handler,
+        logger,
+        corePoolSize,
+        maxPoolSize,
+        minRunnable,
+      )
 
     new ForkJoinIdlenessExecutorService(forkJoinPool, forkJoinPool, reporter, name)
   }
@@ -178,9 +192,13 @@ object Threading {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private def createForkJoinPool(
       parallelism: PositiveInt,
+      keepAliveMillis: PositiveInt,
       threadFactory: ForkJoinPool.ForkJoinWorkerThreadFactory,
       handler: Thread.UncaughtExceptionHandler,
       logger: Logger,
+      corePoolSize: Option[PositiveInt],
+      maxPoolSize: Option[PositiveInt],
+      minRunnable: Option[PositiveInt],
   ): ForkJoinPool = {
     val tunedParallelism =
       if (parallelism >= minParallelismForForkJoinPool) parallelism
@@ -212,16 +230,16 @@ object Threading {
         Int.box(tunedParallelism.unwrap),
         threadFactory,
         handler,
-        Boolean.box(true),
-        Int.box(tunedParallelism.unwrap),
-        Int.box(Int.MaxValue),
+        true,
+        corePoolSize.getOrElse(tunedParallelism).unwrap,
+        maxPoolSize.map(_.value).getOrElse(Int.MaxValue),
         //
         // Choosing tunedParallelism here instead of the default of 1.
         // With the default, we would get only 1 running thread in the presence of blocking calls.
-        Int.box(tunedParallelism.unwrap),
+        minRunnable.getOrElse(tunedParallelism).unwrap,
         null,
-        Long.box(60),
-        TimeUnit.SECONDS,
+        keepAliveMillis.value.toLong,
+        TimeUnit.MILLISECONDS,
       )
     } catch {
       case _: NoSuchMethodException =>
