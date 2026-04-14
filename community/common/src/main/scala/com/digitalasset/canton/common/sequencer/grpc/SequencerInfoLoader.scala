@@ -49,6 +49,7 @@ import scala.annotation.{nowarn, tailrec}
 import scala.concurrent.{ExecutionContextExecutor, Promise}
 
 class SequencerInfoLoader(
+    member: Member,
     timeouts: ProcessingTimeout,
     traceContextPropagation: TracingConfig.Propagation,
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
@@ -65,6 +66,7 @@ class SequencerInfoLoader(
   private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
     (synchronizerAlias: SynchronizerAlias, config: SequencerConnection) =>
       SequencerConnectClient(
+        member,
         synchronizerAlias,
         config,
         timeouts,

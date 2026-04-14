@@ -862,6 +862,7 @@ private[sync] class SynchronizerConnectionsManager(
         sequencerConnectionsWithoutId
           .map(conn =>
             SequencerConnectClient(
+              participantId,
               alias,
               conn,
               timeouts,
@@ -1414,9 +1415,7 @@ private[sync] class SynchronizerConnectionsManager(
                   Set(party),
                   participantId = request.participantId.getOrElse(participantId),
                 )
-                .map(
-                  _.get(party)
-                )
+                .map(_.get(party))
             )
           } yield attributesO
             .map(attributes =>

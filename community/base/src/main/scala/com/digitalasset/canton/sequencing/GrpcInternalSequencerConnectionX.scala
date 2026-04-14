@@ -503,6 +503,7 @@ object GrpcInternalSequencerConnectionX {
 }
 
 class GrpcInternalSequencerConnectionXFactory(
+    member: Member,
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
     keepAliveClientConfigO: Option[KeepAliveClientConfig],
@@ -522,7 +523,7 @@ class GrpcInternalSequencerConnectionXFactory(
       clientProtocolVersions,
       minimumProtocolVersion,
       keepAliveClientConfigO,
-      stubFactory = new SequencerConnectionXStubFactoryImpl(loggerFactory),
+      stubFactory = new SequencerConnectionXStubFactoryImpl(member, loggerFactory),
       metrics,
       metricsContext,
       futureSupervisor,
