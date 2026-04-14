@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.validation.ExampleTransactionConformanceTest.HashReInterpretationCounter
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
-import com.digitalasset.canton.participant.store.ContractAndKeyLookup
+import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.{HasReinterpret, ReInterpretationResult}
 import com.digitalasset.canton.protocol.*
@@ -34,7 +34,7 @@ import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
   LfCommand,
-  LfKeyResolver,
+  LfGlobalKeyMapping,
   LfPackageName,
   LfPackageVersion,
   LfPartyId,
@@ -91,7 +91,7 @@ class ExampleTransactionConformanceTest
       with HashReInterpretationCounter {
 
       override def reinterpret(
-          contracts: ContractAndKeyLookup,
+          contracts: ReplayContractLookup,
           contractAuthenticator: ContractAuthenticatorFn,
           submitters: Set[LfPartyId],
           command: LfCommand,
@@ -135,12 +135,12 @@ class ExampleTransactionConformanceTest
 
     def viewsWithNoInputKeys(
         rootViews: Seq[FullTransactionViewTree]
-    ): NonEmpty[Seq[(FullTransactionViewTree, Seq[(TransactionView, LfKeyResolver)])]] =
+    ): NonEmpty[Seq[(FullTransactionViewTree, Seq[(TransactionView, LfGlobalKeyMapping)])]] =
       NonEmptyUtil.fromUnsafe(rootViews.map { viewTree =>
         // Include resolvers for all the subviews
         val resolvers =
           viewTree.view.allSubviewsWithPosition(viewTree.viewPosition).map { case (view, _) =>
-            view -> (Map.empty: LfKeyResolver)
+            view -> (Map.empty: LfGlobalKeyMapping)
           }
         (viewTree, resolvers)
       })
@@ -172,7 +172,7 @@ class ExampleTransactionConformanceTest
 
     def check(
         mcc: ModelConformanceChecker,
-        views: NonEmpty[Seq[(FullTransactionViewTree, Seq[(TransactionView, LfKeyResolver)])]],
+        views: NonEmpty[Seq[(FullTransactionViewTree, Seq[(TransactionView, LfGlobalKeyMapping)])]],
         ips: TopologySnapshot = factory.topologySnapshot,
         reInterpretedTopLevelViews: ModelConformanceChecker.LazyAsyncReInterpretationMap = Map.empty,
     ): EitherT[Future, ErrorWithSubTransaction[Unit], Result] = {

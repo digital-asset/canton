@@ -147,7 +147,7 @@ class BlockSequencerStateAsyncWriterTest
     FreshInFlightAggregation(
       CantonTimestamp.Epoch,
       AggregationRule(
-        eligibleMembers = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
+        eligibleSenders = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
         threshold = PositiveInt.one,
         protocolVersion = testedProtocolVersion,
       ),

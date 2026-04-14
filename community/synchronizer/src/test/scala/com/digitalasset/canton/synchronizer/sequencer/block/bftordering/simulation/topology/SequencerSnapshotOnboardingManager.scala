@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SequencerSnapshotOnboardingManager.{
   BftOnboardingData,
   DefaultEpsilonForSchedulingCommand,
+  WaitingConnection,
 }
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -68,7 +69,7 @@ class SequencerSnapshotOnboardingManager(
 
   private var nodesToStart = Seq.empty[BftNodeId]
 
-  private var nodesToRetry = Seq.empty[BftNodeId]
+  private var connectionsToRetry = Seq.empty[WaitingConnection]
 
   override def provide(
       reasonForProvide: ReasonForProvide,
@@ -121,14 +122,19 @@ class SequencerSnapshotOnboardingManager(
 
     nodesToStart = Seq.empty
 
-    val commandsToRetryNodes: Seq[(Command, FiniteDuration)] = nodesToRetry.map { sequencerId =>
-      PrepareOnboarding(
-        sequencerId
-      ) -> topologySettings.retryBecomingOnlineInterval
-    }
-    nodesToRetry = Seq.empty
+    val (endpointsToRetry, stillWaiting) = connectionsToRetry.span(_.deadline.isBefore(timestamp))
+    connectionsToRetry = stillWaiting ++ endpointsToRetry.map(waiting =>
+      waiting.copy(deadline = waiting.deadline.add(topologySettings.retryAddEndpointInterval))
+    )
+    val commandsToAddEndpoint: Seq[(Command, FiniteDuration)] =
+      endpointsToRetry.map(waitingConnection =>
+        AddEndpoint(
+          waitingConnection.endpoint,
+          waitingConnection.node,
+        ) -> DefaultEpsilonForSchedulingCommand
+      )
 
-    commandsToStartNodes ++ commandsToRetryNodes
+    commandsToStartNodes ++ commandsToAddEndpoint
   }
 
   override def machineStarted(
@@ -137,14 +143,21 @@ class SequencerSnapshotOnboardingManager(
       node: BftNodeId,
   ): Seq[(Command, FiniteDuration)] = {
     val oneWayEndpointAdditions: Seq[(Command, FiniteDuration)] = onboardedNodes.map { otherNode =>
-      AddEndpoint(myEndpoint, otherNode) -> 1.milliseconds
+      AddEndpoint(myEndpoint, otherNode) -> DefaultEpsilonForSchedulingCommand
     }
 
     val otherWayEndpointAdditions: Seq[(Command, FiniteDuration)] = onboardedNodes.map {
       otherNode =>
-        AddEndpoint(nodeToEndpoint(otherNode), node) -> 1.milliseconds
+        AddEndpoint(nodeToEndpoint(otherNode), node) -> DefaultEpsilonForSchedulingCommand
     }
 
+    val deadline = timestamp.add(topologySettings.retryAddEndpointInterval)
+    connectionsToRetry = connectionsToRetry ++ onboardedNodes.flatMap { otherNode =>
+      Seq(
+        WaitingConnection(deadline, myEndpoint, otherNode),
+        WaitingConnection(deadline, nodeToEndpoint(otherNode), node),
+      )
+    }
     onboardedNodes = node +: onboardedNodes
 
     oneWayEndpointAdditions ++ otherWayEndpointAdditions
@@ -172,10 +185,16 @@ class SequencerSnapshotOnboardingManager(
       )
   }.toSeq
 
+  @SuppressWarnings(Array("org.wartremover.warts.Return"))
   override def prepareOnboardingFor(
       at: CantonTimestamp,
       node: BftNodeId,
   ): Seq[(Command, FiniteDuration)] = {
+
+    if (nodeToSequencerSnapshotAdditionalInfo.contains(node)) {
+      return Seq.empty[(Command, FiniteDuration)]
+    }
+
     // Conservatively, find the most advanced store to increase certainty that it contains the right onboarding data.
     val nodeToAsk =
       StorageHelpers
@@ -189,7 +208,9 @@ class SequencerSnapshotOnboardingManager(
 
     val sequencerActivationTime = newlyOnboardingNodesToTimes(node)
 
-    Seq(
+    logger.info(s"Asking $nodeToAsk to produce snapshot for $node")
+
+    Seq[(Command, FiniteDuration)](
       InjectedSend(
         nodeToAsk,
         ModuleAddress.Output,
@@ -210,11 +231,12 @@ class SequencerSnapshotOnboardingManager(
                     ) // silly to convert to ByteString
                     .getOrElse(sys.error(s"Can't parse sequencerSnapshot $info"))
 
-                  if (snapshot.nodeActiveAt.contains(node)) {
+                  if (
+                    !nodeToSequencerSnapshotAdditionalInfo
+                      .contains(node) && snapshot.nodeActiveAt.contains(node)
+                  ) {
                     nodesToStart = node +: nodesToStart
                     nodeToSequencerSnapshotAdditionalInfo(node) = snapshot
-                  } else {
-                    nodesToRetry = node +: nodesToRetry
                   }
 
                 case SnapshotMessage.AdditionalInfoRetrievalError(errorMessage) =>
@@ -222,7 +244,15 @@ class SequencerSnapshotOnboardingManager(
               }
           },
         ),
-      ) -> DefaultEpsilonForSchedulingCommand
+      ) -> DefaultEpsilonForSchedulingCommand,
+      PrepareOnboarding(node) -> topologySettings.retryBecomingOnlineInterval, // schedule retries
+    )
+  }
+
+  override def connectionAdded(endpoint: P2PEndpoint, to: BftNodeId): Unit = {
+    logger.info(s"connectionAdded($endpoint, $to)")
+    connectionsToRetry = connectionsToRetry.filterNot(waitingConnection =>
+      waitingConnection.node == to && waitingConnection.endpoint == endpoint
     )
   }
 }
@@ -231,6 +261,12 @@ object SequencerSnapshotOnboardingManager {
   final case class BftOnboardingData(
       initialApplicationHeight: BlockNumber,
       snapshot: Option[SequencerSnapshotAdditionalInfo],
+  )
+
+  final case class WaitingConnection(
+      deadline: CantonTimestamp,
+      endpoint: P2PEndpoint,
+      node: BftNodeId,
   )
 
   // We make the commands take some time to go into effect, this amount is completely arbitrary

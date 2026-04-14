@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.party
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.participant.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -52,7 +52,7 @@ object PartyReplicationTargetParticipantMessage
             )
           ) =>
         ProtoConverter
-          .parseNonNegativeInt(
+          .parseNonNegativeLong(
             "initial_contract_ordinal_inclusive",
             initialContractOrdinalInclusive,
           )
@@ -63,7 +63,7 @@ object PartyReplicationTargetParticipantMessage
             )
           ) =>
         ProtoConverter
-          .parseNonNegativeInt(
+          .parseNonNegativeLong(
             "max_contract_ordinal_inclusive",
             maxContractOrdinalInclusive,
           )
@@ -75,7 +75,8 @@ object PartyReplicationTargetParticipantMessage
     def toProtoV30: v30.PartyReplicationTargetParticipantMessage.Instruction
   }
 
-  final case class Initialize(initialContractOrdinalInclusive: NonNegativeInt) extends Instruction {
+  final case class Initialize(initialContractOrdinalInclusive: NonNegativeLong)
+      extends Instruction {
     override def toProtoV30: v30.PartyReplicationTargetParticipantMessage.Instruction =
       v30.PartyReplicationTargetParticipantMessage.Instruction.Initialize(
         v30.PartyReplicationTargetParticipantMessage
@@ -83,7 +84,7 @@ object PartyReplicationTargetParticipantMessage
       )
   }
 
-  final case class SendAcsUpTo(maxContractOrdinalInclusive: NonNegativeInt) extends Instruction {
+  final case class SendAcsUpTo(maxContractOrdinalInclusive: NonNegativeLong) extends Instruction {
     override def toProtoV30: v30.PartyReplicationTargetParticipantMessage.Instruction =
       v30.PartyReplicationTargetParticipantMessage.Instruction.SendAcsUpTo(
         v30.PartyReplicationTargetParticipantMessage

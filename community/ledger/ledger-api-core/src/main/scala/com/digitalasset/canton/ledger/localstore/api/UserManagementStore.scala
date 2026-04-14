@@ -15,6 +15,7 @@ final case class UserUpdate(
     primaryPartyUpdateO: Option[Option[Ref.Party]] = None,
     isDeactivatedUpdateO: Option[Boolean] = None,
     metadataUpdate: ObjectMetaUpdate,
+    primaryPartyAuthenticationUpdateO: Option[Boolean] = None,
 )
 
 final case class ObjectMetaUpdate(

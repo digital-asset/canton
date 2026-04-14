@@ -1,0 +1,83 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module AuthFailure where
+
+import Daml.Script
+import DA.Optional(fromSome)
+
+-- Tests for various(all) different forms of authorization failure detected during execution.
+-- Five kinds of authorization failure are tested here.
+-- Two others (NoSignatories and NoControllers) are tested in separate files, because the expected error message doesn't contain any indication of which testcase causes it.
+
+template TheContract1
+  with
+    s : Party
+  where
+    signatory s
+
+t1_CreateMissingAuthorization : Script ()
+t1_CreateMissingAuthorization = script do
+  mach <- allocateParty "Mach-AuthFailure:t1_CreateMissingAuthorization"
+  ivy <- allocateParty "Ivy-AuthFailure:t1_CreateMissingAuthorization"
+  mach `submit` createCmd (TheContract1 with s = ivy)
+  abort "t1 finished"
+
+template TheContract3
+  with
+    s : Party
+  where
+    signatory s
+
+template TheContractBuilder3
+  with
+    s : Party
+    c : Party
+  where
+    signatory s
+    observer c
+    choice TheChoice : ContractId TheContract3
+      with s2 : Party
+      controller c
+      do create TheContract3 with s = s2
+
+template Test3
+  with
+    bob : Party
+    cid : ContractId TheContract3
+  where
+    signatory bob
+    choice Call3 : TheContract3
+      controller bob
+      do fetch @TheContract3 cid
+
+t3_FetchMissingAuthorization : Script ()
+t3_FetchMissingAuthorization = script do
+  alice <- allocateParty "Alice-AuthFailure:t3_FetchMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailure:t3_FetchMissingAuthorization"
+  builder <- alice `submit`
+    createCmd (TheContractBuilder3 with s = alice; c = bob)
+  -- note: we use `builder` so `cid` is visible to bob, although he is not a stakeholder
+  cid <- bob `submit`
+    exerciseCmd builder TheChoice with s2 = alice
+  disclosedCid <- fromSome <$> queryDisclosure alice cid
+  _ <- submitWithDisclosures bob [disclosedCid] (createAndExerciseCmd (Test3 bob cid) Call3)
+  abort "t3 finished"
+
+template TheContract5
+  with
+    s : Party
+  where
+    signatory s
+    choice TheChoice5 : () with
+        cs : [Party]
+      controller cs
+      do return ()
+
+t5_ExerciseMissingAuthorization : Script ()
+t5_ExerciseMissingAuthorization = script do
+  alice <- allocateParty "Alice-AuthFailure:t5_ExerciseMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailure:t5_ExerciseMissingAuthorization"
+  cid <- alice `submit` createCmd (TheContract5 with s = alice)
+  alice `submit` exerciseCmd cid TheChoice5 with cs = [bob]
+  abort "t5 finished"

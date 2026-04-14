@@ -53,8 +53,8 @@ final case class PublicServerConfig(
       PublicServerConfig.defaultNonceExpirationInterval,
     maxTokenExpirationInterval: NonNegativeFiniteDuration =
       PublicServerConfig.defaultMaxTokenExpirationInterval,
-    override val maxConcurrentStreamsPerConnection: NonNegativeInt =
-      ServerConfig.defaultMaxConcurrentStreamsPerConnection,
+    override val maxConcurrentCallsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentCallsPerConnection,
     maxAuthTokensPerMember: PositiveInt = PublicServerConfig.defaultMaxAuthTokensPerMember,
     useExponentialRandomTokenExpiration: Boolean = false,
     overrideMaxRequestSize: Option[NonNegativeInt] = None,

@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError.{
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ByteString4096, ByteString6144}
+import com.digitalasset.canton.util.{ByteString4096, ByteString6144, EitherTUtil}
 
 import scala.concurrent.ExecutionContext
 
@@ -28,6 +28,17 @@ trait EncryptedCryptoPrivateStoreHelper {
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, CryptoPrivateStoreError, StoredPrivateKey] =
     for {
+      // Guard against double-encryption: if the key already has a wrapperKeyId, it is already
+      // encrypted. Re-encrypting ciphertext would produce irrecoverably corrupted key material,
+      // because the original wrapperKeyId is overwritten and the inner encryption layer
+      // can no longer be decrypted.
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        storedKey.wrapperKeyId.isEmpty,
+        InvariantViolation(
+          storedKey.id,
+          s"attempted to encrypt an already-encrypted key (wrapper key: ${storedKey.wrapperKeyId})",
+        ),
+      )
       storedKeyData <- ByteString4096
         .create(storedKey.data)
         .leftMap[CryptoPrivateStoreError](err =>

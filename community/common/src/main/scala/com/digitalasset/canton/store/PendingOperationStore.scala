@@ -148,7 +148,8 @@ object PendingOperationStore {
       sidParser: String => Either[String, SId],
   )(implicit executionContext: ExecutionContext): PendingOperationStore[Op, SId] =
     storage match {
-      case _: MemoryStorage => new InMemoryPendingOperationStore[Op, SId](opCompanion)
+      case _: MemoryStorage =>
+        new InMemoryPendingOperationStore[Op, SId](opCompanion, loggerFactory)
       case jdbc: DbStorage =>
         new DbPendingOperationsStore[Op, SId](jdbc, timeouts, loggerFactory, opCompanion, sidParser)
     }
@@ -209,5 +210,8 @@ object PendingOperation {
       synchronizer: Synchronizer,
       key: String,
       name: NonEmptyString,
-  )
+  ) {
+    def message: String =
+      s"Cannot insert pending operation '$name' for synchronizer $synchronizer with key '$key': a different operation with the same key already exists"
+  }
 }

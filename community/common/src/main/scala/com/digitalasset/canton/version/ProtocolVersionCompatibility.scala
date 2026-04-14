@@ -13,8 +13,10 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion.InvalidProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersionCompatibility.UnsupportedVersion
+import io.grpc.Status
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -122,6 +124,8 @@ object ProtocolVersionCompatibility {
 /** Trait for errors that are returned to clients when handshake fails. */
 sealed trait HandshakeError {
   def description: String
+
+  def asStatus: Status
 }
 
 final case class MinProtocolError(
@@ -135,6 +139,8 @@ final case class MinProtocolError(
         .getOrElse("")}). " +
       s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the synchronizer and would be able to connect to the synchronizer if the minimum required version is configured to be lower."
         else ""} "
+
+  override def asStatus: Status = Status.INVALID_ARGUMENT.withDescription(description)
 }
 
 final case class VersionNotSupportedError(
@@ -142,7 +148,9 @@ final case class VersionNotSupportedError(
     clientSupportedVersions: Seq[ProtocolVersion],
 ) extends HandshakeError {
   override def description: String =
-    s"The protocol version required by the server (${server.toString}) is not among the supported protocol versions by the client $clientSupportedVersions. "
+    show"The protocol version required by the server (${server.toString}) is not among the supported protocol versions by the client: $clientSupportedVersions. "
+
+  override def asStatus: Status = Status.INVALID_ARGUMENT.withDescription(description)
 }
 
 object HandshakeErrors extends HandshakeErrorGroup {

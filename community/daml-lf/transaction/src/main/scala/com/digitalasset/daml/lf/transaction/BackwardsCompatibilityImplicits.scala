@@ -5,8 +5,7 @@ package com.digitalasset.daml.lf.transaction
 
 import com.digitalasset.daml.lf.value.Value.ContractId
 
-// TODO(#30398) Helper functions for converting between `Vector[ContractId]` and `Option[ContractId]`.
-// These are provided to support the transition from unique to non-unique contract keys.
+// These are provided to support the implementation of the legacy state machine and transaction tree, used in PV34.
 object BackwardsCompatibilityImplicits {
 
   implicit class CidVectorOps(val underlying: Vector[ContractId]) extends AnyVal {

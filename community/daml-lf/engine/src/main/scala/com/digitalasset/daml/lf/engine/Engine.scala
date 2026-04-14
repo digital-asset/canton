@@ -272,7 +272,7 @@ class Engine(
   /** Check if the given transaction is a valid result of some single-submitter command.
     *
     * Formally, for all tx, pcs, pkgs, keys:
-    *   evaluate(validate(tx, ledgerEffectiveTime)) == ResultDone(()) <==> exists cmds. evaluate(submit(cmds)) = tx
+    *   evaluate(validate(tx, ledgerEffectiveTime)) == Result.Unit <==> exists cmds. evaluate(submit(cmds)) = tx
     * where:
     *   evaluate(result) = result.consume(pcs, pkgs, keys)
     *
@@ -522,6 +522,34 @@ class Engine(
       Some(machine.transactionTrace(config.transactionTraceMaxLength))
     }
 
+    def checkAllowedDeps(deps: Set[PackageId]): Result[Unit] = {
+      val allowedLangVersions = machine.contractKeyUniqueness match {
+        case ContractStateMachine.Mode.NUCK =>
+          config.allowedLanguageVersions
+        case ContractStateMachine.Mode.NoKey =>
+          VersionRange(config.allowedLanguageVersions.min, LanguageVersion.v2_2)
+      }
+
+      val disallowedPackages =
+        deps.view
+          .map(pkgId => (pkgId, compiledPackages.signatures(pkgId).languageVersion))
+          .filterNot { case (pkgId, langVer) =>
+            (
+              (allowedLangVersions.min <= langVer || stablePackageIds(pkgId)) &&
+              langVer <= allowedLangVersions.max
+            )
+          }
+
+      disallowedPackages.headOption match {
+        case Some((pkgId, pkg)) =>
+          ResultError(
+            Error.Package.AllowedLanguageVersion(pkgId, pkg, allowedLangVersions)
+          )
+        case None =>
+          Result.Unit
+      }
+    }
+
     def finish: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
       machine.finish match {
         case Right(
@@ -624,7 +652,7 @@ class Engine(
                 ResultError(Error.Interpretation.Internal(loc, errMsg, None))
 
               case None =>
-                ResultDone((tx, meta, machine.metrics))
+                checkAllowedDeps(deps).map(_ => (tx, meta, machine.metrics))
             }
           }
         case Left(err) =>
@@ -919,7 +947,7 @@ class Engine(
           _ <-
             if (!compiledPackages.contains(pkgId))
               loadPackage(pkgId, language.Reference.Template(templateId.toRef))
-            else ResultDone.Unit
+            else Result.Unit
           sValue <- new ValueTranslator(
             compiledPackages.pkgInterface,
             forbidLocalContractIds = true,

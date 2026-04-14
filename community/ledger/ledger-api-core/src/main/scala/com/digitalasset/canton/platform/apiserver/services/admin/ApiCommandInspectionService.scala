@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin.command_inspection_service.*
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.api.services.CommandInspectionService
@@ -16,13 +15,12 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiCommandInspectionService(
     service: CommandInspectionService,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -41,7 +39,7 @@ class ApiCommandInspectionService(
       request: GetCommandStatusRequest
   ): Future[GetCommandStatusResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     logger.info(s"Received new command status request $request.")
     CommandInspectionServiceRequestValidator
       .validateCommandStatusRequest(request)(

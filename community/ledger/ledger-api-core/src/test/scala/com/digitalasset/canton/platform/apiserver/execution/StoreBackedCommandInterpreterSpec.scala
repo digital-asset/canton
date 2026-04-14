@@ -8,10 +8,16 @@ import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.ledger.api.Commands
 import com.digitalasset.canton.ledger.api.util.TimeProvider
-import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStore}
+import com.digitalasset.canton.ledger.participant.state.index.{
+  ContractKeyPage,
+  ContractState,
+  ContractStore,
+}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.InterpretationTimeExceeded
 import com.digitalasset.canton.platform.config.CommandServiceConfig
@@ -30,6 +36,8 @@ import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
+  GlobalKey,
+  NeedKeyProgression,
   NextGenContractStateMachine as ContractStateMachine,
   Node as LfNode,
 }
@@ -41,6 +49,7 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.Future
 
 class StoreBackedCommandInterpreterSpec
@@ -72,9 +81,9 @@ class StoreBackedCommandInterpreterSpec
       disclosedContracts,
     )
 
-  private def createCycleContract() = {
+  private def createCycleContract(id: String = "id") = {
     val (createTx, createMeta) =
-      testEngine.submitAndConsume(new Cycle("id", alice).create().commands.loneElement, alice)
+      testEngine.submitAndConsume(new Cycle(id, alice).create().commands.loneElement, alice)
     val createNode = createTx.nodes.values.collect { case c: LfNodeCreate => c }.loneElement
     val (_, createSeed) = createMeta.nodeSeeds.toList.loneElement
     val contract = ExampleContractFactory.fromCreate(createNode)
@@ -412,4 +421,341 @@ class StoreBackedCommandInterpreterSpec
 
   }
 
+  private val keyHash: crypto.Hash = crypto.Hash.hashPrivateKey("nuck-test-key")
+  private val globalKey: GlobalKey =
+    GlobalKey.assertBuild(identifier, packageName, Value.ValueText("key"), keyHash)
+
+  private def mkContract(id: String): LfFatContractInst = {
+    val (_, _, contract) = createCycleContract(id)
+    contract.inst
+  }
+
+  private val testReaders: Set[Ref.Party] = Set(alice)
+  private val testMetrics: LedgerApiServerMetrics = LedgerApiServerMetrics.ForTesting
+  private implicit val testLoggingContext: LoggingContextWithTrace =
+    LoggingContextWithTrace(loggerFactory)
+
+  private def mkMockContractStore(
+      pages: Map[Option[Long], ContractKeyPage]
+  ): ContractStore = {
+    val store = mock[ContractStore]
+    when(
+      store.lookupNonUniqueContractKey(
+        readers = any[Set[Ref.Party]],
+        key = any[GlobalKey],
+        pageToken = any[Option[Long]],
+        limit = any[Int],
+      )(any[LoggingContextWithTrace])
+    ).thenAnswer[Set[Ref.Party], GlobalKey, Option[Long], Int, LoggingContextWithTrace] {
+      case (_, _, pageToken, _, _) =>
+        Future.successful(
+          pages.getOrElse(
+            pageToken,
+            fail(s"Unexpected store lookup with pageToken $pageToken"),
+          )
+        )
+    }
+    store
+  }
+
+  private val emptyContractStore: ContractStore = mkMockContractStore(
+    Map(None -> ContractKeyPage(contracts = Vector.empty, nextPageToken = None))
+  )
+
+  private val invalidContractStore: ContractStore = {
+    val store = mock[ContractStore]
+    when(
+      store.lookupNonUniqueContractKey(
+        readers = any[Set[Ref.Party]],
+        key = any[GlobalKey],
+        pageToken = any[Option[Long]],
+        limit = any[Int],
+      )(any[LoggingContextWithTrace])
+    ).thenReturn(
+      Future.failed(new IllegalStateException("Store lookup should not have been called"))
+    )
+    store
+  }
+
+  private def lookup(
+      disclosedContracts: Vector[LfFatContractInst] = Vector.empty,
+      disclosedContractsById: Map[Value.ContractId, LfFatContractInst] = Map.empty,
+      limit: Int = 10,
+      progression: NeedKeyProgression.CanContinue = NeedKeyProgression.Unstarted,
+      contractStore: ContractStore = emptyContractStore,
+  ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] =
+    StoreBackedCommandInterpreter.disclosedOrStoreNKeyLookup(
+      key = globalKey,
+      limit = limit,
+      disclosedContracts = disclosedContracts,
+      progression = progression,
+      disclosedContractsById = disclosedContractsById,
+      contractStore = contractStore,
+      metrics = testMetrics,
+      readers = testReaders,
+      lookupContractKeyTime = new AtomicLong(0L),
+      lookupContractKeyCount = new AtomicLong(0L),
+    )
+
+  private def extractInProgress(
+      hasStarted: NeedKeyProgression.HasStarted
+  ): NeedKeyProgression.InProgress =
+    hasStarted match {
+      case ip: NeedKeyProgression.InProgress => ip
+      case _ => fail("Expected InProgress")
+    }
+
+  "disclosedOrStoreNKeyLookup" should {
+
+    "return empty when no disclosed contracts and store is empty" in {
+      lookup().map { case (contracts, progression) =>
+        contracts shouldBe empty
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "return disclosed contracts when they fit within the limit" in {
+      val c1 = mkContract("1")
+      val c2 = mkContract("2")
+      val disclosed = Vector(c1, c2)
+
+      lookup(
+        disclosedContracts = disclosed,
+        limit = 5,
+        contractStore = emptyContractStore,
+      ).map { case (contracts, _) =>
+        contracts should contain theSameElementsInOrderAs disclosed
+      }
+    }
+
+    "return only disclosed contracts when they do not fit within the limit" in {
+      val disclosed = (1 to 5).map(i => mkContract(i.toString)).toVector
+
+      lookup(
+        disclosedContracts = disclosed,
+        limit = 3,
+        contractStore = invalidContractStore,
+      ).map { case (contracts, progression) =>
+        contracts should have size 3
+        contracts shouldBe disclosed.take(3)
+        progression shouldBe NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueDisclosed(3)
+        )
+      }
+    }
+
+    "paginate through disclosed contracts across multiple calls" in {
+      val disclosed = (1 to 5).map(i => mkContract(i.toString)).toVector
+
+      for {
+        (page1, token1) <- lookup(
+          disclosedContracts = disclosed,
+          limit = 2,
+          contractStore = invalidContractStore,
+        )
+        _ = token1 shouldBe NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueDisclosed(2)
+        )
+        (page2, token2) <- lookup(
+          disclosedContracts = disclosed,
+          limit = 2,
+          progression = extractInProgress(token1),
+          contractStore = invalidContractStore,
+        )
+        _ = token2 shouldBe NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueDisclosed(4)
+        )
+        (page3, token3) <- lookup(
+          disclosedContracts = disclosed,
+          limit = 2,
+          progression = extractInProgress(token2),
+          contractStore = emptyContractStore,
+        )
+      } yield {
+        page1 shouldBe disclosed.slice(0, 2)
+        page2 shouldBe disclosed.slice(2, 4)
+        page3 shouldBe disclosed.slice(4, 5)
+        token3 shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "fall back to store when no disclosed contracts" in {
+      val inStore = mkContract("inStore")
+      val store = mkMockContractStore(
+        Map(None -> ContractKeyPage(Vector(inStore), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = Vector(),
+        limit = 3,
+        contractStore = store,
+      ).map { case (contracts, progression) =>
+        contracts shouldBe Vector(inStore)
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "fall back to store when disclosed contracts are exhausted" in {
+      val c1 = mkContract("disclosed")
+      val inStore = mkContract("in-store")
+      val store = mkMockContractStore(
+        Map(None -> ContractKeyPage(Vector(inStore), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = Vector(c1),
+        limit = 3,
+        contractStore = store,
+      ).map { case (contracts, progression) =>
+        contracts shouldBe Vector(c1, inStore)
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "deduplicate store contracts that are also in disclosed contracts" in {
+      val sharedContract = mkContract("shared")
+      val storeOnlyContract = mkContract("store-only")
+
+      val disclosedById = Map(sharedContract.contractId -> sharedContract)
+      val store = mkMockContractStore(
+        Map(
+          None -> ContractKeyPage(
+            Vector(sharedContract, storeOnlyContract),
+            nextPageToken = None,
+          )
+        )
+      )
+
+      lookup(
+        disclosedContracts = Vector(sharedContract),
+        disclosedContractsById = disclosedById,
+        limit = 5,
+        contractStore = store,
+      ).map { case (contracts, _) =>
+        contracts shouldBe Vector(sharedContract, storeOnlyContract)
+      }
+    }
+
+    "correctly pass through store pagination tokens" in {
+      val storeContract1 = mkContract("store1")
+      val storeContract2 = mkContract("store2")
+
+      val store = mkMockContractStore(
+        Map(
+          None -> ContractKeyPage(Vector(storeContract1), nextPageToken = Some(42L)),
+          Some(42L) -> ContractKeyPage(Vector(storeContract2), nextPageToken = None),
+        )
+      )
+
+      for {
+        (page1, token1) <- lookup(
+          limit = 1,
+          contractStore = store,
+        )
+        _ = token1 shouldBe NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueFromStore(Some(42L))
+        )
+        (page2, token2) <- lookup(
+          limit = 1,
+          progression = extractInProgress(token1),
+          contractStore = store,
+        )
+      } yield {
+        page1 shouldBe Vector(storeContract1)
+        page2 shouldBe Vector(storeContract2)
+        token2 shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "delegate directly to store when progression has ContinueFromStore token" in {
+      val storeContract = mkContract("store")
+      val storeToken = StoreNeedKeyContinuationToken.ContinueFromStore(Some(99L))
+      val store = mkMockContractStore(
+        Map(Some(99L) -> ContractKeyPage(Vector(storeContract), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = Vector(mkContract("disclosed")),
+        limit = 5,
+        progression = NeedKeyProgression.InProgress(storeToken),
+        contractStore = store,
+      ).map { case (contracts, progression) =>
+        contracts shouldBe Vector(storeContract)
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "throw on invalid continuation token" in {
+      case object InvalidToken extends NeedKeyProgression.Token
+
+      val result = the[IllegalArgumentException] thrownBy lookup(
+        progression = NeedKeyProgression.InProgress(InvalidToken)
+      )
+      result.getMessage should include("Invalid token provided")
+    }
+
+    "filter out all store contracts if they are all in disclosed" in {
+      val c1 = mkContract("1")
+      val c2 = mkContract("2")
+
+      val disclosedById = Map(
+        c1.contractId -> c1,
+        c2.contractId -> c2,
+      )
+      val store = mkMockContractStore(
+        Map(None -> ContractKeyPage(Vector(c1, c2), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = Vector(c1, c2),
+        disclosedContractsById = disclosedById,
+        contractStore = store,
+      ).map { case (contracts, _) =>
+        contracts shouldBe Vector(c1, c2)
+      }
+    }
+
+    "resume from ContinueDisclosed offset correctly" in {
+      val disclosed = (1 to 6).map(i => mkContract(i.toString)).toVector
+      val storeContract = mkContract("store")
+      val store = mkMockContractStore(
+        Map(None -> ContractKeyPage(Vector(storeContract), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = disclosed,
+        limit = 3,
+        progression = NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueDisclosed(4)
+        ),
+        contractStore = store,
+      ).map { case (contracts, progression) =>
+        contracts shouldBe disclosed.drop(4) :+ storeContract
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+
+    "deduplicate store contracts against disclosed when resuming from ContinueFromStore" in {
+      // `shared` was already served from disclosed contracts in a previous page.
+      val shared = mkContract("shared")
+      val storeOnly = mkContract("store-only")
+
+      val disclosedById = Map(shared.contractId -> shared)
+      val storeToken = StoreNeedKeyContinuationToken.ContinueFromStore(Some(42L))
+      val store = mkMockContractStore(
+        Map(Some(42L) -> ContractKeyPage(Vector(shared, storeOnly), nextPageToken = None))
+      )
+
+      lookup(
+        disclosedContracts = Vector(shared),
+        disclosedContractsById = disclosedById,
+        limit = 5,
+        progression = NeedKeyProgression.InProgress(storeToken),
+        contractStore = store,
+      ).map { case (contracts, progression) =>
+        contracts shouldBe Vector(storeOnly)
+        progression shouldBe NeedKeyProgression.Finished
+      }
+    }
+  }
 }

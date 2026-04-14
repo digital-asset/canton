@@ -9,6 +9,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
   failGrpcStreamObserver,
@@ -23,7 +24,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.abort
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc.stub.StreamObserver
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.typed.{ActorRef, Behavior, PostStop}
 
@@ -174,7 +174,7 @@ object PekkoP2PGrpcNetworking {
       // Reschedules an Initialize or Send if the connection is not available yet
       def scheduleMessageIfNotConnectedBehavior(
           message: PekkoP2PGrpcConnectionManagerActorMessage
-      )(whenConnected: StreamObserver[BftOrderingMessage] => Unit)(implicit
+      )(whenConnected: PeerSender => Unit)(implicit
           context: ActorContext[
             PekkoP2PGrpcConnectionManagerActorMessage
           ]
@@ -208,7 +208,7 @@ object PekkoP2PGrpcNetworking {
 
           case Some(peerSender) =>
             logger.debug(
-              s"Connection-managing actor $actorName found connection available for Send"
+              s"Connection-managing actor $actorName found connection available $peerSender for Send"
             )
             whenConnected(peerSender)
 
@@ -281,7 +281,7 @@ object PekkoP2PGrpcNetworking {
 
             case Initialize =>
               logger.info(s"Connection-managing actor $actorName initializing")
-              scheduleMessageIfNotConnectedBehavior(Initialize)(_ => ())
+              scheduleMessageIfNotConnectedBehavior(Initialize)((_) => ())
               Behaviors.same
 
             case sendMsg: SendMessage =>

@@ -347,12 +347,8 @@ protected object ConnectionPoolTestHelpers {
           .Success(SequencerConnect.HandshakeResponse.Success()),
       )
     )
-  lazy val failedHandshake: Either[Exception, SequencerConnect.HandshakeResponse] = Right(
-    SequencerConnect.HandshakeResponse(
-      testedProtocolVersion.toProtoPrimitive,
-      SequencerConnect.HandshakeResponse.Value
-        .Failure(SequencerConnect.HandshakeResponse.Failure("bad handshake")),
-    )
+  lazy val failedHandshake: Either[Exception, SequencerConnect.HandshakeResponse] = Left(
+    Status.INVALID_ARGUMENT.withDescription("bad handshake").asRuntimeException()
   )
 
   lazy val correctSynchronizerIdResponse1

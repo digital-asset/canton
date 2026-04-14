@@ -4,8 +4,8 @@
 package com.digitalasset.canton.synchronizer.service
 
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
+import io.grpc.Status
 
 object HandshakeValidator {
 
@@ -17,14 +17,14 @@ object HandshakeValidator {
       serverVersion: ProtocolVersion,
       clientVersionsP: Seq[Int],
       minClientVersionP: Option[Int],
-  ): Either[String, Unit] =
+  ): Either[Status, Unit] = {
+    // Client may mention a protocol version which is not known to the synchronizer
+    val clientVersions = clientVersionsP.map(ProtocolVersion.parseUnchecked)
+    val minClientVersion = minClientVersionP.map(ProtocolVersion.parseUnchecked)
     for {
-      // Client may mention a protocol version which is not known to the synchronizer
-      clientVersions <- clientVersionsP.traverse(ProtocolVersion.parseUnchecked)
-      minClientVersion <- minClientVersionP.traverse(ProtocolVersion.parseUnchecked)
-
       _ <- ProtocolVersionCompatibility
         .canClientConnectToServer(clientVersions, serverVersion, minClientVersion)
-        .leftMap(_.description)
+        .leftMap(_.asStatus)
     } yield ()
+  }
 }

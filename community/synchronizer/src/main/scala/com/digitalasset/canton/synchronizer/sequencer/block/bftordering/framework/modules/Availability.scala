@@ -82,6 +82,7 @@ object Availability {
     final case class LocalBatchStoredSigned(
         batchId: Traced[BatchId],
         batch: OrderingRequestBatch,
+        signingMembership: Membership,
         // None if this message is just used to trigger further dissemination
         signature: Option[Signature],
     )
@@ -463,6 +464,7 @@ object Availability {
 
     final case class UpdateTopologyDuringStateTransfer[E <: Env[E]](
         currentMembership: Membership,
+        currentEpochNumber: EpochNumber,
         currentCryptoProvider: CryptoProvider[E],
     ) extends Consensus[E]
 

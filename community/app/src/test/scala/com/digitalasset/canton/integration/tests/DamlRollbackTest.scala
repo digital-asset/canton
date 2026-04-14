@@ -106,7 +106,7 @@ trait DamlRollbackTest
       leaf = {
         case (_, _, cn: LfNodeCreate) => add(cn.coid)
         case (_, _, fn: LfNodeFetch) => add(fn.coid)
-        case (_, _, ln: LfNodeLookupByKey) => ln.result.foreach(add)
+        case (_, _, ln: LfNodeQueryByKey) => ln.result.foreach(add)
       },
       exerciseEnd = (_, _, _) => (),
       rollbackEnd = (_, _, _) => (),

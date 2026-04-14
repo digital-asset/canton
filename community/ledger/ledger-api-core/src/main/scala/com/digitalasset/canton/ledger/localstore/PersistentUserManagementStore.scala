@@ -83,6 +83,7 @@ class PersistentUserManagementStore(
           primaryPartyO = user.primaryParty,
           identityProviderId = user.identityProviderId.toDb,
           isDeactivated = user.isDeactivated,
+          primaryPartyAuthentication = user.primaryPartyAuthentication,
           resourceVersion = 0,
           createdAt = now,
         )
@@ -182,6 +183,13 @@ class PersistentUserManagementStore(
             backend.updateUserPrimaryParty(
               internalId = dbUser.internalId,
               primaryPartyO = newValue,
+            )(connection)
+          }
+          // update primary_party_authentication
+          userUpdate.primaryPartyAuthenticationUpdateO.foreach { newValue =>
+            backend.updateUserPrimaryPartyAuthentication(
+              internalId = dbUser.internalId,
+              primaryPartyAuthentication = newValue,
             )(connection)
           }
         }
@@ -360,6 +368,7 @@ class PersistentUserManagementStore(
       annotations: Map[String, String],
   ): User = {
     val payload = dbUser
+
     User(
       id = payload.id,
       primaryParty = payload.primaryPartyO,
@@ -369,6 +378,7 @@ class PersistentUserManagementStore(
         resourceVersionO = Some(payload.resourceVersion),
         annotations = annotations,
       ),
+      primaryPartyAuthentication = payload.primaryPartyAuthentication,
     )
   }
 

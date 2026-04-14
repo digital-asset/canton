@@ -23,12 +23,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.ContractInfo
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
@@ -102,7 +97,7 @@ import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LoggerUtil, RoseTre
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LedgerSubmissionId,
-  LfKeyResolver,
+  LfGlobalKeyMapping,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
@@ -112,6 +107,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.transaction.CreationTime
 import monocle.PLens
 
+import scala.annotation.unused
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -134,6 +130,8 @@ class TransactionProcessingSteps(
     transactionEnricher: TransactionEnricher,
     createNodeEnricher: ContractEnricher,
     authorizationValidator: AuthorizationValidator,
+    // TODO(#31527): SPM re-enable with legacy and NUCK variants
+    @unused
     internalConsistencyChecker: InternalConsistencyChecker,
     tracker: CommandProgressTracker,
     protected val loggerFactory: NamedLoggerFactory,
@@ -268,7 +266,7 @@ class TransactionProcessingSteps(
   private class TrackedTransactionSubmission(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       mediator: MediatorGroupRecipient,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -851,9 +849,9 @@ class TransactionProcessingSteps(
             reInterpretedTopLevelViews,
           )
 
-        internalConsistencyResultE = internalConsistencyChecker.check(
-          parsedRequest.rootViewTrees
-        )
+        // TODO(#31527): SPM re-enable this with legacy and NUCK variants
+        // internalConsistencyResultE = internalConsistencyChecker.check(parsedRequest.rootViewTrees)
+        internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit] = Right(())
 
       } yield ParallelChecksResult(
         authenticationResult,
@@ -1513,7 +1511,7 @@ object TransactionProcessingSteps {
   final case class SubmissionParam(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
   )
@@ -1588,11 +1586,6 @@ object TransactionProcessingSteps {
       pendingTransaction: PendingTransaction,
       errorDetails: ErrorDetails,
   )
-
-  def keyResolverFor(
-      rootView: TransactionView
-  )(implicit loggingContext: NamedLoggingContext): LfKeyResolver =
-    rootView.keyMaintainers.fmap(_.unversioned.contracts.toVector)
 
   /** @throws java.lang.IllegalArgumentException
     *   if `receivedViewTrees` contains views with different transaction root hashes

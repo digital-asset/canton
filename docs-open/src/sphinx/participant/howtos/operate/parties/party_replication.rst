@@ -13,21 +13,19 @@ participant **within a single synchronizer**. In this process, the participant t
 already hosts the party is called the *source* participant, while the new participant
 is called the *target* participant.
 
-The operational procedure differs substantially in complexity and risk depending on
-whether the party you replicate has already been involved in any Daml transaction.
+The procedure's complexity and risk depend on whether the party has already participated
+in a Daml transaction.
 
-Therefore, onboard your party on a participant, and **before you use the party**
-replicate it to other participants following the
-:ref:`simple party replication<replicate-before-party-is-used>` steps.
+Therefore, you should replicate a newly onboarded party **before using it**, following
+the :ref:`simple party replication<replicate-before-party-is-used>` steps.
 
-Otherwise, you must apply an
-:ref:`offline party replication<offline-party-replication>`
+Otherwise, you must use the :ref:`offline party replication<offline-party-replication>`
 procedure.
 
 .. note::
 
     **Party replication** is different from **party migration**. A party
-    migration includes an additional final step, that is removing (or *offboarding*)
+    migration includes an additional final step: removing (or *offboarding*)
     the party from its original participant.
 
     Party offboarding, and thus party migration, is currently not supported.
@@ -42,7 +40,7 @@ Party replication authorization
 How authorization works
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Both the party and the new hosting participant must grant their consent by issuing each a
+Both the party and the new hosting participant must grant their consent by each issuing a
 :ref:`party-to-participant mapping topology transaction<multi-hosting-authorization>`.
 This ensures mutual agreement for the party replication.
 
@@ -51,11 +49,12 @@ External parties
 
 For external parties, changes to the party's topology must be explicitly authorized with
 a signature of the external party's namespace key.
-Whenever in the how-to authorization from the party is required, the distinction will be
-made between *local* and *external* parties.
+Whenever this guide requires party authorization, it distinguishes between *local* and
+*external* parties.
 
-When the ``source`` participant is used in this how-to for actions other than authorizing
-topology changes, one of the existing confirming participants of the external party must be used.
+When this guide uses the ``source`` participant for actions other than authorizing
+topology changes, you must use one of the external party's existing confirming
+participants.
 
 Parties with multiple owners
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -87,8 +86,8 @@ becomes a stakeholder in any contract.
     :ref:`offline party replication<offline-party-replication>`
     instead.
 
-The simple party replication consists of these steps, follow them **in the order**
-they are listed:
+Simple party replication consists of the following steps. You must execute them
+**in order**:
 
 #. :ref:`Create the party<party-management>`, either in the namespace of a
    participant or in a dedicated :externalref:`namespace<topology-namespaces>`.
@@ -134,8 +133,8 @@ The following demonstrates these steps using two participants:
 .. note::
 
     In this example, the **local party Alice** is owned by the ``source`` participant,
-    which is a simplification. It means that Alice is registered in the participant's
-    namespace, but it is not a requirement.
+    which is a simplification meaning Alice is registered in the participant's namespace.
+    This is not a requirement.
 
     Alternatively, you can create the party in its own dedicated
     :externalref:`namespace<topology-namespaces>`, or create an :externalref:`external party <tutorial_onboard_external_party_lapi>`.
@@ -180,7 +179,7 @@ Authorize hosting update on the source participant
 
         :externalref:`A participant can host a party with different permissions<topology-participant-permission>`.
         In this example, the target participant will host party Alice with
-        submission permission, that is party Alice can submit Daml transactions on it.
+        submission permission. This allows party Alice to submit Daml transactions on it.
 
     .. group-tab:: External Party
 
@@ -188,15 +187,14 @@ Authorize hosting update on the source participant
         a single node, and therefore always need to amend their party-to-participant
         mapping after the fact to be multi-hosted, external parties can do this in one
         step during the onboarding process.
-        See :externalref:`onboarding process <tutorial_onboard_external_multi_hosted>` for more details.
+        See the :externalref:`onboarding process <tutorial_onboard_external_multi_hosted>` for more details.
 
 
 Authorize hosting update on the target participant
 """"""""""""""""""""""""""""""""""""""""""""""""""
 
-To complete the process, also the target participant needs to agree to newly
-host Alice. Therefore, you need to issue the **same** party-to-participant mapping
-topology transaction on the ``target`` participant:
+To complete the process, the target participant must also agree to host Alice.
+Issue the **same** topology transaction on the ``target`` participant:
 
 .. snippet:: simple_party_replication
     .. success:: target.topology.party_to_participant_mappings
@@ -217,7 +215,8 @@ topology transaction on the ``target`` participant:
 .. note::
 
     The participant permission here must be the same as in the previous step.
-    For external parties in particular this must be either ``Confirmation`` or ``Observation``.
+    For external parties in particular, this must be either ``Confirmation`` or
+    ``Observation``.
 
 Once the party-to-participant mapping takes effect, the replication is complete.
 This results in party Alice being multi-hosted on both the ``source`` and ``target``
@@ -233,8 +232,9 @@ the original ``source`` and ``newTarget`` participants.
 
 .. note::
 
-    For **external parties**, the threshold is defined during the :externalref:`onboarding process <tutorial_onboard_external_party_lapi>` already,
-    so this section is not relevant to them.
+    For **external parties**, the threshold is already defined during the
+    :externalref:`onboarding process <tutorial_onboard_external_party_lapi>`,
+    so this section does not apply.
 
 To change a party's confirmation threshold, you must use a different procedure for
 proposing the party-to-participant mapping than previously shown.
@@ -245,8 +245,8 @@ in a single operation.
 The following example continues from the previous one, demonstrating how to replicate
 party Alice from the ``source`` participant to the ``newTarget`` participant while
 simultaneously setting the confirmation threshold to three. This operation also sets
-the participant permission to confirmation for all three participants that will be
-hosting Alice.
+the participant permission to confirmation for all three participants that will host
+Alice.
 
 .. snippet:: simple_party_replication
     .. success:: val newTarget = participant3
@@ -287,28 +287,28 @@ Before replication can start, both the target participant and the party itself m
 :ref:`explicitly consent to the new hosting arrangement<party_replication-authorization>`.
 
 Afterwards, the replication consists of exporting the party's Active Contract Set (ACS)
-from a source participant, and importing it to the target participant.
+from a source participant and importing it to the target participant.
 
 .. note::
 
     * Connect a single Canton console to both the source and target participants
       to export and import the party's ACS file using a single physical machine or
-      environment. Otherwise, you need to securely transfer the ACS export file
-      to the place where you import it to the target participant.
+      environment. Otherwise, you must securely transfer the ACS export file
+      to the target participant's environment before importing.
     * Offline party replication requires you to disconnect the target participant from all
       synchronizers before importing the party's ACS. Hence the name *offline* party replication.
-    * While you onboard the party on the target participant you may detect ACS
-      commitment mismatches. This is expected and resolves itself in time; ignore such errors
-      during the party replication procedure.
+    * During onboarding, you may notice ACS commitment mismatches on the target participant.
+      This is expected and resolves over time; ignore these errors during the replication
+      procedure.
 
 .. warning::
 
     **Be advised: You must back up the target participant before you start the ACS import!**
 
     This ensures you have a clean recovery point if the ACS import is interrupted (crash,
-    unintended node restart, etc.), or when you otherwise were unable to follow this manual
-    operational steps to completion. Having this backup allows you to safely reset the target
-    participant and **still complete the ongoing offline party replication**.
+    unintended node restart, etc.), or if you are otherwise unable to complete these
+    manual operational steps. A backup allows you to safely reset the target participant
+    and **still complete the replication**.
 
 
 .. _offline-party-replication-steps:
@@ -316,7 +316,7 @@ from a source participant, and importing it to the target participant.
 Offline party replication steps
 -------------------------------
 
-These are the steps, which you must perform in **the exact order** they are listed:
+You must perform the following steps in **the exact order** listed:
 
 #. **Target: Package Vetting** – Ensure the target participant vets all required packages.
 #. **Source: Data Retention** - Ensure the source participant retains data long enough for the export.
@@ -331,9 +331,9 @@ These are the steps, which you must perform in **the exact order** they are list
 
 .. warning::
 
-    Offline party replication must be performed with care, strictly following
-    the documented **steps in order**. Not following the outlined operational
-    flow will result in errors potentially requiring significant manual correction.
+    You must perform offline party replication carefully and strictly follow the
+    **steps in order**. Deviating from this flow will cause errors that may require
+    significant manual correction.
 
     This documentation provides a guide. Your environment may require
     adjustments. Test thoroughly in a test environment before production use.
@@ -341,9 +341,10 @@ These are the steps, which you must perform in **the exact order** they are list
 External parties
 ^^^^^^^^^^^^^^^^
 
-For demonstration purposes, we will authorize topology transactions on behalf of external parties using a private ED25519
-key in the DER format available on disk called ``private_key.der``.
-This is NOT a secure way to store private keys. Real world deployment must secure private keys (using a KMS for example).
+For demonstration purposes, we will authorize topology transactions on behalf of
+external parties using a private ED25519 key in the DER format available on disk
+called ``private_key.der``. This is NOT a secure way to store private keys.
+Real-world deployments must secure private keys (using a KMS for example).
 
 Scenario description
 ^^^^^^^^^^^^^^^^^^^^
@@ -401,7 +402,7 @@ The ``source`` can be any participant already hosting the party.
 Ensure the target participant :ref:`vets all packages<package_vetting>` associated with
 contracts where the party is a stakeholder.
 
-The party ``alice`` uses the package ``CantonExamples`` which is vetted on the ``source``
+The party ``alice`` uses the package ``CantonExamples``, which is vetted on the ``source``
 participant but not yet on the ``target`` participant.
 
 .. snippet:: offline_party_replication
@@ -410,7 +411,7 @@ participant but not yet on the ``target`` participant.
         .filter(_.item.packages.exists(_.packageId == mainPackageId))
         .map(r => (r.context.storeId, r.item.participantId))
 
-Hence, upload the missing DAR package to the ``target`` participant.
+Upload the missing DAR package to the ``target`` participant.
 
 .. snippet:: offline_party_replication
     .. success:: target.dars.upload("dars/CantonExamples.dar")
@@ -450,14 +451,16 @@ Clear the pruning schedule, disabling the automatic pruning on the ``source`` no
 .. warning::
 
     Manual pruning cannot be programmatically disabled on the ``source`` participant.
-    Coordinate closely with other operators and ensure that no external automation
+    Coordinate closely with other operators to ensure no external automation
     triggers pruning until the :ref:`ACS export is complete<party-replication-export-acs>`.
 
+
+.. _party-replication-target-authorization:
 
 3. Authorize new hosting on the target participant
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-First, have the ``target`` participant agree to host party Alice with the desired
+First, the ``target`` participant must agree to host party Alice with the desired
 participant permission (*observation* in this example).
 
 .. warning::
@@ -506,9 +509,8 @@ Ensure the target participant does not automatically reconnect to the synchroniz
 6. Authorize new hosting for the party
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To later *find* the ledger offset of the topology transaction which authorizes the new
-hosting arrangement, take the current ledger end offset on the ``source`` participant
-as a starting point:
+To locate the topology transaction that authorizes the new hosting arrangement
+later, record the current ledger end offset on the ``source`` participant:
 
 .. snippet:: offline_party_replication
     .. success:: val beforeActivationOffset = source.ledger_api.state.end()
@@ -537,12 +539,13 @@ have party Alice agree to be hosted on it.
     .. group-tab:: External Party
 
         ..
-            Note: We play a trick in this section by re-allocating "alice" to "externalAlice" in the console
-                   (hidden) at the beginning and re-allocating her to "localAlice" at the end. From the final documentation
-                   perspective it makes it look like we're acting on the same alice while actually running the commands
-                   on "externalAlice".
+            Note: We play a trick in this section by re-allocating "alice" to "externalAlice" in
+            the console (hidden) at the beginning and re-allocating her to "localAlice" at the end.
+            From the final documentation perspective it makes it look like we're acting on the same
+            alice while actually running the commands on "externalAlice".
 
-        For external parties, we need to authorize the new hosting proposal by signing the transaction hash with Alice's external key.
+        For external parties, we need to authorize the new hosting proposal by signing the
+        transaction hash with Alice's external key.
 
         First write the hash to a file:
 
@@ -551,13 +554,15 @@ have party Alice agree to be hosted on it.
             .. success:: val tmpDir = better.files.File(s"/tmp/canton/offline_party_replication").createDirectories()
             .. success:: (tmpDir / "target_obs_topology_tx.hash").createFileIfNotExists().outputStream.apply(proposal.hash.hash.getCryptographicEvidence.writeTo(_))
 
-        Then sign the hash. As mentioned before, we use a local private key and the ``openssl`` command line tool to sign the hash here for demonstration purposes. In real deployments, use a secure storage / signing solution.
+        Then sign the hash. As mentioned before, we use a local private key and the ``openssl``
+        command-line tool to sign the hash here for demonstration purposes. In real deployments,
+        use a secure storage / signing solution.
 
         .. snippet:: offline_party_replication
             .. shell:: TMP_DIR=$(echo "/tmp/canton/offline_party_replication")
             .. shell:: openssl pkeyutl -sign -inkey private_key.der -rawin -in $TMP_DIR/target_obs_topology_tx.hash -out $TMP_DIR/target_obs_topology_tx.sig -keyform DER
 
-        Finally load the transaction with Alice's signature:
+        Finally, load the transaction with Alice's signature:
 
         .. snippet:: offline_party_replication
             .. success:: val aliceSignature = Signature.fromExternalSigning(
@@ -584,11 +589,11 @@ have party Alice agree to be hosted on it.
 
 Export Alice's ACS from the ``source`` participant.
 
-The following command finds internally the ledger offset where party Alice is activated on
-the ``target`` participant, starting the search from ``beginOffsetExclusive``.
+The following command searches internally for the ledger offset where party Alice is
+activated on the ``target`` participant, starting from ``beginOffsetExclusive``.
 
-It then exports Alice's ACS from the ``source`` participant at that exact offset, and stores
-it in the export file named ``party_replication.alice.acs.gz``.
+It then exports Alice's ACS from the ``source`` participant at that exact offset and
+saves it to a file named ``party_replication.alice.acs.gz``.
 
 .. snippet:: offline_party_replication
     .. success:: source.parties
@@ -628,22 +633,29 @@ Run the following command using the original configuration parameters you record
 .. warning:: **Please back up the target participant before importing the ACS!**
 
 
+.. _party-replication-import-acs:
+
 10. Import ACS
 ^^^^^^^^^^^^^^
 
-Import Alice's ACS in the ``target`` participant:
+Import Alice's ACS on the ``target`` participant:
 
 .. snippet:: offline_party_replication
-    .. success:: target.parties.import_party_acs(synchronizerId, Some(alice), importFilePath = "party_replication.alice.acs.gz")
-    .. hidden:: target.parties.import_party_acs(synchronizerId, Some(alice), importFilePath = "party_replication.alice_external.acs.gz")
+    .. success:: target.parties.import_party_acs(synchronizerId, party = Some(alice), importFilePath = "party_replication.alice.acs.gz")
+    .. hidden:: target.parties.import_party_acs(synchronizerId, party = Some(alice), importFilePath = "party_replication.alice_external.acs.gz")
+
+.. note::
+
+    Providing the party ID is optional for backward compatibility. However,
+    omitting it prevents automatic onboarding flag clearance, requiring you to
+    :ref:`clear the flag manually <party-replication-onboarding-flag-clearance>`.
 
 
 11. Reconnect target participant to synchronizer
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To later *find* the ledger offset of the topology transaction where the new hosting
-arrangement on the ``target`` participant has been authorized, take the current ledger
-end offset:
+To later find the topology transaction that authorized the new hosting arrangement on
+the ``target`` participant, record the current ledger end offset:
 
 .. snippet:: offline_party_replication
     .. success:: val targetLedgerEnd = target.ledger_api.state.end()
@@ -683,19 +695,34 @@ configured to reconnect automatically upon restart.
     .. success:: target.synchronizers.modify("mysynchronizer", _.copy(manualConnect=false))
 
 
-13. Clear the participant's onboarding flag
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _party-replication-onboarding-flag-clearance:
 
-After the ``target`` participant has completed the ACS import and reconnected to the
-synchronizer, you must clear the onboarding flag. This signals that the participant
-is fully ready to host the party.
+13. Complete the onboarding of the party
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There is a dedicated command to accomplish the onboarding flag clearance. It will issue
-the topology transaction to clear the flag for you, but only when it is safe to do so.
+To complete the replication, you must clear the :ref:`previously set onboarding
+flag <party-replication-target-authorization>` using the ``target`` participant.
+This signals that the participant is fully ready to host the party.
 
-The following command uses the ``targetLedgerEnd`` captured in the previous step as the
-starting point to internally locate the effective party-to-participant mapping transaction
-that has activated ``alice`` on the ``target`` participant.
+If you run protocol version 35 or later and provided the party ID during the
+:ref:`ACS import <party-replication-import-acs>`, this clearance is scheduled
+automatically in the background upon reconnecting to the synchronizer. It
+executes as soon as it is safe to do so.
+
+.. note::
+
+    Background flag clearance execution is observable in the participant logs.
+
+
+Optional: Manual onboarding flag clearance
+""""""""""""""""""""""""""""""""""""""""""
+
+If automatic clearance does not apply, or if there are issues with the
+background clearance, you must clear the flag manually.
+
+Use the dedicated command below, which safely issues the required topology
+transaction. It uses the ``targetLedgerEnd`` captured earlier to locate the
+transaction that activated the party on the ``target`` participant:
 
 .. snippet:: offline_party_replication
     .. success:: val flagStatus = target.parties
@@ -705,18 +732,23 @@ that has activated ``alice`` on the ``target`` participant.
         .clear_party_onboarding_flag(externalParty, synchronizerId, targetLedgerEnd)
     .. assert:: flagStatusExternal.isInstanceOf[FlagSet]
 
+.. note::
+
+    The ``targetLedgerEnd`` is a ledger offset on the ``target`` participant from
+    where this command starts searching for the effective topology transaction that
+    states that party ``alice`` is onboarding on the ``target`` participant.
+
 The command returns the onboarding flag clearance status:
 
-- ``FlagNotSet``: The onboarding flag is cleared. Proceed to the next step.
-- ``FlagSet``: The onboarding flag is still set. Removal is safe
-  only after the indicated timestamp.
+- ``FlagNotSet``: The onboarding flag is cleared.
+- ``FlagSet``: The onboarding flag is still set. Removal is safe only after the indicated timestamp.
 
-If the onboarding flag is still set and you have called this command for the first time,
-it has internally created a schedule to trigger the onboarding flag clearance at the
-appropriate time. This happens in the background.
+If the onboarding flag is still set, the command has internally created a
+schedule to trigger the onboarding flag clearance at the appropriate time.
+This happens in the background.
 
-However, because this command is idempotent, you *may* call it repeatedly. Thus, you
-*may* also poll this command until it confirms that the onboarding flag has been cleared.
+However, because this command is idempotent, you *may* call it repeatedly. Thus, you *may*
+also poll this command until it confirms that the onboarding flag has been cleared.
 The following snippet demonstrates how this command can be polled.
 
 .. snippet:: offline_party_replication
@@ -730,7 +762,7 @@ The following snippet demonstrates how this command can be polled.
         }
 
 ..
-    Note: We don't wait here again for the onboarding flag to be cleared on the external party to save
+    Note: We do not wait here again for the onboarding flag to be cleared on the external party to save
         on time in the generation of the snippets
 
 .. note::

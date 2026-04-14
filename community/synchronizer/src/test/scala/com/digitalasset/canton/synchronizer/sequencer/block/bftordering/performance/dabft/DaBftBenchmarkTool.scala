@@ -18,5 +18,6 @@ object DaBftBenchmarkTool extends App {
     .load[BftBenchmarkConfig]
     .getOrElse(throw new RuntimeException("Invalid configuration"))
 
-  new BftBenchmarkTool(DaBftBindingFactory, NamedLoggerFactory.root).run(config)
+  new BftBenchmarkTool(new DaBftBindingFactory(NamedLoggerFactory.root), NamedLoggerFactory.root)
+    .run(config)
 }

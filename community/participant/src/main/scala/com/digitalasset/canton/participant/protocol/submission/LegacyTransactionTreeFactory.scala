@@ -96,7 +96,7 @@ class LegacyTransactionTreeFactory(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      keyResolver: LfKeyResolver,
+      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -108,7 +108,7 @@ class LegacyTransactionTreeFactory(
       mediator,
       transactionUuid,
       metadata.ledgerTime,
-      keyResolver.asCidOptionMap,
+      legacyKeyResolver.asCidOptionMap,
     )
 
     // Create salts
@@ -397,7 +397,7 @@ class LegacyTransactionTreeFactory(
             _ <- EitherT.fromEither[FutureUnlessShutdown]({
               for {
                 resolutionForModeOff <- suffixedNode match {
-                  case lookupByKey: LfNodeLookupByKey
+                  case lookupByKey: LfNodeQueryByKey
                       if state.csmState.mode == ContractKeyUniquenessMode.Off =>
                     val gkey = lookupByKey.key.globalKey
                     state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
@@ -674,9 +674,9 @@ class LegacyTransactionTreeFactory(
     *     [[com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyInactive]]. If this node
     *     `n` is in the core of the view, then `cid` is a core input and we are done. If this node
     *     `n` is in a proper subview, then the aggregated global key inputs
-    *     [[com.digitalasset.canton.data.TransactionView.keyMaintainers]] of the subviews resolve
-    *     `k` to `cid` (as resolutions from earlier subviews are preferred) and therefore the map
-    *     difference does not resolve `k` at all.
+    *     [[com.digitalasset.canton.data.TransactionView.legacyGlobalKeyInputs]] of the subviews
+    *     resolve `k` to `cid` (as resolutions from earlier subviews are preferred) and therefore
+    *     the map difference does not resolve `k` at all.
     *
     * @return
     *   `Left(...)` if `viewKeyInputs` contains a key not in the `keyVersionAndMaintainers.keySet`
@@ -841,7 +841,7 @@ class LegacyTransactionTreeFactory(
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def tryReconstruct(
-      subaction: WellFormedTransaction[WithoutSuffixes],
+      transaction: WellFormedTransaction[WithoutSuffixes],
       rootPosition: ViewPosition,
       mediator: MediatorGroupRecipient,
       submittingParticipantO: Option[ParticipantId],
@@ -850,7 +850,7 @@ class LegacyTransactionTreeFactory(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      keyResolver: LfKeyResolver,
+      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -865,23 +865,23 @@ class LegacyTransactionTreeFactory(
      */
 
     ErrorUtil.requireArgument(
-      subaction.unwrap.roots.length == 1,
-      s"Subaction must have a single root node, but has ${subaction.unwrap.roots.iterator.mkString(", ")}",
+      transaction.unwrap.roots.length == 1,
+      s"Subaction must have a single root node, but has ${transaction.unwrap.roots.iterator.mkString(", ")}",
     )
 
-    val metadata = subaction.metadata
+    val metadata = transaction.metadata
     val state = stateForValidation(
       mediator,
       transactionUuid,
       metadata.ledgerTime,
       viewSalts,
-      keyResolver.asCidOptionMap,
+      legacyKeyResolver.asCidOptionMap,
     )
 
     val decompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
-        subaction,
+        transaction,
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
       )
@@ -892,7 +892,7 @@ class LegacyTransactionTreeFactory(
       suffixedNodes = state.suffixedNodes() transform {
         // Recover the children
         case (nodeId, ne: LfNodeExercises) =>
-          checked(subaction.unwrap.nodes(nodeId)) match {
+          checked(transaction.unwrap.nodes(nodeId)) match {
             case ne2: LfNodeExercises =>
               ne.copy(children = ne2.children)
             case _: LfNode =>
@@ -904,14 +904,14 @@ class LegacyTransactionTreeFactory(
       }
 
       // keep around the rollback nodes (not suffixed as they don't have a contract id), so that we don't orphan suffixed nodes.
-      rollbackNodes = subaction.unwrap.nodes.collect { case tuple @ (_, _: LfNodeRollback) =>
+      rollbackNodes = transaction.unwrap.nodes.collect { case tuple @ (_, _: LfNodeRollback) =>
         tuple
       }
 
       suffixedTx = LfVersionedTransaction(
-        subaction.unwrap.version,
+        transaction.unwrap.version,
         suffixedNodes ++ rollbackNodes,
-        subaction.unwrap.roots,
+        transaction.unwrap.roots,
       )
       absolutizedTx <- EitherT
         .fromEither[FutureUnlessShutdown](absolutizer.absolutizeTransaction(suffixedTx))

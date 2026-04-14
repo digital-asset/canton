@@ -52,6 +52,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
   BftOrderingMessageBody,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertions.fail
 import org.scalatest.wordspec.AnyWordSpec
 import shapeless.*
@@ -65,6 +66,8 @@ import scala.util.{Failure, Success, Try}
 class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
   import P2PNetworkOutModuleTest.*
+
+  implicit val pv: ProtocolVersion = testedProtocolVersion
 
   "p2p output" when {
     "ready" should {
@@ -897,7 +900,7 @@ object P2PNetworkOutModuleTest {
       .tupled
 
   private lazy val bftNodeIds = selfNode +: otherInitialEndpoints.map(endpointToTestBftNodeId)
-  private lazy val aMembership =
+  private def aMembership(implicit pv: ProtocolVersion) =
     Membership(
       selfNode,
       OrderingTopology.forTesting(bftNodeIds.toSet),

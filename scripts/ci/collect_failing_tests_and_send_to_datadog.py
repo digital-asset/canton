@@ -24,8 +24,8 @@ branches_to_report = {
     "main-2.x" : "073b4df3" # ID of the value "main-2.x" for the Release Line field in the project
 }
 
-hub_cmd = [".ci/nix-exec", "hub"]
-gh_cmd = [".ci/nix-exec", "gh"]
+hub_cmd = ["hub"]
+gh_cmd = ["gh"]
 
 branch = os.environ['CIRCLE_BRANCH']
 

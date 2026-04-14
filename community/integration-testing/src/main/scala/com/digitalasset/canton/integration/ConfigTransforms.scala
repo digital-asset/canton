@@ -5,7 +5,12 @@ package com.digitalasset.canton.integration
 
 import cats.syntax.option.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{
@@ -23,6 +28,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
@@ -856,8 +862,27 @@ object ConfigTransforms {
       .modify(_ + (InstanceName.tryCreate(target) -> remote))
   }
 
+  private val defaultAchsConfig: AchsConfig = AchsConfig(
+    validAtDistanceTarget = NonNegativeLong.tryCreate(10L),
+    lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(5L),
+    aggregationThreshold = 5L,
+    initAggregationThreshold = 5L,
+  )
+
+  def enableAchs: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.ledgerApiServer.indexer.achsConfig)
+        .replace(Some(defaultAchsConfig))
+    )
+
+  def disableAchs: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.ledgerApiServer.indexer.achsConfig)
+        .replace(None)
+    )
+
   def defaultsForNodes: Seq[ConfigTransform] =
-    setProtocolVersion(ProtocolVersion.v34)
+    setProtocolVersion(ProtocolVersion.v34) :+ enableAchs
 
   def setTopologyTransactionRegistrationTimeout(
       timeout: config.NonNegativeFiniteDuration

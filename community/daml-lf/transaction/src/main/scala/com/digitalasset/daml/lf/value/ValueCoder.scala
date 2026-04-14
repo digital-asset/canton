@@ -459,13 +459,13 @@ class ValueCoder(allowNullCharacters: Boolean) {
       }
     }
 
-    // TODO(i30398): storing both the hash and the value in the key field is a temporary hack. We will eventually
+    // TODO(#31847): storing both the hash and the value in the key field is a temporary hack. We will eventually
     //  introduce a new transaction version which will store the hash and the value in separate fields.
     def encodeKey(version: SerializationVersion, key: GlobalKey): Either[EncodeError, ByteString] =
       encodeValue(valueVersion = version, v0 = key.key)
         .map(bs => key.hash.bytes.toByteString.concat(bs))
 
-    // TODO(i30398): storing both the hash and the value in the key field is a temporary hack. We will eventually
+    // TODO(#31847): storing both the hash and the value in the key field is a temporary hack. We will eventually
     //  introduce a new transaction version which will store the hash and the value in separate fields.
     def decodeKey(
         templateId: Ref.TypeConId,

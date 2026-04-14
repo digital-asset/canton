@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.data
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus.*
@@ -245,7 +245,7 @@ object PartyReplicationStatus {
   }
 
   final case class AcsReplicationProgress(
-      processedContractCount: NonNegativeInt,
+      processedContractCount: NonNegativeLong,
       fullyProcessedAcs: Boolean,
   ) extends PrettyPrinting {
     def toProtoV30: v30.PartyReplicationStatus.AcsReplicationProgress =
@@ -276,7 +276,7 @@ object PartyReplicationStatus {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.AcsReplicationProgress
     ): ParsingResult[AcsReplicationProgress] = for {
-      replicatedContractCount <- ProtoConverter.parseNonNegativeInt(
+      replicatedContractCount <- ProtoConverter.parseNonNegativeLong(
         "replicated_contract_count",
         proto.processedContractCount,
       )
@@ -288,7 +288,7 @@ object PartyReplicationStatus {
       prettyOfObject[AcsIndexingProgress.type]
 
     def fromInternal: InternalStatus.AcsIndexingProgress => AcsIndexingProgress.type = {
-      case InternalStatus.AcsIndexingProgress(_indexedContractCount, _nextIndexingCounter) =>
+      case InternalStatus.AcsIndexingProgress(_indexedContractCount, _nextIndexingCounter, _done) =>
         AcsIndexingProgress
     }
 

@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class CatchupDetectorTest extends AnyWordSpec with BftSequencerBaseTest {
@@ -108,8 +109,10 @@ object CatchupDetectorTest {
   private val node4 = BftNodeId("node4")
   private val node5 = BftNodeId("node5")
   private val node6 = BftNodeId("node6")
-  private val membership2Nodes = Membership.forTesting(myId, Set(node1))
-  private val membership4Nodes = Membership.forTesting(myId, Set(node1, node2, node3))
-  private val membership7Nodes =
+  private def membership2Nodes(implicit pv: ProtocolVersion) =
+    Membership.forTesting(myId, Set(node1))
+  private def membership4Nodes(implicit pv: ProtocolVersion) =
+    Membership.forTesting(myId, Set(node1, node2, node3))
+  private def membership7Nodes(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, Set(node1, node2, node3, node4, node5, node6, node6))
 }

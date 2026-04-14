@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.sequencer
 
 import better.files.*
 import com.digitalasset.canton.integration.EnvironmentDefinition
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.SynchronizerBootstrapWithSeparateConsolesIntegrationTest
 
 import scala.concurrent.duration.DurationInt
@@ -78,12 +79,10 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
             serial = newSerial,
           )
           // wait for the topology change to be observed by the sequencer
-          utils.retry_until_true(commandTimeouts.bounded) {
-            sequencer1.topology.sequencers
-              .list(sequencer1.synchronizer_id)
-              .headOption
-              .map(_.item.allSequencers.forgetNE)
-              .getOrElse(Seq.empty)
+          utils.retry_until_true(env.commandTimeouts.bounded) {
+            sequencer1.bft
+              .get_ordering_topology()
+              .sequencerIds
               .contains(sequencer3.id)
           }
 
@@ -110,4 +109,10 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
       participant1.health.ping(participant3, timeout = 30.seconds)
     }
   }
+}
+
+class BftOrdererSynchronizerBootstrapWithSeparateConsolesIntegrationTest
+    extends SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

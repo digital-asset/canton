@@ -68,6 +68,7 @@ class JsStateService(
       activeContractsListEndpoint,
       getActiveContractsStream,
     ),
+    withServerLogic(JsStateService.activeContractsPageEndpoint, getActiveContractsPage),
     withServerLogic(JsStateService.getConnectedSynchronizersEndpoint, getConnectedSynchronizers),
     withServerLogic(
       JsStateService.getLedgerEndEndpoint,
@@ -189,6 +190,19 @@ class JsStateService(
         )
     }
 
+  private def getActiveContractsPage(
+      callerContext: CallerContext
+  ): TracedInput[state_service.GetActiveContractsPageRequest] => Future[
+    Either[JsCantonError, JsGetActiveContractsPageResponse]
+  ] = {
+    implicit val traceContext: TraceContext = callerContext.traceContext()
+
+    request =>
+      stateServiceClient(callerContext.token())
+        .getActiveContractsPage(request.in)
+        .flatMap(protocolConverters.GetActiveContractsPageResponse.toJson)
+        .resultToRight
+  }
 }
 
 object JsStateService extends DocumentationEndpoints {
@@ -226,6 +240,12 @@ object JsStateService extends DocumentationEndpoints {
     )
     .inStreamListParamsAndDescription()
 
+  val activeContractsPageEndpoint = state.get
+    .in(sttp.tapir.stringToPath("active-contracts-page"))
+    .in(jsonBody[state_service.GetActiveContractsPageRequest])
+    .out(jsonBody[JsGetActiveContractsPageResponse])
+    .protoRef(state_service.StateServiceGrpc.METHOD_GET_ACTIVE_CONTRACTS_PAGE)
+
   val getConnectedSynchronizersEndpoint = state.get
     .in(sttp.tapir.stringToPath("connected-synchronizers"))
     .in(query[Option[String]]("party"))
@@ -247,6 +267,7 @@ object JsStateService extends DocumentationEndpoints {
   override def documentation: Seq[AnyEndpoint] = Seq(
     activeContractsEndpoint,
     activeContractsListEndpoint,
+    activeContractsPageEndpoint,
     getConnectedSynchronizersEndpoint,
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,
@@ -285,6 +306,12 @@ final case class JsGetActiveContractsResponse(
     streamContinuationToken: ByteString,
 )
 
+final case class JsGetActiveContractsPageResponse(
+    activeContracts: Seq[JsGetActiveContractsResponse],
+    activeAtOffset: Long,
+    nextPageToken: Option[ByteString],
+)
+
 object JsStateServiceCodecs {
 
   import JsSchema.*
@@ -297,6 +324,13 @@ object JsStateServiceCodecs {
     deriveRelaxedCodec
 
   implicit val jsGetActiveContractsResponseRW: Codec[JsGetActiveContractsResponse] =
+    deriveConfiguredCodec
+
+  implicit val jsGetActiveContractsPageRequestRW
+      : Codec[state_service.GetActiveContractsPageRequest] =
+    deriveRelaxedCodec
+
+  implicit val jsGetActiveContractsPageResponseRW: Codec[JsGetActiveContractsPageResponse] =
     deriveConfiguredCodec
 
   implicit val jsContractEntryRW: Codec[JsContractEntry] = deriveConfiguredCodec

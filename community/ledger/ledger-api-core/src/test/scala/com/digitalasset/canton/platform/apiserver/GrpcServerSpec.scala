@@ -276,8 +276,8 @@ object GrpcServerSpec {
         desiredPort = Port.Dynamic,
         maxInboundMessageSize = maxInboundMessageSize,
         maxInboundMetadataSize = maxInboundMetadataSize.getOrElse(8 * 1024),
-        maxConcurrentStreamsPerConnection =
-          ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
+        maxConcurrentCallsPerConnection =
+          ServerConfig.defaultMaxConcurrentCallsPerConnection.unwrap,
         metrics = metrics,
         servicesExecutor = executor,
         services = Seq(helloService(ec)),

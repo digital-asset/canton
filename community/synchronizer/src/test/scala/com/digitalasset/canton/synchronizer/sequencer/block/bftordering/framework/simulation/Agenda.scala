@@ -73,7 +73,7 @@ class Agenda(clock: SimClock, loggerFactory: NamedLoggerFactory) {
       at: CantonTimestamp,
       priority: ScheduledCommand.Priority,
   ): Unit = {
-    require(at >= clock.now)
+    require(at >= clock.now, s"$at >= ${clock.now}")
     queue.addOne(ScheduledCommand(command, at, nextCommandSequencerNumber, priority))
     updateCache(command, at, priority)
     nextCommandSequencerNumber += 1

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.auth
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.{BaseTest, LfLedgerString}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{Status, StatusRuntimeException}
@@ -911,7 +910,6 @@ class AuthorizerSpec
   private def authorizer() = new Authorizer(
     () => Instant.ofEpochSecond(1337L),
     "participant-id",
-    telemetry = NoOpTelemetry,
     loggerFactory = loggerFactory,
   )
 

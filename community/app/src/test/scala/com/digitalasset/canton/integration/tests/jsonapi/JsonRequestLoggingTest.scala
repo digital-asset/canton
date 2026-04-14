@@ -69,6 +69,7 @@ class JsonRequestLoggingTest
                       isDeactivated = false,
                       metadata = None,
                       identityProviderId = "",
+                      primaryPartyAuthentication = false,
                     )
                   ),
                   rights = Nil,
@@ -83,8 +84,8 @@ class JsonRequestLoggingTest
         { logSeq =>
           val content: String =
             Pattern.quote(
-              "\nContentType: Some(application/json)\nContentLength: Some(157)\nParameters: []" +
-                s"\nBody: {\"user\":{\"id\":\"$randomUser\",\"primaryParty\":\"\",\"isDeactivated\":false,\"metadata\":null,\"identityProviderId\":\"\"},\"rights\":[]}"
+              "\nContentType: Some(application/json)\nContentLength: Some(192)\nParameters: []" +
+                s"\nBody: {\"user\":{\"id\":\"$randomUser\",\"primaryParty\":\"\",\"isDeactivated\":false,\"metadata\":null,\"identityProviderId\":\"\",\"primaryPartyAuthentication\":false},\"rights\":[]}"
             )
           val expectedLogsOrderRegexJson = Seq(
             "Request POST /v2/users by http.* auth claims",
@@ -141,25 +142,9 @@ class JsonRequestLoggingTest
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
       config
         .focus(_.monitoring.logging.api)
-        .modify(_.copy(messagePayloads = true, debugInProcessRequests = true))
-  }
-
-  case class LoggingConfigPlugin(
-      enablePayloads: Boolean,
-      maxLength: Int,
-      protected val loggerFactory: NamedLoggerFactory,
-  ) extends EnvironmentSetupPlugin {
-    override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
-      config
-        .focus(_.monitoring.logging.api)
         .modify(
-          _.copy(
-            messagePayloads = enablePayloads,
-            maxStringLength = maxLength,
-            debugInProcessRequests = true,
-          )
+          _.copy(messagePayloads = true, maxStringLength = 1024, debugInProcessRequests = true)
         )
-
   }
 
   private def toScopeContext(

@@ -24,7 +24,7 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenMana
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
   DefaultAvailabilityMaxNonOrderedBatchesPerNode,
-  DefaultAvailabilityMaxProposalCreationDelay,
+  DefaultAvailabilityMinProposalCreationDelay,
   DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
   DefaultBlockingDbReadTimeout,
   DefaultConsensusBlockCompletionTimeout,
@@ -169,8 +169,8 @@ final case class BftBlockOrdererConfig(
     availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int =
       DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
     availabilityMaxNonOrderedBatchesPerNode: Short = DefaultAvailabilityMaxNonOrderedBatchesPerNode,
-    availabilityMaxProposalCreationDelay: FiniteDuration =
-      DefaultAvailabilityMaxProposalCreationDelay,
+    availabilityMinProposalCreationDelay: FiniteDuration =
+      DefaultAvailabilityMinProposalCreationDelay,
     // TODO(#24184) make a dynamic sequencing parameter
     maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     consensusQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
@@ -218,7 +218,7 @@ object BftBlockOrdererConfig {
   val DefaultMaxBatchesPerProposal: Short = 16
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
   val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1000
-  val DefaultAvailabilityMaxProposalCreationDelay: FiniteDuration = 250.millis
+  val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 250.millis
   val DefaultConsensusQueueMaxSize: Int = 10 * 1024
   val DefaultConsensusQueuePerNodeQuota: Int = 1024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
@@ -362,8 +362,8 @@ object BftBlockOrdererConfig {
       tls: Option[TlsServerConfig] = None,
       override val maxInboundMessageSize: NonNegativeInt =
         ServerConfig.defaultMaxInboundMessageSize,
-      override val maxConcurrentStreamsPerConnection: NonNegativeInt =
-        ServerConfig.defaultMaxConcurrentStreamsPerConnection,
+      override val maxConcurrentCallsPerConnection: NonNegativeInt =
+        ServerConfig.defaultMaxConcurrentCallsPerConnection,
       override val limits: Option[ActiveRequestLimitsConfig] = None,
   ) extends ServerConfig {
     override val name: String = "peer-to-peer"

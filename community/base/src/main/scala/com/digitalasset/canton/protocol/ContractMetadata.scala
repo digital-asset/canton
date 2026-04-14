@@ -61,7 +61,17 @@ final case class ContractMetadata private (
       nonMaintainerSignatories = (signatories -- maintainers).toList,
       nonSignatoryStakeholders = (stakeholders -- signatories).toList,
       key = maybeKeyWithMaintainersVersioned.map(keyWithMaintainersVersioned =>
-        GlobalKeySerialization.assertToProto(keyWithMaintainersVersioned.map(_.globalKey))
+        GlobalKeySerialization.assertToProtoV30(keyWithMaintainersVersioned.map(_.globalKey))
+      ),
+      maintainers = maintainers.toSeq,
+    )
+
+  private[protocol] def toProtoV31: v31.SerializableContract.Metadata =
+    v31.SerializableContract.Metadata(
+      nonMaintainerSignatories = (signatories -- maintainers).toList,
+      nonSignatoryStakeholders = (stakeholders -- signatories).toList,
+      key = maybeKeyWithMaintainersVersioned.map(keyWithMaintainersVersioned =>
+        GlobalKeySerialization.assertToProtoV31(keyWithMaintainersVersioned.map(_.globalKey))
       ),
       maintainers = maintainers.toSeq,
     )
@@ -82,7 +92,12 @@ object ContractMetadata
       ProtocolVersion.v34,
       supportedProtoVersion(v30.SerializableContract.Metadata)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> ProtoCodec(
+      ProtocolVersion.v35,
+      supportedProtoVersion(v31.SerializableContract.Metadata)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
 
   override def name: String = "contract metadata"
@@ -130,6 +145,39 @@ object ContractMetadata
         ProtoConverter.parseLfPartyId(_, "non_signatory_stakeholders")
       )
       keyVersionedO <- keyP.traverse(GlobalKeySerialization.fromProtoV30)
+      maintainersList <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
+      _ <- Either.cond(
+        maintainersList.isEmpty || keyVersionedO.isDefined,
+        (),
+        FieldNotSet("Metadata.key"),
+      )
+    } yield {
+      val maintainers = maintainersList.toSet
+      val keyWithMaintainersO = keyVersionedO.map(_.map(LfGlobalKeyWithMaintainers(_, maintainers)))
+      val signatories = maintainers ++ nonMaintainerSignatories.toSet
+      val stakeholders = signatories ++ nonSignatoryStakeholders.toSet
+      checked(ContractMetadata.tryCreate(signatories, stakeholders, keyWithMaintainersO))
+    }
+  }
+
+  def fromProtoV31(
+      metadataP: v31.SerializableContract.Metadata
+  ): ParsingResult[ContractMetadata] = {
+    val v31.SerializableContract.Metadata(
+      nonMaintainerSignatoriesP,
+      nonSignatoryStakeholdersP,
+      keyP,
+      maintainersP,
+    ) =
+      metadataP
+    for {
+      nonMaintainerSignatories <- nonMaintainerSignatoriesP.traverse(
+        ProtoConverter.parseLfPartyId(_, "non_maintainer_signatories")
+      )
+      nonSignatoryStakeholders <- nonSignatoryStakeholdersP.traverse(
+        ProtoConverter.parseLfPartyId(_, "non_signatory_stakeholders")
+      )
+      keyVersionedO <- keyP.traverse(GlobalKeySerialization.fromProtoV31)
       maintainersList <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
       _ <- Either.cond(
         maintainersList.isEmpty || keyVersionedO.isDefined,

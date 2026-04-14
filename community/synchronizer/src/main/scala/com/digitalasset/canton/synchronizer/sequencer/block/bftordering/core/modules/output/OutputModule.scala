@@ -10,7 +10,6 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.sequencing.protocol.AllMembersOfSynchronizer
 import com.digitalasset.canton.synchronizer.block.BlockFormat
-import com.digitalasset.canton.synchronizer.block.BlockFormat.Block.TickTopology
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.deserializeSignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
@@ -228,7 +227,7 @@ class OutputModule[E <: Env[E]](
 
         val lastStoredOutputBlockMetadata =
           context.blockingAwait(
-            store.getLastBlockInLatestCompletedEpoch,
+            store.getLastNonSequentialBlockMetadataStored,
             config.blockingDbReadTimeout,
           )
         val lastStoredBlockNumber = lastStoredOutputBlockMetadata.map(_.blockNumber)
@@ -274,22 +273,27 @@ class OutputModule[E <: Env[E]](
           ).min
 
         val recoverFromBlockNumber = {
-          val firstBlock = for {
+          val firstBlockO = for {
             blockMetadata <- context.blockingAwait(
-              store.getBlock(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
+              store.getBlock(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch),
+              config.blockingDbReadTimeout,
             )
+            startEpochNumber = blockMetadata.epochNumber
             epochInfo <- context.blockingAwait(
-              epochStoreReader.loadEpochInfo(blockMetadata.epochNumber)
+              epochStoreReader.loadEpochInfo(startEpochNumber),
+              config.blockingDbReadTimeout,
             )
+            startBlockNumber = epochInfo.startBlockNumber
           } yield {
             logger.info(
               s"Output module bootstrap wanted to recover from block $recoverFromBlockNumberThatCouldBeInMiddleOfEpoch " +
-                s"which is in epoch ${blockMetadata.epochNumber} we adjust to first block of that epoch which is${epochInfo.startBlockNumber}"
+                s"which is in epoch $startEpochNumber; " +
+                s"we adjust to first block of that epoch which is $startBlockNumber}"
             )
-            epochInfo.startBlockNumber
+            startBlockNumber
           }
 
-          firstBlock.getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
+          firstBlockO.getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
         }
 
         logger.info(
@@ -330,6 +334,11 @@ class OutputModule[E <: Env[E]](
               epochStoreReader.loadOrderedBlocks(recoverFromBlockNumber),
               config.blockingDbReadTimeout,
             )
+          val startEpochNumber =
+            orderedBlocksToProcess.headOption // Ordered blocks to process, if any, always start with the recover block
+              .map(_.orderedBlock.metadata.epochNumber)
+              .getOrElse(EpochNumber.First)
+          logger.info(s"Output module bootstrap: [re-]starting from epoch $startEpochNumber")
           blocksRecoveredFromConsensus.addMessages(orderedBlocksToProcess)
           // Rehydrate the transient local state containing the previous stored block information (if any)
           //  to ensure that the BFT time is computed correctly even when restarting blocks with
@@ -345,9 +354,6 @@ class OutputModule[E <: Env[E]](
                 previousBlock.blockBftTime,
               )
             }
-          val startEpochNumber = orderedBlocksToProcess.headOption
-            .map(_.orderedBlock.metadata.epochNumber)
-            .getOrElse(EpochNumber.First)
           val epochMetadata =
             context.blockingAwait(
               store.getEpoch(startEpochNumber),
@@ -360,18 +366,38 @@ class OutputModule[E <: Env[E]](
           if (epochMetadata.isDefined)
             setEpochMetadataStoredCache(startEpochNumber)
 
-          if (startEpochNumber < startupState.initialEpochWeHaveLeaderSelectionStateFor) {
-
+          val initialEpochWeHaveLeaderSelectionStateFor =
+            startupState.initialEpochWeHaveLeaderSelectionStateFor
+          if (startEpochNumber < initialEpochWeHaveLeaderSelectionStateFor) {
+            logger.info(
+              s"Output module bootstrap: detected start epoch $startEpochNumber, which is before " +
+                s"the epoch we have leader selection state for, i.e. $initialEpochWeHaveLeaderSelectionStateFor: " +
+                "loading epoch info"
+            )
             for {
-              epochInfo <- context.blockingAwait(epochStoreReader.loadEpochInfo(startEpochNumber))
+              epochInfo <- context.blockingAwait(
+                epochStoreReader.loadEpochInfo(startEpochNumber),
+                config.blockingDbReadTimeout,
+              )
+              bootstrapTopologyActivationTime = epochInfo.topologyActivationTime
+              _ = logger.info(
+                s"Output module bootstrap: querying restart topology at $bootstrapTopologyActivationTime for epoch $startEpochNumber " +
+                  s"(could alter ordering topology: $currentEpochCouldAlterOrderingTopology)"
+              )
               (oldOrderingTopology, oldCryptoProvider) <- context.blockingAwait(
                 orderingTopologyProvider.getOrderingTopologyAt(
-                  Some(epochInfo.topologyActivationTime),
-                  checkPendingChanges = true,
-                )
+                  activationTime = Some(bootstrapTopologyActivationTime),
+                  // Don't check for pending changes if we are restarting from the first epoch,
+                  //  since we know there can't be any, and `awaitMaxTimestamp` can be get stuck
+                  //  for the first epoch's activation time, since we haven't ticked it
+                  //  (being the first epoch).
+                  checkPendingChanges = startEpochNumber > EpochNumber.First,
+                ),
+                config.blockingDbReadTimeout,
               )
               leaderSelectionPolicyState <- context.blockingAwait(
-                store.getLeaderSelectionPolicyState(startEpochNumber)
+                store.getLeaderSelectionPolicyState(startEpochNumber),
+                config.blockingDbReadTimeout,
               )
             } {
               currentEpochOrderingTopology = oldOrderingTopology
@@ -382,7 +408,8 @@ class OutputModule[E <: Env[E]](
                 .leaderSelectionPolicy(leaderSelectionPolicyState, currentEpochOrderingTopology)
               logger.info(
                 s"Output module bootstrap is reading blocks from an older epoch $startEpochNumber " +
-                  s"we fetched topology info from ${epochInfo.topologyActivationTime} (could alter ordering topology: $currentEpochCouldAlterOrderingTopology)" +
+                  s"we fetched topology info from $bootstrapTopologyActivationTime " +
+                  s"(could alter ordering topology: $currentEpochCouldAlterOrderingTopology)" +
                   s"and got the following leader selection state $leaderSelectionPolicyState"
               )
             }
@@ -421,7 +448,8 @@ class OutputModule[E <: Env[E]](
               } else traceContext
 
               logger.debug(
-                s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs}"
+                s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs
+                    .map(_.batchId)}"
               )
               if (completedBlocksPeanoQueue.alreadyInserted(blockNumber)) {
                 // This can happen if we start catching up in the middle of an epoch, as state transfer has epoch granularity.
@@ -541,13 +569,10 @@ class OutputModule[E <: Env[E]](
                   orderedBlockNumber,
                   orderedBlockBftTime.toMicros,
                   blockDataToOrderedRequests(orderedBlockData, orderedBlockBftTime),
-                  tickTopology = Option.when(tickTopology)(
-                    TickTopology(
-                      BftTime
-                        .epochEndBftTime(orderedBlockBftTime, orderedBlockData)
-                        .toMicros,
-                      broadcast = false, // Address only to sequencers
-                    )
+                  tickTopologyAtMicrosFromEpoch = Option.when(tickTopology)(
+                    BftTime
+                      .epochEndBftTime(orderedBlockBftTime, orderedBlockData)
+                      .toMicros
                   ),
                 )
               )(blockTraceContext)
@@ -816,7 +841,7 @@ class OutputModule[E <: Env[E]](
       //  (and successfully processed and applied by the topology processor).
       pipeToSelf(
         orderingTopologyProvider.getOrderingTopologyAt(
-          Some(TopologyActivationTime(epochEndBftTime.immediateSuccessor)),
+          activationTime = Some(TopologyActivationTime(epochEndBftTime.immediateSuccessor)),
           checkPendingChanges = true,
         ),
         metrics.topology.queryLatency,

@@ -179,6 +179,8 @@ final case class DeclarativeIdpConfig(
   *   a property bag of annotations that can be stored alongside the user
   * @param identityProviderId
   *   the idp of the given user
+  * @param primaryPartyAuthentication
+  *   if we allow Party JWT authentication for the user through the primary party
   * @param rights
   *   the rights granted to the party
   */
@@ -188,6 +190,7 @@ final case class DeclarativeUserConfig(
     isDeactivated: Boolean = false,
     annotations: Map[String, String] = Map.empty,
     identityProviderId: String = "",
+    primaryPartyAuthentication: Boolean = false,
     rights: DeclarativeUserRightsConfig = DeclarativeUserRightsConfig(),
 )(val resourceVersion: String = "") {
 
@@ -226,7 +229,8 @@ final case class DeclarativeUserConfig(
   }
 
   def needsUserChange(other: DeclarativeUserConfig): Boolean =
-    primaryParty != other.primaryParty || isDeactivated != other.isDeactivated || annotations != other.annotations
+    primaryParty != other.primaryParty || isDeactivated != other.isDeactivated || annotations != other.annotations ||
+      primaryPartyAuthentication != other.primaryPartyAuthentication
 
 }
 

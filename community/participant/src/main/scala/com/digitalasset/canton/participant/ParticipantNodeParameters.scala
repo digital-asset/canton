@@ -73,6 +73,7 @@ object ParticipantNodeParameters {
       watchdog = None,
       startupMemoryCheckConfig = StartupMemoryCheckConfig(ReportingLevel.Warn),
       dispatchQueueBackpressureLimit = NonNegativeInt.tryCreate(10),
+      sanitizePublicErrorMessages = false,
     ),
     activationFrequencyForWarnAboutConsistencyChecks = 1000L,
     adminWorkflow = AdminWorkflowConfig(

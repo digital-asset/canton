@@ -5,14 +5,6 @@
 -- defining the type that contains a contract id in a separate module, the
 -- runtime check is still performed.
 
--- @ERROR range=41:1-41:17; Contract IDs are not supported in contract key
--- @ERROR range=50:1-50:13; Contract IDs are not supported in contract key
--- @ERROR range=56:1-56:19; Contract IDs are not supported in contract key
--- @ERROR range=95:1-95:14; Contract IDs are not supported in contract key
--- @ERROR range=99:1-99:13; Contract IDs are not supported in contract key
--- @ERROR range=103:1-103:14; Contract IDs are not supported in contract key
--- @ERROR range=107:1-107:16; Contract IDs are not supported in contract key
-
 module ContractIdInContractKeySkipCheck where
 
 import Daml.Script

@@ -45,6 +45,7 @@ import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.store.db.RequiredTypesCodec.*
 import com.digitalasset.canton.synchronizer.block.UninitializedBlockHeight
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.{
   CommitMode,
@@ -1363,7 +1364,7 @@ class DbSequencerStore(
         UninitializedBlockHeight,
         previousTimestampsAtTimestamps,
         statusAtTimestamp,
-        Map.empty,
+        InFlightAggregations.empty,
         None,
         protocolVersion,
         Seq.empty,

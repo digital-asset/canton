@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf
 package transaction
 
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 /** Errors raised when building transactions with PartialTransaction:
  *   - [[TransactionError.DuplicateContractId]]
- *   - [[TransactionError.DuplicateContractKey]]
  */
 sealed trait TransactionError extends Serializable with Product
 
@@ -16,13 +16,13 @@ sealed trait TransactionContractError extends TransactionError
 
 /** Defines the errors raised by [[LegacyContractStateMachine]] and its clients:
   *  - [[TransactionError.DuplicateContractId]]
-  *  - [[TransactionError.DuplicateContractKey]]
   *  - [[TransactionError.InconsistentContractKey]]
   */
 object TransactionError {
 
   final case class AlreadyConsumed(
       cid: ContractId,
+      tmplId: Ref.TypeConId,
       nid: NodeId
   ) extends TransactionContractError
 
@@ -32,27 +32,6 @@ object TransactionError {
     */
   final case class DuplicateContractId(
       contractId: ContractId
-  ) extends TransactionContractError
-
-
-  /** Signals that within the transaction we got to a point where
-    * two contracts with the same key were active.
-    *
-    * Note that speedy only detects duplicate key collisions
-    * if both contracts are used in the transaction in by-key operations
-    * meaning lookup, fetch or exercise-by-key or local creates.
-    *
-    * Two notable cases that will never produce duplicate key errors
-    * is a standalone create or a create and a fetch (but not fetch-by-key)
-    * with the same key.
-    *
-    * For ledger implementors this means that (for contract key uniqueness)
-    * it is sufficient to only look at the inputs and the outputs of the
-    * transaction while leaving all internal checks within the transaction
-    * to the engine.
-    */
-  final case class DuplicateContractKey(
-      key: GlobalKey
   ) extends TransactionContractError
 
   /** An exercise, fetch or lookupByKey failed because the mapping of key -> contract id

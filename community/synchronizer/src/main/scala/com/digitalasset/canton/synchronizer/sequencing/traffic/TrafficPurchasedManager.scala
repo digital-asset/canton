@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.traffic.TrafficPurchased
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager.{
   PendingBalanceUpdate,
@@ -51,6 +52,7 @@ class TrafficPurchasedManager(
     futureSupervisor: FutureSupervisor,
     sequencerMetrics: SequencerMetrics,
     override protected val timeouts: ProcessingTimeout,
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
@@ -247,8 +249,15 @@ class TrafficPurchasedManager(
   private def updateAndCompletePendingUpdates(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Unit = {
-    logger.trace(s"Updating lastUpdatedAt to $timestamp")
-    val prev = lastUpdateAt.getAndSet(Some(timestamp))
+    val prev = lastUpdateAt.getAndUpdate {
+      // only update if preserves monotonicity
+      case previous if previous.forall(_ <= timestamp) =>
+        logger.trace(s"Updating lastUpdatedAt to $timestamp")
+        Some(timestamp)
+      case previous =>
+        logger.trace(s"Ignoring out of order update to $timestamp for lastUpdatedAt")
+        previous
+    }
 
     prev match {
       case previous if previous.forall(_ <= timestamp) => {
@@ -262,6 +271,10 @@ class TrafficPurchasedManager(
           }
         }
       }
+      case _ if lsuSequencingBounds.exists(_.upgradeTime >= timestamp) =>
+        logger.debug(
+          s"Ignoring out of order update at $timestamp, because it's before or at the LSU upgrade time."
+        )
       case _ =>
         ErrorUtil.invalidState(
           s"Received an update out of order: Update = $timestamp. Previous timestamp was $prev"

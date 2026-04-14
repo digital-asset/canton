@@ -11,6 +11,7 @@ import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.RichGeneratedMessage
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{
@@ -101,6 +102,7 @@ import org.apache.pekko.stream.*
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.slf4j.event.Level
 
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
@@ -135,6 +137,7 @@ class BlockSequencer(
     prettyPrinter: CantonPrettyPrinter,
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
+    consistencyChecks: Boolean,
     loggerFactory: NamedLoggerFactory,
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
@@ -288,8 +291,9 @@ class BlockSequencer(
       producePostOrderingTopologyTicks,
       metrics,
       batchingConfig,
-      loggerFactory,
+      consistencyChecks = consistencyChecks,
       memberValidator = memberValidator,
+      loggerFactory,
     )(CloseContext(cryptoApi), tracer)
 
     implicit val traceContext: TraceContext =
@@ -550,6 +554,10 @@ class BlockSequencer(
           approximateSnapshot.ipsSnapshot,
         )
         .leftMap(_.toSequencerDeliverError)
+      _ <- {
+        if (batch.envelopes.isEmpty) EitherT.right(FutureUnlessShutdown.unit) // Allow timeproofs
+        else checkBeforeUpgradeTime(approximateSnapshot)
+      }
       _ = if (logEventDetails)
         logger.debug(
           s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
@@ -563,6 +571,23 @@ class BlockSequencer(
       ).mapK(FutureUnlessShutdown.outcomeK).leftWiden[CantonBaseError]
     } yield ()
   }
+
+  private def checkBeforeUpgradeTime(
+      snapshot: SynchronizerSnapshotSyncCryptoApi
+  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
+    for {
+      lsu <- EitherT.right(snapshot.ipsSnapshot.announcedLsu())
+      sequencingTs = snapshot.ipsSnapshot.timestamp
+      errO = lsu.collect {
+        case (successor, _) if sequencingTs >= successor.upgradeTime =>
+          SequencerErrors.PassedUpgradeTime(
+            s"Submission request was refused because the sequencer can no longer accept transactions on " +
+              s"${snapshot.psid} as sequencing time of $sequencingTs exceeds the upgrade time of " +
+              successor.upgradeTime
+          )
+      }
+      _ <- EitherT.fromEither[FutureUnlessShutdown](errO.toLeft(()))
+    } yield ()
 
   override protected def localSequencerMember: Member = sequencerId
 
@@ -642,7 +667,9 @@ class BlockSequencer(
     val timestampsSet = SortedSet.from(timestamps)
     val headBlock = stateManager.getHeadState.block
     val latestSequencedTimestamp = headBlock.lastTs
-    val latestSequencerEventTimestamp = headBlock.latestSequencerEventTimestamp
+    val latestSequencerEventTimestamp = headBlock.latestSequencerEventTimestamp.orElse(
+      lsuSequencingBounds.map(_.upgradeTime)
+    )
 
     // Get the latest snapshot available by making use of the latestSequencerEventTimestamp in the head state
     // This ensures we can immediately get topology snapshots for events that have been sequenced without
@@ -1410,7 +1437,12 @@ class BlockSequencer(
           Recipients.cc(mediatorGroupRecipient),
         ),
       )
-      messageId = MessageId.randomMessageId()
+      messageId = MessageId(
+        String73.tryCreate(
+          s"lsu-${UUID.randomUUID()}",
+          Some("lsu-sequencing-test"),
+        )
+      )
 
       submissionRequest <- SubmissionRequest
         .create(

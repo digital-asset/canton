@@ -3,9 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.slow
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -43,7 +41,6 @@ import scala.concurrent.duration.*
   *   - above synchronizer is bootstrapped and p1 is connected to it
   *   - performance runner is run against p1
   */
-@UnstableTest // TODO(#19034)
 class PerformanceReplicatedMediatorDatabaseFaultIntegrationTest
     extends ReliabilityPerformanceIntegrationTest
     with ReplicatedNodeHelper
@@ -86,30 +83,35 @@ class PerformanceReplicatedMediatorDatabaseFaultIntegrationTest
     participant1.topology.synchronisation.await_idle()
   }
 
+  // Defined here to avoid "Suspicious forward reference in class" warning as `external` is used in environment definition below
+  protected val external =
+    new UseExternalProcess(
+      loggerFactory,
+      externalMediators = Set(mediator1Name, mediator2Name),
+      fileNameHint = this.getClass.getSimpleName,
+    )
+
   // Combine the environment definition to setup replicas, health checks, and the performance runner
-  override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition
-      .buildBaseEnvironmentDefinition(
-        numParticipants = 1,
-        numSequencers = 1,
-        numMediators = 2,
+  override lazy val environmentDefinition: EnvironmentDefinition = EnvironmentDefinition
+    .buildBaseEnvironmentDefinition(
+      numParticipants = 1,
+      numSequencers = 1,
+      numMediators = 2,
+    )
+    .addConfigTransforms(
+      _.focus(_.parameters.timeouts.processing.shutdownProcessing)
+        .replace(config.NonNegativeDuration.tryFromDuration(1.minute)),
+      // Disable consistency checks as this test creates a lot of contracts and chokes Postgres in CI
+      // Consistency checks are slow, so we should not use them in performance tests!
+      _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false),
+    )
+    .withManualStart
+    .withSetup(setupReplicas(_, external))
+    .withTeardown { _ =>
+      ToxiproxyHelpers.removeAllProxies(
+        toxiproxyPlugin.runningToxiproxy.controllingToxiproxyClient
       )
-      .addConfigTransforms(
-        _.focus(_.parameters.timeouts.processing.shutdownProcessing)
-          .replace(NonNegativeDuration.tryFromDuration(1.minute)),
-        // Disable warnings about consistency checks as this test creates a lot of contracts
-        ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.activationFrequencyForWarnAboutConsistencyChecks)
-            .replace(Long.MaxValue)
-        ),
-      )
-      .withManualStart
-      .withSetup(setupReplicas(_, external))
-      .withTeardown { _ =>
-        ToxiproxyHelpers.removeAllProxies(
-          toxiproxyPlugin.runningToxiproxy.controllingToxiproxyClient
-        )
-      }
+    }
 
   lazy val replica1ProxyConf: ProxyConfig =
     MediatorToPostgres(s"$mediator1Name-to-postgres", mediator1Name)
@@ -124,13 +126,6 @@ class PerformanceReplicatedMediatorDatabaseFaultIntegrationTest
     toxiproxyPlugin.runningToxiproxy.getProxy(replica1ProxyConf.name).valueOrFail("replica1 proxy")
   lazy val replica2Proxy: RunningProxy =
     toxiproxyPlugin.runningToxiproxy.getProxy(replica2ProxyConf.name).valueOrFail("replica2 proxy")
-
-  protected val external =
-    new UseExternalProcess(
-      loggerFactory,
-      externalMediators = Set(mediator1Name, mediator2Name),
-      fileNameHint = this.getClass.getSimpleName,
-    )
 
   // Register plugins
   Seq(
@@ -186,14 +181,13 @@ class PerformanceReplicatedMediatorDatabaseFaultIntegrationTest
 
   }
 
-  override protected def matchAcceptableErrorOrWarnMessage: Matcher[String] = (
+  override protected def matchAcceptableErrorOrWarnMessage: Matcher[String] =
     super.matchAcceptableErrorOrWarnMessage.or {
-      // Happens because during mediator failover the pending requests are lost, which means some participant do not get
-      // a verdict
-      (include("LOCAL_VERDICT_TIMEOUT") and include(
+      // Happens because during mediator failover the pending requests are lost,
+      // which means some participant do not get a verdict
+      include("LOCAL_VERDICT_TIMEOUT") and include(
         "Rejected transaction due to a participant determined timeout"
-      ))
+      )
     }
-  )
 
 }

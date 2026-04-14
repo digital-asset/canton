@@ -126,8 +126,8 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
           synchronizeParticipants = Seq(participant1, participant2), // p3 is offline
         )
 
-        val failedHandshakeError = "Validation failure: Failed handshake: "
-          + "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+        val failedHandshakeError = "GrpcClientError: INVALID_ARGUMENT/" +
+          "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
 
         loggerFactory.assertLogsUnorderedOptional(
           {

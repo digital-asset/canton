@@ -30,14 +30,11 @@ message SequencerConnect {
     int32 server_protocol_version = 1;
     oneof value {
       Success success = 2;
-      Failure failure = 3;
     }
-
     message Success {}
 
-    message Failure {
-      string reason = 1;
-    }
+    reserved 3; // used to be value.failure
+    reserved "failure";
   }
 
   message GetSynchronizerIdRequest {}
@@ -62,13 +59,12 @@ message SequencerConnect {
       bool is_active = 1;
     }
 
-    message Failure {
-      string reason = 1;
-    }
     oneof value {
       Success success = 1;
-      Failure failure = 2;
     }
+
+    reserved 2; // used to be value.failure
+    reserved "failure";
   }
 
   message RegisterOnboardingTopologyTransactionsRequest {

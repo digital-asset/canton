@@ -40,14 +40,18 @@ class SymbolicPrivateCrypto(
 
   // NOTE: These schemes are not really used by Symbolic crypto
   override def signingSchemes: SigningCryptoSchemes =
-    SigningCryptoSchemes(
-      CryptoScheme(SigningKeySpec.EcCurve25519, NonEmpty.mk(Set, SigningKeySpec.EcCurve25519)),
-      CryptoScheme(SigningAlgorithmSpec.Ed25519, NonEmpty.mk(Set, SigningAlgorithmSpec.Ed25519)),
+    SigningCryptoSchemes.tryCreate(
+      CryptoScheme
+        .tryCreate(SigningKeySpec.EcCurve25519, NonEmpty.mk(Set, SigningKeySpec.EcCurve25519)),
+      CryptoScheme.tryCreate(
+        SigningAlgorithmSpec.Ed25519,
+        NonEmpty.mk(Set, SigningAlgorithmSpec.Ed25519),
+      ),
     )
   override def encryptionSchemes: EncryptionCryptoSchemes =
-    EncryptionCryptoSchemes(
-      CryptoScheme(EncryptionKeySpec.EcP256, NonEmpty.mk(Set, EncryptionKeySpec.EcP256)),
-      CryptoScheme(
+    EncryptionCryptoSchemes.tryCreate(
+      CryptoScheme.tryCreate(EncryptionKeySpec.EcP256, NonEmpty.mk(Set, EncryptionKeySpec.EcP256)),
+      CryptoScheme.tryCreate(
         EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc,
         NonEmpty.mk(Set, EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc),
       ),

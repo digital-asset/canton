@@ -4,9 +4,14 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.ledger.api.v2.commands.Command
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  PositiveInt,
+  PositiveLong,
+}
 import com.digitalasset.canton.console.{
   CommandFailure,
   InstanceReference,
@@ -19,20 +24,23 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.sequencing.traffic.{TrafficConsumedManager, TrafficControlErrors}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.topology.{Party, SynchronizerId}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
+import org.slf4j.event.Level
 
 import java.time.Duration
+import scala.concurrent.{Future, Promise}
 import scala.jdk.CollectionConverters.*
-import scala.util.Random
+import scala.util.{Random, Try}
 
 /** This test ensures that traffic transfers works for LSU.
   *
@@ -150,6 +158,22 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
         environment.simClock.value.advance(Duration.ofSeconds(1))
       }
 
+  def advanceSynchronizerTime(duration: Duration)(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    val clock = env.environment.simClock.value
+    clock.advance(duration)
+    val now = clock.now
+    participant1.runningNode.value.getNode.value.sync
+      .lookupSynchronizerTimeTracker(sequencer3.physical_synchronizer_id)
+      .value
+      .awaitTick(now)
+      .value
+      .futureValue
+      .discard
+  }
+
   "Traffic transfer during an LSU" should {
     "create and assert non-empty traffic state on the sequencer" in { implicit env =>
       import env.*
@@ -213,6 +237,25 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       )
 
       performSynchronizerNodesLsu(fixture)
+
+      // Run the sanity sequencing tests while we assign traffic
+      val testLsuSequencingComplete = Promise[Unit]()
+      val testLsuSequencingF = Future {
+        (0 to 1000).foreach { i =>
+          if (!testLsuSequencingComplete.isCompleted) {
+            logger.debug(s"Round $i of test_lsu_sequencing")
+            Try {
+              sequencer3.setup.test_lsu_sequencing(NonNegativeInt.zero)
+            }.recover {
+              case x: CommandFailure
+                  if x.getMessage.contains("SEQUENCER_SUBMISSION_AFTER_UPGRADE_TIME") =>
+                ()
+            }
+
+            Threading.sleep(100L)
+          }
+        }
+      }
 
       // Generate some non-trivial base traffic remainder state
       environment.simClock.value.advanceTo(upgradeTime.minusMillis(20L))
@@ -284,6 +327,10 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       }
 
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
+
+      // finish the sequencing test workload
+      testLsuSequencingComplete.success(())
+      testLsuSequencingF.futureValue
 
       logger.debug("Comparing traffic states on old and new sequencers")
       val members = Seq(participant1.id.member, participant2.id.member, mediator1.id.member)
@@ -403,21 +450,23 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       import env.*
       val clock = env.environment.simClock.value
       clock.advance(Duration.ofSeconds(1))
-      val trafficBeforeCommand = getTrafficForMember(participant1, sequencer3).value
-      participant1.runningNode.value.getNode.value.sync
-        .lookupSynchronizerTimeTracker(sequencer3.physical_synchronizer_id)
-        .value
-        .fetchTimeProof()
-        .futureValueUS
-        .discard
-      val trafficAfterCommand = getTrafficForMember(participant1, sequencer3).value
-      (trafficBeforeCommand.baseTrafficRemainder.value - trafficAfterCommand.baseTrafficRemainder.value) shouldBe baseEventCost
+      loggerFactory.assertEventuallyLogsSeq(
+        SuppressionRule.forLogger[TrafficConsumedManager] && SuppressionRule.Level(Level.DEBUG)
+      )(
+        participant1.runningNode.value.getNode.value.sync
+          .lookupSynchronizerTimeTracker(sequencer3.physical_synchronizer_id)
+          .value
+          .fetchTimeProof()
+          .futureValueUS
+          .discard,
+        forExactly(2, _)( // both sequencers will log the consumption
+          _.message should include(s"Consumed $baseEventCost for ${participant1.id}")
+        ),
+      )
     }
 
     "succeed to run a big transaction with enough credit (after LSU)" in { implicit env =>
       import env.*
-
-      val clock = env.environment.simClock.value
 
       val claire = participant2.parties.testing.find("Claire")
       val pkg = participant2.packages.find_by_module("Test").headOption.map(_.packageId).value
@@ -427,7 +476,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       val trafficBeforeCommand = participant2.traffic_control.traffic_state(daId)
 
       // Fill in base rate
-      clock.advance(Duration.ofSeconds(1))
+      advanceSynchronizerTime(Duration.ofSeconds(1))
 
       // Now it should succeed
       participant2.ledger_api.commands.submit(
@@ -444,7 +493,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       trafficAfterCommand.extraTrafficPurchased.value shouldBe topUpAmount
 
       // Make sure base rate is full
-      clock.advance(Duration.ofSeconds(1))
+      advanceSynchronizerTime(Duration.ofSeconds(1))
 
       // Run it again to compare the 2 traffic consumptions
       val exerciseCommandRerun =
@@ -453,7 +502,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       val trafficBeforeRerun = participant2.traffic_control.traffic_state(daId)
 
       // Fill in base rate
-      clock.advance(Duration.ofSeconds(1))
+      advanceSynchronizerTime(Duration.ofSeconds(1))
 
       participant2.ledger_api.commands.submit(
         Seq(claire),
@@ -518,23 +567,12 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
   }
 }
 
-final class LsuReferenceTrafficAccountingIntegrationTest
+final class LsuBftOrderingTrafficAccountingIntegrationTest
     extends LsuTrafficAccountingIntegrationTest {
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
     )
   )
 }
-
-// TODO(#16789) Re-enable test once dynamic onboarding (traffic control) is supported for DA BFT
-//final class LsuBftOrderingTrafficAccountingIntegrationTest
-//  extends LsuTrafficAccountingIntegrationTest {
-//    registerPlugin(
-//      new UseBftSequencer(
-//        loggerFactory,
-//        MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
-//      )
-//    )
-//}

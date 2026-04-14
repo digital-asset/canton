@@ -17,7 +17,10 @@ import com.digitalasset.canton.sequencing.client.SequencerSubscription
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.client.transports.ServerSubscriptionCloseReason
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
-import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError.EventsUnavailableForTimestamp
+import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError.{
+  EventsUnavailableForTimestamp,
+  MemberDisabled,
+}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
@@ -141,6 +144,10 @@ private[service] class GrpcManagedSubscription[T](
                 // Logging at INFO level because this can happen during normal operations for a decentralized synchronizer
                 // where a participant updates its sequencer connection config before it has caught up to the point
                 // where the sequencer was actually onboarded.
+                logger.info(message)
+              case _: MemberDisabled =>
+                // Logging at INFO level because this can happen during normal operations when a participant is administratively
+                // disabled while off-line for >30d.
                 logger.info(message)
               case _ => logger.warn(message)
             }

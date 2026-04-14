@@ -238,6 +238,7 @@ class CachingTopologySnapshot(
           parent
             .loadVettedPackages(participants.toSet)
             .map(foundVettedPackages =>
+              // make sure that the returned map contains an entry for each input element
               participants
                 .map(participant =>
                   participant -> foundVettedPackages.getOrElse(participant, Map.empty)

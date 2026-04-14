@@ -126,6 +126,10 @@ abstract class NextGenContractStateMachineGenerativeSpec(
 
 object NextGenContractStateMachineGenerativeSpec {
 
+
+  // TODO (#31844) The framework should pass the actual template ID
+  private val dummyTmplId: Ref.TypeConId = Ref.TypeConId.assertFromString("-dummy-:Mod:T")
+
   private val generators =
     new ConcreteGenerators(
       LanguageVersion.v2_dev,
@@ -233,6 +237,7 @@ object NextGenContractStateMachineGenerativeSpec {
           for {
             s <- state.visitExercise(
               nodeId = freshNodeId(),
+              tmplId = dummyTmplId,
               targetId = toContractId(contractId),
               mbKey = keyOf(contractId),
               byKey = false,
@@ -245,6 +250,7 @@ object NextGenContractStateMachineGenerativeSpec {
           for {
             s <- state.visitExercise(
               nodeId = freshNodeId(),
+              tmplId = dummyTmplId,
               targetId = toContractId(contractId),
               mbKey = Some(toGlobalKey(keyId)),
               byKey = true,
@@ -255,6 +261,7 @@ object NextGenContractStateMachineGenerativeSpec {
 
         case Concrete.Fetch(contractId) =>
           state.visitFetch(
+            tmplId = dummyTmplId,
             contractId = toContractId(contractId),
             mbKey = keyOf(contractId),
             byKey = false,
@@ -262,6 +269,7 @@ object NextGenContractStateMachineGenerativeSpec {
 
         case Concrete.FetchByKey(contractId, keyId, _) =>
           state.visitFetch(
+            tmplId = dummyTmplId,
             contractId = toContractId(contractId),
             mbKey = Some(toGlobalKey(keyId)),
             byKey = true,

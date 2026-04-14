@@ -5,9 +5,10 @@ package com.digitalasset.canton.tracing
 
 import cats.Show.Shown
 import com.daml.nonempty.NonEmpty
-import com.daml.tracing as damlTelemetry
+import com.daml.scalautil.Statement.discard
+import com.daml.tracing.SpanAttribute
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
-import io.opentelemetry.api.trace.{Span, Tracer}
+import io.opentelemetry.api.trace.Span
 import io.opentelemetry.context.Context as OpenTelemetryContext
 import io.opentelemetry.sdk.trace.ReadableSpan
 
@@ -43,13 +44,8 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
       readableSpan.getName
     }
 
-  /** Convert to ledger-api server's telemetry context to facilitate integration
-    */
-  def toDamlTelemetryContext(implicit tracer: Tracer): damlTelemetry.TelemetryContext =
-    damlTelemetry.DefaultTelemetryContext(
-      tracer,
-      Option(Span.fromContextOrNull(context)).getOrElse(Span.getInvalid),
-    )
+  def setSpanAttributes(attributes: Seq[(SpanAttribute, String)]): Unit =
+    span.foreach(s => attributes.foreach(a => discard(s.setAttribute(a._1.key, a._2))))
 
   /** Java serialization method (despite looking unused, Java serialization will use this during our
     * record/replay tests) Delegates to a proxy to do serialization and deserialization. Despite
@@ -170,9 +166,4 @@ object TraceContext {
     private def readResolve(): Object =
       w3CTraceContextO.map(_.toTraceContext).getOrElse(TraceContext.empty)
   }
-
-  /** Create a trace context from a telemetry context provided by the ledger-api server
-    */
-  def fromDamlTelemetryContext(telemetryContext: damlTelemetry.TelemetryContext): TraceContext =
-    TraceContext(telemetryContext.openTelemetryContext)
 }

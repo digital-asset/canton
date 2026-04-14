@@ -96,18 +96,22 @@ class SequencerOffboardingIntegrationTest
   "Reconnect participant2 to sequencer1" in { implicit env =>
     import env.*
 
+    // user-manual-entry-begin: SequencerOffboardingSwitchAwayParticipant
     participant2.synchronizers.disconnect(daName)
     participant2.synchronizers.modify(
       daName,
       _.copy(sequencerConnections = SequencerConnections.single(sequencer1.sequencerConnection)),
     )
     participant2.synchronizers.reconnect(daName)
+  // user-manual-entry-end: SequencerOffboardingSwitchAwayParticipant
   }
 
   "Reconnect mediator2 to sequencer1" in { implicit env =>
     import env.*
 
+    // user-manual-entry-begin: SequencerOffboardingSwitchAwayMediator
     mediator1.sequencer_connection.set(SequencerConnections.single(sequencer1.sequencerConnection))
+  // user-manual-entry-end: SequencerOffboardingSwitchAwayMediator
   }
 
   "Off-board sequencer2" in { implicit env =>

@@ -42,4 +42,8 @@ ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.spee
 ERROR c\.d\.d\.lf - LF internal error in com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run: exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 
+# TODO (#31441) substitute mechanism for missing artifacts
+# Ignore expected download failures from ledger-api-test-tool (older versions may not be available)
+ERROR c\.d\.c\.i\.p\.UseLedgerApiTestTool.*Failed to download from.*
+
 # Make sure to have a trailing newline

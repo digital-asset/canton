@@ -109,7 +109,7 @@ package object canton {
   type LfWorkflowId = Ref.WorkflowId
   val LfWorkflowId: Ref.WorkflowId.type = Ref.WorkflowId
 
-  type LfKeyResolver = Map[GlobalKey, Vector[LfValue.ContractId]]
+  type LfGlobalKeyMapping = Map[GlobalKey, Vector[LfValue.ContractId]]
 
   /** The counter assigned by the sequencer to messages sent to the participant. The counter is
     * specific to every participant.

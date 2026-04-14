@@ -16,6 +16,15 @@ r = MyRec { foo = "bar" }
 r2 : MyNestedRec
 r2 = MyNestedRec{ bar = "foo"; nested = r }
 
+template T
+  with p: Party
+  where
+    signatory p
+
+    nonconsuming choice C : ()
+      controller p
+      do pure ()
+
 template Simple
   with p: Party
   where

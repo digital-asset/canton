@@ -95,7 +95,7 @@ trait ServerConfig extends Product with Serializable {
   /** maximum inbound message size in bytes on the ledger api and the admin api */
   def maxInboundMessageSize: NonNegativeInt
 
-  def maxConcurrentStreamsPerConnection: NonNegativeInt
+  def maxConcurrentCallsPerConnection: NonNegativeInt
 
   /** maximum expiration time accepted for tokens */
   def maxTokenLifetime: NonNegativeDuration
@@ -110,7 +110,7 @@ trait ServerConfig extends Product with Serializable {
 object ServerConfig {
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
   val defaultMaxInboundMetadataSize: NonNegativeInt = NonNegativeInt.tryCreate(8 * 1024)
-  val defaultMaxConcurrentStreamsPerConnection: NonNegativeInt = NonNegativeInt.tryCreate(500)
+  val defaultMaxConcurrentCallsPerConnection: NonNegativeInt = NonNegativeInt.tryCreate(100000)
 }
 
 /** A variant of [[ServerConfig]] that by default listens to connections only on the loopback
@@ -125,8 +125,8 @@ final case class AdminServerConfig(
       BasicKeepAliveServerConfig()
     ),
     override val maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
-    override val maxConcurrentStreamsPerConnection: NonNegativeInt =
-      ServerConfig.defaultMaxConcurrentStreamsPerConnection,
+    override val maxConcurrentCallsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentCallsPerConnection,
     override val authServices: Seq[AuthServiceConfig] = Seq.empty,
     override val adminTokenConfig: AdminTokenConfig = AdminTokenConfig(),
     override val maxTokenLifetime: NonNegativeDuration = NonNegativeDuration(5.minutes),

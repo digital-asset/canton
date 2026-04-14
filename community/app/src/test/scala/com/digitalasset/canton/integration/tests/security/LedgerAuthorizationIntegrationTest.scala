@@ -656,14 +656,24 @@ trait LedgerAuthorizationIntegrationTest
         // Reject with a valid signature
         withLocalVerdict(localReject),
       ) {
-        loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
+        loggerFactory.assertThrowsAndLogsUnorderedOptional[CommandFailure](
           submitSimpleP1Cmd(),
-          _.warningMessage should include("Unexpected message from MED"),
-          _.shouldBeCantonError(
-            MediatorError.MalformedMessage,
-            _ should include("invalid signature"),
+          (
+            // the malicious message will be picked up by the throughput cap logic on the write path
+            // and once on the read path.
+            // NOTE: the test should be reworked, and we should just plainly reject messages that
+            // fail the categorization check.
+            LogEntryOptionality.OptionalMany,
+            _.warningMessage should include("Unexpected message from MED"),
           ),
-          _.shouldBeCommandFailure(localReject.code),
+          (
+            LogEntryOptionality.Required,
+            _.shouldBeCantonError(
+              MediatorError.MalformedMessage,
+              _ should include("invalid signature"),
+            ),
+          ),
+          (LogEntryOptionality.Required, _.shouldBeCommandFailure(localReject.code)),
         )
       }
     }
@@ -1481,7 +1491,7 @@ trait LedgerAuthorizationIntegrationTest
       ),
       (
         ExampleTransactionFactory
-          .lookupByKeyNode(
+          .queryByKeyNode(
             ExampleTransactionFactory.defaultGlobalKey,
             maintainers = Set(party1.toLf),
           ),
@@ -2115,7 +2125,11 @@ trait LedgerAuthorizationIntegrationTest
 
 class LedgerAuthorizationReferenceIntegrationTestDefault
     extends LedgerAuthorizationIntegrationTest {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(
+    new UseReferenceBlockSequencer[DbConfig.H2](
+      loggerFactory
+    )
+  )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 

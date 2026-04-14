@@ -18,10 +18,8 @@ import com.daml.ledger.api.v2.package_service.{
   PackageStatus,
 }
 import com.daml.logging.LoggingContext
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.api.{
   InitialPageToken,
@@ -44,6 +42,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.platform.config.PackageServiceConfig
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.archive.DamlLf.{Archive, HashFunction}
@@ -55,7 +54,6 @@ import scala.concurrent.{ExecutionContext, Future}
 private[apiserver] final class ApiPackageService(
     packageSyncService: PackageSyncService,
     packageServiceConfig: PackageServiceConfig,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends PackageService
@@ -72,7 +70,7 @@ private[apiserver] final class ApiPackageService(
 
   override def listPackages(request: ListPackagesRequest): Future[ListPackagesResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     logger.info(s"Received request to list packages: $request")
     packageSyncService
       .listLfPackages()
@@ -81,9 +79,8 @@ private[apiserver] final class ApiPackageService(
   }
 
   override def getPackage(request: GetPackageRequest): Future[GetPackageResponse] =
-    withEnrichedLoggingContext(telemetry)(
-      logging.packageId(request.packageId),
-      traceId(telemetry.traceIdFromGrpcContext),
+    withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
+      logging.packageId(request.packageId)
     ) { implicit loggingContext =>
       logger.info(s"Received request for a package: $request")
       withValidatedPackageId(request.packageId, request) { packageId =>
@@ -107,7 +104,7 @@ private[apiserver] final class ApiPackageService(
   override def getPackageStatus(
       request: GetPackageStatusRequest
   ): Future[GetPackageStatusResponse] =
-    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+    LoggingContextWithTrace.withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.packageId(request.packageId)
     ) { implicit loggingContext =>
       logger.info(s"Received request for a package status: $request")
@@ -131,21 +128,20 @@ private[apiserver] final class ApiPackageService(
 
   override def listVettedPackages(
       request: ListVettedPackagesRequest
-  ): Future[ListVettedPackagesResponse] =
-    withEnrichedLoggingContext(telemetry)(
-      traceId(telemetry.traceIdFromGrpcContext)
-    ) { implicit loggingContext =>
-      for {
-        opts <- ListVettedPackagesOpts
-          .fromProto(request, packageServiceConfig.maxVettedPackagesPageSize)
-          .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
-        results <- packageSyncService.listVettedPackages(opts)
-      } yield ListVettedPackagesResponse(
-        vettedPackages = results.map(_.toProtoLAPI),
-        nextPageToken =
-          results.lastOption.map(_.toBoundedPageToken: PageToken).getOrElse(InitialPageToken).encode,
-      )
-    }
+  ): Future[ListVettedPackagesResponse] = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    for {
+      opts <- ListVettedPackagesOpts
+        .fromProto(request, packageServiceConfig.maxVettedPackagesPageSize)
+        .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
+      results <- packageSyncService.listVettedPackages(opts)
+    } yield ListVettedPackagesResponse(
+      vettedPackages = results.map(_.toProtoLAPI),
+      nextPageToken =
+        results.lastOption.map(_.toBoundedPageToken: PageToken).getOrElse(InitialPageToken).encode,
+    )
+  }
 
   private def withValidatedPackageId[T, R](packageId: String, request: R)(
       block: Ref.PackageId => Future[T]

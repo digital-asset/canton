@@ -261,8 +261,6 @@ final class StoreBackedCommandInterpreter(
     import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerOnShutdownSyntax
     val readers = actAs ++ readAs
 
-    import StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
-
     val lookupActiveContractTime = new AtomicLong(0L)
     val lookupActiveContractCount = new AtomicLong(0L)
 
@@ -314,91 +312,19 @@ final class StoreBackedCommandInterpreter(
         key: GlobalKey,
         limit: Int,
         progression: NeedKeyProgression.CanContinue,
-    ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] = {
-      val disclosedContracts = disclosedContractsByKey.getOrElse(key, Vector.empty)
-      val token = progression match {
-        case NeedKeyProgression.Unstarted => StoreNeedKeyContinuationToken.ContinueDisclosed(0)
-        case NeedKeyProgression.InProgress(t: StoreNeedKeyContinuationToken) => t
-        case NeedKeyProgression.InProgress(invalidToken) =>
-          throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
-      }
-      token match {
-        case StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
-          val (fromDisclosed, remainingFromDisclosed) =
-            disclosedContracts.drop(usedFromDisclosed).splitAt(limit)
-          if (remainingFromDisclosed.nonEmpty) {
-            FutureUnlessShutdown.pure(
-              fromDisclosed -> NeedKeyProgression.InProgress(
-                StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
-              )
-            )
-          } else {
-            timedNKeyLookup(
-              key = key,
-              limit = limit - fromDisclosed.size,
-              continuationToken = StoreNeedKeyContinuationToken.ContinueFromStore(None),
-            ).map { case (contracts, hasStarted) =>
-              val contractsNotDisclosed = contracts.filterNot(contract =>
-                disclosedContractsById.contains(contract.contractId)
-              )
-              (fromDisclosed ++ contractsNotDisclosed, hasStarted)
-            }
-          }
-
-        case storeToken: StoreNeedKeyContinuationToken.ContinueFromStore =>
-          timedNKeyLookup(
-            key = key,
-            limit = limit,
-            continuationToken = storeToken,
-          )
-      }
-    }
-
-    def timedNKeyLookup(
-        key: GlobalKey,
-        limit: Int,
-        continuationToken: StoreNeedKeyContinuationToken.ContinueFromStore,
     ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] =
-      if (limit <= 0)
-        FutureUnlessShutdown.pure(
-          Vector.empty -> NeedKeyProgression.InProgress(
-            StoreNeedKeyContinuationToken.ContinueFromStore(None)
-          )
-        )
-      else {
-        val start = System.nanoTime
-        Timed
-          .futureUS(
-            metrics.execution.lookupNContractKey,
-            FutureUnlessShutdown.outcomeF(
-              contractStore
-                .lookupNonUniqueContractKey(
-                  readers = readers,
-                  key = key,
-                  pageToken = continuationToken.token,
-                  limit = limit,
-                )
-                .map(contractKeyPage =>
-                  (
-                    contractKeyPage.contracts,
-                    contractKeyPage.nextPageToken.fold[NeedKeyProgression.HasStarted](
-                      NeedKeyProgression.Finished
-                    )(token =>
-                      NeedKeyProgression.InProgress(
-                        StoreNeedKeyContinuationToken.ContinueFromStore(Some(token))
-                      )
-                    ),
-                  )
-                )
-            ),
-          )
-          .map {
-            _.tap { _ =>
-              lookupContractKeyTime.addAndGet(System.nanoTime() - start)
-              lookupContractKeyCount.incrementAndGet()
-            }
-          }
-      }
+      StoreBackedCommandInterpreter.disclosedOrStoreNKeyLookup(
+        key = key,
+        limit = limit,
+        progression = progression,
+        disclosedContracts = disclosedContractsByKey.getOrElse(key, Vector.empty),
+        disclosedContractsById = disclosedContractsById,
+        contractStore = contractStore,
+        metrics = metrics,
+        readers = readers,
+        lookupContractKeyTime = lookupContractKeyTime,
+        lookupContractKeyCount = lookupContractKeyCount,
+      )
 
     def resolveStep(result: Result[A]): FutureUnlessShutdown[Either[ErrorCause, A]] =
       result match {
@@ -522,7 +448,7 @@ final class StoreBackedCommandInterpreter(
                 case (acc, ContractState.Active(ci)) => ci.collectCids(acc)
                 case (acc, _) => acc
               })
-          // TODO(#30398): restore the prefetching of keys
+          // TODO(#31845): restore the prefetching of keys
           val initialLoadKeyF = Future.successful(Seq.empty[ContractId])
           // then prefetch the found referenced or key contracts recursively
           val loadContractsF = initialLoadCidF.flatMap { referencedCids =>
@@ -569,6 +495,136 @@ object StoreBackedCommandInterpreter {
   object StoreNeedKeyContinuationToken {
     final case class ContinueDisclosed(usedFromDisclosed: Int) extends StoreNeedKeyContinuationToken
     final case class ContinueFromStore(token: Option[Long]) extends StoreNeedKeyContinuationToken
+  }
+
+  def disclosedOrStoreNKeyLookup(
+      key: GlobalKey,
+      limit: Int,
+      progression: NeedKeyProgression.CanContinue,
+      disclosedContracts: Vector[LfFatContractInst],
+      disclosedContractsById: Map[ContractId, LfFatContractInst],
+      contractStore: ContractStore,
+      metrics: LedgerApiServerMetrics,
+      readers: Set[Ref.Party],
+      lookupContractKeyTime: AtomicLong,
+      lookupContractKeyCount: AtomicLong,
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: LoggingContextWithTrace,
+  ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] = {
+    def storeLookup(
+        key: GlobalKey,
+        limit: Int,
+        token: StoreNeedKeyContinuationToken.ContinueFromStore,
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] =
+      timedNKeyLookup(
+        key,
+        limit,
+        token,
+        contractStore = contractStore,
+        metrics = metrics,
+        readers = readers,
+        lookupContractKeyTime = lookupContractKeyTime,
+        lookupContractKeyCount = lookupContractKeyCount,
+      )
+
+    val token = progression match {
+      case NeedKeyProgression.Unstarted => StoreNeedKeyContinuationToken.ContinueDisclosed(0)
+      case NeedKeyProgression.InProgress(t: StoreNeedKeyContinuationToken) => t
+      case NeedKeyProgression.InProgress(invalidToken) =>
+        throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
+    }
+    def filterNotDisclosedAndPrepend(prefix: Vector[LfFatContractInst])(
+        result: (Vector[LfFatContractInst], NeedKeyProgression.HasStarted)
+    ): (Vector[LfFatContractInst], NeedKeyProgression.HasStarted) = {
+      val (contracts, hasStarted) = result
+      val contractsNotDisclosed =
+        contracts.filterNot(contract => disclosedContractsById.contains(contract.contractId))
+      (prefix ++ contractsNotDisclosed, hasStarted)
+    }
+
+    token match {
+      case StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
+        val (fromDisclosed, remainingFromDisclosed) =
+          disclosedContracts.drop(usedFromDisclosed).splitAt(limit)
+        if (remainingFromDisclosed.nonEmpty) {
+          FutureUnlessShutdown.pure(
+            fromDisclosed -> NeedKeyProgression.InProgress(
+              StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
+            )
+          )
+        } else {
+          storeLookup(
+            key,
+            limit - fromDisclosed.size,
+            StoreNeedKeyContinuationToken.ContinueFromStore(None),
+          ).map(filterNotDisclosedAndPrepend(fromDisclosed))
+        }
+
+      case storeToken: StoreNeedKeyContinuationToken.ContinueFromStore =>
+        storeLookup(
+          key,
+          limit,
+          storeToken,
+        ).map(filterNotDisclosedAndPrepend(Vector.empty))
+    }
+  }
+
+  def timedNKeyLookup(
+      key: GlobalKey,
+      limit: Int,
+      continuationToken: StoreNeedKeyContinuationToken.ContinueFromStore,
+      contractStore: ContractStore,
+      metrics: LedgerApiServerMetrics,
+      readers: Set[Ref.Party],
+      lookupContractKeyTime: AtomicLong,
+      lookupContractKeyCount: AtomicLong,
+  )(implicit
+      executionContext: ExecutionContext,
+      loggingContext: LoggingContextWithTrace,
+  ): FutureUnlessShutdown[(Vector[LfFatContractInst], NeedKeyProgression.HasStarted)] = {
+    import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerOnShutdownSyntax
+
+    if (limit <= 0)
+      FutureUnlessShutdown.pure(
+        Vector.empty -> NeedKeyProgression.InProgress(
+          StoreNeedKeyContinuationToken.ContinueFromStore(None)
+        )
+      )
+    else {
+      val start = System.nanoTime
+      Timed
+        .futureUS(
+          metrics.execution.lookupNContractKey,
+          FutureUnlessShutdown.outcomeF(
+            contractStore
+              .lookupNonUniqueContractKey(
+                readers = readers,
+                key = key,
+                pageToken = continuationToken.token,
+                limit = limit,
+              )
+              .map(contractKeyPage =>
+                (
+                  contractKeyPage.contracts,
+                  contractKeyPage.nextPageToken.fold[NeedKeyProgression.HasStarted](
+                    NeedKeyProgression.Finished
+                  )(token =>
+                    NeedKeyProgression.InProgress(
+                      StoreNeedKeyContinuationToken.ContinueFromStore(Some(token))
+                    )
+                  ),
+                )
+              )
+          ),
+        )
+        .map {
+          _.tap { _ =>
+            lookupContractKeyTime.addAndGet(System.nanoTime() - start)
+            lookupContractKeyCount.incrementAndGet()
+          }
+        }
+    }
   }
 
   def considerDisclosedContractsSynchronizerId(

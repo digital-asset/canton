@@ -578,7 +578,7 @@ class GrpcSequencerServiceTest
         .replace(
           Some(
             AggregationRule(
-              eligibleMembers = NonEmpty(Seq, participant, participant),
+              eligibleSenders = NonEmpty(Seq, participant, participant),
               threshold = PositiveInt.tryCreate(2),
               testedProtocolVersion,
             )
@@ -600,7 +600,7 @@ class GrpcSequencerServiceTest
         .replace(
           Some(
             AggregationRule(
-              eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
+              eligibleSenders = NonEmpty(Seq, DefaultTestIdentities.participant2),
               threshold = PositiveInt.tryCreate(1),
               testedProtocolVersion,
             )

@@ -27,8 +27,6 @@ import java.util.concurrent.{Executor, TimeUnit}
 trait CantonServerBuilder {
   def mutableHandlerRegistry(): CantonMutableHandlerRegistry
 
-  def addService(service: BindableService, withLogging: Boolean): CantonServerBuilder
-
   def addService(service: ServerServiceDefinition, withLogging: Boolean = true): CantonServerBuilder
 
   def build: Server
@@ -104,11 +102,6 @@ object CantonServerBuilder {
 
       }
 
-    override def addService(service: BindableService, withLogging: Boolean): CantonServerBuilder = {
-      serverBuilder.addService(interceptors.addAllInterceptors(service.bindService(), withLogging))
-      this
-    }
-
     override def maxInboundMessageSize(bytes: NonNegativeInt): CantonServerBuilder = {
       serverBuilder.maxInboundMessageSize(bytes.unwrap)
       this
@@ -164,6 +157,7 @@ object CantonServerBuilder {
         .forAddress(new InetSocketAddress(config.address, config.port.unwrap))
         .executor(executor)
         .maxInboundMessageSize(config.maxInboundMessageSize.unwrap)
+        .maxConcurrentCallsPerConnection(config.maxConcurrentCallsPerConnection.unwrap)
 
     val builderWithSsl = config.sslContext match {
       case Some(sslContext) =>

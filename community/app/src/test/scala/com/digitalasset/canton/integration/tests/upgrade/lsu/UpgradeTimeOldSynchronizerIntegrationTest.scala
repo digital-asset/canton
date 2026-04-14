@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import cats.syntax.functor.*
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.SingleSynchronizer
@@ -18,15 +17,22 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.protocol.TransactionProcessor
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedUncompressedEnvelope,
+  MessageId,
+  Recipients,
+  SequencerErrors,
+  SignedContent,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.synchronizer.sequencer.{
   AnnouncedLsu,
   HasProgrammableSequencer,
   SequencerReader,
 }
+import com.google.protobuf.ByteString
 import org.slf4j.event.Level
-
-import scala.concurrent.Future
 
 /*
  * This test validates that upgrade time is respected on the old synchronizer.
@@ -99,7 +105,7 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
         ),
       )
 
-      /** If the participant sends the ping before the resilient subscription detects that the
+      /** If the participant sends the request before the resilient subscription detects that the
         * sequencer is up again, it fails (failed future). On such failed future, the submission is
         * not removed from the pending submissions.
         *
@@ -115,67 +121,50 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
 
       participant1.health.ping(participant1)
 
-      environment.simClock.value.advanceTo(upgradeTime)
-
-      var pingF: Future[Option[Unit]] = Future.successful(None)
-
       loggerFactory.assertEventuallyLogsSeq(
         (SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerReader])
           || (SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[AnnouncedLsu])
-          || (SuppressionRule.Level(Level.WARN) && SuppressionRule.forLogger[TransactionProcessor])
           || (SuppressionRule.Level(Level.ERROR) && SuppressionRule.forLogger[RecordOrderPublisher])
       )(
-        {
-          // asynchronously launch a ping. unfortunately, the action passed to assertEventuallyLogsSeq must be a type other than
-          // Future[*], otherwise BaseTest.eventually does some magic that causes the consecutive calls to assertEventuallyLogsSeq to "overlap"
-          logger.debug("Starting asynchronous ping")
-          pingF = Future(
-            participant1.health
-              .maybe_ping(participant1, timeout = config.NonNegativeDuration.ofSeconds(1))
-              .void
+        environment.simClock.value.advanceTo(upgradeTime),
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              _.infoMessage should include(
+                s"Computed synchronizer upgrade time offset: 1m"
+              ),
+              "upgrade time offset computation",
+            ),
+            (
+              _.infoMessage should include(
+                "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
+              ),
+              "event after upgrade time warning",
+            ),
+            (
+              _.errorMessage should include(
+                "failed: No sequencer successor was found"
+              ),
+              "automatic upgrade error due to sequencer successor missing",
+            ),
           )
-        },
-        logs => {
-          // We expect exactly 1 attempt of automatic LSU
-          forExactly(1, logs)(
-            _.errorMessage should include(
-              "failed: No sequencer successor was found"
-            )
-          )
-
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.infoMessage should include(
-                  s"Computed synchronizer upgrade time offset: 1m"
-                ),
-                "upgrade time offset computation",
-              ),
-              (
-                _.infoMessage should include(
-                  "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
-                ),
-                "event after upgrade time warning",
-              ),
-              (
-                _.warningMessage should include(
-                  "Submission timed out at 1970-01-01T00:02"
-                ),
-                "immediate timeout due to upgrade time offset",
-              ),
-              (
-                _.errorMessage should include(
-                  "failed: No sequencer successor was found"
-                ),
-                "automatic upgrade error due to sequencer successor missing",
-              ),
-            )
-          )(logs)
-        },
+        ),
       )
 
-      pingF.futureValue shouldBe None
-      logger.debug("Ping failed")
+      // A non-empty batch should fail.
+      sequencer1.underlying.value.sequencer.sequencer
+        .sendAsyncSigned(createSignedRequest(envelopeCount = 1))
+        .futureValueUS
+        .left
+        .value
+        .code shouldBe SequencerErrors.PassedUpgradeTime
+
+      // An empty batch should still succeed.
+      sequencer1.underlying.value.sequencer.sequencer
+        .sendAsyncSigned(createSignedRequest(envelopeCount = 0))
+        .futureValueUS
+        .isRight shouldBe true
+
       participant1.testing.fetch_synchronizer_times()
 
       val dynamicSynchronizerParameters = participant1.topology.synchronizer_parameters.latest(daId)
@@ -204,5 +193,47 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
       cleanSynchronizerIndex.recordTime shouldBe upgradeTime
       cleanSynchronizerIndex.sequencerIndex.value should be < upgradeTime
     }
+  }
+
+  private def createSignedRequest(envelopeCount: Int)(implicit
+      env: TestConsoleEnvironment
+  ): SignedContent[SubmissionRequest] = {
+    import env.*
+    val envelopes = List.fill(envelopeCount)(
+      ClosedUncompressedEnvelope.create(
+        ByteString.empty,
+        Recipients.ofSet(Set(participant1.id)).value,
+        Seq.empty,
+        testedProtocolVersion,
+      )
+    )
+    val request = SubmissionRequest.tryCreate(
+      sender = participant1.member,
+      messageId = MessageId.tryCreate("thisisamessage: hello"),
+      batch = Batch(envelopes, testedProtocolVersion),
+      maxSequencingTime = CantonTimestamp.MaxValue,
+      topologyTimestamp = None,
+      aggregationRule = None,
+      submissionCost = None,
+      protocolVersion = testedProtocolVersion,
+    )
+    val cryptoSnapshot: SyncCryptoApi =
+      participant1.underlying.value.sync.syncCrypto
+        .forSynchronizer(daId, staticSynchronizerParameters1)
+        .value
+        .currentSnapshotApproximation
+        .futureValueUS
+    SignedContent
+      .create(
+        cryptoApi = cryptoSnapshot.pureCrypto,
+        cryptoPrivateApi = cryptoSnapshot,
+        content = request,
+        timestampOfSigningKey = Some(cryptoSnapshot.ipsSnapshot.timestamp),
+        signingTimestampOverrides = None,
+        purpose = HashPurpose.SubmissionRequestSignature,
+        protocolVersion = testedProtocolVersion,
+      )
+      .futureValueUS
+      .value
   }
 }

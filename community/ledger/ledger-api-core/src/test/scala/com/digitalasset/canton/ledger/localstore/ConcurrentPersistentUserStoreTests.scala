@@ -34,6 +34,7 @@ trait ConcurrentPersistentUserStoreTests extends ConcurrentChangeControlTests {
         primaryPartyO = None,
         identityProviderId = None,
         isDeactivated = false,
+        primaryPartyAuthentication = false,
         resourceVersion = initialResourceVersion,
         createdAt = 0,
       )

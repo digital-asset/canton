@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   TrafficState,
 }
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.VersionedStatus
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
@@ -90,7 +91,7 @@ final class GeneratorsSequencer(
       latestBlockHeight,
       previousTimestamps,
       status,
-      inFlightAggregations,
+      InFlightAggregations.fromMap(inFlightAggregations),
       additional,
       protocolVersion,
       trafficPurchased,

@@ -124,7 +124,7 @@ class DbSequencerBlockStore(
     val updateBlockHeight = updateBlockHeightDBIO(Seq(BlockInfo.fromSequencerInitialState(initial)))
     for {
       _ <- stateManagerStore.addInFlightAggregationUpdates(
-        initial.snapshot.inFlightAggregations.fmap(_.asUpdate)
+        initial.snapshot.inFlightAggregations.byId.fmap(_.asUpdate)
       )
       _ <- storage.queryAndUpdate(updateBlockHeight, functionFullName)
     } yield ()

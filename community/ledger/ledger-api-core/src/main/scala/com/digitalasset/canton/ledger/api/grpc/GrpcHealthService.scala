@@ -4,11 +4,11 @@
 package com.digitalasset.canton.ledger.api.grpc
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse, HealthGrpc}
 import io.grpc.stub.StreamObserver
 import io.grpc.{ServerServiceDefinition, Status, StatusRuntimeException}
@@ -21,7 +21,6 @@ import scala.util.{Failure, Success, Try}
 
 class GrpcHealthService(
     healthChecks: HealthChecks,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
     maximumWatchFrequency: FiniteDuration = 1.second,
 )(implicit
@@ -37,7 +36,8 @@ class GrpcHealthService(
     HealthGrpc.bindService(this, executionContext)
 
   override def check(request: HealthCheckRequest): Future[HealthCheckResponse] = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     Future.fromTry(matchResponse(serviceFrom(request)))
   }
@@ -46,7 +46,8 @@ class GrpcHealthService(
       request: HealthCheckRequest,
       responseObserver: StreamObserver[HealthCheckResponse],
   ): Unit = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     registerStream(responseObserver) {
       Source
         .fromIterator(() =>

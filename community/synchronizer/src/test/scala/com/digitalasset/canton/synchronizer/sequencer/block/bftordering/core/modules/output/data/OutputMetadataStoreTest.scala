@@ -197,7 +197,7 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
       "get last block in latest completed epoch" when {
         "the store is empty" in {
           val store = createStore()
-          store.getLastBlockInLatestCompletedEpoch.map(_ shouldBe empty)
+          store.getLastNonSequentialBlockMetadataStored.map(_ shouldBe empty)
         }
 
         "have started (but not completed one epoch)" in {
@@ -207,9 +207,9 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true)
             )
             _ <- store.insertBlockIfMissing(createBlock(0L))
-            result <- store.getLastBlockInLatestCompletedEpoch
+            result <- store.getLastNonSequentialBlockMetadataStored
           } yield {
-            result shouldBe None
+            result shouldBe Some(createBlock(0L))
           }
         }
 
@@ -225,7 +225,7 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
             _ <- store.insertEpochIfMissing(
               OutputEpochMetadata(EpochNumber(1L), couldAlterOrderingTopology = true)
             ) // start epoch 1
-            result <- store.getLastBlockInLatestCompletedEpoch
+            result <- store.getLastNonSequentialBlockMetadataStored
           } yield {
             result shouldBe Some(createBlock(2L))
           }
@@ -244,9 +244,9 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               OutputEpochMetadata(EpochNumber(1L), couldAlterOrderingTopology = true)
             ) // start epoch 1
             _ <- store.insertBlockIfMissing(createBlock(3L, EpochNumber(1L)))
-            result <- store.getLastBlockInLatestCompletedEpoch
+            result <- store.getLastNonSequentialBlockMetadataStored
           } yield {
-            result shouldBe Some(createBlock(2L))
+            result shouldBe Some(createBlock(3L, EpochNumber(1L)))
           }
         }
       }
@@ -345,8 +345,8 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               blocks = 3L,
             ))
 
-            lastBlock <- store.getLastBlockInLatestCompletedEpoch
-            _ = lastBlock shouldBe Some(block2)
+            lastBlock <- store.getLastNonSequentialBlockMetadataStored
+            _ = lastBlock shouldBe Some(block3)
 
             pruningEpoch = EpochNumber(EpochNumber.First + 1)
             _ <- store.saveLowerBound(pruningEpoch)
@@ -363,8 +363,8 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
               OutputMetadataStore.LowerBound(pruningEpoch, BlockNumber(1L))
             )
 
-            lastBlockAfterPruning <- store.getLastBlockInLatestCompletedEpoch
-            _ = lastBlockAfterPruning shouldBe Some(block2)
+            lastBlockAfterPruning <- store.getLastNonSequentialBlockMetadataStored
+            _ = lastBlockAfterPruning shouldBe Some(block3)
 
           } yield succeed
         }

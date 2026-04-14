@@ -262,6 +262,9 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def clearACHSState(connection: Connection): Unit =
       throw new UnsupportedOperationException
 
+    override def clearAchsData(connection: Connection): Unit =
+      throw new UnsupportedOperationException
+
   }
 }
 

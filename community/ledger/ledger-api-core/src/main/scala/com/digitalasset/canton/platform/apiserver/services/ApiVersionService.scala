@@ -11,7 +11,6 @@ import com.daml.ledger.api.v2.version_service.{
   UserManagementFeature,
   *,
 }
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -28,6 +27,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   UserManagementServiceConfig,
 }
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.ServerServiceDefinition
 
@@ -41,7 +41,6 @@ private[apiserver] final class ApiVersionService(
     userManagementServiceConfig: UserManagementServiceConfig,
     partyManagementServiceConfig: PartyManagementServiceConfig,
     packageServiceConfig: PackageServiceConfig,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -90,7 +89,8 @@ private[apiserver] final class ApiVersionService(
   override def getLedgerApiVersion(
       request: GetLedgerApiVersionRequest
   ): Future[GetLedgerApiVersionResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     Future

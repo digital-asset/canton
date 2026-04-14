@@ -25,7 +25,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfKeyResolver, LfPackageId, LfPartyId, SynchronizerAlias}
+import com.digitalasset.canton.{LfGlobalKeyMapping, LfPackageId, LfPartyId, SynchronizerAlias}
 
 /** An interface to change a ledger via a participant. '''Please note that this interface is
   * unstable and may significantly change.'''
@@ -187,7 +187,7 @@ trait SyncService
       transaction: LfVersionedTransaction,
       transactionMetadata: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit

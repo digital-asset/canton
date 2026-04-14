@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.util.Success
 
@@ -34,7 +35,8 @@ class SimulationOrderingTopologyProvider(
     epochLength: EpochLength, // TODO(#24184) make this dynamic sequencing parameter
     getEndpointsToTopologyData: () => Map[P2PEndpoint, NodeSimulationTopologyData],
     loggerFactory: NamedLoggerFactory,
-) extends OrderingTopologyProvider[SimulationEnv] {
+)(implicit synchronizerProtocolVersion: ProtocolVersion)
+    extends OrderingTopologyProvider[SimulationEnv] {
 
   override def getOrderingTopologyAt(
       activationTimeO: Option[TopologyActivationTime],

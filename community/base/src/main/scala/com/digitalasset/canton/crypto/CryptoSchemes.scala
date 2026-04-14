@@ -3,9 +3,17 @@
 
 package com.digitalasset.canton.crypto
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.{CryptoConfig, CryptoProviderScheme, CryptoSchemeConfig}
+import com.digitalasset.canton.config.{
+  CryptoConfig,
+  CryptoProvider,
+  CryptoProviderScheme,
+  CryptoSchemeConfig,
+  EncryptionSchemeConfig,
+  SigningSchemeConfig,
+}
 import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.util.EitherUtil
 import com.google.common.annotations.VisibleForTesting
@@ -31,7 +39,7 @@ object CryptoSchemes {
       cryptoScheme: CryptoScheme[S],
       kmsSupported: Set[S],
       description: String,
-  ): Either[String, NonEmpty[Set[S]]] =
+  ): Either[String, CryptoScheme[S]] =
     for {
       _ <- EitherUtil.condUnit(
         kmsSupported.contains(cryptoScheme.default),
@@ -44,9 +52,10 @@ object CryptoSchemes {
           s"None of the allowed $description ${cryptoScheme.allowed.mkString(", ")} are supported by" +
             s"the KMS: $kmsSupported"
         )
-    } yield supportedNE
+      selectedCryptoScheme <- CryptoScheme.create(cryptoScheme.default, supportedNE)
+    } yield selectedCryptoScheme
 
-  def selectKmsSchemes(
+  private[crypto] def selectKmsSchemes(
       cryptoSchemes: CryptoSchemes,
       kms: Kms.SupportedSchemes,
   ): Either[String, CryptoSchemes] =
@@ -66,13 +75,9 @@ object CryptoSchemes {
           "signing algorithm specs",
         )
 
-      signingSchemes = SigningCryptoSchemes(
-        keySpecs =
-          CryptoScheme(cryptoSchemes.signingSchemes.keySpecs.default, selectedSigningKeySpecs),
-        algorithmSpecs = CryptoScheme(
-          cryptoSchemes.signingSchemes.algorithmSpecs.default,
-          selectedSigningAlgoSpecs,
-        ),
+      signingSchemes <- SigningCryptoSchemes.create(
+        keySpecs = selectedSigningKeySpecs,
+        algorithmSpecs = selectedSigningAlgoSpecs,
       )
 
       selectedEncryptionKeySpecs <-
@@ -89,15 +94,9 @@ object CryptoSchemes {
           "encryption algorithm specs",
         )
 
-      encryptionSchemes = EncryptionCryptoSchemes(
-        keySpecs = CryptoScheme(
-          cryptoSchemes.encryptionSchemes.keySpecs.default,
-          selectedEncryptionKeySpecs,
-        ),
-        algorithmSpecs = CryptoScheme(
-          cryptoSchemes.encryptionSchemes.algorithmSpecs.default,
-          selectedEncryptionAlgoSpecs,
-        ),
+      encryptionSchemes <- EncryptionCryptoSchemes.create(
+        keySpecs = selectedEncryptionKeySpecs,
+        algorithmSpecs = selectedEncryptionAlgoSpecs,
       )
     } yield cryptoSchemes.copy(
       signingSchemes = signingSchemes,
@@ -115,33 +114,14 @@ object CryptoSchemes {
 
   def fromConfig(config: CryptoConfig): Either[String, CryptoSchemes] =
     for {
-      signingKeySpecs <- CryptoScheme.create(config.signing.keys, config.provider.signingKeys)
-      signingAlgoSpecs <- CryptoScheme.create(
-        config.signing.algorithms,
-        config.provider.signingAlgorithms,
-      )
-
-      encryptionKeySpecs <- CryptoScheme.create(
-        config.encryption.keys,
-        config.provider.encryptionKeys,
-      )
-      encryptionAlgoSpecs <- CryptoScheme.create(
-        config.encryption.algorithms,
-        config.provider.encryptionAlgorithms,
-      )
-
       symmetricKeySchemes <- CryptoScheme.create(config.symmetric, config.provider.symmetric)
       hashAlgorithms <- CryptoScheme.create(config.hash, config.provider.hash)
       pbkdfSchemesO <- config.provider.pbkdf.traverse(CryptoScheme.create(config.pbkdf, _))
+      signingCryptoSchemes <- SigningCryptoSchemes.create(config.signing, config.provider)
+      encryptionCryptoSchemes <- EncryptionCryptoSchemes.create(config.encryption, config.provider)
     } yield CryptoSchemes(
-      SigningCryptoSchemes(
-        signingKeySpecs,
-        signingAlgoSpecs,
-      ),
-      EncryptionCryptoSchemes(
-        encryptionKeySpecs,
-        encryptionAlgoSpecs,
-      ),
+      signingCryptoSchemes,
+      encryptionCryptoSchemes,
       symmetricKeySchemes,
       hashAlgorithms,
       pbkdfSchemesO,
@@ -149,18 +129,101 @@ object CryptoSchemes {
 }
 
 /** The default and supported key and algorithm signing specifications. */
-final case class SigningCryptoSchemes(
+final case class SigningCryptoSchemes private (
     keySpecs: CryptoScheme[SigningKeySpec],
     algorithmSpecs: CryptoScheme[SigningAlgorithmSpec],
 )
 
+object SigningCryptoSchemes {
+
+  /** Validates that the default key spec is compatible with the default algorithm spec. Without
+    * this check, a misconfiguration (e.g. default key = EcP384 with default algorithm = Ed25519)
+    * would silently produce keys that cannot be used with the default signing algorithm, or force
+    * use of a weaker algorithm than intended (cryptographic downgrade).
+    */
+  def create(
+      keySpecs: CryptoScheme[SigningKeySpec],
+      algorithmSpecs: CryptoScheme[SigningAlgorithmSpec],
+  ): Either[String, SigningCryptoSchemes] = for {
+    _ <- EitherUtil.condUnit(
+      algorithmSpecs.default.supportedSigningKeySpecs.contains(keySpecs.default),
+      s"Default signing key spec ${keySpecs.default} is not supported by default signing algorithm " +
+        s"${algorithmSpecs.default}. Supported key specs: ${algorithmSpecs.default.supportedSigningKeySpecs}",
+    )
+  } yield SigningCryptoSchemes(keySpecs, algorithmSpecs)
+
+  def create(
+      signingSchemeConfig: SigningSchemeConfig,
+      cryptoProvider: CryptoProvider,
+  ): Either[String, SigningCryptoSchemes] =
+    for {
+      keySpecs <- CryptoScheme.create(
+        signingSchemeConfig.keys,
+        cryptoProvider.signingKeys,
+      )
+      algoSpecs <- CryptoScheme.create(
+        signingSchemeConfig.algorithms,
+        cryptoProvider.signingAlgorithms,
+      )
+      signingCryptoSchemes <- create(keySpecs, algoSpecs)
+    } yield signingCryptoSchemes
+
+  private[crypto] def tryCreate(
+      keySpecs: CryptoScheme[SigningKeySpec],
+      algorithmSpecs: CryptoScheme[SigningAlgorithmSpec],
+  ): SigningCryptoSchemes = create(keySpecs, algorithmSpecs).valueOr { err =>
+    throw new IllegalArgumentException(s"Invalid signing crypto scheme configuration: $err")
+  }
+}
+
 /** The default and supported key and algorithm encryption specifications. */
-final case class EncryptionCryptoSchemes(
+final case class EncryptionCryptoSchemes private (
     keySpecs: CryptoScheme[EncryptionKeySpec],
     algorithmSpecs: CryptoScheme[EncryptionAlgorithmSpec],
 )
 
-final case class CryptoScheme[S](default: S, allowed: NonEmpty[Set[S]])
+object EncryptionCryptoSchemes {
+
+  /** Validates that the default key spec is compatible with the default algorithm spec. Without
+    * this check, a misconfiguration could silently produce keys that cannot be used with the
+    * default encryption algorithm.
+    */
+  def create(
+      keySpecs: CryptoScheme[EncryptionKeySpec],
+      algorithmSpecs: CryptoScheme[EncryptionAlgorithmSpec],
+  ): Either[String, EncryptionCryptoSchemes] = for {
+    _ <- EitherUtil.condUnit(
+      algorithmSpecs.default.supportedEncryptionKeySpecs.contains(keySpecs.default),
+      s"Default encryption key spec ${keySpecs.default} is not supported by default encryption algorithm " +
+        s"${algorithmSpecs.default}. Supported key specs: ${algorithmSpecs.default.supportedEncryptionKeySpecs}",
+    )
+  } yield EncryptionCryptoSchemes(keySpecs, algorithmSpecs)
+
+  def create(
+      encryptionSchemeConfig: EncryptionSchemeConfig,
+      cryptoProvider: CryptoProvider,
+  ): Either[String, EncryptionCryptoSchemes] =
+    for {
+      keySpecs <- CryptoScheme.create(
+        encryptionSchemeConfig.keys,
+        cryptoProvider.encryptionKeys,
+      )
+      algoSpecs <- CryptoScheme.create(
+        encryptionSchemeConfig.algorithms,
+        cryptoProvider.encryptionAlgorithms,
+      )
+      encryptionCryptoSchemes <- create(keySpecs, algoSpecs)
+    } yield encryptionCryptoSchemes
+
+  private[crypto] def tryCreate(
+      keySpecs: CryptoScheme[EncryptionKeySpec],
+      algorithmSpecs: CryptoScheme[EncryptionAlgorithmSpec],
+  ): EncryptionCryptoSchemes = create(keySpecs, algorithmSpecs).valueOr { err =>
+    throw new IllegalArgumentException(s"Invalid encryption crypto scheme configuration: $err")
+  }
+}
+
+final case class CryptoScheme[S] private (default: S, allowed: NonEmpty[Set[S]])
 
 object CryptoScheme {
 
@@ -186,9 +249,26 @@ object CryptoScheme {
     val unsupported = allowed.diff(supported)
 
     for {
-      _ <- Either.cond(unsupported.isEmpty, (), s"Allowed schemes $unsupported are not supported")
-      _ <- Either.cond(allowed.contains(default), (), s"Scheme $default is not allowed: $allowed")
-    } yield CryptoScheme(default, allowed)
+      _ <- EitherUtil.condUnit(
+        unsupported.isEmpty,
+        s"Allowed schemes $unsupported are not supported",
+      )
+      scheme <- CryptoScheme.create(default, allowed)
+    } yield scheme
+  }
+
+  def create[S](default: S, allowed: NonEmpty[Set[S]]): Either[String, CryptoScheme[S]] =
+    Either.cond(
+      allowed.contains(default),
+      CryptoScheme(default, allowed),
+      s"Scheme $default is not allowed: $allowed",
+    )
+
+  private[crypto] def tryCreate[S](
+      default: S,
+      allowed: NonEmpty[Set[S]],
+  ): CryptoScheme[S] = create(default, allowed).valueOr { err =>
+    throw new IllegalArgumentException(s"Invalid crypto scheme configuration: $err")
   }
 
 }

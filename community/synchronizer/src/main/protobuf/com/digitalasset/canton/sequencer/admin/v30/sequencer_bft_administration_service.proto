@@ -5,6 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.sequencer.admin.v30;
 
+import "com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/dynamic_sequencing_parameters.proto";
+
 service SequencerBftAdministrationService {
   rpc AddPeerEndpoint(AddPeerEndpointRequest) returns (AddPeerEndpointResponse);
   rpc RemovePeerEndpoint(RemovePeerEndpointRequest) returns (RemovePeerEndpointResponse);
@@ -130,6 +132,8 @@ message GetOrderingTopologyResponse {
   int64 current_epoch = 1;
   // The sequencer IDs of the active BFT ordering nodes in the network.
   repeated string sequencer_ids = 2;
+  // The dynamic sequencing parameters
+  com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.DynamicSequencingParametersPayload dynamic_sequencing_parameters_payload = 3;
 }
 
 message SetPerformanceMetricsEnabledRequest {

@@ -115,7 +115,7 @@ object DeterministicEncoding {
         Left("Varint too long")
       else {
         val nextByte = bytes.byteAt(index)
-        val out = output | (nextByte & 0x7f) << shift
+        val out = output | (nextByte & 0x7fL) << shift
         // the continuation MSB is set
         if ((nextByte & 0x80) != 0) {
           decodeUVarIntBytes(out, index + 1, shift + 7)

@@ -14,7 +14,10 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarative
-import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.InvalidState.AbortAcsExportForMissingOnboardingFlag
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.{
+  AcsExportMissingTargetOnboardingMapping,
+  EffectivePartyToParticipantMappingNotFound,
+}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersHistory,
@@ -450,7 +453,7 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
         exportFilePath = acsSnapshotPath,
         waitForActivationTimeout = Some(config.NonNegativeFiniteDuration.ofMillis(5)),
       ),
-      _.errorMessage should include regex "The stream has not been completed in.*– Possibly missing party activation?",
+      _.shouldBeCantonErrorCode(EffectivePartyToParticipantMappingNotFound.code),
     )
   }
 
@@ -500,9 +503,7 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
           exportFilePath = acsSnapshotPath,
           waitForActivationTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(1)),
         ),
-        _.errorMessage should include(
-          AbortAcsExportForMissingOnboardingFlag(alice.partyId, target).cause
-        ),
+        _.shouldBeCantonErrorCode(AcsExportMissingTargetOnboardingMapping.code),
       )
 
       // Undo activating Alice on the target participant without onboarding flag set; for the following test

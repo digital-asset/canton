@@ -22,15 +22,13 @@ package object speedy {
   private[speedy] def convTxError(nodes: HashMap[NodeId, Node], context: => String, err: TxErr): IE = {
     err match {
       case TxErr.DuplicateContractId(contractId) =>
-        // TODO(#30398) make these proper IE errors instead of crashing the engine.
+        // TODO(#23969) check if ww want a proper IE errors instead of crashing the engine.
+        //  this will be required by ContractID V2
         throw SErrorCrash(context, s"Unexpected duplicate contract ID $contractId")
-      case TxErr.DuplicateContractKey(key) =>
-        throw SErrorCrash(context, s"Unexpected duplicate key $key")
       case TxErr.InconsistentContractKey(key) =>
         IE.InconsistentContractKey(key)
-      case TxErr.AlreadyConsumed(cid, _: Any) =>
-        // TODO(#30398) make these proper IE errors instead of crashing the engine.
-        throw SErrorCrash(context, s"Tried consuming Already consumed id ${cid}")
+      case TxErr.AlreadyConsumed(cid, tmplId, nid) =>
+         IE.ContractNotActive(cid, tmplId, nid)
       case e: TxErr.EffectfulRollback =>
         convEffectfulRollbackError(nodes, e)
     }

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout, SessionSigningKeysConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256
@@ -93,17 +94,18 @@ class SyncCryptoSignerWithSessionKeys(
   private lazy val signPublicApiSoftwareBased: SynchronizerCryptoPureApi = {
     val pureCryptoForSessionKeys = new JcePureCrypto(
       defaultSymmetricKeyScheme = Aes128Gcm, // not used
-      signingAlgorithmSpecs = CryptoScheme(
+      signingAlgorithmSpecs = CryptoScheme.tryCreate(
         sessionSigningKeysConfig.signingAlgorithmSpec,
         NonEmpty.mk(Set, sessionSigningKeysConfig.signingAlgorithmSpec),
       ),
       encryptionAlgorithmSpecs =
-        CryptoScheme(RsaOaepSha256, NonEmpty.mk(Set, RsaOaepSha256)), // not used
+        CryptoScheme.tryCreate(RsaOaepSha256, NonEmpty.mk(Set, RsaOaepSha256)), // not used
       defaultHashAlgorithm = Sha256, // not used
       defaultPbkdfScheme = PbkdfScheme.Argon2idMode1, // not used
       publicKeyConversionCacheConfig,
       // this `JcePureCrypto` object only holds private key conversions spawned from sign calls
       privateKeyConversionCacheTtl = Some(sessionSigningKeysConfig.keyEvictionPeriod.underlying),
+      signatureVerificationParallelism = PositiveInt.one, // not used
       loggerFactory = loggerFactory,
     )
 

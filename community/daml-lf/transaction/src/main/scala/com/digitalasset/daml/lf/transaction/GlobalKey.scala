@@ -36,7 +36,7 @@ object GlobalKey {
     new GlobalKey(key.templateId, key.packageName, value, key.hash)
 
   // Will fail if key contains contract ids
-  // TODO(i30398): remove this redundant smart constructor not that the hash is computed by the caller
+  // TODO(#31844): remove this redundant smart constructor now that the hash is computed by the caller
   def build(
       templateId: TypeConId,
       packageName: PackageName,

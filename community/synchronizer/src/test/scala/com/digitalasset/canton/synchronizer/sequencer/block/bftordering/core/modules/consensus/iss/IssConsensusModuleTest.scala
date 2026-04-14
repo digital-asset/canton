@@ -92,6 +92,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.TryValues
 import org.scalatest.exceptions.TestFailedException
@@ -938,12 +939,14 @@ class IssConsensusModuleTest
         consensus.getActiveTopologyInfo shouldBe aTopologyInfo // the default from the initial state
 
         val becomes = context.extractBecomes()
+
+        val aTopologyInfoWithPv = aTopologyInfo
         becomes should matchPattern {
           case Seq(
                 StateTransferBehavior(
                   `aStartEpochNumber`,
                   None, // minimum state transfer end epoch
-                  `aTopologyInfo`,
+                  `aTopologyInfoWithPv`,
                   `aStartEpoch`,
                   `aBootstrapEpoch`,
                 )
@@ -1008,12 +1011,13 @@ class IssConsensusModuleTest
               any[OrderingTopologyInfo[ProgrammableUnitTestEnv]],
               any[RetransmissionsMessage],
             )(any[ContextType], any[TraceContext])
+          val aTopologyInfoWithPv = aTopologyInfo
           context.extractBecomes() should matchPattern {
             case Seq(
                   StateTransferBehavior(
                     BootstrapEpochNumber,
                     `catchUpToEpochNumber`,
-                    `aTopologyInfo`,
+                    `aTopologyInfoWithPv`,
                     `aBootstrapEpochInfo`,
                     EpochStore.Epoch(`aBootstrapEpochInfo`, Seq()),
                   )
@@ -1331,21 +1335,24 @@ private[iss] object IssConsensusModuleTest {
     Seq(ProofOfAvailability(aBatchId, Seq.empty, EpochNumber.First))
   )
 
-  private val anOrderingTopology = OrderingTopology.forTesting(allIds.toSet)
-  private val aMembership = Membership(myId, anOrderingTopology, allIds)
+  private def anOrderingTopology(implicit pv: ProtocolVersion) =
+    OrderingTopology.forTesting(allIds.toSet)
+  private def aMembership(implicit pv: ProtocolVersion) =
+    Membership(myId, anOrderingTopology, allIds)
   private val aFakeCryptoProviderInstance1: CryptoProvider[ProgrammableUnitTestEnv] =
     failingCryptoProvider
   private val aFakeCryptoProviderInstance2: CryptoProvider[ProgrammableUnitTestEnv] =
     failingCryptoProvider
-  private val aTopologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
-    myId,
-    anOrderingTopology,
-    aFakeCryptoProviderInstance2,
-    allIds,
-    previousTopology = anOrderingTopology, // not relevant
-    aFakeCryptoProviderInstance1,
-    allIds,
-  )
+  private def aTopologyInfo(implicit pv: ProtocolVersion) =
+    OrderingTopologyInfo[ProgrammableUnitTestEnv](
+      myId,
+      anOrderingTopology,
+      aFakeCryptoProviderInstance2,
+      allIds,
+      previousTopology = anOrderingTopology, // not relevant
+      aFakeCryptoProviderInstance1,
+      allIds,
+    )
   private val aBootstrapEpoch = bootstrapEpoch(TestBootstrapTopologyActivationTime)
   private val aBootstrapEpochInfo = aBootstrapEpoch.info
 

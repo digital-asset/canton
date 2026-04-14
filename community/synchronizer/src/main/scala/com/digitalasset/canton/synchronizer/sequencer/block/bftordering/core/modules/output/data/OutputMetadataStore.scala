@@ -85,12 +85,12 @@ trait OutputMetadataStore[E <: Env[E]] extends AutoCloseable {
   protected final def getLastInEpochActionName(epochNumber: EpochNumber): String =
     s"get last output block metadata in epoch $epochNumber"
 
-  def getLastBlockInLatestCompletedEpoch(implicit
+  def getLastNonSequentialBlockMetadataStored(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[OutputBlockMetadata]]
 
-  protected final val lastBlockInLatestCompletedEpochName: String =
-    "get last block in latest completed epoch"
+  protected final val lastNonSequentialBlockMetadataStoredName: String =
+    "get last non-sequential block metadata stored"
 
   @VisibleForTesting
   private[data] def loadNumberOfRecords(implicit

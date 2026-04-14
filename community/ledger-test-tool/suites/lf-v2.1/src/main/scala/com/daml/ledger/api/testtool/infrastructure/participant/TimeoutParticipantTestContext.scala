@@ -53,7 +53,12 @@ import com.daml.ledger.api.v2.package_service.{
   ListVettedPackagesResponse,
   PackageStatus,
 }
-import com.daml.ledger.api.v2.state_service.{GetActiveContractsRequest, GetActiveContractsResponse}
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsPageRequest,
+  GetActiveContractsPageResponse,
+  GetActiveContractsRequest,
+  GetActiveContractsResponse,
+}
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, TransactionFormat}
@@ -314,11 +319,23 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     s"Active contracts for request $request",
     delegate.activeContracts(request),
   )
+  override def activeContractsWithVariants(
+      request: GetActiveContractsRequest
+  ): Future[Vector[CreatedEvent]] = withTimeout(
+    s"Active contracts with variants for request $request",
+    delegate.activeContractsWithVariants(request),
+  )
   override def activeContractResponses(
       request: GetActiveContractsRequest
   ): Future[Vector[GetActiveContractsResponse]] = withTimeout(
     s"Active contracts for request $request",
     delegate.activeContractResponses(request),
+  )
+  override def activeContractsPage(
+      request: GetActiveContractsPageRequest
+  ): Future[GetActiveContractsPageResponse] = withTimeout(
+    s"Active contracts page for request $request",
+    delegate.activeContractsPage(request),
   )
   override def activeContractsRequest(
       parties: Option[Seq[Party]],
@@ -343,6 +360,15 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       s"Active contracts for parties $parties",
       delegate.activeContracts(parties, activeAtOffsetO, verbose),
     )
+  override def activeContractsWithVariants(
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long] = None,
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]] =
+    withTimeout(
+      s"Active contracts with variants for parties $parties",
+      delegate.activeContracts(parties, activeAtOffsetO, verbose),
+    )
   override def activeContractsByTemplateId(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
@@ -351,6 +377,15 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Vector[CreatedEvent]] = withTimeout(
     s"Active contracts by template ids $templateIds for parties $parties",
     delegate.activeContractsByTemplateId(templateIds, parties, activeAtOffsetO, verbose),
+  )
+  override def activeContractsByTemplateIdWithVariants(
+      templateIds: Seq[Identifier],
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long],
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]] = withTimeout(
+    s"Active contracts with variants by template ids $templateIds for parties $parties",
+    delegate.activeContractsByTemplateIdWithVariants(templateIds, parties, activeAtOffsetO, verbose),
   )
 
   def eventFormat(

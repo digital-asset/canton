@@ -1,0 +1,13 @@
+override-components:
+  damlc:
+    version: $DAML_VERSION
+build-options:
+  - --enable-interfaces=yes
+  - --target=2.1
+  - -Wno-upgrade-interfaces
+name: model-tests
+source: .
+version: 1.0.0
+dependencies:
+  - daml-prim
+  - daml-stdlib

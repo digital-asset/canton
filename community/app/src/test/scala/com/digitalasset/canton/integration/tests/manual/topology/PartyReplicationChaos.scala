@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import better.files.File
 import cats.syntax.parallel.*
-import com.digitalasset.canton.BaseTest.eventually
+import com.digitalasset.canton.BaseTest.{eventually, testedProtocolVersion}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, config}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.convertOptionToValuable
@@ -34,8 +35,10 @@ Exclusive resources:
 - participant4
 
 Party onboarding:
-- Authorizing the party (observation rights)
+- Authorizing the party (confirmation rights) with onboarding flag
+- Exporting ACS safely using the party ACS export feature
 - Importing the ACS on the target participants
+- Clearing the onboarding flag
 - After some time, changing permission to confirmation
 
 Party offboarding:
@@ -92,10 +95,6 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
       case NoAction => Future.unit
       case op: ReplicateParty =>
         Future(replicateParty(op))
-      case ChangePermissions(party, partyOwner, participant) =>
-        Future {
-          changePermissions(party, partyOwner, participant, ParticipantPermission.Confirmation)
-        }
       case operation: OffboardParty =>
         Future(offboardParty(operation))
     }
@@ -132,14 +131,6 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
           } else NoAction
 
         case WIP => NoAction
-
-        case observing: PartyObserving =>
-          if (now >= observing.minimumConfirmingTime) {
-            workerStatus.put(targetParticipant.id, WIP)
-            ChangePermissions(observing.party, sourceParticipant, targetParticipant)
-          } else {
-            NoAction
-          }
 
         case confirming: PartyConfirming =>
           if (now >= confirming.minimumOffboardingTime) {
@@ -210,8 +201,9 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
     def propose(p: LocalParticipantReference): Unit = p.topology.party_to_participant_mappings
       .propose_delta(
         party,
-        adds = List((to.id, ParticipantPermission.Observation)),
+        adds = List((to.id, ParticipantPermission.Confirmation)),
         store = daId,
+        requiresPartyToBeOnboarded = true,
       )
       .discard
 
@@ -224,60 +216,42 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
       level = Level.DEBUG,
     )
 
-    val onboardingTx = clue("party replication")(s"$party authorizes hosting on ${to.id}") {
-      eventually(topologyChangeTimeout.asFiniteApproximation, retryOnTestFailuresOnly = false) {
-        logOperationStep("party replication")(
-          s"Querying party to participant mappings for $party and participant ${to.id})",
-          level = Level.DEBUG,
-        )
-
-        from.topology.party_to_participant_mappings
-          .list(
-            synchronizerId = daId,
-            filterParty = party.filterString,
-            filterParticipant = to.filterString,
-          )
-          .loneElement(s"$operation: $party authorizes replication")
-          .context
-      }
-    }
-
-    val partyAddedOffset = from.parties.find_party_max_activation_offset(
-      partyId = party,
-      participantId = to.id,
-      synchronizerId = daId,
-      validFrom = Some(onboardingTx.validFrom),
-      beginOffsetExclusive = fromLedgerEnd,
-      completeAfter = PositiveInt.one,
-      onboarding = false,
-    )
-    logOperationStep("party replication")(
-      s"Exporting ACS at offset $partyAddedOffset for $party from ${from.id}"
-    )
-
     File.usingTemporaryFile() { file =>
       clue("party replication")(s"exporting acs for $party from ${from.id}") {
-        BaseTest.eventually(retryOnTestFailuresOnly = false) {
-          from.repair.export_acs(
-            parties = Set(party),
-            exportFilePath = file.canonicalPath,
-            synchronizerId = Some(daId),
-            ledgerOffset = partyAddedOffset,
-          )
-        }
+        from.parties.export_party_acs(
+          party = party,
+          synchronizerId = daId,
+          targetParticipantId = to.id,
+          beginOffsetExclusive = fromLedgerEnd,
+          exportFilePath = file.canonicalPath,
+        )
       }
 
-      to.repair.import_acs(importFilePath = file.canonicalPath, synchronizerId = daId)
+      to.parties.import_party_acs(daId, Some(party), file.canonicalPath)
+
       logOperationStep("party replication")(
         s"Done replicating party $party from ${from.id} to ${to.id}; reconnecting ${to.id} to the synchronizer"
       )
+
+      val clearOnboardingFlagBeginOffsetOnPv34 =
+        Option.when(testedProtocolVersion < ProtocolVersion.v35) {
+          to.ledger_api.state.end()
+        }
       to.synchronizers.reconnect(daName)
+
+      logOperationStep("party replication")(
+        s"Clearing onboarding flag for $party on ${to.id}"
+      )
+
+      clearOnboardingFlagBeginOffsetOnPv34.foreach {
+        to.parties.clear_party_onboarding_flag(party, daId, _).discard
+      }
 
       val now = environment.clock.now
       val minimumConfirmingTime: CantonTimestamp = now
         .add(decisionTimeout.asJava)
 
-      workerStatus.put(to.id, PartyObserving(party, minimumConfirmingTime))
+      workerStatus.put(to.id, PartyConfirming(party, minimumConfirmingTime))
     }
   }
 
@@ -363,42 +337,6 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
     logOperationStep("party offboarding")(s"Done offboarding party $party from ${from.id}")
   }
 
-  private def changePermissions(
-      party: PartyId,
-      partyOwner: LocalParticipantReference,
-      participant: LocalParticipantReference,
-      newPermission: ParticipantPermission,
-  )(implicit
-      env: TestConsoleEnvironment,
-      errorLoggingContext: ErrorLoggingContext,
-  ): Unit = {
-    import env.*
-
-    logOperationStep("party replication")(
-      s"Changing $party permissions to $newPermission on ${participant.id}"
-    )
-
-    Seq(partyOwner, participant).foreach(
-      _.topology.party_to_participant_mappings
-        .propose_delta(
-          party,
-          adds = List((participant.id, newPermission)),
-          store = daId,
-        )
-    )
-
-    val minimumOffboardingTime = env.environment.clock.now.plus(partyLifetime.asJava)
-    workerStatus.put(participant.id, PartyConfirming(party, minimumOffboardingTime))
-
-    eventually() {
-      hostingParticipants(partyOwner, party) should contain((participant.id, newPermission))
-    }
-
-    logOperationStep("party replication")(
-      s"Done changing $party permissions to $newPermission on ${participant.id}"
-    )
-  }
-
   private def hostingParticipants(
       p: LocalParticipantReference,
       party: PartyId,
@@ -437,11 +375,6 @@ private[topology] object PartyReplicationChaos extends TopologyOperationsCompani
       from: LocalParticipantReference,
       to: LocalParticipantReference,
   ) extends Action
-  private final case class ChangePermissions(
-      party: PartyId,
-      partyOwner: LocalParticipantReference,
-      participant: LocalParticipantReference,
-  ) extends Action
   private final case class OffboardParty(
       party: PartyId,
       partyOwner: LocalParticipantReference,
@@ -451,18 +384,10 @@ private[topology] object PartyReplicationChaos extends TopologyOperationsCompani
   sealed trait Status extends Product with Serializable
   final case class Idle(from: CantonTimestamp) extends Status
   case object WIP extends Status
-  final case class PartyObserving(
-      party: PartyId,
-      minimumConfirmingTime: CantonTimestamp, // we don't want to switch to confirmation too early
-  ) extends Status
   final case class PartyConfirming(
       party: PartyId,
       minimumOffboardingTime: CantonTimestamp, // we don't want to offboard party too early
   ) extends Status
-
-  // Time between party being able to confirm and offboarding
-  private val partyLifetime: config.NonNegativeFiniteDuration =
-    config.NonNegativeFiniteDuration.ofSeconds(20)
 
   /*
     Time between one offboarding and the next onboarding.

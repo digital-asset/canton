@@ -2005,10 +2005,11 @@ private[lf] object SBuiltinFun {
   }
 
   private[this] abstract class KeyOperation(
-                                             final val name: String,
-                                             // if false, feed n with 1
-                                             // if true, take n as snd argument on the stack
-                                             final val needN: Boolean) {
+      final val name: String,
+      // if false, feed n with 1
+      // if true, take n as snd argument on the stack
+      final val needN: Boolean,
+  ) {
     val templateId: TypeConId
 
     final val arity: Int = if (needN) 2 else 1
@@ -2019,6 +2020,12 @@ private[lf] object SBuiltinFun {
         result: KeyMapping,
         payloads: List[SValue],
     ): Control[Nothing]
+
+    def authorizeLookup(
+        machine: UpdateMachine,
+        key: CachedKey,
+    ): Either[IE, Unit]
+
   }
 
   object SPair {
@@ -2034,9 +2041,10 @@ private[lf] object SBuiltinFun {
   }
 
   private[this] object KeyOperation {
-    final class Fetch(override val templateId: TypeConId) extends KeyOperation("FetchByKey", needN = false) {
+    final class Fetch(override val templateId: TypeConId)
+        extends KeyOperation("FetchByKey", needN = false) {
 
-      override final def handleKnownInputKey(
+      override def handleKnownInputKey(
           machine: UpdateMachine,
           cachedKey: CachedKey,
           result: KeyMapping,
@@ -2048,6 +2056,12 @@ private[lf] object SBuiltinFun {
           case None =>
             Control.Error(IE.ContractKeyNotFound(cachedKey.globalKey))
         }
+
+      override def authorizeLookup(
+        machine: UpdateMachine,
+        key: CachedKey,
+      ): Right[Nothing, Unit] =
+        Right(())
     }
 
     final class Lookup(override val templateId: TypeConId) extends KeyOperation("LookupByKey", needN = false) {
@@ -2059,51 +2073,58 @@ private[lf] object SBuiltinFun {
           result: KeyMapping,
           payloads: List[SValue],
       ): Control[Nothing] = {
-        machine.ptx.insertQueryByKey(
+        machine.ptx = machine.ptx.insertQueryByKey(
           optLocation = machine.getLastLocation,
           key = cachedKey,
           result = result,
           keyVersion = machine.tmplId2TxVersion(templateId),
-        ) match {
-          case Right(ptx) =>
-            machine.ptx = ptx
-            machine.metrics.incrCount[TxNodeCount]()
-            Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
-          case Left(err) =>
-            Control.Error(err)
-        }
+        )
+        Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
       }
+
+      override def authorizeLookup(
+        machine: UpdateMachine,
+        key: CachedKey,
+      ): Either[IE, Unit] =
+        machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
 
     final class QueryNByKey(override val templateId: TypeConId)
-        extends KeyOperation("QueryNByKey",  needN = true) {
+        extends KeyOperation("QueryNByKey", needN = true) {
 
-      override final def handleKnownInputKey(
+      override def handleKnownInputKey(
           machine: UpdateMachine,
           cachedKey: CachedKey,
           result: KeyMapping,
           payloads: List[SValue],
-      ): Control[Nothing] =
-        machine.ptx.insertQueryByKey(
+      ): Control[Nothing] = {
+        machine.ptx = machine.ptx.insertQueryByKey(
           optLocation = machine.getLastLocation,
           key = cachedKey,
           result = result,
           keyVersion = machine.tmplId2TxVersion(templateId),
-        ) match {
-          case Right(ptx) =>
-            machine.ptx = ptx
-            machine.metrics.incrCount[TxNodeCount]()
-            Control.Value(
-              SList(
-                (result.queue.view.map(SContractId(_)) zip payloads)
-                  .map { case (cid, payload) => SValue.SPair(cid, payload) }
-                  .to(FrontStack)
-              )
-            )
-          case Left(err) =>
-            Control.Error(err)
-        }
+        )
+        machine.metrics.incrCount[TxNodeCount]()
+        Control.Value(
+          SList(
+            (result.queue.view.map(SContractId(_)) zip payloads)
+              .map { case (cid, payload) => SValue.SPair(cid, payload) }
+              .to(FrontStack)
+          )
+        )
+      }
+
+      override def authorizeLookup(
+          machine: UpdateMachine,
+          key: CachedKey,
+      ): Either[IE, Unit] =
+        machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
+
     }
+  }
+
+  object SBUKeyBuiltin {
+    private val maxN = 1L<<20 // around 1M
   }
 
   private[speedy] sealed abstract class SBUKeyBuiltin(
@@ -2122,10 +2143,13 @@ private[lf] object SBuiltinFun {
       val keyValue = args(0)
 
       val n =
-        if (operation.needN) (getSInt64(args, 1) min Int.MaxValue).toInt else 1
+        if (operation.needN)
+          (getSInt64(args, 1) min SBUKeyBuiltin.maxN).toInt
+        else
+          1
 
       if (n < 1) {
-        // TODO (#30398): add a proper error
+        // TODO (#31849): add a proper error
         crash(s"Invalid argument n for ${operation.name}: $n. Expected a positive integer.")
       } else {
 
@@ -2180,8 +2204,13 @@ private[lf] object SBuiltinFun {
                 ContU.throwError(convTxError(machine.ptx.nodes, operation.name, error))
             }
 
-          loop(machine.ptx.contractState.queryNByKey(gkey, n)).run { case (keyMapping, payloads) =>
-            operation.handleKnownInputKey(machine, cachedKey, keyMapping, payloads)
+          operation.authorizeLookup(machine, cachedKey) match {
+            case Left(err) =>
+              Control.Error(err)
+            case Right(_) =>
+              loop(machine.ptx.contractState.queryNByKey(gkey, n)).run { case (keyMapping, payloads) =>
+                operation.handleKnownInputKey(machine, cachedKey, keyMapping, payloads)
+              }
           }
         }
       }

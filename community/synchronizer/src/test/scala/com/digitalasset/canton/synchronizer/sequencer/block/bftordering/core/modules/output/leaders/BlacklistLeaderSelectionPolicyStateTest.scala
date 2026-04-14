@@ -14,9 +14,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest {
+
+  private implicit val pv: ProtocolVersion = testedProtocolVersion
 
   private def n(i: Int): BftNodeId = BftNodeId(s"node$i")
   private val n0 = n(0)

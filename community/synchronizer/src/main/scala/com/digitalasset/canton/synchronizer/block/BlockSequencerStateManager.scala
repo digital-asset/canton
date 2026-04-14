@@ -39,7 +39,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerStreamInstrumentationConfig,
   DeliverableSubmissionOutcome,
   InFlightAggregationUpdates,
-  InFlightAggregations,
   SequencerIntegration,
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficConsumedStore

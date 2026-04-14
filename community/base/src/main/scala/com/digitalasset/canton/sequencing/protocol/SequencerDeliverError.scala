@@ -89,6 +89,18 @@ object SequencerErrors extends SequencerErrorGroup {
       )
 
   @Explanation(
+    """The sequencer received a request after the LSU time."""
+  )
+  @Resolution(
+    """Requests should be sent to a sequencer node of the new physical synchronizer."""
+  )
+  case object PassedUpgradeTime
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_SUBMISSION_AFTER_UPGRADE_TIME",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      )
+
+  @Explanation(
     """Topology timestamp on the submission request is earlier than allowed by the dynamic synchronizer parameters."""
   )
   @Resolution(

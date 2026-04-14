@@ -1,0 +1,59 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module AuthFailureWithKeys where
+
+import Daml.Script
+import DA.Optional(fromSome)
+
+-- Tests for various(all) different forms of authorization failure detected during execution.
+-- Five kinds of authorization failure are tested here.
+-- Two others (NoSignatories and NoControllers) are tested in separate files, because the expected error message doesn't contain any indication of which testcase causes it.
+
+template TheContract2
+  with
+    s : Party
+    m : Party
+    id : Int
+  where
+    signatory s
+    key (m, id) : (Party, Int)
+    maintainer key._1
+
+t2_MaintainersNotSubsetOfSignatories : Script ()
+t2_MaintainersNotSubsetOfSignatories = script do
+  alice <- allocateParty "Alice-AuthFailureWithKeys:t2_MaintainersNotSubsetOfSignatories"
+  bob <- allocateParty "Bob-AuthFailureWithKeys:t2_MaintainersNotSubsetOfSignatories"
+  alice `submit` createCmd (TheContract2 with s = alice; m = bob; id = 100)
+  abort "t2 finished"
+
+template TheContract4
+  with
+    ss : [Party]
+    ms : [Party]
+    os : [Party]
+    id : Int
+  where
+    signatory ss
+    key (ms, id) : ([Party], Int)
+    maintainer key._1
+    observer os
+
+template Test4
+  with
+    bob : Party
+    contractKey : ([Party], Int)
+  where
+    signatory bob
+    choice Call4 : Optional (ContractId TheContract4)
+      controller bob
+      do lookupByKey @TheContract4 contractKey
+
+t4_LookupByKeyMissingAuthorization : Script ()
+t4_LookupByKeyMissingAuthorization = script do
+  alice <- allocateParty "Alice-AuthFailureWithKeys:t4_LookupByKeyMissingAuthorization"
+  bob <- allocateParty "Bob-AuthFailureWithKeys:t4_LookupByKeyMissingAuthorization"
+  alice `submit`
+    createCmd (TheContract4 with ss = [alice]; ms = [alice]; os = [bob]; id = 100)
+  _ <- bob `submit` createAndExerciseCmd (Test4 bob ([alice],100)) Call4
+  abort "t4 finished"

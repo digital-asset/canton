@@ -8,7 +8,10 @@ import com.daml.ledger.api.v2.state_service.StateServiceGrpc.StateService
 import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
-import com.digitalasset.canton.ledger.api.auth.services.StateServiceAuthorization.getActiveContractsClaims
+import com.digitalasset.canton.ledger.api.auth.services.StateServiceAuthorization.{
+  getActiveContractsClaims,
+  getActiveContractsPageClaims,
+}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
@@ -31,6 +34,13 @@ final class StateServiceAuthorization(
     authorizer.stream(service.getActiveContracts)(
       getActiveContractsClaims(request)*
     )(request, responseObserver)
+
+  override def getActiveContractsPage(
+      request: GetActiveContractsPageRequest
+  ): Future[GetActiveContractsPageResponse] =
+    authorizer.rpc(service.getActiveContractsPage)(
+      getActiveContractsPageClaims(request)*
+    )(request)
 
   override def getConnectedSynchronizers(
       request: GetConnectedSynchronizersRequest
@@ -63,5 +73,12 @@ object StateServiceAuthorization {
   ): List[RequiredClaim[GetActiveContractsRequest]] =
     request.eventFormat.toList.flatMap(
       RequiredClaims.eventFormatClaims[GetActiveContractsRequest]
+    )
+
+  def getActiveContractsPageClaims(
+      request: GetActiveContractsPageRequest
+  ): List[RequiredClaim[GetActiveContractsPageRequest]] =
+    request.eventFormat.toList.flatMap(
+      RequiredClaims.eventFormatClaims[GetActiveContractsPageRequest]
     )
 }

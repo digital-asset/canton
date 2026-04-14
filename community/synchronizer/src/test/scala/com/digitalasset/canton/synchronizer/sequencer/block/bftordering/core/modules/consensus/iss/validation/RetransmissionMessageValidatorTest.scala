@@ -257,17 +257,17 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
 }
 
 object RetransmissionMessageValidatorTest {
-  val epochLength = EpochLength(8L)
-  val epochInfo =
+  val epochLength: EpochLength = EpochLength(8L)
+  val epochInfo: EpochInfo =
     EpochInfo.forTesting(
       number = EpochNumber.First,
       startBlockNumber = BlockNumber.First,
       length = epochLength,
     )
-  val myId = BftNodeId("self")
-  val otherId = BftNodeId(s"node0")
-  val membership = Membership.forTesting(myId)
-  val epoch = Epoch(epochInfo, membership, membership)
+  val myId: BftNodeId = BftNodeId("self")
+  val otherId: BftNodeId = BftNodeId(s"node0")
+  def membership(implicit pv: ProtocolVersion): Membership = Membership.forTesting(myId)
+  def epoch(implicit pv: ProtocolVersion): Epoch = Epoch(epochInfo, membership, membership)
 
   def retransmissionRequest(segments: Seq[SegmentStatus])(implicit
       synchronizerProtocolVersion: ProtocolVersion

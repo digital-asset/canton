@@ -8,7 +8,12 @@ import com.digitalasset.canton.admin.api.client.data.topology.ListOwnerToKeyMapp
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.SigningKeyUsage.{Namespace, Protocol}
-import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningKeyUsage, SigningPublicKey}
+import com.digitalasset.canton.crypto.{
+  EncryptionPublicKey,
+  Fingerprint,
+  SigningKeyUsage,
+  SigningPublicKey,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -24,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllMappings,
   CanSignSpecificMappings,
 }
+import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PartyId, TopologyManagerError}
 import com.digitalasset.daml.lf.archive.DarParser
 
@@ -229,6 +235,132 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
         )
 
       updateP2k
+    }
+
+    "hermetically separate keys for package vetting and other functions" in { implicit env =>
+      import env.*
+
+      def unvetAndVetPackages(packageIds: Seq[VettedPackage], fingerprint: Fingerprint) = {
+
+        // Unvet all packages
+        participant1.topology.vetted_packages.propose(
+          participant1.id,
+          store = daId,
+          packages = packageIds,
+          operation = TopologyChangeOp.Remove,
+          signedBy = Some(fingerprint),
+        )
+        eventually() {
+          participant1.topology.vetted_packages
+            .list(store = daId, filterParticipant = participant1.filterString) should have size 0
+        }
+
+        // Vet the same packages again
+        participant1.topology.vetted_packages.propose(
+          participant1.id,
+          store = daId,
+          packages = packageIds,
+          signedBy = Some(fingerprint),
+        )
+
+        eventually() {
+          participant1.topology.vetted_packages
+            .list(store = daId, filterParticipant = participant1.filterString)
+            .loneElement
+            .item
+            .packages should contain theSameElementsAs packageIds
+        }
+      }
+
+      val packageIds = participant1.topology.vetted_packages
+        .list(store = daId, filterParticipant = participant1.filterString)
+        .loneElement
+        .item
+        .packages
+      packageIds should not be empty
+
+      // Propose a delegation for vetting packages to a key that is not the root namespace key.
+      val vettingKey = participant1.keys.secret
+        .generate_signing_key(
+          "vetting_key",
+          SigningKeyUsage.NamespaceOnly,
+        )
+
+      participant1.topology.namespace_delegations.propose_delegation(
+        participant1.namespace,
+        vettingKey,
+        CanSignSpecificMappings(VettedPackages),
+      )
+
+      // Propose a delegation to a key that is not the root namespace key.
+      // This key does not have the correct delegation for vetting packages nor for signing delegations.
+      val noVettingKey = participant1.keys.secret
+        .generate_signing_key(
+          "no_vetting_key",
+          SigningKeyUsage.NamespaceOnly,
+        )
+
+      participant1.topology.namespace_delegations.propose_delegation(
+        participant1.namespace,
+        noVettingKey,
+        CanSignSpecificMappings(
+          NonEmpty
+            .from(
+              // This key should not have the delegation for vetting packages nor for signing delegations.
+              TopologyMapping.Code.all.filter(p =>
+                (p != Code.VettedPackages) && (p != Code.NamespaceDelegation)
+              )
+            )
+            .value
+            .toSet
+        ),
+      )
+
+      // Wait for the topology changes to be effective.
+      eventually() {
+        participant1.topology.namespace_delegations.list(
+          daId,
+          filterNamespace = participant1.namespace.filterString,
+          filterTargetKey = Some(
+            noVettingKey.fingerprint
+          ),
+        ) should not be empty
+      }
+
+      // Check that the key with the correct delegation can vet packages
+      unvetAndVetPackages(packageIds, vettingKey.fingerprint)
+
+      // Check that the key without the correct delegation cannot vet packages
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.topology.vetted_packages.propose(
+          participant1.id,
+          store = daId,
+          packages = packageIds,
+          operation = TopologyChangeOp.Remove,
+          signedBy = Some(noVettingKey.fingerprint),
+        ),
+        _.shouldBeCommandFailure(TopologyManagerError.NoAppropriateSigningKeyInStore),
+      )
+
+      // Check that the root key can still vet packages
+      unvetAndVetPackages(packageIds, participant1.id.fingerprint)
+
+      // Attempt to propose a delegation for vetting packages, signing it by the dedicated non-vetting key.
+      val anotherVettingKey = participant1.keys.secret
+        .generate_signing_key(
+          "another_vetting_key",
+          SigningKeyUsage.NamespaceOnly,
+        )
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.topology.namespace_delegations.propose_delegation(
+          participant1.namespace,
+          anotherVettingKey,
+          CanSignSpecificMappings(VettedPackages),
+          signedBy = Seq(noVettingKey.fingerprint),
+        ),
+        _.shouldBeCommandFailure(TopologyManagerError.NoAppropriateSigningKeyInStore),
+      )
     }
 
   }

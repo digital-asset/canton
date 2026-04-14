@@ -155,8 +155,8 @@ class DbPhysicalSyncPersistentState(
     loggerFactory,
   )
 
-  val parameterStore: DbSynchronizerParameterStore =
-    new DbSynchronizerParameterStore(
+  val connectivityStatusStore: DbSynchronizerConnectivityStatusStore =
+    new DbSynchronizerConnectivityStatusStore(
       psid,
       storage,
       timeouts,
@@ -190,7 +190,7 @@ class DbPhysicalSyncPersistentState(
       topologyStore,
       sequencedEventStore,
       requestJournalStore,
-      parameterStore,
+      connectivityStatusStore,
       sendTrackerStore,
       submissionTrackerStore,
     )(logger)

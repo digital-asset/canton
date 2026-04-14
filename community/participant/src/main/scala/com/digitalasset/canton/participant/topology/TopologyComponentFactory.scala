@@ -27,7 +27,7 @@ import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminate
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
@@ -96,7 +96,7 @@ class TopologyComponentFactory(
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
-      pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+      pendingLsuOperationsStore: PendingLsuOperation.Store,
       pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
@@ -123,7 +123,7 @@ class TopologyComponentFactory(
           _.pauseSynchronizerIndexingDuringPartyReplication
         ),
         synchronizerPredecessor = synchronizerPredecessor,
-        pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
+        pendingLsuOperationsStore = pendingLsuOperationsStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,

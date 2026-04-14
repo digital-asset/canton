@@ -383,9 +383,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       }
 
       val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
-        // TODO(#29427) - Address ongoing synchronizer upgrade "no more topology transaction after freeze"
-        // Switch back to import_party_acs from repair.import_acs
-        participant2.repair.import_acs(lsid, acsSnapshotFile.path.toString)
+        participant2.parties.import_party_acs(lsid, Some(alice), acsSnapshotFile.path.toString)
         participant2.ledger_api.state.end()
       }
 

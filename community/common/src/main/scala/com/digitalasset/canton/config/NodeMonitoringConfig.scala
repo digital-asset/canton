@@ -29,8 +29,8 @@ final case class GrpcHealthServerConfig(
   override val sslContext: Option[SslContext] = None
   override val serverCertChainFile: Option[PemFileOrString] = None
   override def maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize
-  override def maxConcurrentStreamsPerConnection: NonNegativeInt =
-    ServerConfig.defaultMaxConcurrentStreamsPerConnection
+  override def maxConcurrentCallsPerConnection: NonNegativeInt =
+    ServerConfig.defaultMaxConcurrentCallsPerConnection
   override val maxTokenLifetime: NonNegativeDuration = NonNegativeDuration(Duration.Inf)
   override val jwksCacheConfig: JwksCacheConfig = JwksCacheConfig()
   override def limits: Option[ActiveRequestLimitsConfig] = None

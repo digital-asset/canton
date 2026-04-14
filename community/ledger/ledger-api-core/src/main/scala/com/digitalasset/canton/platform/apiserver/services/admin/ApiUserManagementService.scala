@@ -13,7 +13,6 @@ import com.daml.ledger.api.v2.admin.user_management_service.{
   UpdateUserResponse,
 }
 import com.daml.platform.v1.page_tokens.ListUsersPageTokenPayload
-import com.daml.tracing.Telemetry
 import com.digitalasset.base.error.ErrorResource
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValueValidator}
@@ -39,6 +38,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import scalaz.std.either.*
@@ -56,7 +56,6 @@ private[apiserver] final class ApiUserManagementService(
     partyRecordExist: PartyRecordsExist,
     maxUsersPageSize: Int,
     submissionIdGenerator: SubmissionIdGenerator,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -76,7 +75,7 @@ private[apiserver] final class ApiUserManagementService(
     proto.UserManagementServiceGrpc.bindService(this, executionContext)
 
   override def createUser(request: proto.CreateUserRequest): Future[CreateUserResponse] =
-    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+    withSubmissionId(loggerFactory) { implicit loggingContext =>
       implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       // Retrieving the authenticated user context from the thread-local context
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
@@ -116,6 +115,7 @@ private[apiserver] final class ApiUserManagementService(
               annotations = pAnnotations,
             ),
             identityProviderId = identityProviderId,
+            primaryPartyAuthentication = pUser.primaryPartyAuthentication,
           ),
           pRights,
         )
@@ -138,7 +138,7 @@ private[apiserver] final class ApiUserManagementService(
       }
     }
   override def updateUser(request: UpdateUserRequest): Future[UpdateUserResponse] =
-    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+    withSubmissionId(loggerFactory) { implicit loggingContext =>
       implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
         resolveAuthenticatedUserContext
@@ -176,6 +176,7 @@ private[apiserver] final class ApiUserManagementService(
               annotations = pAnnotations,
             ),
             identityProviderId = identityProviderId,
+            primaryPartyAuthentication = pUser.primaryPartyAuthentication,
           ),
           pFieldMask,
         )
@@ -215,7 +216,8 @@ private[apiserver] final class ApiUserManagementService(
     }
 
   override def getUser(request: proto.GetUserRequest): Future[GetUserResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
@@ -234,7 +236,7 @@ private[apiserver] final class ApiUserManagementService(
   }
 
   override def deleteUser(request: proto.DeleteUserRequest): Future[proto.DeleteUserResponse] =
-    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+    withSubmissionId(loggerFactory) { implicit loggingContext =>
       implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
         resolveAuthenticatedUserContext
@@ -270,7 +272,8 @@ private[apiserver] final class ApiUserManagementService(
     }
 
   override def listUsers(request: proto.ListUsersRequest): Future[proto.ListUsersResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation(
       for {
@@ -308,7 +311,7 @@ private[apiserver] final class ApiUserManagementService(
 
   override def grantUserRights(
       request: proto.GrantUserRightsRequest
-  ): Future[proto.GrantUserRightsResponse] = withSubmissionId(loggerFactory, telemetry) {
+  ): Future[proto.GrantUserRightsResponse] = withSubmissionId(loggerFactory) {
     implicit loggingContext =>
       implicit val errorLoggingContext: ErrorLoggingContext =
         ErrorLoggingContext(logger, loggingContext)
@@ -345,7 +348,7 @@ private[apiserver] final class ApiUserManagementService(
 
   override def revokeUserRights(
       request: proto.RevokeUserRightsRequest
-  ): Future[proto.RevokeUserRightsResponse] = withSubmissionId(loggerFactory, telemetry) {
+  ): Future[proto.RevokeUserRightsResponse] = withSubmissionId(loggerFactory) {
     implicit loggingContext =>
       implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       // Retrieving the authenticated user context from the thread-local context
@@ -387,7 +390,8 @@ private[apiserver] final class ApiUserManagementService(
   override def listUserRights(
       request: proto.ListUserRightsRequest
   ): Future[proto.ListUserRightsResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
@@ -408,7 +412,8 @@ private[apiserver] final class ApiUserManagementService(
   override def updateUserIdentityProviderId(
       request: UpdateUserIdentityProviderIdRequest
   ): Future[UpdateUserIdentityProviderIdResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
@@ -582,11 +587,13 @@ private[apiserver] final class ApiUserManagementService(
   ): Either[StatusRuntimeException, Set[UserRight]] =
     rights.toList.traverse(fromProtoRight).map(_.toSet)
 
-  private def withSubmissionId[A](loggerFactory: NamedLoggerFactory, telemetry: Telemetry)(
+  private def withSubmissionId[A](loggerFactory: NamedLoggerFactory)(
       f: LoggingContextWithTrace => A
   ): A = {
     val loggingContext = createLoggingContext(loggerFactory)(identity)
-    withEnrichedLoggingContext(telemetry)("submissionId" -> submissionIdGenerator.generate())(f)(
+    withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
+      "submissionId" -> submissionIdGenerator.generate()
+    )(f)(
       loggingContext
     )
   }
@@ -602,6 +609,7 @@ object ApiUserManagementService {
       isDeactivated = user.isDeactivated,
       metadata = Some(Utils.toProtoObjectMeta(user.metadata)),
       identityProviderId = user.identityProviderId.toRequestString,
+      primaryPartyAuthentication = user.primaryPartyAuthentication,
     )
 
   private val toProtoRight: UserRight => proto.Right = {

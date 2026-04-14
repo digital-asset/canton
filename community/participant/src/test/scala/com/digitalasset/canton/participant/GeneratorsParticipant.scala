@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config.GeneratorsConfig
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -36,7 +36,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SubmissionTrackingData,
   TransactionSubmissionTrackingData,
 }
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -189,7 +189,7 @@ final class GeneratorsParticipant(
   implicit val acsReplicationProgressArb: Arbitrary[AcsReplicationProgress] =
     Arbitrary(
       for {
-        replicatedContractCount <- Arbitrary.arbitrary[NonNegativeInt]
+        replicatedContractCount <- Arbitrary.arbitrary[NonNegativeLong]
         nextPersistenceCounter <- Arbitrary.arbitrary[RepairCounter]
         fullyReplicatedAcs <- Arbitrary.arbitrary[Boolean]
       } yield {
@@ -205,9 +205,14 @@ final class GeneratorsParticipant(
   implicit val acsIndexingProgressArb: Arbitrary[AcsIndexingProgress] =
     Arbitrary(
       for {
-        indexedContractCount <- Arbitrary.arbitrary[NonNegativeInt]
-        nextIndexingCounter <- Arbitrary.arbitrary[RepairCounter]
-      } yield AcsIndexingProgress(indexedContractCount, nextIndexingCounter)
+        indexedContractActivationChangeCount <- Arbitrary.arbitrary[NonNegativeLong]
+        nextIndexingCounter <- Arbitrary.arbitrary[NonNegativeLong]
+        indexingAlmostDoneWatermarkO <- Gen.option(Arbitrary.arbitrary[NonNegativeLong])
+      } yield AcsIndexingProgress(
+        indexedContractActivationChangeCount,
+        nextIndexingCounter,
+        indexingAlmostDoneWatermarkO,
+      )
     )
 
   implicit val partyReplicationErrorArb: Arbitrary[PartyReplicationError] =
@@ -271,7 +276,7 @@ final class GeneratorsParticipant(
   implicit val partyReplicationTargetParticipantMessageArb
       : Arbitrary[PartyReplicationTargetParticipantMessage] = Arbitrary(
     for {
-      contractOrdinal <- nonNegativeIntArb.arbitrary
+      contractOrdinal <- nonNegativeLongArb.arbitrary
       instruction <- Gen
         .oneOf[PartyReplicationTargetParticipantMessage.Instruction](
           PartyReplicationTargetParticipantMessage.Initialize(contractOrdinal),
@@ -280,15 +285,12 @@ final class GeneratorsParticipant(
     } yield PartyReplicationTargetParticipantMessage.apply(instruction, version)
   )
 
-  implicit val pendingHandshakeWithLsuSuccessorArb: Arbitrary[PendingHandshakeWithLsuSuccessor] =
+  implicit val pendingLsuOperationArb: Arbitrary[PendingLsuOperation] =
     Arbitrary(
-      Arbitrary
-        .arbitrary[PhysicalSynchronizerId]
-        .map(
-          PendingHandshakeWithLsuSuccessor(_)(
-            PendingHandshakeWithLsuSuccessor.protocolVersionRepresentativeFor(version)
-          )
-        )
+      for {
+        psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+        rpv = PendingLsuOperation.protocolVersionRepresentativeFor(version)
+      } yield PendingLsuOperation(psid)(rpv)
     )
 
   implicit val onboardingClearanceOperationArb: Arbitrary[OnboardingClearanceOperation] =

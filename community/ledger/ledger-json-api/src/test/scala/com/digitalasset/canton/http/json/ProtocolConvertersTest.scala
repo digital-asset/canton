@@ -84,6 +84,7 @@ class ProtocolConvertersTest extends AnyWordSpec with BaseTest with HasExecution
     JsMapping(converters.AssignedEvent),
     JsMapping(converters.ContractEntry),
     JsMapping(converters.GetActiveContractsResponse),
+    JsMapping(converters.GetActiveContractsPageResponse),
     JsMapping(converters.ReassignmentEvent),
     JsMapping(converters.Reassignment),
     JsMapping(converters.GetUpdatesResponse),
@@ -322,6 +323,10 @@ object Arbitraries {
   implicit val arbGetActiveContractsResponse
       : Arbitrary[lapi.state_service.GetActiveContractsResponse] =
     ArbitraryDerivation[lapi.state_service.GetActiveContractsResponse]
+
+  implicit val arbGetActiveContractsPageResponse
+      : Arbitrary[lapi.state_service.GetActiveContractsPageResponse] =
+    ArbitraryDerivation[lapi.state_service.GetActiveContractsPageResponse]
 
   implicit class OptM[T](val v: Option[T]) {
     def getValue()(implicit ct: ClassTag[T]): T =

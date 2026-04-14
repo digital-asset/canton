@@ -106,12 +106,6 @@ object MemberAuthentication extends MemberAuthentication {
         "LogoutTokenDoesNotExist",
       )
 
-  final case class AuthenticationNotSupportedForMember(member: Member)
-      extends AuthenticationError(
-        reason = s"Authentication for member type is not supported: $member",
-        code = "UnsupportedMember",
-      )
-
   def hashSynchronizerNonce(
       nonce: Nonce,
       synchronizerId: PhysicalSynchronizerId,

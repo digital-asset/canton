@@ -703,7 +703,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         override val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            s"The topology snapshot was rejected because it contains synchronizer sequencer states with multiple differing syncrhonizer ids: $synchronizerIds."
+            s"The topology snapshot was rejected because it contains synchronizer sequencer states with multiple differing synchronizer ids: $synchronizerIds."
         )
         with TopologyManagerError
 

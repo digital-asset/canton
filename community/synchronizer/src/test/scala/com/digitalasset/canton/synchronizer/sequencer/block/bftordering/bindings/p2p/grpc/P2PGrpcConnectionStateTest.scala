@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
   PlainTextP2PEndpoint,
@@ -17,7 +18,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkRef,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
-import io.grpc.stub.StreamObserver
 import org.mockito.MockitoSugar.mock
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -304,8 +304,8 @@ object P2PGrpcConnectionStateTest {
   private val AnotherPeerBftNodeId = BftNodeId("3")
   private val APeerP2PNodeAddressId = P2PAddress.NodeId(APeerBftNodeId).id
 
-  private val ASender = mock[StreamObserver[BftOrderingMessage]]
-  private val AnotherSender = mock[StreamObserver[BftOrderingMessage]]
+  private val ASender = mock[PeerSender]
+  private val AnotherSender = mock[PeerSender]
 
   private def createNewNetworkRef() = mock[P2PNetworkRef[BftOrderingMessage]]
 }

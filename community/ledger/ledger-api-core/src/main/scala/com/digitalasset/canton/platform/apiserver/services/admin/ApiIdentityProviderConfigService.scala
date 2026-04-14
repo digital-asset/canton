@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin.identity_provider_config_service as proto
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.error.groups.IdentityProviderConfigServiceErrors
@@ -17,14 +16,13 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiIdentityProviderConfigService.toProto
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.IdentityProviderConfigUpdateMapper
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiIdentityProviderConfigService(
     identityProviderConfigStore: IdentityProviderConfigStore,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -43,7 +41,8 @@ class ApiIdentityProviderConfigService(
   override def createIdentityProviderConfig(
       request: proto.CreateIdentityProviderConfigRequest
   ): Future[proto.CreateIdentityProviderConfigResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     logger.info("Creating identity provider config.")
     withValidation {
@@ -74,7 +73,8 @@ class ApiIdentityProviderConfigService(
   override def getIdentityProviderConfig(
       request: proto.GetIdentityProviderConfigRequest
   ): Future[proto.GetIdentityProviderConfigResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     withValidation(
       requireIdentityProviderId(request.identityProviderId, "identity_provider_id")
@@ -88,7 +88,8 @@ class ApiIdentityProviderConfigService(
   override def updateIdentityProviderConfig(
       request: proto.UpdateIdentityProviderConfigRequest
   ): Future[proto.UpdateIdentityProviderConfigResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     withValidation {
       for {
@@ -139,7 +140,7 @@ class ApiIdentityProviderConfigService(
       request: proto.ListIdentityProviderConfigsRequest
   ): Future[proto.ListIdentityProviderConfigsResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     identityProviderConfigStore
       .listIdentityProviderConfigs()
@@ -150,7 +151,7 @@ class ApiIdentityProviderConfigService(
       request: proto.DeleteIdentityProviderConfigRequest
   ): Future[proto.DeleteIdentityProviderConfigResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     withValidation(
       requireIdentityProviderId(request.identityProviderId, "identity_provider_id")

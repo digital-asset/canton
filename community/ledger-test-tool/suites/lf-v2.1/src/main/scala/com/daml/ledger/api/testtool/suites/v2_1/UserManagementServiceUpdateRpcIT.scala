@@ -6,6 +6,7 @@ package com.daml.ledger.api.testtool.suites.v2_1
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TestConstraints
 import com.daml.ledger.api.v2.admin.user_management_service.{
+  GetUserRequest,
   UpdateUserRequest,
   UpdateUserResponse,
   User,
@@ -74,6 +75,7 @@ class UserManagementServiceUpdateRpcIT extends UserManagementServiceITBase {
                   metadata = None,
                   isDeactivated = false,
                   identityProviderId = "",
+                  primaryPartyAuthentication = false,
                 )
               ),
               updateMask = Some(FieldMask(Seq("primary_party"))),
@@ -238,6 +240,61 @@ class UserManagementServiceUpdateRpcIT extends UserManagementServiceITBase {
               expected = false,
             )
           }
+  )
+
+  testWithFreshUser(
+    "UpdatePrimaryPartyAuthentication",
+    "Update primary party using the default value",
+  )()(implicit ec =>
+    ledger =>
+      user =>
+        for {
+          updateResp <- ledger.userManagement
+            .updateUser(
+              updateRequest(
+                id = user.id,
+                primaryPartyAuthentication = true,
+                updatePaths = Seq("primary_party_authentication"),
+              )
+            )
+          _ = assertEquals(
+            "turning on primary_party_authentication",
+            extractPrimaryPartyAuthentication(updateResp),
+            expected = true,
+          )
+
+          getUser = GetUserRequest(
+            userId = user.id,
+            identityProviderId = user.identityProviderId,
+          )
+          getResp <- ledger.userManagement.getUser(getUser)
+          _ = assertEquals(
+            "verifying primary_party_authentication is on",
+            getResp.getUser.primaryPartyAuthentication,
+            expected = true,
+          )
+
+          updateResp <- ledger.userManagement
+            .updateUser(
+              updateRequest(
+                id = user.id,
+                primaryPartyAuthentication = false,
+                updatePaths = Seq("primary_party_authentication"),
+              )
+            )
+          _ = assertEquals(
+            "turning off primary_party_authentication",
+            extractPrimaryPartyAuthentication(updateResp),
+            expected = false,
+          )
+
+          getResp <- ledger.userManagement.getUser(getUser)
+          _ = assertEquals(
+            "verifying primary_party_authentication is off",
+            getResp.getUser.primaryPartyAuthentication,
+            expected = false,
+          )
+        } yield ()
   )
 
 }

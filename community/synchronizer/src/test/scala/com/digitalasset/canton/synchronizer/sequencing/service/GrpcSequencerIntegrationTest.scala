@@ -239,6 +239,7 @@ class Env(
     cryptoApi = cryptoApi,
     clock = clock,
     lsuSequencingBounds = None,
+    sanitizePublicErrorMessages = false,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,
     loggerFactory = loggerFactory,
   )

@@ -29,6 +29,34 @@ final case class JsonApiConfig(
     internalPort.getOrElse(
       throw new IllegalStateException("Accessing server port before default was set")
     )
+
+  def clientConfig: Option[JsonClientConfig] =
+    if (!enabled) None
+    else
+      internalPort.map(port =>
+        JsonClientConfig(
+          address = address,
+          port = port,
+          pathPrefix = pathPrefix,
+        )
+      )
+}
+
+final case class JsonClientConfig(
+    address: String = "127.0.0.1",
+    port: Port,
+    pathPrefix: Option[String] = None,
+    // TODO (i31823) Provide TLS configuration
+) {
+  def endpointAsString: String = {
+    val base = address + ":" + port.unwrap
+    pathPrefix match {
+      case None => base
+      case Some(prefix) if prefix.startsWith("/") => base + prefix
+      case Some(prefix) if base.endsWith("/") => base + prefix
+      case Some(prefix) => base + "/" + prefix
+    }
+  }
 }
 
 object JsonApiConfig {

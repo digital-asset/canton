@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.*
+import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -14,7 +14,7 @@ import com.digitalasset.canton.data.ViewType.{AssignmentViewType, TransactionVie
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject}
@@ -38,7 +38,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
+import com.digitalasset.canton.{ProtocolVersionChecksAsyncWordSpec, *}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import org.scalatest.Assertion
@@ -56,6 +57,7 @@ import ResponseAggregation.ConsortiumVotingState
 @nowarn("msg=match may not be exhaustive")
 class ConfirmationRequestAndResponseProcessorTest
     extends AsyncWordSpec
+    with ProtocolVersionChecksAsyncWordSpec
     with BaseTest
     with HasTestCloseContext
     with HasExecutionContext
@@ -95,6 +97,9 @@ class ConfirmationRequestAndResponseProcessorTest
   private lazy val mediatorId: MediatorId = activeMediator2
   private lazy val mediatorGroupRecipient: MediatorGroupRecipient = MediatorGroupRecipient(
     mediatorGroup.index
+  )
+  private lazy val mediatorGroupRecipient2: MediatorGroupRecipient = MediatorGroupRecipient(
+    mediatorGroup2.index
   )
   private def addRecipients(
       request: MediatorConfirmationRequest,
@@ -253,6 +258,9 @@ class ConfirmationRequestAndResponseProcessorTest
   protected lazy val requestId = RequestId(requestIdTs)
   protected lazy val participantResponseDeadline = requestIdTs.plusSeconds(60)
   protected lazy val decisionTime = requestIdTs.plusSeconds(120)
+
+  private def makeTopologyTimestamp(requestId: RequestId) =
+    if (testedProtocolVersion >= ProtocolVersion.v35) None else Some(requestId.unwrap)
 
   class Fixture(syncCryptoApi: SynchronizerCryptoClient = synchronizerSyncCryptoApi) {
     private val sequencerSend: TestSequencerClientSend = new TestSequencerClientSend(wallClock)
@@ -1022,7 +1030,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ts1.plusSeconds(60),
             ts1.plusSeconds(120),
             approval,
-            Some(requestId.unwrap),
+            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
         // records the request
@@ -1140,7 +1148,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ts2.plusSeconds(60),
             ts2.plusSeconds(120),
             approval,
-            Some(requestId.unwrap),
+            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
         // Now the innerFuture should be completed as we get a finalized response
@@ -1288,7 +1296,7 @@ class ConfirmationRequestAndResponseProcessorTest
               ts1.plusSeconds(60),
               ts1.plusSeconds(120),
               _,
-              Some(requestId.unwrap),
+              makeTopologyTimestamp(requestId),
               Recipients.cc(mediatorGroupRecipient),
             )
             .failOnShutdown("Unexpected shutdown.")
@@ -1389,7 +1397,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ts.plusSeconds(60),
             ts.plusSeconds(120),
             verdict,
-            Some(requestId.unwrap),
+            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
           .failOnShutdown("Unexpected shutdown.")
@@ -1566,7 +1574,7 @@ class ConfirmationRequestAndResponseProcessorTest
                 ts1.plusSeconds(60),
                 ts1.plusSeconds(120),
                 abstain,
-                Some(requestId.unwrap),
+                makeTopologyTimestamp(requestId),
                 Recipients.cc(mediatorGroupRecipient),
               )
               .failOnShutdown("Unexpected shutdown.")
@@ -1649,7 +1657,7 @@ class ConfirmationRequestAndResponseProcessorTest
               participantResponseDeadline,
               requestIdTs.plusSeconds(120),
               response,
-              Some(requestId.unwrap),
+              makeTopologyTimestamp(requestId),
               Recipients.cc(mediatorGroupRecipient),
             ),
           _.warningMessage shouldBe s"Response $responseTs is too late as request RequestId($requestTs) has already exceeded the participant response deadline [$participantResponseDeadline]",
@@ -1674,7 +1682,7 @@ class ConfirmationRequestAndResponseProcessorTest
               notSignificantCounter,
               sequencingTs,
               response,
-              topologyTimestamp = Some(requestId.unwrap),
+              topologyTimestamp = makeTopologyTimestamp(requestId),
               recipients = Recipients.cc(mediatorGroupRecipient),
             )
           ),
@@ -1798,6 +1806,10 @@ class ConfirmationRequestAndResponseProcessorTest
       val sc = SequencerCounter(100)
       val ts = CantonTimestamp.ofEpochSecond(sc.v)
       val requestId = RequestId(ts)
+
+      val expectedLogMessage =
+        show"Received a confirmation response at ${ts.immediateSuccessor} by $participant with an unknown request id $requestId. Discarding response..."
+
       for {
         _ <- sut.processor
           .processRequest(
@@ -1827,28 +1839,175 @@ class ConfirmationRequestAndResponseProcessorTest
           LocalApprove(testedProtocolVersion),
           requestId = requestId,
         )
-        _ <- loggerFactory.assertLogs(
-          sut.processor
-            .processResponses(
-              ts.immediateSuccessor,
-              sc + 1L,
-              ts.plusSeconds(60),
-              ts.plusSeconds(120),
-              response,
-              Some(requestId.unwrap),
-              Recipients.cc(mediatorGroupRecipient),
-            ),
-          _.shouldBeCantonError(
-            MediatorError.InvalidMessage,
-            _ shouldBe show"Received a confirmation response at ${ts.immediateSuccessor} by $participant with an unknown request id $requestId. Discarding response...",
-          ),
-        )
+
+        _ <-
+          if (testedProtocolVersion >= ProtocolVersion.v35) {
+            loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.INFO))(
+              sut.processor
+                .processResponses(
+                  ts.immediateSuccessor,
+                  sc + 1L,
+                  ts.plusSeconds(60),
+                  ts.plusSeconds(120),
+                  response,
+                  makeTopologyTimestamp(requestId),
+                  Recipients.cc(mediatorGroupRecipient),
+                ),
+              entries => {
+                forAtLeast(1, entries.toList) {
+                  _.infoMessage should include(expectedLogMessage)
+                }
+              },
+            )
+          } else {
+            loggerFactory.assertLogs(
+              sut.processor
+                .processResponses(
+                  ts.immediateSuccessor,
+                  sc + 1L,
+                  ts.plusSeconds(60),
+                  ts.plusSeconds(120),
+                  response,
+                  makeTopologyTimestamp(requestId),
+                  Recipients.cc(mediatorGroupRecipient),
+                ),
+              _.shouldBeCantonError(
+                MediatorError.InvalidMessage,
+                _ shouldBe expectedLogMessage,
+              ),
+            )
+          }
       } yield {
         succeed
       }
     }
 
-    "check the timestamp of signing key on responses" in {
+    "reject the confirmation responses with a non-empty topology timestamp in protocol version >= 35" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in {
+      val sut = new Fixture(synchronizerSyncCryptoApi2)
+
+      val requestIdTs = CantonTimestamp.Epoch
+      val requestId = RequestId(requestIdTs)
+
+      def checkUnexpectedTopologyTimestamp(logEntry: LogEntry): Assertion =
+        logEntry.shouldBeCantonError(
+          MediatorError.MalformedMessage,
+          message =>
+            message should include(
+              s"Request $requestId, sender $participant: Discarding confirmation response because the topology timestamp is non-empty."
+            ),
+        )
+
+      val ts1 = CantonTimestamp.Epoch.plusMillis(1L)
+      for {
+        someResponse <- createConfirmationResponses(
+          Some(ViewPosition.root),
+          participant,
+          Set(submitter),
+          LocalApprove(testedProtocolVersion),
+        )
+
+        _ <- loggerFactory.assertLogs(
+          sut.processor
+            .processResponses(
+              ts1,
+              notSignificantCounter,
+              ts1.plusSeconds(60),
+              ts1.plusSeconds(120),
+              someResponse,
+              Some(requestId.unwrap),
+              Recipients.cc(mediatorGroupRecipient),
+            ),
+          checkUnexpectedTopologyTimestamp,
+        )
+      } yield succeed
+    }
+
+    "fail for responses with more than 1 mediator group in the recipients in protocol version >= 35" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in {
+      val sut = new Fixture(synchronizerSyncCryptoApi2)
+
+      val ts1 = CantonTimestamp.Epoch.plusMillis(1L)
+
+      for {
+        someResponse <-
+          createConfirmationResponses(
+            Some(ViewPosition.root),
+            participant,
+            Set(submitter),
+            LocalApprove(testedProtocolVersion),
+          )
+        _ <-
+          loggerFactory.assertLogs(
+            {
+              val exception = sut.processor
+                .processResponses(
+                  ts1,
+                  notSignificantCounter,
+                  ts1.plusSeconds(60),
+                  ts1.plusSeconds(120),
+                  someResponse,
+                  None,
+                  Recipients.cc(mediatorGroupRecipient, mediatorGroupRecipient2),
+                )
+                .failed
+                .futureValueUS
+
+              exception.asInstanceOf[ErrorCode.ApiException].getMessage should include(
+                "INVALID_ARGUMENT: An error occurred. Please contact the operator and inquire"
+              )
+
+              FutureUnlessShutdown.pure(())
+            },
+            _.shouldBeCantonError(
+              MediatorError.MalformedMessage,
+              message =>
+                message should include(
+                  s"Request $requestId, sender $participant: More than one mediator group in the recipients: ${Set(mediatorGroupRecipient, mediatorGroupRecipient2)}. Discarding..."
+                ),
+            ),
+          )
+      } yield succeed
+    }
+
+    "not fail for responses with more than 1 mediator group in the recipients in protocol version <= 34" onlyRunWithOrLessThan (ProtocolVersion.v34) in {
+      val sut = new Fixture(synchronizerSyncCryptoApi2)
+
+      val ts1 = CantonTimestamp.Epoch.plusMillis(1L)
+      val requestIdTs = CantonTimestamp.Epoch
+      val requestId = RequestId(requestIdTs)
+
+      for {
+        someResponse <-
+          createConfirmationResponses(
+            Some(ViewPosition.root),
+            participant,
+            Set(submitter),
+            LocalApprove(testedProtocolVersion),
+          )
+        _ <- loggerFactory.assertLogs(
+          sut.processor
+            .processResponses(
+              ts1,
+              notSignificantCounter,
+              ts1.plusSeconds(60),
+              ts1.plusSeconds(120),
+              someResponse,
+              Some(requestId.unwrap),
+              Recipients.cc(mediatorGroupRecipient, mediatorGroupRecipient2),
+            ),
+          // We expect a different error for a different reason, but no exception
+          _.shouldBeCantonError(
+            MediatorError.InvalidMessage,
+            message =>
+              message should include(
+                s"Received a confirmation response at $ts1 by $participant with an unknown request id $requestId. Discarding response..."
+              ),
+          ),
+        )
+
+      } yield succeed
+    }
+
+    "check the timestamp of signing key on responses in protocol version <= 34" onlyRunWithOrLessThan (ProtocolVersion.v34) in {
       val sut = new Fixture(synchronizerSyncCryptoApi2)
 
       val requestIdTs = CantonTimestamp.Epoch

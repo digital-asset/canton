@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.admin.command_inspection_service.{
   CommandInspectionServiceGrpc,
   CommandState,
 }
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandInspectionService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -35,7 +34,6 @@ private[apiserver] object CommandInspectionServiceImpl {
 
   def createApiService(
       tracker: CommandProgressTracker,
-      telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
@@ -48,7 +46,6 @@ private[apiserver] object CommandInspectionServiceImpl {
 
     new ApiCommandInspectionService(
       impl,
-      telemetry,
       loggerFactory,
     ) with GrpcApiService {
       override def bindService(): ServerServiceDefinition =

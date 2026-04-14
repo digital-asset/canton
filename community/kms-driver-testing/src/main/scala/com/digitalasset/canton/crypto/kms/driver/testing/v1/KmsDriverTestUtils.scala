@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto.kms.driver.testing.v1
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.config.{CachingConfigs, CryptoParallelismConfig}
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{
   EncryptionAlgoSpec,
   EncryptionKeySpec,
@@ -75,14 +75,16 @@ object KmsDriverTestUtils extends FutureHelpers {
 
     new JcePureCrypto(
       defaultSymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm,
-      signingAlgorithmSpecs =
-        CryptoScheme(supportedCryptoSigningAlgoSpecs.head1, supportedCryptoSigningAlgoSpecs),
-      encryptionAlgorithmSpecs =
-        CryptoScheme(supportedCryptoEncryptionAlgoSpecs.head1, supportedCryptoEncryptionAlgoSpecs),
+      signingAlgorithmSpecs = CryptoScheme
+        .tryCreate(supportedCryptoSigningAlgoSpecs.head1, supportedCryptoSigningAlgoSpecs),
+      encryptionAlgorithmSpecs = CryptoScheme
+        .tryCreate(supportedCryptoEncryptionAlgoSpecs.head1, supportedCryptoEncryptionAlgoSpecs),
       defaultHashAlgorithm = HashAlgorithm.Sha256,
       defaultPbkdfScheme = PbkdfScheme.Argon2idMode1,
       publicKeyConversionCacheConfig = CachingConfigs.defaultPublicKeyConversionCache,
       privateKeyConversionCacheTtl = None,
+      signatureVerificationParallelism =
+        CryptoParallelismConfig.defaultSignatureVerificationParallelism,
       loggerFactory = NamedLoggerFactory.root,
     )
   }

@@ -230,6 +230,17 @@ protocol_continuity_test_all:
         num_parallel_tasks: "1"
         timeout: "40m"
 
+ledger_api_compatibility_tests:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 5 # Should be the same as num_test_buckets below, as we want to run every test once.
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity\\.api"
+        num_test_buckets: "5" # TODO(i31673) recheck this after more tests are added
+        num_parallel_tasks: "1"
+        timeout: "40m"
+
 protocol_continuity_test_latest:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 2 # Should be the same as num_test_buckets below, as we want to run every test once.
@@ -246,7 +257,8 @@ nightly_integration_test:
   steps:
     - run_tests:
         command: *default_test_command
-        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly"
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
 

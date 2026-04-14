@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.ledger.api.v2.event_query_service.{GetEventsByContractIdRequest, *}
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.EventQueryServiceRequestValidator
@@ -15,6 +14,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.{
 }
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.*
 
@@ -22,7 +22,6 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiEventQueryService(
     eventQueryService: IndexEventQueryService,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -34,7 +33,7 @@ final class ApiEventQueryService(
       req: GetEventsByContractIdRequest
   ): Future[GetEventsByContractIdResponse] = {
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     EventQueryServiceRequestValidator
       .validateEventsByContractId(req)
       .fold(

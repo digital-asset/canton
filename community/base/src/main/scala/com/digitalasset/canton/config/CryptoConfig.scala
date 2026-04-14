@@ -74,6 +74,9 @@ final case class EncryptionSchemeConfig(
   *   session signing keys' configuration
   * @param privateKeyStore
   *   private key store configuration to allow for encrypted key storage
+  * @param parallelism
+  *   Maximum number of cryptographic operations (e.g., signature verifications) that can be
+  *   performed in parallel.
   */
 final case class CryptoConfig(
     provider: CryptoProvider = CryptoProvider.Jce,
@@ -85,4 +88,5 @@ final case class CryptoConfig(
     kms: Option[KmsConfig] = None,
     sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled,
     privateKeyStore: PrivateKeyStoreConfig = PrivateKeyStoreConfig(),
+    parallelism: CryptoParallelismConfig = CryptoParallelismConfig(),
 )

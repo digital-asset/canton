@@ -21,16 +21,16 @@ class P2PGrpcBftOrderingService(
     with NamedLogging {
 
   override def receive(
-      peerSender: StreamObserver[BftOrderingMessage]
+      sendingStreamObserver: StreamObserver[BftOrderingMessage]
   ): StreamObserver[BftOrderingMessage] =
-    createServerSidePeerReceiver(peerSender) match {
-      case UnlessShutdown.Outcome(peerReceiver) =>
-        peerReceiver
+    createServerSidePeerReceiver(sendingStreamObserver) match {
+      case UnlessShutdown.Outcome(peerReceiver) => peerReceiver
       case UnlessShutdown.AbortedDueToShutdown =>
         // No receiver created means that we're shutting down
         implicit val traceContext: TraceContext = TraceContext.empty
-        logger.debug(s"Completing peer sender ${objId(peerSender)} due to shutdown")
-        peerSender.onCompleted()
+        logger.debug(s"Completing peer sender ${objId(sendingStreamObserver)} due to shutdown")
+        // Unsynchronized but we're shutting down, so this observer hasn't been sent anything
+        sendingStreamObserver.onCompleted()
         new StreamObserver[BftOrderingMessage]() {
           override def onNext(value: BftOrderingMessage): Unit =
             logger.debug(s"Received message $value, ignoring due to shutdown")

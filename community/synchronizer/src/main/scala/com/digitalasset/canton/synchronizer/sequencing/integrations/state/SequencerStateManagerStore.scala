@@ -5,10 +5,8 @@ package com.digitalasset.canton.synchronizer.sequencing.integrations.state
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.synchronizer.sequencer.{
-  InFlightAggregationUpdates,
-  InFlightAggregations,
-}
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
+import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregationUpdates
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Backing store for the [[com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager]]

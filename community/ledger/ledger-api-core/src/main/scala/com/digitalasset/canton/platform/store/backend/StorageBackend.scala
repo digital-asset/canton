@@ -184,6 +184,9 @@ trait ParameterStorageBackend {
   def updateACHSLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
 
   def clearACHSState(connection: Connection): Unit
+
+  /** Clears all ACHS data (both the state row and the filter data table). */
+  def clearAchsData(connection: Connection): Unit
 }
 
 object ParameterStorageBackend {
@@ -459,7 +462,7 @@ trait EventStorageBackend {
     * @param connection
     *   The database connection to be used for the operation.
     */
-  def addActivationsToACHS(
+  def addActivationsToAchs(
       params: AchsAddActivationsParams
   )(connection: Connection): Unit
 
@@ -473,7 +476,7 @@ trait EventStorageBackend {
     * @param connection
     *   The database connection to be used for the operation.
     */
-  def removeDeactivatedFromACHS(
+  def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit
 }

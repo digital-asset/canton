@@ -8,18 +8,15 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
@@ -32,7 +29,7 @@ import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, blocking}
 
@@ -68,7 +65,6 @@ class PartyReplicationFileImporter(
     persistsContracts: TargetParticipantAcsPersistence.PersistsContracts,
     requestTracker: RequestTracker,
     acsReader: Iterator[ActiveContract],
-    indexingWorkflow: PartyReplicationIndexingWorkflow,
     indexingStore: PartyReplicationIndexingStore,
     testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
     protected val loggerFactory: NamedLoggerFactory,
@@ -87,7 +83,7 @@ class PartyReplicationFileImporter(
   def importEntireAcsSnapshotInOneGo()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val numContractsImported = new AtomicInteger(0)
+    val numContractsImported = new AtomicLong(0L)
     for {
       _ <- MonadUtil.sequentialTraverse_(
         acsReader.grouped(TargetParticipantAcsPersistence.contractsToRequestEachTime.unwrap).toSeq
@@ -116,7 +112,6 @@ class PartyReplicationFileImporter(
           this,
         ),
       )
-      _ <- indexingWorkflow.indexAllContractBatches()
     } yield ()
   }
 
@@ -139,7 +134,7 @@ class PartyReplicationFileImporter(
   }
 
   override protected def newProgress(
-      updatedProcessedContractsCount: NonNegativeInt,
+      updatedProcessedContractsCount: NonNegativeLong,
       usedRepairCounter: RepairCounter,
   ): PartyReplicationStatus.AcsReplicationProgress =
     PartyReplicationStatus.EphemeralFileImporterProgress(
@@ -159,18 +154,12 @@ object PartyReplicationFileImporter {
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
       acsReader: Iterator[ActiveContract],
-      config: AlphaOnlinePartyReplicationConfig,
-      batchingConfig: BatchingConfig,
       testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext) = {
     val partyReplicationIndexingStore =
       connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
         .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
-    val requestSpecificLoggerFactory = loggerFactory
-      .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
-      .append("partyId", partyId.toProtoPrimitive)
-      .append("requestId", requestId.toHexString)
     new PartyReplicationFileImporter(
       partyId,
       requestId,
@@ -180,20 +169,12 @@ object PartyReplicationFileImporter {
       new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
       connectedSynchronizer.ephemeral.requestTracker,
       acsReader,
-      new PartyReplicationIndexingWorkflow(
-        partyId,
-        connectedSynchronizer.psid,
-        partyReplicationIndexingStore,
-        participantNodePersistentState.map(_.contractStore),
-        connectedSynchronizer.ephemeral.recordOrderPublisher,
-        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
-        config.pauseSynchronizerIndexingDuringPartyReplication,
-        batchingConfig,
-        requestSpecificLoggerFactory,
-      ),
       partyReplicationIndexingStore,
       testOnlyInterceptorO,
-      requestSpecificLoggerFactory,
+      loggerFactory
+        .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
+        .append("partyId", partyId.toProtoPrimitive)
+        .append("requestId", requestId.toHexString),
     )
   }
 }

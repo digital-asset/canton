@@ -8,7 +8,6 @@ import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.ledger.api.v2.admin.package_management_service.*
 import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
 import com.daml.logging.LoggingContext
-import com.daml.tracing.Telemetry
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -25,6 +24,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
@@ -37,7 +37,6 @@ import scala.util.Try
 private[apiserver] final class ApiPackageManagementService private (
     packageSyncService: PackageSyncService,
     submissionIdGenerator: String => Ref.SubmissionId,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends PackageManagementService
@@ -59,7 +58,7 @@ private[apiserver] final class ApiPackageManagementService private (
       request: ListKnownPackagesRequest
   ): Future[ListKnownPackagesResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     logger.info("Listing known packages.")
     packageSyncService
@@ -79,7 +78,7 @@ private[apiserver] final class ApiPackageManagementService private (
   }
 
   override def validateDarFile(request: ValidateDarFileRequest): Future[ValidateDarFileResponse] =
-    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+    LoggingContextWithTrace.withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.submissionId(submissionIdGenerator(request.submissionId))
     ) { implicit loggingContext: LoggingContextWithTrace =>
       logger.info(s"Validating DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
@@ -108,7 +107,7 @@ private[apiserver] final class ApiPackageManagementService private (
 
   override def uploadDarFile(request: UploadDarFileRequest): Future[UploadDarFileResponse] = {
     val submissionId = submissionIdGenerator(request.submissionId)
-    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+    LoggingContextWithTrace.withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.submissionId(submissionId)
     ) { implicit loggingContext: LoggingContextWithTrace =>
       logger.info(s"Uploading DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
@@ -146,7 +145,7 @@ private[apiserver] final class ApiPackageManagementService private (
       request: UpdateVettedPackagesRequest
   ): Future[UpdateVettedPackagesResponse] = {
     val submissionId = submissionIdGenerator("")
-    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+    LoggingContextWithTrace.withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.submissionId(submissionId)
     ) { implicit loggingContext: LoggingContextWithTrace =>
       for {
@@ -169,7 +168,6 @@ private[apiserver] object ApiPackageManagementService {
 
   def createApiService(
       packageSyncService: PackageSyncService,
-      telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
@@ -177,7 +175,6 @@ private[apiserver] object ApiPackageManagementService {
     new ApiPackageManagementService(
       packageSyncService,
       augmentSubmissionId,
-      telemetry,
       loggerFactory,
     )
 

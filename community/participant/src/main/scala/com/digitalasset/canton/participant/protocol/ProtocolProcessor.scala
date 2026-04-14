@@ -125,6 +125,7 @@ abstract class ProtocolProcessor[
       crypto,
       sequencerClient,
       clock,
+      sequencerClient.protocolVersion,
     )
     with RequestProcessor[RequestViewType, SequencedEventUpdate] {
 

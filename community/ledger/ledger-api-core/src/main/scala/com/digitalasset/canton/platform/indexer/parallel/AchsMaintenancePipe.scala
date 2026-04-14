@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.logging.entries.LoggingEntries
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
@@ -38,7 +38,7 @@ object AchsMaintenancePipe {
       parameterStorageBackend: ParameterStorageBackend,
       eventStorageBackend: EventStorageBackend,
       dbDispatcher: DbDispatcher,
-      inMemoryState: InMemoryState,
+      achsStateCache: AchsStateCache,
       toAchsWorkDistance: T => AchsWorkDistance,
       initialWork: AchsWorkDistance,
       populationParallelism: Int,
@@ -58,13 +58,13 @@ object AchsMaintenancePipe {
           metrics = metrics,
           logger = logger,
         ),
-        achsStateCache = inMemoryState.achsStateCache,
+        achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = logger,
       ),
       populateAchsActivations = populateAchsActivations(
         persistActivationsF = persistChangesF(
-          persistChanges = eventStorageBackend.addActivationsToACHS,
+          persistChanges = eventStorageBackend.addActivationsToAchs,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
         ),
@@ -73,7 +73,7 @@ object AchsMaintenancePipe {
       ),
       removeDeactivatedFromAchs = removeDeactivatedFromAchs(
         removeDeactivatedF = persistChangesF(
-          persistChanges = eventStorageBackend.removeDeactivatedFromACHS,
+          persistChanges = eventStorageBackend.removeDeactivatedFromAchs,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
         ),
@@ -89,12 +89,12 @@ object AchsMaintenancePipe {
           metrics = metrics,
           logger = logger,
         ),
-        achsStateCache = inMemoryState.achsStateCache,
+        achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = logger,
       ),
       aggregationThreshold = aggregationThreshold,
-      initialAchsState = inMemoryState.achsStateCache.get(),
+      initialAchsState = achsStateCache.get(),
     )
 
   /** Computes the initial work distance for the ACHS maintenance pipe. This can be negative,
@@ -117,7 +117,7 @@ object AchsMaintenancePipe {
   }
 
   /** Represents the accumulated work to be done, measured in event sequential id deltas. */
-  final case class AchsWorkDistance(populate: Long, remove: Long) {
+  final case class AchsWorkDistance(populate: Long, remove: Long) extends PrettyPrinting {
     def +(other: AchsWorkDistance): AchsWorkDistance =
       AchsWorkDistance(populate = populate + other.populate, remove = remove + other.remove)
 
@@ -132,6 +132,11 @@ object AchsMaintenancePipe {
         populate = if (populate >= threshold) threshold else 0L,
         remove = if (remove >= threshold) threshold else 0L,
       )
+
+    override protected def pretty: Pretty[AchsWorkDistance] = prettyOfClass(
+      param("populate", _.populate),
+      param("remove", _.remove),
+    )
   }
 
   /** Represents a range of event sequential ids. */
@@ -293,8 +298,14 @@ object AchsMaintenancePipe {
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val endInclusive = workRange.deactivatedRemoval.endInclusive
     val startExclusive = workRange.deactivatedRemoval.startExclusive
+    val populationEnd = workRange.activationsPopulation.endInclusive
 
-    if (endInclusive > startExclusive) {
+    if (populationEnd <= 0L) {
+      logger.debug(
+        s"Skipping ACHS removal as no population has been assigned up to this point (populationEnd=$populationEnd, removalStart=$startExclusive, removalEnd=$endInclusive)."
+      )
+      Future.unit
+    } else if (endInclusive > startExclusive) {
       val loggingContextWithTrace: LoggingContextWithTrace =
         new LoggingContextWithTrace(LoggingEntries.empty, traceContext)
       logger.debug(
@@ -326,7 +337,7 @@ object AchsMaintenancePipe {
       persistAchsLastPointersF(lastPointers)
         .map { _ =>
           logger.debug(
-            s"updated ACHS last pointers: lastRemoved=$lastRemoved, lastPopulated=$lastPopulated."
+            s"Updated ACHS last pointers: lastRemoved=$lastRemoved, lastPopulated=$lastPopulated."
           )
         }(executionContext)
     } else {

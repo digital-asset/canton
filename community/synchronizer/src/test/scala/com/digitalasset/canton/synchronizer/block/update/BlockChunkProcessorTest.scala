@@ -72,7 +72,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
                 lastBlockTs = aTimestamp,
                 lastChunkTs = aTimestamp,
                 latestSequencerEventTimestamp = None,
-                inFlightAggregations = Map.empty,
+                inFlightAggregations = InFlightAggregations.empty,
                 latestPendingTopologyTransactionTimestamp = None,
               ),
               height = aHeight,

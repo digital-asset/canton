@@ -10,8 +10,7 @@ import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesRespo
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.ReportsHealth
-import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
-import com.digitalasset.canton.ledger.api.{AcsContinuationToken, ParticipantId}
+import com.digitalasset.canton.ledger.api.{AcsRangeInfo, ParticipantId}
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
@@ -42,8 +41,7 @@ private[platform] trait LedgerDaoUpdateReader {
       activeAt: Option[Offset],
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-      continuationToken: Option[AcsContinuationToken],
-      checksum: Checksum,
+      rangeInfo: AcsRangeInfo,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]

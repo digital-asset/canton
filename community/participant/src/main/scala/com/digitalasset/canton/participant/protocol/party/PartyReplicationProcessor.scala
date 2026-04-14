@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
 import com.digitalasset.canton.participant.store.AcsReplicationProgress
@@ -17,7 +17,7 @@ import com.google.common.annotations.VisibleForTesting
 import scala.util.chaining.scalaUtilChainingOps
 
 trait PartyReplicationProcessor extends SequencerChannelProtocolProcessor {
-  def replicatedContractsCount: NonNegativeInt
+  def replicatedContractsCount: NonNegativeLong
 
   protected def name: String
   protected def futureSupervisor: FutureSupervisor

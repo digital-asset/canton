@@ -26,22 +26,24 @@ import scala.util.Try
 object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
 
   private val ParticipantUserParser
-      : RowParser[(Int, String, Option[String], Option[String], Boolean, Long, Long)] = {
+      : RowParser[(Int, String, Option[String], Option[String], Boolean, Boolean, Long, Long)] = {
     import com.digitalasset.canton.platform.store.backend.Conversions.bigDecimalColumnToBoolean
     int("internal_id") ~
       str("user_id") ~
       str("primary_party").? ~
       str("identity_provider_id").? ~
       bool("is_deactivated") ~
+      bool("primary_party_authentication") ~
       long("resource_version") ~
       long("created_at") map {
-        case internalId ~ userId ~ primaryParty ~ identityProviderId ~ isDeactivated ~ resourceVersion ~ createdAt =>
+        case internalId ~ userId ~ primaryParty ~ identityProviderId ~ isDeactivated ~ primaryPartyAuthentication ~ resourceVersion ~ createdAt =>
           (
             internalId,
             userId,
             primaryParty,
             identityProviderId,
             isDeactivated,
+            primaryPartyAuthentication,
             resourceVersion,
             createdAt,
           )
@@ -64,12 +66,13 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
     val primaryParty = user.primaryPartyO: Option[String]
     val identityProviderId = user.identityProviderId.map(_.value): Option[String]
     val isDeactivated = user.isDeactivated
+    val primaryPartyAuthentication = user.primaryPartyAuthentication
     val resourceVersion = user.resourceVersion
     val createdAt = user.createdAt
     val internalId: Try[Int] =
       SQL"""
-         INSERT INTO lapi_users (user_id, primary_party, identity_provider_id, is_deactivated, resource_version, created_at)
-         VALUES ($id, $primaryParty, $identityProviderId, $isDeactivated, $resourceVersion, $createdAt)
+         INSERT INTO lapi_users (user_id, primary_party, identity_provider_id, is_deactivated, primary_party_authentication, resource_version, created_at)
+         VALUES ($id, $primaryParty, $identityProviderId, $isDeactivated, $primaryPartyAuthentication, $resourceVersion, $createdAt)
        """.executeInsert1("internal_id")(SqlParser.scalar[Int].single)(connection)
     internalId.fold(throw _, identity)
   }
@@ -112,7 +115,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
       id: UserId
   )(connection: Connection): Option[UserManagementStorageBackend.DbUserWithId] =
     SQL"""
-       SELECT internal_id, user_id, primary_party, is_deactivated, identity_provider_id, resource_version, created_at
+       SELECT internal_id, user_id, primary_party, is_deactivated, identity_provider_id, primary_party_authentication, resource_version, created_at
        FROM lapi_users
        WHERE user_id = ${id: String}
        """
@@ -124,6 +127,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
               primaryPartyRaw,
               identityProviderId,
               isDeactivated,
+              primaryPartyAuthentication,
               resourceVersion,
               createdAt,
             ) =>
@@ -134,6 +138,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
               primaryPartyO = dbStringToPartyString(primaryPartyRaw),
               identityProviderId = dbStringToIdentityProviderId(identityProviderId),
               isDeactivated = isDeactivated,
+              primaryPartyAuthentication = primaryPartyAuthentication,
               resourceVersion = resourceVersion,
               createdAt = createdAt,
             ),
@@ -165,7 +170,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
       } else
         cSQL""
     }
-    SQL"""SELECT internal_id, user_id, primary_party, identity_provider_id, is_deactivated, resource_version, created_at
+    SQL"""SELECT internal_id, user_id, primary_party, identity_provider_id, is_deactivated, primary_party_authentication, resource_version, created_at
           FROM lapi_users
           $whereClause
           ORDER BY user_id
@@ -178,6 +183,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
               primaryPartyRaw,
               identityProviderId,
               isDeactivated,
+              primaryPartyAuthentication,
               resourceVersion,
               createdAt,
             ) =>
@@ -188,6 +194,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
               primaryPartyO = dbStringToPartyString(primaryPartyRaw),
               identityProviderId = dbStringToIdentityProviderId(identityProviderId),
               isDeactivated = isDeactivated,
+              primaryPartyAuthentication = primaryPartyAuthentication,
               resourceVersion = resourceVersion,
               createdAt = createdAt,
             ),
@@ -361,4 +368,20 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
        """.executeUpdate()(connection)
     rowsUpdated == 1
   }
+
+  override def updateUserPrimaryPartyAuthentication(
+      internalId: Int,
+      primaryPartyAuthentication: Boolean,
+  )(
+      connection: Connection
+  ): Boolean = {
+    val rowsUpdated = SQL"""
+         UPDATE lapi_users
+         SET primary_party_authentication = $primaryPartyAuthentication
+         WHERE
+             internal_id = $internalId
+       """.executeUpdate()(connection)
+    rowsUpdated == 1
+  }
+
 }

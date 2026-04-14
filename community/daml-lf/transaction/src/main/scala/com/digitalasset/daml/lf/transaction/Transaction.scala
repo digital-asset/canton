@@ -171,9 +171,9 @@ final case class Transaction(
                   go(ne1.children.zip(ne2.children) ++: rest)
                 case _ => false
               }
-            case nl1: Node.LookupByKey =>
+            case nl1: Node.QueryByKey =>
               node2 match {
-                case nl2: Node.LookupByKey =>
+                case nl2: Node.QueryByKey =>
                   compare(nl1, nl2) && go(rest)
                 case _ => false
               }
@@ -200,7 +200,7 @@ final case class Transaction(
             case Some(key) => f(key.globalKey.key)
           })
         case ne: Node.Exercise => errs :++ f(ne.chosenValue)
-        case nlbk: Node.LookupByKey => errs :++ f(nlbk.gkey.key)
+        case nlbk: Node.QueryByKey => errs :++ f(nlbk.gkey.key)
       }
     }.toImmArray
   }
@@ -220,7 +220,7 @@ final case class Transaction(
           z2
         case nf: Node.Fetch => nf.keyOpt.fold(z)(k => f(z, k.globalKey.key))
         case e: Node.Exercise => f(z, e.chosenValue)
-        case lk: Node.LookupByKey => f(z, lk.gkey.key)
+        case lk: Node.QueryByKey => f(z, lk.gkey.key)
       }
     }
 
@@ -443,8 +443,8 @@ sealed abstract class HasTxNodes[Tx] {
         acc + coid
       case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))  if !localContractIds.contains(coid)=>
         acc + coid
-      case (acc, (_, Node.LookupByKey(_, _, _, Some(coid), _)))  if !localContractIds.contains(coid)=>
-        acc + coid
+      case (acc, (_, Node.QueryByKey(_, _, _, _, result, _)))  =>
+        acc ++ result.filterNot(localContractIds.contains)
       case (acc, _) => acc
     }
   }
@@ -554,7 +554,7 @@ sealed abstract class HasTxNodes[Tx] {
             case None => Some(ContractKeyUpdate(Vector(create.coid), Set.empty))
             case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(create.coid +: created, consumed))
           })
-        case (acc, _, _: Node.Fetch | _: Node.LookupByKey) => acc
+        case (acc, _, _: Node.Fetch | _: Node.QueryByKey) => acc
       },
       exerciseEnd = (acc, _, _) => acc,
       rollbackEnd = (acc, _, _) => acc,
@@ -704,7 +704,7 @@ object Transaction {
     * @param nodeSeeds        An association list that maps the node-id of create and exercise
     *                         nodes to their seed.
     * @param globalKeyMapping Input key mappings inferred during interpretation.
-    * @param disclosedEvents  Disclosed create events that have been used in this transaction.
+    * @param contractOrder   The order of contract ids as they appear in the transaction.
     */
   final case class Metadata(
       submissionSeed: Option[crypto.Hash],

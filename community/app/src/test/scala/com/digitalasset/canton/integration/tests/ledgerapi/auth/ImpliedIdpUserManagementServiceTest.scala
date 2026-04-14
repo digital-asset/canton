@@ -76,6 +76,7 @@ class ImpliedIdpUserManagementServiceTest extends ServiceCallAuthTests with Impl
                     isDeactivated = false,
                     metadata = None,
                     identityProviderId = "",
+                    primaryPartyAuthentication = false,
                   )
                 ),
                 rights = Nil,
@@ -117,6 +118,7 @@ class ImpliedIdpUserManagementServiceTest extends ServiceCallAuthTests with Impl
                     isDeactivated = false,
                     metadata = None,
                     identityProviderId = "",
+                    primaryPartyAuthentication = false,
                   )
                 ),
                 updateMask = Some(FieldMask(paths = Seq("primary_party"))),
@@ -170,6 +172,7 @@ class ImpliedIdpUserManagementServiceTest extends ServiceCallAuthTests with Impl
                     isDeactivated = false,
                     metadata = None,
                     identityProviderId = "",
+                    primaryPartyAuthentication = false,
                   )
                 ),
                 rights = Nil,
@@ -211,6 +214,7 @@ class ImpliedIdpUserManagementServiceTest extends ServiceCallAuthTests with Impl
                     isDeactivated = false,
                     metadata = None,
                     identityProviderId = "",
+                    primaryPartyAuthentication = false,
                   )
                 ),
                 updateMask = Some(FieldMask(paths = Seq("primary_party"))),

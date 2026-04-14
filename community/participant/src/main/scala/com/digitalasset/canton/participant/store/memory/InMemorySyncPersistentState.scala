@@ -74,7 +74,7 @@ class InMemoryLogicalSyncPersistentState(
     new InMemoryReassignmentStore(Target(synchronizerIdx.item), loggerFactory)
 
   override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
-    new InMemoryPendingOperationStore(OnboardingClearanceOperation)
+    new InMemoryPendingOperationStore(OnboardingClearanceOperation, loggerFactory)
 
   override val partyReplicationIndexingStoreIfOnPREnabled
       : Option[InMemoryPartyReplicationIndexingStore] =
@@ -99,7 +99,7 @@ class InMemoryPhysicalSyncPersistentState(
 
   val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-  val parameterStore = new InMemorySynchronizerParameterStore()
+  val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
   val sendTrackerStore = new InMemorySendTrackerStore()
   val submissionTrackerStore = new InMemorySubmissionTrackerStore(loggerFactory)
 

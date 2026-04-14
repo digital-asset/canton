@@ -186,7 +186,7 @@ class PipeTest extends AnyFlatSpec with BaseTest {
       localSettings = LocalSettings(randomSeed = 4),
       networkSettings = NetworkSettings(randomSeed = 4),
       futureSettings = FutureSettings(randomSeed = 4),
-      durationOfFirstPhaseWithFaults = 2.minutes,
+      phaseDurations = PhaseDurations(2.minutes),
     )
 
     val theEndpoint = PlainTextP2PEndpoint("node", Port.tryCreate(0)).asInstanceOf[P2PEndpoint]

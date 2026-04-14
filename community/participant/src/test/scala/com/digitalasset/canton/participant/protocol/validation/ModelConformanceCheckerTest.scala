@@ -42,7 +42,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   Result,
   ViewReconstructionError,
 }
-import com.digitalasset.canton.participant.store.ContractAndKeyLookup
+import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.HasReinterpret
 import com.digitalasset.canton.protocol.*
@@ -59,7 +59,7 @@ import com.digitalasset.canton.{
   FailOnShutdown,
   HasExecutionContext,
   LfCommand,
-  LfKeyResolver,
+  LfGlobalKeyMapping,
   LfPackageId,
   LfPartyId,
   LfVersioned,
@@ -92,7 +92,7 @@ class ModelConformanceCheckerTest
 
   import ModelConformanceCheckerTest.*
 
-  private val keyResolver: LfKeyResolver = Map.empty
+  private val keyResolver: LfGlobalKeyMapping = Map.empty
   private val getEngineAbortStatus: GetEngineAbortStatus = () => EngineAbortStatus.notAborted
   private val symbolicCrypto =
     SymbolicCrypto.create(testedReleaseProtocolVersion, ProcessingTimeout(), loggerFactory)
@@ -190,7 +190,7 @@ class ModelConformanceCheckerTest
     val reinterpreter = if (flattenTx) {
       new HasReinterpret {
         override def reinterpret(
-            contracts: ContractAndKeyLookup,
+            contracts: ReplayContractLookup,
             contractAuthenticator: ContractAuthenticatorFn,
             submitters: Set[LfPartyId],
             command: LfCommand,
@@ -835,7 +835,7 @@ class ModelConformanceCheckerTest
           transactionUuid = seedGenerator.generateUuid(),
           topologySnapshot = topologySnapshot,
           contractOfId = contractOfId,
-          keyResolver = keyResolver,
+          legacyKeyResolver = keyResolver,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
         )

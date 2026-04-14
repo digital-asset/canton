@@ -168,6 +168,7 @@ object LedgerApiIndexer {
               indexerConfig = ledgerApiIndexerConfig.indexerConfig,
               connectionTimeout =
                 ledgerApiIndexerConfig.serverConfig.databaseConnectionTimeout.underlying,
+              loggerFactory = loggerFactory,
             ),
           postgres = ledgerApiIndexerConfig.indexerConfig.postgresDataSource,
         ),

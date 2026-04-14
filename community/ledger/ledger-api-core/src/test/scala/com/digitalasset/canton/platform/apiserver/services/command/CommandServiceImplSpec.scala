@@ -15,7 +15,6 @@ import com.daml.ledger.api.v2.commands.{Command, Commands, CreateCommand}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   ValidateUpgradingPackageResolutions,
@@ -33,7 +32,6 @@ import com.google.rpc.Code
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.{Context, Deadline, Status}
-import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -55,7 +53,6 @@ class CommandServiceImplSpec
     with HasExecutionContext {
 
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
-  private val telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build())
 
   s"the command service" should {
     "submit a request, and wait for a response" in withTestContext { testContext =>
@@ -265,7 +262,6 @@ class CommandServiceImplSpec
       currentUtcTime = () => Instant.EPOCH,
       maxDeduplicationDuration = maxDeduplicationDuration,
       generateSubmissionId = () => submissionId,
-      telemetry = telemetry,
       loggerFactory = loggerFactory,
     )
     for {

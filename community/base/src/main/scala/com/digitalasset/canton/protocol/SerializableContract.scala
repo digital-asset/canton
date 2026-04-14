@@ -75,6 +75,15 @@ case class SerializableContract(
       authenticationData = authenticationData.toSerializableContractAdminProtoV30,
     )
 
+  def toProtoV31: protocol.v31.SerializableContract =
+    protocol.v31.SerializableContract(
+      contractId = contractId.toProtoPrimitive,
+      rawContractInstance = rawContractInstance.getCryptographicEvidence,
+      metadata = Some(metadata.toProtoV31),
+      ledgerCreateTime = CantonTimestamp(ledgerCreateTime.time).toProtoPrimitive,
+      authenticationData = authenticationData.toSerializableContractProtoV30,
+    )
+
   override protected def pretty: Pretty[SerializableContract] = prettyOfClass(
     param("contractId", _.contractId),
     paramWithoutValue("instance"), // Do not leak confidential data (such as PII) to the log file!
@@ -111,7 +120,12 @@ object SerializableContract
       ProtocolVersion.v34,
       supportedProtoVersion(protocol.v30.SerializableContract)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> ProtoCodec(
+      ProtocolVersion.v35,
+      supportedProtoVersion(protocol.v31.SerializableContract)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
 
   override def name: String = "serializable contract"
@@ -155,6 +169,35 @@ object SerializableContract
       authenticationData <- ContractAuthenticationData
         .fromSerializableContractProtoV30(contractIdVersion, authenticationDataP)
       contract <- toSerializableContract(
+        contractId,
+        rawP,
+        metadataP,
+        CreationTime.CreatedAt(ledgerCreateTime.toLf),
+        authenticationData,
+      )
+    } yield contract
+  }
+
+  def fromProtoV31(
+      serializableContractInstanceP: protocol.v31.SerializableContract
+  ): ParsingResult[SerializableContract] = {
+    val protocol.v31.SerializableContract(
+      contractIdP,
+      rawP,
+      metadataP,
+      ledgerCreateTimeP,
+      authenticationDataP,
+    ) = serializableContractInstanceP
+
+    for {
+      ledgerCreateTime <- CantonTimestamp.fromProtoPrimitive(ledgerCreateTimeP)
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
+      contractIdVersion <- CantonContractIdVersion
+        .extractCantonContractIdVersion(contractId)
+        .leftMap(err => ValueConversionError("contract_id", err.toString))
+      authenticationData <- ContractAuthenticationData
+        .fromSerializableContractProtoV30(contractIdVersion, authenticationDataP)
+      contract <- toSerializableContractV31(
         contractId,
         rawP,
         metadataP,
@@ -211,6 +254,28 @@ object SerializableContract
       metadata <- ProtoConverter
         .required("metadata", metadataP)
         .flatMap(ContractMetadata.fromProtoV30)
+    } yield SerializableContract(
+      contractId,
+      raw,
+      metadata,
+      ledgerCreateTime,
+      authenticationData,
+    )
+
+  private def toSerializableContractV31(
+      contractId: LfContractId,
+      rawP: ByteString,
+      metadataP: Option[protocol.v31.SerializableContract.Metadata],
+      ledgerCreateTime: CreationTime.CreatedAt,
+      authenticationData: ContractAuthenticationData,
+  ): ParsingResult[SerializableContract] =
+    for {
+      raw <- SerializableRawContractInstance
+        .fromByteString(rawP)
+        .leftMap(error => ValueConversionError("raw_contract_instance", error.toString))
+      metadata <- ProtoConverter
+        .required("metadata", metadataP)
+        .flatMap(ContractMetadata.fromProtoV31)
     } yield SerializableContract(
       contractId,
       raw,

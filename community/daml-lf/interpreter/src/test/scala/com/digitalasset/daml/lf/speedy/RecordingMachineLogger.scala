@@ -13,7 +13,7 @@ class RecordingMachineLogger(underlying: MachineLogger) extends MachineLogger {
   override def trace(message: String, location: Option[Location])(
     implicit loggerName: LoggerNameFromClass
   ): Unit = {
-    messages += message
+    llTrace(message)
     underlying.trace(message, location)
   }
 
@@ -21,8 +21,12 @@ class RecordingMachineLogger(underlying: MachineLogger) extends MachineLogger {
     implicit loggerName: LoggerNameFromClass
   ): Unit = underlying.warn(message, location)
 
+  def llTrace(message: String): Unit = {
+    messages += message
+  }
+
   def tracePartialFunction[X, Y](message: String, pf: PartialFunction[X, Y]): PartialFunction[X, Y] = {
-    case x if { messages += message; pf.isDefinedAt(x) } => pf(x)
+    case x if { llTrace(message); pf.isDefinedAt(x) } => pf(x)
   }
 
   def recordedMessages: Seq[String] = messages.toSeq

@@ -91,7 +91,7 @@ on_exit() {
         else
             err "The script has failed with exit code $CODE."
         fi
-        nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py \"SBT exited with code $CODE ($HINT_MSG)\""
+        python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
     fi
         # ${variable,,} -- convert value to lowercase (Bash ver > 4)
         if [[ "${SUCCEED_ON_ERROR,,}" == "true" || "${SUCCEED_ON_ERROR}" == "1" ]]; then
@@ -104,7 +104,6 @@ on_exit() {
 
 # Necessary workaround to prevent sbt from setting default JVM options
 export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
-
 
 _print_header "${c_white}Running parameters:${c_reset}"
 # Print variable = value of configuration
@@ -214,7 +213,7 @@ done
 #   false | true
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"
 python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
-  timeout --kill-after=30s "${TIMEOUT}" .ci/nix-exec "${SBT_CMD[@]}" 2>&1 | \
+  timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
   tee sbt_output
 
 # save sbt command exit code for use on exit
@@ -234,7 +233,7 @@ else
   if [[ "${FAIL_ON_ERROR_IN_OUTPUT,,}" == "true" || "${FAIL_ON_ERROR_IN_OUTPUT}" == "1" ]]; then
     # Check and report whether sbt has output errors
     # Need to also apply ignore rules for the log, as errors in the log are emitted to stdout by default.
-    .ci/nix-exec ./scripts/ci/check-sbt-output.sh "sbt_output" "project/errors-in-sbt-output-to-ignore.txt" "project/errors-in-log-to-ignore.txt"
+    ./scripts/ci/check-sbt-output.sh "sbt_output" "project/errors-in-sbt-output-to-ignore.txt" "project/errors-in-log-to-ignore.txt"
     CODE=$?
   fi
 fi

@@ -9,7 +9,10 @@ import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.InvalidTimestamp
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.{
+  ExactRecordTimeMatchNotFound,
+  InvalidTimestamp,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -259,11 +262,7 @@ final class HighestOffsetByTimestampSafeguardsIntegrationTest
     clue("Second Safeguard") {
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         source.parties.find_highest_offset_by_timestamp(daId, t1, force = false),
-        logEntry => {
-          logEntry.errorMessage should include("INVALID_STATE_PARTY_MANAGEMENT_ERROR")
-          logEntry.errorMessage should include regex
-            s"Timestamp mismatch: requested=$t1 != recordTime=.*\\. \\(Context: offset=\\d+\\)"
-        },
+        _.shouldBeCantonErrorCode(ExactRecordTimeMatchNotFound.code),
       )
     }
 

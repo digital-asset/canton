@@ -166,7 +166,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                 shouldPerformOffboarding =
                   firstStage.topologySettings.nodesToOffboard.contains(endpoint),
                 topologySettings = firstStage.topologySettings,
-                stopKeyRotations = firstStage.simulationSettings.durationOfFirstPhaseWithFaults,
+                stopKeyRotations = firstStage.simulationSettings.phaseDurations.faulty,
               ),
             ),
             endpoint,
@@ -230,7 +230,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                       shouldPerformOffboarding =
                         topologySettings.nodesToOffboard.contains(endpoint),
                       topologySettings = topologySettings,
-                      stopKeyRotations = simSettings.durationOfFirstPhaseWithFaults,
+                      stopKeyRotations = simSettings.phaseDurations.faulty,
                     ),
                   ),
                 endpoint = endpoint,

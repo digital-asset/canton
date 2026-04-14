@@ -248,6 +248,7 @@ final class OngoingStreamAuthIT
               isDeactivated = true,
               metadata = Some(admin_proto.object_meta.ObjectMeta.defaultInstance),
               identityProviderId = "",
+              primaryPartyAuthentication = false,
             )
           ),
           updateMask = Some(

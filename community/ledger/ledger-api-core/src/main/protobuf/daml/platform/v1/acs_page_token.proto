@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package daml.platform.v1;
+
+option java_package = "com.daml.platform.v1";
+
+message AcsPageTokenPayload {
+  // the continuation token of the first element in the next page
+  bytes continuation_token = 1;
+  int64 active_at_offset = 2;
+  int32 version = 3;
+  bytes participant_id_checksum = 4;
+  bytes request_checksum = 5;
+}

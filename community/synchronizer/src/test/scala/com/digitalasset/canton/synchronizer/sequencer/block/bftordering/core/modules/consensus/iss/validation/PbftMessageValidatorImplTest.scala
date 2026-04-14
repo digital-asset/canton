@@ -525,8 +525,8 @@ object PbftMessageValidatorImplTest {
     BlockMetadata(EpochNumber(1L), aPreviousBlockNumberInSegment)
   private val aSegment = Segment(myId, NonEmpty(Seq, aPreviousBlockNumberInSegment, aBlockNumber))
 
-  private val aMembership = Membership.forTesting(myId)
-  private val aMembershipWithoutKeys =
+  private def aMembership(implicit pv: ProtocolVersion) = Membership.forTesting(myId)
+  private def aMembershipWithoutKeys(implicit pv: ProtocolVersion) =
     Membership.forTesting(
       myId,
       nodesTopologyInfos = Map(

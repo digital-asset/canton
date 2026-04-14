@@ -34,7 +34,7 @@ class GrpcHealthServer(
       tracing = tracingConfig,
       grpcMetrics = grpcMetrics,
     )
-    .addService(ProtoReflectionServiceV1.newInstance(), withLogging = false)
+    .addService(ProtoReflectionServiceV1.newInstance().bindService(), withLogging = false)
     .addService(healthManager.getHealthService.bindService())
     .build
     .start()

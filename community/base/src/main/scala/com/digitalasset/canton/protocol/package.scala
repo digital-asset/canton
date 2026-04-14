@@ -77,10 +77,6 @@ package object protocol {
   type LfNodeExercises = Node.Exercise
   val LfNodeExercises: Node.Exercise.type = Node.Exercise
 
-  /** Shorthand for lookup by key nodes. */
-  type LfNodeLookupByKey = Node.LookupByKey
-  val LfNodeLookupByKey: Node.LookupByKey.type = Node.LookupByKey
-
   /** Shorthand for query by key nodes. */
   type LfNodeQueryByKey = Node.QueryByKey
   val LfNodeQueryByKey: Node.QueryByKey.type = Node.QueryByKey

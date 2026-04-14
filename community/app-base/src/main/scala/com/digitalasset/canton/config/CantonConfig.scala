@@ -45,7 +45,7 @@ import com.digitalasset.canton.crypto.kms.KmsKeyId
 import com.digitalasset.canton.crypto.kms.driver.v1.DriverKms
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
+import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig, WebsocketConfig}
 import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secure.{
   commandConfigurationConvert,
   dbConfigPostgresDataSourceConfigConvert,
@@ -68,6 +68,7 @@ import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
+  StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
@@ -166,9 +167,15 @@ final case class DeadlockDetectionConfig(
   *   Optional Metrics Reporter used to expose internally captured metrics
   * @param tracing
   *   Tracing configuration
-  *
   * @param dumpNumRollingLogFiles
-  *   How many of the rolling log files shold be included in the remote dump. Default is 0.
+  *   How many of the rolling log files should be included in the remote dump. Default is 0.
+  * @param sanitizePublicErrorMessages
+  *   Specifies whether the system should redact error messages sent to clients. By default, Canton
+  *   redacts error information to maintain a secure baseline. This flag allows for disabling of the
+  *   redaction to provide detailed diagnostic data, but currently only affects supported services
+  *   (such as the SequencerConnectService). For all other endpoints, standard baseline redaction
+  *   remains in effect regardless of this setting. This feature must be enabled in production
+  *   environments to prevent information leakage and ensure system security.
   */
 final case class MonitoringConfig(
     deadlockDetection: DeadlockDetectionConfig = DeadlockDetectionConfig(),
@@ -176,6 +183,7 @@ final case class MonitoringConfig(
     tracing: TracingConfig = TracingConfig(),
     logging: LoggingConfig = LoggingConfig(),
     dumpNumRollingLogFiles: NonNegativeInt = MonitoringConfig.defaultDumpNumRollingLogFiles,
+    sanitizePublicErrorMessages: Boolean = true,
 ) extends LazyLogging
 
 object MonitoringConfig {
@@ -255,7 +263,6 @@ object ClockConfig {
     *   admin-port of the node to read the time from
     */
   final case class RemoteClock(remoteApi: FullClientConfig) extends ClockConfig
-
 }
 
 /** Default retention periods used by pruning commands where no values are explicitly specified.
@@ -533,7 +540,7 @@ final case class CantonConfig(
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
         drSequencingTimeUpperBound =
-          sequencerNodeConfig.parameters.lsuRepair.globalMaxSequencingTimeInclusive
+          sequencerNodeConfig.parameters.lsuRepair.globalMaxSequencingTimeExclusive
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
       )
     }
@@ -688,6 +695,7 @@ private[canton] object CantonNodeParameterConverter {
       watchdog = node.parameters.watchdog,
       startupMemoryCheckConfig = parent.parameters.startupMemoryCheckConfig,
       dispatchQueueBackpressureLimit = node.topology.dispatchQueueBackpressureLimit,
+      sanitizePublicErrorMessages = parent.monitoring.sanitizePublicErrorMessages,
     )
 
   def protocol(parent: CantonConfig, config: ProtocolConfig): CantonNodeParameters.Protocol =
@@ -799,6 +807,8 @@ object CantonConfig {
         deriveReader[EncryptedPrivateStoreConfig]
       implicit val privateKeyStoreConfigReader: ConfigReader[PrivateKeyStoreConfig] =
         deriveReader[PrivateKeyStoreConfig]
+      implicit val cryptoParallelismConfigReader: ConfigReader[CryptoParallelismConfig] =
+        deriveReader[CryptoParallelismConfig]
 
       implicit val gcpKmsConfigReader: ConfigReader[KmsConfig.Gcp] =
         deriveReader[KmsConfig.Gcp]
@@ -924,8 +934,11 @@ object CantonConfig {
       deriveReader[FullClientConfig].applyDeprecations
     }
 
-    lazy implicit final val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] =
+    lazy implicit final val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] = {
+      implicit val jsonClientConfigReader: ConfigReader[JsonClientConfig] =
+        deriveReader[JsonClientConfig]
       deriveReader[RemoteParticipantConfig]
+    }
     lazy implicit final val sequencerApiclientConfigReader
         : ConfigReader[SequencerApiClientConfig] = {
       implicit val tlsClientConfigOnlyTrustFileReader: ConfigReader[TlsClientConfigOnlyTrustFile] =
@@ -1003,6 +1016,9 @@ object CantonConfig {
     }
     lazy implicit final val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
+
+    lazy implicit final val stateServiceConfigReader: ConfigReader[StateServiceConfig] =
+      deriveReader[StateServiceConfig]
 
     lazy implicit final val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] = {
       implicit val lapiKeepAliveServerConfigReader: ConfigReader[LedgerApiKeepAliveServerConfig] =
@@ -1675,6 +1691,8 @@ object CantonConfig {
         deriveWriter[EncryptedPrivateStoreConfig]
       implicit val privateKeyStoreConfigWriter: ConfigWriter[PrivateKeyStoreConfig] =
         deriveWriter[PrivateKeyStoreConfig]
+      implicit val cryptoParallelismConfigWriter: ConfigWriter[CryptoParallelismConfig] =
+        deriveWriter[CryptoParallelismConfig]
 
       implicit val driverKmsConfigWriter: ConfigWriter[KmsConfig.Driver] =
         ConfigWriter.fromFunction { driverConfig =>
@@ -1774,8 +1792,11 @@ object CantonConfig {
         deriveWriter[TlsClientConfigOnlyTrustFile]
       deriveWriter[SequencerApiClientConfig]
     }
-    lazy implicit final val remoteParticipantConfigWriter: ConfigWriter[RemoteParticipantConfig] =
+    lazy implicit final val remoteParticipantConfigWriter: ConfigWriter[RemoteParticipantConfig] = {
+      implicit val jsonClientConfigWriter: ConfigWriter[JsonClientConfig] =
+        deriveWriter[JsonClientConfig]
       deriveWriter[RemoteParticipantConfig]
+    }
     lazy implicit final val nodeMonitoringConfigWriter: ConfigWriter[NodeMonitoringConfig] = {
       implicit val httpHealthServerConfigWriter: ConfigWriter[HttpHealthServerConfig] =
         deriveWriter[HttpHealthServerConfig]
@@ -1841,6 +1862,8 @@ object CantonConfig {
     }
     lazy implicit final val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
       deriveWriter[RateLimitingConfig]
+    lazy implicit final val stateServiceConfigWriter: ConfigWriter[StateServiceConfig] =
+      deriveWriter[StateServiceConfig]
     lazy implicit final val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] = {
       implicit val lapiKeepAliveServerConfigWriter: ConfigWriter[LedgerApiKeepAliveServerConfig] =
         deriveWriter[LedgerApiKeepAliveServerConfig]

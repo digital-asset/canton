@@ -10,6 +10,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   Onboarding,
   Revoked,
 }
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.topology.DefaultTestIdentities.sequencerId
@@ -26,6 +27,24 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
+/** Tests the computation of topology state differences.
+  *
+  * The primary goal is to verify that transitioning from an old set of topology transactions to a
+  * new set correctly generates the appropriate authorization events (`Added`, `Revoked`,
+  * `ChangedTo`, `Onboarding`) for parties hosted on various participants.
+  *
+  * Terminology:
+  *   - **Local Participant (`localParticipantId`)**: The specific participant node evaluating this
+  *     diff. This is critical for computing flags like `abortingOnboardingLocalParty`, which
+  *     explicitly track whether an interrupted onboarding process directly affects the node
+  *     currently running the code.
+  *   - **Onboarding**: A transient state (`Onboarding` event has only been introduced in Protocol
+  *     Version 35) indicating that a party has been granted an authorization on a participant, but
+  *     their state is still synchronizing.
+  *   - **Admin Parties**: Participants implicitly have an admin party representation via their
+  *     `SynchronizerTrustCertificate`. The diff logic maps these to a default `Submission`
+  *     authorization level.
+  */
 class TopologyTransactionDiffTest
     extends AsyncWordSpec
     with BaseTest
@@ -81,12 +100,58 @@ class TopologyTransactionDiffTest
     topologyFactory.mkTrans[Replace, SynchronizerTrustCertificate](trans = tx)
   }
 
+  /** Determines the expected value of onboarding-related local party flags based on the protocol
+    * version.
+    *
+    * The flags `onboardingLocalParty`, `clearingOnboardingLocalParty`, and
+    * `abortingOnboardingLocalParty` track the lifecycle of a party's "onboarding" state on a
+    * participant. Because the concept of an onboarding state was only introduced in Protocol
+    * Version 35 (PV35), these flags must always strictly evaluate to `false` in PV34 and earlier,
+    * regardless of what the transaction's contents attempt to specify.
+    *
+    * @param ifSupportedToBe
+    *   The expected boolean value if the protocol version natively supports onboarding (PV35+).
+    * @return
+    *   `true` only if the protocol version is >= PV35 AND the expected value is true.
+    */
+  private def expectedOnboardingFlag(ifSupportedToBe: Boolean): Boolean = {
+    val supportsOnboarding = testedProtocolVersion > ProtocolVersion.v34
+    supportsOnboarding && ifSupportedToBe
+  }
+
+  /** Determines the expected authorization event when a participant mapping is added with an
+    * "onboarding" state flag.
+    *
+    * In PV35 and later, adding a participant with the onboarding flag set to true yields an
+    * explicit `Onboarding` topology event. However, in PV34 and earlier, the participant completely
+    * ignores the onboarding flag during state computation. Therefore, the transition falls back to
+    * `Added` event.
+    *
+    * @param partyId
+    *   The party being authorized.
+    * @param participantId
+    *   The participant hosting the party.
+    * @param permission
+    *   The base authorization level (e.g., Submission, Confirmation).
+    * @return
+    *   An `Onboarding` event for PV35+, or an `Added` event for PV34-.
+    */
+  private def expectedOnboardingEvent(
+      partyId: PartyId,
+      participantId: ParticipantId,
+      permission: AuthorizationLevel,
+  ): PartyToParticipantAuthorization =
+    if (testedProtocolVersion > ProtocolVersion.v34) {
+      PartyToParticipantAuthorization(partyId.toLf, participantId.toLf, Onboarding(permission))
+    } else {
+      PartyToParticipantAuthorization(partyId.toLf, participantId.toLf, Added(permission))
+    }
+
   "TopologyTransactionDiff" should {
     val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
     val p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant2"))
 
-    "compute adds and removes" in {
-
+    "compute adds and removes" should {
       val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
       val bob = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::bob"))
       val charlie = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::charlie"))
@@ -114,101 +179,206 @@ class TopologyTransactionDiffTest
         initialTxs,
         newState,
         p1,
-      )
-        .map { case TopologyTransactionDiff(events, _, _, _) =>
-          events
-        }
-      // Same transactions
-      diffInitialWith(initialTxs) shouldBe None
+      ).map(_.topologyEvents)
 
-      // Empty target -> everything is removed
-      diffInitialWith(Nil).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
-        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
-        PartyToParticipantAuthorization(bob.toLf, p1.toLf, Revoked),
-        PartyToParticipantAuthorization(charlie.toLf, p2.toLf, Revoked),
-      )
+      "return None for identical transactions" in {
+        diffInitialWith(initialTxs) shouldBe None
+      }
 
-      diffInitialWith(
-        List(
-          ptp(alice, List(p2 -> ParticipantPermission.Submission)), // no p1
-
-          ptp(bob, List(p1 -> ParticipantPermission.Submission)),
-          ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+      "revoke everything when the target state is empty" in {
+        diffInitialWith(Nil).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
+          PartyToParticipantAuthorization(bob.toLf, p1.toLf, Revoked),
+          PartyToParticipantAuthorization(charlie.toLf, p2.toLf, Revoked),
         )
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked)
-      )
+      }
 
-      diffInitialWith(
-        List(
-          ptp(alice, List()), // nobody
-          ptp(bob, List(p1 -> ParticipantPermission.Submission)),
-          ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+      "revoke specific participant mapping" in {
+        diffInitialWith(
+          List(
+            ptp(alice, List(p2 -> ParticipantPermission.Submission)), // no p1
+            ptp(bob, List(p1 -> ParticipantPermission.Submission)),
+            ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+          )
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked)
         )
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
-        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
-      )
+      }
 
-      diffInitialWith(
-        List(
-          ptp(
-            alice,
-            List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
-          ),
-          ptp(
-            bob,
-            List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
-          ), // p2 added
-          ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+      "revoke all mappings for a specific party" in {
+        diffInitialWith(
+          List(
+            ptp(alice, List()), // nobody
+            ptp(bob, List(p1 -> ParticipantPermission.Submission)),
+            ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+          )
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
         )
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Submission))
-      )
+      }
 
-      diffInitialWith(
-        List(
-          ptp(donald, List(p1 -> ParticipantPermission.Submission)) // new
-        ) ++ initialTxs
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(donald.toLf, p1.toLf, Added(Submission))
-      )
-
-      diffInitialWith(
-        List(
-          synchronizerTrustCertificate(p1), // new
-          synchronizerTrustCertificate(p2), // new
-        ) ++ initialTxs
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(p1.adminParty.toLf, p1.toLf, Added(Submission)),
-        PartyToParticipantAuthorization(p2.adminParty.toLf, p2.toLf, Added(Submission)),
-      )
-
-      diffInitialWith(
-        List(
-          ptp(
-            bob,
-            List(p1 -> ParticipantPermission.Confirmation, p2 -> ParticipantPermission.Observation),
-          ), // p2 added, p1 overridden
-          ptp(
-            alice,
-            List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
-          ),
-          ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+      "add a new participant mapping for an existing party" in {
+        diffInitialWith(
+          List(
+            ptp(
+              alice,
+              List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
+            ),
+            ptp(
+              bob,
+              List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
+            ), // p2 added
+            ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+          )
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Submission))
         )
-      ).value.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(bob.toLf, p1.toLf, ChangedTo(Confirmation)),
-        PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Observation)),
-      )
+      }
+
+      "add a mapping for a completely new party" in {
+        diffInitialWith(
+          List(
+            ptp(donald, List(p1 -> ParticipantPermission.Submission)) // new
+          ) ++ initialTxs
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(donald.toLf, p1.toLf, Added(Submission))
+        )
+      }
+
+      "add mappings for synchronizer trust certificates (admin parties)" in {
+        diffInitialWith(
+          List(
+            synchronizerTrustCertificate(p1), // new
+            synchronizerTrustCertificate(p2), // new
+          ) ++ initialTxs
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(p1.adminParty.toLf, p1.toLf, Added(Submission)),
+          PartyToParticipantAuthorization(p2.adminParty.toLf, p2.toLf, Added(Submission)),
+        )
+      }
+
+      "revoke an admin party mapping" in {
+        TopologyTransactionDiff(
+          synchronizerId,
+          List(synchronizerTrustCertificate(p1)), // old state has admin
+          Nil, // new state revokes admin
+          p1,
+        ).value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(p1.adminParty.toLf, p1.toLf, Revoked)
+        )
+      }
+
+      "change permissions and add mappings simultaneously" in {
+        diffInitialWith(
+          List(
+            ptp(
+              bob,
+              List(
+                p1 -> ParticipantPermission.Confirmation,
+                p2 -> ParticipantPermission.Observation,
+              ),
+            ), // p2 added, p1 overridden
+            ptp(
+              alice,
+              List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
+            ),
+            ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
+          )
+        ).value.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(bob.toLf, p1.toLf, ChangedTo(Confirmation)),
+          PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Observation)),
+        )
+      }
     }
 
-    "compute adds and removes with onboarding flag" in {
+    "compute the abortingOnboardingLocalParty flag" should {
       val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
       val Subm = (ParticipantPermission.Submission, false)
       val SubmOB = (ParticipantPermission.Submission, true)
 
-      val isAtLeastV35 = testedProtocolVersion > ProtocolVersion.v34
+      val activeBeforeState = List(
+        ptp(
+          alice,
+          List(p1 -> ParticipantPermission.Submission, p2 -> ParticipantPermission.Submission),
+        )
+      )
+
+      val onboardingBeforeState = List(
+        ptpOB(
+          alice,
+          List(p1 -> SubmOB, p2 -> Subm),
+        )
+      )
+
+      val afterStateP1Revoked = List(ptp(alice, List(p2 -> ParticipantPermission.Submission)))
+
+      "evaluate to true when a party's authorization on the local participant is revoked while still in onboarding state" in {
+        TopologyTransactionDiff(
+          synchronizerId,
+          onboardingBeforeState,
+          afterStateP1Revoked,
+          p1,
+        ).value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = true)
+      }
+
+      "evaluate to false when the local participant revokes a party's mapping but the party was already fully active" in {
+        TopologyTransactionDiff(
+          synchronizerId,
+          activeBeforeState,
+          afterStateP1Revoked,
+          p1,
+        ).value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+      }
+
+      "evaluate to false when an onboarding authorization is revoked, but not from the local participant" in {
+        TopologyTransactionDiff(
+          synchronizerId,
+          onboardingBeforeState,
+          afterStateP1Revoked,
+          p2,
+        ).value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+      }
+
+      "return None when no party authorizations are changed or revoked on the local participant" in {
+        TopologyTransactionDiff(
+          synchronizerId,
+          onboardingBeforeState,
+          onboardingBeforeState,
+          p1,
+        ) shouldBe None
+      }
+
+      "evaluate to false when a party is granted a new mapping to another participant, but their local onboarding mapping remains intact" in {
+        val p3 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant3"))
+        TopologyTransactionDiff(
+          synchronizerId,
+          onboardingBeforeState,
+          List(
+            ptpOB(
+              alice,
+              List(
+                p1 -> SubmOB,
+                p2 -> Subm,
+                p3 -> Subm, // Alice is granted authorization on p3
+              ),
+            )
+          ),
+          p1,
+        ).value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+      }
+    }
+
+    "compute adds and removes with onboarding flag" should {
+      val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
+      val Subm = (ParticipantPermission.Submission, false)
+      val SubmOB = (ParticipantPermission.Submission, true)
+      val ConfOB = (ParticipantPermission.Confirmation, true)
 
       def diff(
           beforeState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]],
@@ -221,105 +391,181 @@ class TopologyTransactionDiffTest
         localParticipant,
       )
 
-      def authOnboarding(participantId: ParticipantId) = Set(
-        PartyToParticipantAuthorization(
-          alice.toLf,
-          participantId.toLf,
-          if (isAtLeastV35) Onboarding(Submission)
-          else Added(Submission),
-        )
-      )
-
       def authClearOnboarding(
           participantId: ParticipantId
       ): Option[Set[PartyToParticipantAuthorization]] =
-        Option.when(isAtLeastV35)(
+        // Clearing onboarding only emits an event if onboarding was supported to begin with
+        Option.when(expectedOnboardingFlag(ifSupportedToBe = true))(
           Set(PartyToParticipantAuthorization(alice.toLf, participantId.toLf, Added(Submission)))
         )
 
-      // Non-local onboarding
-      val res1 = diff(
-        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        p1,
-      )
-      res1.value.topologyEvents.forgetNE should contain theSameElementsAs authOnboarding(p2)
-      res1.value.onboardingLocalParty shouldBe false
-      res1.value.clearingOnboardingLocalParty shouldBe false
-
-      // Non-local clearing of onboarding
-      val res2 = diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
-        p1,
-      )
-      res2.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
-      res2.foreach { d =>
-        d.onboardingLocalParty shouldBe false
-        d.clearingOnboardingLocalParty shouldBe false
+      "handle non-local onboarding" in {
+        val res = diff(
+          List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          p1,
+        )
+        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          expectedOnboardingEvent(alice, p2, Submission)
+        )
+        res.value.onboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.clearingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
       }
 
-      // Non-local onboarding removal considered removed
-      val res3 = diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
-        p1,
-      )
-      res3.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
-      )
-      res3.value.onboardingLocalParty shouldBe false
-      res3.value.clearingOnboardingLocalParty shouldBe false
+      "handle non-local clearing of onboarding" in {
+        val res = diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+          p1,
+        )
+        res.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
 
-      // Non-local transition from not onboarding to onboarding considered no-op
-      // This is not an expected transition but tested for completeness.
-      diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        p1,
-      ) shouldBe None
-
-      // Local participant onboarding
-      val res4 = diff(
-        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        p2,
-      )
-      res4.value.topologyEvents.forgetNE should contain theSameElementsAs authOnboarding(p2)
-      res4.value.onboardingLocalParty shouldBe isAtLeastV35
-      res4.value.clearingOnboardingLocalParty shouldBe false
-
-      // Local participant clearing of onboarding
-      val res5 = diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
-        p2,
-      )
-      res5.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
-      res5.foreach { d =>
-        d.onboardingLocalParty shouldBe false
-        d.clearingOnboardingLocalParty shouldBe true
+        if (expectedOnboardingFlag(ifSupportedToBe = true)) {
+          val d = res.value
+          d.onboardingLocalParty shouldBe false
+          d.clearingOnboardingLocalParty shouldBe false
+          d.abortingOnboardingLocalParty shouldBe false
+        } else {
+          // In PV34, this transition is a no-op, so no diff is generated
+          res shouldBe None
+        }
       }
 
-      // Local participant onboarding removal considered removed
-      val res6 = diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
-        p2,
-      )
-      res6.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
-        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
-      )
-      res6.value.onboardingLocalParty shouldBe false
-      res6.value.clearingOnboardingLocalParty shouldBe false
+      "handle non-local onboarding removal considered removed" in {
+        val res = diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+          p1,
+        )
+        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
+        )
+        res.value.onboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.clearingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+      }
 
-      // Local participant transition from not onboarding to onboarding considered no-op
-      // This is not an expected transition but tested for completeness.
-      diff(
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
-        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
-        p2,
-      ) shouldBe None
+      "treat non-local transition from not onboarding to onboarding as no-op" in {
+        // This is not an expected transition but tested for completeness.
+        diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          p1,
+        ) shouldBe None
+      }
+
+      "handle local participant onboarding" in {
+        val res = diff(
+          List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          p2,
+        )
+        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          expectedOnboardingEvent(alice, p2, Submission)
+        )
+        res.value.onboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = true)
+        res.value.clearingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+      }
+
+      "handle local participant clearing of onboarding" in {
+        val res = diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+          p2,
+        )
+        res.map(_.topologyEvents) shouldBe authClearOnboarding(p2)
+
+        if (expectedOnboardingFlag(ifSupportedToBe = true)) {
+          val d = res.value
+          d.onboardingLocalParty shouldBe false
+          d.clearingOnboardingLocalParty shouldBe true
+          d.abortingOnboardingLocalParty shouldBe false
+        } else {
+          // In PV34, this transition is a no-op, so no diff is generated
+          res shouldBe None
+        }
+      }
+
+      "handle local participant onboarding removal considered removed" in {
+        val res = diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+          p2,
+        )
+        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
+        )
+        res.value.onboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        res.value.clearingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = false)
+        // Triggered because p2 (local) was revoked.
+        res.value.abortingOnboardingLocalParty shouldBe
+          expectedOnboardingFlag(ifSupportedToBe = true)
+      }
+
+      "treat local participant transition from not onboarding to onboarding as no-op" in {
+        // This is not an expected transition but tested for completeness.
+        diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          p2,
+        ) shouldBe None
+      }
+
+      "handle permission change while still onboarding" in {
+        val res = diff(
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+          List(ptpOB(alice, List(p1 -> Subm, p2 -> ConfOB))),
+          p2,
+        )
+        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, ChangedTo(Confirmation))
+        )
+      }
+    }
+
+    "generate deterministic updateIds" should {
+      val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
+      val bob = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::bob"))
+
+      val tx1 = ptp(alice, List(p1 -> ParticipantPermission.Submission))
+      val tx2 = ptp(bob, List(p1 -> ParticipantPermission.Submission))
+      val tx3 = ptp(alice, List(p1 -> ParticipantPermission.Confirmation))
+
+      val oldState = List(tx1, tx2)
+      val newState = List(tx2, tx3)
+
+      "be independent of sequence order" in {
+        val updateId1 = TopologyTransactionDiff.updateId(synchronizerId, oldState, newState)
+        val updateIdReversed =
+          TopologyTransactionDiff.updateId(synchronizerId, oldState.reverse, newState.reverse)
+        updateId1 shouldBe updateIdReversed
+      }
+
+      "yield different ids for different state transitions" in {
+        val updateId1 = TopologyTransactionDiff.updateId(synchronizerId, oldState, newState)
+        val updateIdDifferent =
+          TopologyTransactionDiff.updateId(synchronizerId, oldState, List(tx1, tx3))
+        updateId1 should not be updateIdDifferent
+      }
+
+      "yield different ids when swapping old and new state" in {
+        val updateId1 = TopologyTransactionDiff.updateId(synchronizerId, oldState, newState)
+        val updateIdSwapped = TopologyTransactionDiff.updateId(synchronizerId, newState, oldState)
+        updateId1 should not be updateIdSwapped
+      }
     }
   }
 }

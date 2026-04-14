@@ -16,7 +16,6 @@ import com.daml.ledger.api.v2.transaction_filter.{
   TransactionFormat,
   WildcardFilter,
 }
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.validation.{
@@ -43,7 +42,6 @@ class ApiCommandService(
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: Duration,
     generateSubmissionId: SubmissionIdGenerator,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends CommandServiceGrpc
@@ -72,7 +70,7 @@ class ApiCommandService(
   private def enrichRequestAndSubmit[T](
       request: SubmitAndWaitRequest
   )(submit: SubmitAndWaitRequest => LoggingContextWithTrace => Future[T]): Future[T] = {
-    val traceContext = getAnnotatedCommandTraceContext(request.commands, telemetry)
+    val traceContext = getAnnotatedCommandTraceContext(request.commands)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(traceContext)
     val requestWithSubmissionId =
@@ -98,7 +96,7 @@ class ApiCommandService(
         SubmitAndWaitForTransactionResponse
       ]
   ): Future[SubmitAndWaitForTransactionResponse] = {
-    val traceContext = getAnnotatedCommandTraceContext(request.commands, telemetry)
+    val traceContext = getAnnotatedCommandTraceContext(request.commands)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(traceContext)
     val requestWithSubmissionIdAndFormat =
@@ -136,7 +134,7 @@ class ApiCommandService(
       ]
   ): Future[SubmitAndWaitForReassignmentResponse] = {
     val traceContext =
-      getAnnotatedReassignmentCommandTraceContext(request.reassignmentCommands, telemetry)
+      getAnnotatedReassignmentCommandTraceContext(request.reassignmentCommands)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(traceContext)
     val requestWithSubmissionId =

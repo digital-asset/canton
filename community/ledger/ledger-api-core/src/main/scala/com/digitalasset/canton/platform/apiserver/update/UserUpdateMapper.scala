@@ -21,6 +21,10 @@ object UserUpdateMapper extends UpdateMapperBase {
       annotationsUpdate <- resolveAnnotationsUpdate(updateTrie, user.metadata.annotations)
       primaryPartyUpdate <- resolvePrimaryPartyUpdate(updateTrie, user.primaryParty)
       isDeactivatedUpdate <- isDeactivatedUpdateResult(updateTrie, user.isDeactivated)
+      primaryPartyAuthenticationUpdate <- primaryPartyAuthenticationUpdateResult(
+        updateTrie,
+        user.primaryPartyAuthentication,
+      )
     } yield {
       UserUpdate(
         id = user.id,
@@ -31,6 +35,7 @@ object UserUpdateMapper extends UpdateMapperBase {
           resourceVersionO = user.metadata.resourceVersionO,
           annotationsUpdateO = annotationsUpdate,
         ),
+        primaryPartyAuthenticationUpdateO = primaryPartyAuthenticationUpdate,
       )
     }
 
@@ -64,6 +69,20 @@ object UserUpdateMapper extends UpdateMapperBase {
   ): Result[Option[Boolean]] =
     updateTrie
       .findMatch(UserPaths.isDeactivated)
+      .fold(noUpdate[Boolean])(matchResult =>
+        makePrimitiveFieldUpdate(
+          updateMatch = matchResult,
+          defaultValue = false,
+          newValue = newValue,
+        )
+      )
+
+  def primaryPartyAuthenticationUpdateResult(
+      updateTrie: UpdatePathsTrie,
+      newValue: Boolean,
+  ): Result[Option[Boolean]] =
+    updateTrie
+      .findMatch(UserPaths.primaryPartyAuthentication)
       .fold(noUpdate[Boolean])(matchResult =>
         makePrimitiveFieldUpdate(
           updateMatch = matchResult,

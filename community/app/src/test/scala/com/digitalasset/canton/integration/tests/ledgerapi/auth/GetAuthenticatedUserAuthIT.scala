@@ -81,6 +81,7 @@ class GetAuthenticatedUserAuthIT extends ServiceCallAuthTests {
           isDeactivated = false,
           metadata = Some(ObjectMeta("0", Map.empty)),
           identityProviderId = "",
+          primaryPartyAuthentication = false,
         ),
       )
     }

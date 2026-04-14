@@ -255,6 +255,8 @@ class AvailabilityModuleDisseminationTest
               p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
               disseminationProtocolState = disseminationProtocolState,
             )
+          val membership = availability.getActiveMembership
+
           availability.receive(
             LocalDissemination.LocalBatchesStored(Seq(Traced(ABatchId) -> ABatch))
           )
@@ -266,7 +268,14 @@ class AvailabilityModuleDisseminationTest
 
           availability.receive(
             LocalDissemination.LocalBatchesStoredSigned(
-              Seq(LocalBatchStoredSigned(Traced(ABatchId), ABatch, Some(Signature.noSignature)))
+              Seq(
+                LocalBatchStoredSigned(
+                  Traced(ABatchId),
+                  ABatch,
+                  membership,
+                  Some(Signature.noSignature),
+                )
+              )
             )
           )
 
@@ -321,6 +330,7 @@ class AvailabilityModuleDisseminationTest
               p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
               disseminationProtocolState = disseminationProtocolState,
             )
+          val membership = availability.getActiveMembership
           availability.receive(
             LocalDissemination.LocalBatchesStored(Seq(Traced(ABatchId) -> ABatch))
           )
@@ -332,7 +342,14 @@ class AvailabilityModuleDisseminationTest
 
           availability.receive(
             LocalDissemination.LocalBatchesStoredSigned(
-              Seq(LocalBatchStoredSigned(Traced(ABatchId), ABatch, Some(Signature.noSignature)))
+              Seq(
+                LocalBatchStoredSigned(
+                  Traced(ABatchId),
+                  ABatch,
+                  membership,
+                  Some(Signature.noSignature),
+                )
+              )
             )
           )
 

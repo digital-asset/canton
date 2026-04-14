@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.auth
 
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -90,7 +89,6 @@ class AuthInterceptorSpec
 
     new GrpcAuthInterceptor(
       authInterceptor,
-      NoOpTelemetry,
       loggerFactory,
       ApiLoggingConfig(),
       executionContext,

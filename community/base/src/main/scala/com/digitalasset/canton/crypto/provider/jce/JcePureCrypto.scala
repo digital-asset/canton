@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto.provider.jce
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   CacheConfig,
   CryptoConfig,
@@ -88,6 +89,7 @@ class JcePureCrypto(
     override val defaultPbkdfScheme: PbkdfScheme,
     publicKeyConversionCacheConfig: CacheConfig,
     privateKeyConversionCacheTtl: Option[FiniteDuration],
+    override val signatureVerificationParallelism: PositiveInt,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CryptoPureApi
@@ -128,6 +130,8 @@ class JcePureCrypto(
   private object Aes128GcmParams {
     // the internal jce designation for this scheme
     val jceInternalName: String = "AES/GCM/NoPadding"
+    // the raw algorithm name for SecretKeySpec (must be "AES", not the full transformation string)
+    val jceKeyAlgorithm: String = "AES"
     // the IV for AES-128-GCM is 12 bytes
     val ivSizeForAesGcmInBytes: Int = 12
     // the authentication tag for AES-128-GCM is recommended to be 128bits
@@ -200,7 +204,7 @@ class JcePureCrypto(
       errFn: String => E,
   ): Either[E, T] =
     for {
-      privateKey <- javaPrivateKeyCache
+      javaPrivateKey <- javaPrivateKeyCache
         .get(
           privateKey.id,
           _ =>
@@ -215,7 +219,7 @@ class JcePureCrypto(
         .leftMap(err => errFn(s"Failed to deserialize ${privateKey.format} private key: $err"))
       // The private key is already validated, including its type, during creation/deserialization,
       // so we can throw an exception here. This type check should never fail, except in case of an internal error.
-      checkedPrivateKey <- typeMatcher(privateKey)
+      checkedPrivateKey <- typeMatcher(javaPrivateKey)
     } yield checkedPrivateKey
 
   private def encryptAes128Gcm(
@@ -234,7 +238,7 @@ class JcePureCrypto(
       iv = JceSecureRandom.generateRandomBytes(Aes128GcmParams.ivSizeForAesGcmInBytes)
       encrypter <- Either
         .catchOnly[GeneralSecurityException] {
-          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceInternalName)
+          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
           val cipher = Cipher.getInstance(
             Aes128GcmParams.jceInternalName,
             JceSecurityProvider.bouncyCastleProvider,
@@ -274,7 +278,7 @@ class JcePureCrypto(
       rawCiphertext = ciphertext.toByteArray.drop(Aes128GcmParams.ivSizeForAesGcmInBytes)
       decrypter <- Either
         .catchOnly[GeneralSecurityException] {
-          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceInternalName)
+          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
           val cipher = Cipher.getInstance(
             Aes128GcmParams.jceInternalName,
             JceSecurityProvider.bouncyCastleProvider,
@@ -884,6 +888,7 @@ object JcePureCrypto {
       defaultPbkdfScheme = pbkdfSchemes.default,
       publicKeyConversionCacheConfig = publicKeyConversionCacheConfig,
       privateKeyConversionCacheTtl = minimumPrivateKeyCacheDuration,
+      signatureVerificationParallelism = config.parallelism.signatureVerificationParallelism,
       loggerFactory = loggerFactory,
     )
   }

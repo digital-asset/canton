@@ -118,6 +118,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
         ReportingLevel.Warn
       ),
       dispatchQueueBackpressureLimit: NonNegativeInt = NonNegativeInt.two,
+      sanitizePublicErrorMessages: Boolean = false,
   ) extends CantonNodeParameters
 
   private val metricsFactory: LabeledMetricsFactory = new InMemoryMetricsFactory

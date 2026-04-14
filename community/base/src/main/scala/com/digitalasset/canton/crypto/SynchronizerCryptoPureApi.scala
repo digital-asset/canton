@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
@@ -24,6 +25,9 @@ final class SynchronizerCryptoPureApi(
     val pureCrypto: CryptoPureApi,
 ) extends CryptoPureApi
     with SynchronizerCryptoValidation {
+
+  override def signatureVerificationParallelism: PositiveInt =
+    pureCrypto.signatureVerificationParallelism
 
   override def verifySignature(
       hash: Hash,

@@ -193,6 +193,30 @@ manual_protocol_continuity_tests:
         requires:
           - compile
 
+manual_ledger_api_compatibility_tests:
+  when:
+    and:
+      - equal: [ ledger-api-compatibility-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - ledger_api_compatibility_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
 
 manual_toxiproxy_slow_test:
   when:

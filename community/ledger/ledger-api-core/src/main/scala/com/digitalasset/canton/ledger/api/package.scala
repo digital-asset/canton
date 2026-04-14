@@ -165,12 +165,13 @@ package api {
       isDeactivated: Boolean = false,
       metadata: ObjectMeta = ObjectMeta.empty,
       identityProviderId: IdentityProviderId = IdentityProviderId.Default,
+      primaryPartyAuthentication: Boolean = false,
   ) {
     // Note: this should be replaced by pretty printing once the ledger-api server packages move
     //  into their proper place
     override def toString: String =
       s"User(id=$id, primaryParty=$primaryParty, isDeactivated=$isDeactivated, metadata=${metadata.toString
-          .take(512)}, identityProviderId=${identityProviderId.toRequestString})"
+          .take(512)}, identityProviderId=${identityProviderId.toRequestString}, primaryPartyAuthentication=$primaryPartyAuthentication)"
   }
 
   final case class PartyDetails(

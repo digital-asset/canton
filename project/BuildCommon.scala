@@ -794,11 +794,14 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedAppSettings,
+        // Build the example Daml models under src/pack/examples (e.g. 09-json-api/model)
+        // so they don't rot when the SDK version advances.
+        Compile / damlSourceDirectory := (Compile / sourceDirectory).value / ".." / "pack" / "examples",
         // Some tests in community-app depend on a newer protobuf-java to use
         // opentelemetry_proto, which community-integration-testing depends on
         dependencyOverrides ++= Seq(
-          "com.google.protobuf" % "protobuf-java" % "4.31.0" % Test,
-          "com.google.protobuf" % "protobuf-java-util" % "4.31.0" % Test,
+          "com.google.protobuf" % "protobuf-java" % "4.33.5" % Test,
+          "com.google.protobuf" % "protobuf-java-util" % "4.33.5" % Test,
         ),
         libraryDependencies ++= Seq(
           janino, // not used at compile time, but required for conditionals in logback configuration
@@ -3482,6 +3485,7 @@ object BuildCommon {
         WartRemover
       )
       .settings(
+        buildInfoPackage := "com.digitalasset.daml.lf",
         buildInfoKeys ++= {
           import DamlLfPlugin.LfVersionsDTO.*
           Seq[BuildInfoKey](

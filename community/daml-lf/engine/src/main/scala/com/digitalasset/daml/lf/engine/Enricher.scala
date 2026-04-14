@@ -424,7 +424,7 @@ final class Enricher(
         _ <-
           if (!compiledPackages.contains(pkgId))
             loadPackage(pkgId, language.Reference.Package(PackageRef.Id(pkgId)))
-          else ResultDone(())
+          else Result.Unit
         res <- preprocessor.translateValue(
           Ast.TTyCon(Identifier(pkgId, create.templateId.qualifiedName)),
           create.arg,

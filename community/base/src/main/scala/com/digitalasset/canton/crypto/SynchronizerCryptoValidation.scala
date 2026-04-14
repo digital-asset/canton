@@ -48,12 +48,31 @@ trait SynchronizerCryptoValidation {
         staticSynchronizerParameters.requiredSigningSpecs.keys,
         SignatureCheckError.UnsupportedKeySpec.apply,
       )
-      _ <- algorithmSpecO.fold[Either[SignatureCheckError, Unit]](Right(())) { algorithmSpec =>
-        CryptoKeyValidation.ensureCryptoAlgorithmSpec(
-          algorithmSpec,
-          staticSynchronizerParameters.requiredSigningSpecs.algorithms,
-          SignatureCheckError.UnsupportedAlgorithmSpec.apply,
-        )
+      _ <- algorithmSpecO match {
+        case Some(algorithmSpec) =>
+          CryptoKeyValidation.ensureCryptoAlgorithmSpec(
+            algorithmSpec,
+            staticSynchronizerParameters.requiredSigningSpecs.algorithms,
+            SignatureCheckError.UnsupportedAlgorithmSpec.apply,
+          )
+        case None =>
+          // When the algorithm spec is not provided (legacy signatures), derive it from the key spec
+          // and validate that the derived algorithm is allowed by the synchronizer parameters.
+          // Without this check, a malicious participant could omit the algorithm spec to bypass
+          // the synchronizer's algorithm requirements (cryptographic downgrade attack).
+          val derivedAlgoSpecO = staticSynchronizerParameters.requiredSigningSpecs.algorithms
+            .find(_.supportedSigningKeySpecs.contains(keySpec))
+          derivedAlgoSpecO match {
+            case Some(_) => Right(())
+            case None =>
+              Left(
+                SignatureCheckError.NoMatchingAlgorithmSpec(
+                  s"No signing algorithm spec in synchronizer's required algorithms " +
+                    s"${staticSynchronizerParameters.requiredSigningSpecs.algorithms} " +
+                    s"supports key spec $keySpec"
+                )
+              )
+          }
       }
     } yield ()
 

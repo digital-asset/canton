@@ -1060,7 +1060,6 @@ class GrpcTopologyManagerReadService(
           .awaitSequencedTimestamp(SequencedTime(referenceEffectiveTime.value))
           .getOrElse(FutureUnlessShutdown.unit)
       )
-
     } yield {
       // Now all the stores are in sync and we can actually query the store
 

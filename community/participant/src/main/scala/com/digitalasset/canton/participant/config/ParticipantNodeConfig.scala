@@ -10,7 +10,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.{ReplicationConfig, *}
-import com.digitalasset.canton.http.JsonApiConfig
+import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
@@ -26,6 +26,7 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   PackageServiceConfig,
   PartyManagementServiceConfig,
+  StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
   UserManagementServiceConfig,
 }
@@ -103,7 +104,11 @@ final case class ParticipantNodeConfig(
   def clientLedgerApi: ClientConfig = ledgerApi.clientConfig
 
   def toRemoteConfig: RemoteParticipantConfig =
-    RemoteParticipantConfig(adminApi.clientConfig, ledgerApi.clientConfig)
+    RemoteParticipantConfig(
+      adminApi.clientConfig,
+      ledgerApi.clientConfig,
+      ledgerJsonApi = httpLedgerApi.clientConfig,
+    )
 
   override def withDefaults(
       ports: Option[DefaultPorts]
@@ -158,12 +163,17 @@ final case class ParticipantFeaturesConfig()
   *   the configuration to connect the console to the remote admin api
   * @param ledgerApi
   *   the configuration to connect the console to the remote ledger api
+  * @param ledgerJsonApi
+  *   optional configuration to connect the console to the remote ledger JSON API; expected to be
+  *   defined when the remote participant exposes a JSON API endpoint that the console should
+  *   access, and left as None otherwise
   * @param token
   *   optional bearer token to use on the ledger-api if jwt authorization is enabled
   */
 final case class RemoteParticipantConfig(
     adminApi: FullClientConfig,
     ledgerApi: FullClientConfig,
+    ledgerJsonApi: Option[JsonClientConfig] = None,
     token: Option[String] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi
@@ -229,8 +239,8 @@ final case class LedgerApiServerConfig(
     ),
     maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     maxInboundMetadataSize: NonNegativeInt = ServerConfig.defaultMaxInboundMetadataSize,
-    maxConcurrentStreamsPerConnection: NonNegativeInt =
-      ServerConfig.defaultMaxConcurrentStreamsPerConnection,
+    maxConcurrentCallsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentCallsPerConnection,
     rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
     postgresDataSource: PostgresDataSourceConfig = PostgresDataSourceConfig(),
     databaseConnectionTimeout: config.NonNegativeFiniteDuration =
@@ -240,6 +250,7 @@ final case class LedgerApiServerConfig(
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
     partyManagementService: PartyManagementServiceConfig = PartyManagementServiceConfig(),
     packageService: PackageServiceConfig = PackageServiceConfig(),
+    stateService: StateServiceConfig = StateServiceConfig(),
     managementServiceTimeout: config.NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
     enableCommandInspection: Boolean = true,

@@ -28,6 +28,7 @@ trait RateLimitManagerTesting { this: BaseTest with HasExecutionContext =>
     futureSupervisor,
     SequencerMetrics.noop("sequencer-rate-limit-manager-test"),
     timeouts,
+    lsuSequencingBounds = None,
     loggerFactory,
   )
   lazy val defaultTrafficPurchasedManager = mkTrafficPurchasedManager(trafficPurchasedStore)

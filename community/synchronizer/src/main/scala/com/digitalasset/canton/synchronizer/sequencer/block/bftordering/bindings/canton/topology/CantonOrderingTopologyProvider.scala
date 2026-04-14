@@ -43,6 +43,7 @@ import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -52,7 +53,8 @@ private[canton] final class CantonOrderingTopologyProvider(
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
 )(implicit
-    ec: ExecutionContext
+    ec: ExecutionContext,
+    synchronizerProtocolVersion: ProtocolVersion,
 ) extends OrderingTopologyProvider[PekkoEnv]
     with NamedLogging {
 
@@ -96,10 +98,14 @@ private[canton] final class CantonOrderingTopologyProvider(
             //  are no pending topology changes.
             FutureUnlessShutdown.pure[Option[Boolean]](Some(false))
           } { ts =>
-            logger.debug(s"Awaiting max timestamp for snapshot at activation time $activationTime")
             // `awaitMaxTimestamp` is inclusive on its input, but `activationTime` already reflects the timestamp
             // that needs to be observed to retrieve the correct topology snapshot.
-            cryptoApi.awaitMaxTimestamp(SequencedTime(ts.immediatePredecessor)).flatMap {
+            val sequencingTimeToBeObserved = ts.immediatePredecessor
+            logger.debug(
+              s"Awaiting max timestamp for sequencing time $sequencingTimeToBeObserved " +
+                s"(i.e., for snapshot active starting at $ts)"
+            )
+            cryptoApi.awaitMaxTimestamp(SequencedTime(sequencingTimeToBeObserved)).flatMap {
               maxTimestamp =>
                 logger.debug(
                   s"Max timestamp $maxTimestamp awaited successfully for snapshot at activation time $activationTime"

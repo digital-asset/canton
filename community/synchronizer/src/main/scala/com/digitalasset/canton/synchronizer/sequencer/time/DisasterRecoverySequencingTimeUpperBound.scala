@@ -10,6 +10,6 @@ import com.digitalasset.canton.data.CantonTimestamp
   * value MUST be set before the time reaches ts.
   *
   * @param ts
-  *   The max sequencing time (inclusive).
+  *   The max sequencing time (exclusive).
   */
 final case class DisasterRecoverySequencingTimeUpperBound(ts: CantonTimestamp) extends AnyVal

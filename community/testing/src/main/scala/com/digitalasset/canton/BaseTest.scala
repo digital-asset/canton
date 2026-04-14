@@ -683,6 +683,7 @@ object BaseTest {
   lazy val SubViewsAssetV1Path: String = getResourcePath("sub-views-asset-1.0.0.dar")
   lazy val SubViewsAssetV2Path: String = getResourcePath("sub-views-asset-2.0.0.dar")
   lazy val SubViewsMainV1Path: String = getResourcePath("sub-views-main-1.0.0.dar")
+  lazy val UniversalPath: String = getResourcePath("universal.dar")
 
   def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

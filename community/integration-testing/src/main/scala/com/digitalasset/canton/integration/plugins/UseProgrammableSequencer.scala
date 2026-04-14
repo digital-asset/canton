@@ -8,6 +8,11 @@ import com.digitalasset.canton.integration.EnvironmentSetupPlugin
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencer
 
+/** An environment plugin to use the programmable sequencer in an environment.
+  *
+  * The programmable sequencer allows you to control the sequencing of messages in a test, such that
+  * you can test different inter-leavings of messages.
+  */
 class UseProgrammableSequencer(
     environmentId: String,
     override protected val loggerFactory: NamedLoggerFactory,

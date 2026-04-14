@@ -67,7 +67,7 @@ final case class SequencerNodeParameterConfig(
   *   Override the LSU sequencing bounds computed from the topology store. Should be used ONLY in a
   *   disaster recovery scenario (roll forward) and the value MUST be identical across sequencer
   *   nodes.
-  * @param globalMaxSequencingTimeInclusive
+  * @param globalMaxSequencingTimeExclusive
   *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
   *   strictly greater to this value will not be delivered. Important notes:
   *   - SHOULD be set only in disaster recovery scenarios.
@@ -75,7 +75,7 @@ final case class SequencerNodeParameterConfig(
   */
 final case class LsuRepair(
     lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None,
-    globalMaxSequencingTimeInclusive: Option[CantonTimestamp] = None,
+    globalMaxSequencingTimeExclusive: Option[CantonTimestamp] = None,
 )
 
 /** Used to override values usually derived from the LSU announcement. MUST be used only for roll
@@ -87,8 +87,8 @@ final case class LsuRepair(
   *   The value should be chosen as follows:
   *   - At least lowerBoundSequencingTimeExclusive
   *   - At least the latest sequencing time on the broken synchronizer
-  *   - At least the latest effective time of the latest fully authorized topology transaction on
-  *     the broken synchronizer
+  *   - At least the latest effective time of the latest non-rejected topology transaction on the
+  *     broken synchronizer.
   *   - Not too far in the future, as it acts as a strict lower bound on the new synchronizer.
   */
 final case class LsuSequencingBoundsOverride(

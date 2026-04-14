@@ -29,6 +29,7 @@ import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
@@ -111,7 +112,7 @@ class GrpcPartyManagementService(
   ): StreamObserver[AddPartyWithAcsAsyncRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    // TODO(#23818): This buffer will contain the whole ACS snapshot.
+    // TODO(#30362): This buffer will contain the whole ACS snapshot - switch it to the streaming approach
     val outputStream = new ByteArrayOutputStream()
     val arguments = new AtomicReference[Option[PartyReplicationArguments]](None)
     // for extracting the arguments on the first request
@@ -335,12 +336,12 @@ class GrpcPartyManagementService(
       snapshot <- topologyLookup
         .maybeOfflineAwaitTopologySnapshot(
           synchronizerId,
-          activationTimestamp.value.immediateSuccessor,
+          activationTimestamp.immediateSuccessor.value,
         )
         .leftMap(err =>
           PartyManagementServiceError.InvalidState
             .Error(
-              s"Unable to query topology for $synchronizerId at ${activationTimestamp.value.immediateSuccessor}: $err"
+              s"Unable to query topology for $synchronizerId at ${activationTimestamp.immediateSuccessor}: $err"
             )
         )
 
@@ -353,11 +354,10 @@ class GrpcPartyManagementService(
             participantAttributes.onboarding
           },
           (),
-          PartyManagementServiceError.InvalidState
-            .AbortAcsExportForMissingOnboardingFlag(
-              party,
-              targetParticipant,
-            ): PartyManagementServiceError,
+          PartyManagementServiceError.AcsExportMissingTargetOnboardingMapping.Error(
+            party,
+            targetParticipant,
+          ): PartyManagementServiceError,
         )
 
       partiesHostedByTargetParticipant <- EitherT.right(
@@ -369,8 +369,10 @@ class GrpcPartyManagementService(
         )
       )
 
-      otherPartiesHostedByTargetParticipant =
-        partiesHostedByTargetParticipant excl party excl targetParticipant.adminParty
+      // Set removal (excl) is O(1); filterNot is O(N)
+      otherPartiesHostedByTargetParticipant = partiesHostedByTargetParticipant
+        .excl(party)
+        .excl(targetParticipant.adminParty)
 
       _ <- ParticipantCommon
         .writeAcsSnapshot(
@@ -478,8 +480,12 @@ class GrpcPartyManagementService(
             .transform {
               case Success(tx) => Success(Right(tx))
               case Failure(e) =>
-                val message = s"${e.getMessage} – Possibly missing party activation?"
-                Success(Left(PartyManagementServiceError.IOStream.Error(message)))
+                Success(
+                  Left(
+                    PartyManagementServiceError.EffectivePartyToParticipantMappingNotFound
+                      .Error(party, targetParticipant, e.getMessage)
+                  )
+                )
             }
         )
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -578,7 +584,7 @@ class GrpcPartyManagementService(
       case (
             (
               synchronizer,
-              partyIdO,
+              partyIdO, // None if not provided by the user (backwards compatibility)
               workflowIdPrefix,
               contractImportMode,
               representativePackageIdOverride,
@@ -586,89 +592,25 @@ class GrpcPartyManagementService(
             source,
           ) =>
         val repairContractSource = source
-          .map { case (activeContract) =>
+          .map { activeContract =>
             RepairContract
               .fromLapiActiveContract(activeContract.contract)
               // Use InvalidArgument if the provided contracts are malformed
               .valueOr(err =>
+                // NOTE: We must throw here because this iterator is evaluated lazily inside
+                // `addContracts`. Throwing a StatusRuntimeException is the only way to
+                // short-circuit the upstream gRPC stream when we encounter malformed data.
                 throw PartyManagementServiceError.InvalidArgument.Error(err).asGrpcError
               )
           }
+
+        val synchronizerId = synchronizer.logical
+
         val resultET = for {
-          // Pre-import Topology Check: Abort import if a party is provided but no PTP mapping is found.
-          // This prevents creating a phantom "pending clearance" record for a party that isn't actually
-          // onboarding here, which would otherwise remain stranded in the database requiring manual cleanup.
           effectiveTimestampO <- partyIdO match {
-            case Some(partyId) =>
-              for {
-                // TODO(#30096): Swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
-                store <- EitherT.fromEither[FutureUnlessShutdown](
-                  topologyLookup.topologyStore(synchronizer).leftMap { err =>
-                    PartyManagementServiceError.InvalidState
-                      .Error(s"Topology store not available for $synchronizer: $err")
-                      .asGrpcError
-                  }
-                )
-
-                // Query for both effective AND proposed transactions
-                effectiveTxs <- EitherT.right[StatusRuntimeException](
-                  store.findPositiveTransactions(
-                    asOf = CantonTimestamp.MaxValue,
-                    asOfInclusive = false,
-                    isProposal = false,
-                    types = Seq(TopologyMapping.Code.PartyToParticipant),
-                    filterUid = Some(NonEmpty(Seq, partyId.uid)),
-                    filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
-                  )
-                )
-
-                proposalTxs <- EitherT.right[StatusRuntimeException](
-                  store.findPositiveTransactions(
-                    asOf = CantonTimestamp.MaxValue,
-                    asOfInclusive = false,
-                    isProposal = true,
-                    types = Seq(TopologyMapping.Code.PartyToParticipant),
-                    filterUid = Some(NonEmpty(Seq, partyId.uid)),
-                    filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
-                  )
-                )
-
-                allTxs = effectiveTxs.result ++ proposalTxs.result
-
-                onboardingTxs = allTxs.filter { tx =>
-                  tx.mapping match {
-                    case ptp: PartyToParticipant =>
-                      ptp.participants.exists(p => p.participantId == participantId && p.onboarding)
-                    case _ => false
-                  }
-                }
-
-                _ <- EitherT.cond[FutureUnlessShutdown](
-                  onboardingTxs.nonEmpty,
-                  (),
-                  PartyManagementServiceError.InvalidState
-                    .Error(
-                      s"Refuse to import ACS for party $partyId: No topology transaction found onboarding this party on participant $participantId."
-                    )
-                    .asGrpcError,
-                )
-
-                // If an effective transaction already exists (unexpected, but possible not following OffPR steps), extract its timestamp
-                effectiveTimestampO = onboardingTxs
-                  .filterNot(_.transaction.isProposal)
-                  .map(_.validFrom)
-                  .maxOption
-
-              } yield effectiveTimestampO
-
-            case None =>
-              EitherT.rightT[FutureUnlessShutdown, StatusRuntimeException](
-                Option.empty[EffectiveTime]
-              )
+            case Some(partyId) => preImportValidation(synchronizer, partyId)
+            case None => Right(Option.empty[EffectiveTime]).toEitherT[FutureUnlessShutdown]
           }
-
-          // TODO(#30096): Not needed once the topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
-          synchronizerId = synchronizer.logical
 
           // Import ACS
           _ <- sync.repairService
@@ -680,89 +622,112 @@ class GrpcPartyManagementService(
               representativePackageIdOverride = representativePackageIdOverride,
               workflowIdPrefix = workflowIdPrefix,
             )
-            .leftMap(err => PartyManagementServiceError.IOStream.Error(err).asGrpcError)
+            .leftMap(err => PartyManagementServiceError.IOStream.Error(err))
 
-          // Post-import pending operation insertion which should never fail this endpoint
           _ <- partyIdO match {
             case Some(partyId) =>
-              val processPendingOperationET: EitherT[FutureUnlessShutdown, Unit, Unit] = for {
-                psid <- EitherT.fromOption[FutureUnlessShutdown](
-                  sync.activePsidForLsid(synchronizerId),
-                  logger.warn(
-                    s"No active physical synchronizer found for $synchronizerId. Skipping pending operation insertion."
-                  ),
-                )
-                persistentState <- EitherT.fromOption[FutureUnlessShutdown](
-                  sync.syncPersistentStateManager.get(psid),
-                  logger.warn(
-                    s"No persistent state found for $psid. Skipping pending operation insertion."
-                  ),
-                )
-                pv = persistentState.staticSynchronizerParameters.protocolVersion
-
-                _ <-
-                  if (pv >= ProtocolVersion.v35) {
-                    val _ = effectiveTimestampO match {
-                      case Some(timestamp) => // Case 2: Unexpected (Operator error)
-                        logger.warn(
-                          s"Found an already effective party-to-participant mapping with the onboarding flag set " +
-                            s"for $partyId on synchronizer $synchronizerId (valid from $timestamp). " +
-                            s"The target participant has not been taken offline at the appropriate time, indicating " +
-                            s"the offline party replication steps were not strictly followed. " +
-                            s"A pending onboarding flag clearance operation will be recorded using $timestamp as reference."
-                        )
-                      case None => // Case 1: Expected (Proposal)
-                        logger.info(
-                          s"Found a proposed party-to-participant mapping with the onboarding flag set " +
-                            s"for $partyId on synchronizer $synchronizerId. Recording pending onboarding flag clearance operation."
-                        )
-                    }
-
-                    val pendingOp = OnboardingClearanceOperation(effectiveTimestampO)(
-                      OnboardingClearanceOperation.protocolVersionRepresentativeFor(pv)
-                    ).toPendingOperation(synchronizerId, partyId)
-
-                    EitherT.right[Unit] {
-                      persistentState.pendingOnboardingClearanceStore
-                        .insert(pendingOp)
-                        .fold(
-                          err => {
-                            logger.warn(
-                              s"Failed to insert pending onboarding operation for party $partyId on synchronizer $synchronizerId: $err. " +
-                                s"You may recover by manually invoking the onboarding flag clearance endpoint after (re)connecting to the synchronizer."
-                            )
-                          },
-                          _ => (),
-                        )
-                    }
-                  } else {
-                    EitherT.rightT[FutureUnlessShutdown, Unit] {
-                      logger.debug(
-                        s"Skipping insertion of pending onboarding flag clearance operation for party $partyId " +
-                          s"on synchronizer $synchronizerId because protocol version $pv is older than v35."
+              persistPendingOnboardingClearance(
+                partyId,
+                synchronizerId,
+                effectiveTimestampO,
+                logAction = _ => {
+                  effectiveTimestampO match {
+                    case Some(timestamp) =>
+                      // Unexpected, because following offline party replication steps results in a proposal
+                      logger.info(
+                        s"Pending clearance recorded for $partyId on $synchronizerId at $timestamp despite pre-existing effective mapping."
                       )
-                    }
+                    case None => // Expected (Proposal)
+                      logger.info(
+                        s"Recording pending onboarding clearance for proposed $partyId on $synchronizerId."
+                      )
                   }
-              } yield ()
-
-              // Map the successful (or safely warned) future back to our gRPC response so the endpoint never fails
-              EitherT.right[StatusRuntimeException](processPendingOperationET.value.map(_ => ()))
-
-            case None =>
-              // No party ID provided, proceed without pending operation insertion
-              logger.warn(
-                "Skipping insertion of pending onboarding flag clearance operation as no party ID was provided. " +
-                  "Please manually invoke the onboarding flag clearance endpoint after (re)connecting to the synchronizer."
+                },
               )
-              EitherT.rightT[FutureUnlessShutdown, StatusRuntimeException](())
+            case None =>
+              logger.warn(
+                "Action Required: Skipped pending onboarding clearance (no party ID provided). " +
+                  "Please invoke the onboarding flag clearance endpoint after reconnecting to the synchronizer."
+              )
+              EitherT.rightT[FutureUnlessShutdown, PartyManagementServiceError](())
           }
 
         } yield ImportPartyAcsResponse()
 
-        EitherTUtil.toFutureUnlessShutdown(resultET)
+        EitherTUtil.toFutureUnlessShutdown(resultET.leftMap(_.asGrpcError))
     }
-
   }
+
+  /** Pre-import Topology Check: Abort import if a party is provided but no PTP mapping is found.
+    * This prevents creating a phantom "pending clearance" record for a party that isn't actually
+    * onboarding here, which would otherwise remain stranded in the database requiring manual
+    * cleanup.
+    */
+  private def preImportValidation(
+      synchronizer: Synchronizer,
+      partyId: PartyId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Option[EffectiveTime]] =
+    for {
+      // Dependency validation for persisting a pending onboarding clearance operation as part of the import
+      _ <- getPersistentState(synchronizer.logical)
+
+      // TODO(#30096): Swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
+      store <- EitherT.fromEither[FutureUnlessShutdown](
+        topologyLookup.topologyStore(synchronizer).leftMap { err =>
+          PartyManagementServiceError.InvalidState
+            .Error(s"Topology store not available for $synchronizer: $err")
+        }
+      )
+
+      // Query for both effective AND proposed transactions
+      effectiveTxs <- EitherT.right[PartyManagementServiceError](
+        store.findPositiveTransactions(
+          asOf = CantonTimestamp.MaxValue,
+          asOfInclusive = false,
+          isProposal = false,
+          types = Seq(TopologyMapping.Code.PartyToParticipant),
+          filterUid = Some(NonEmpty(Seq, partyId.uid)),
+          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+        )
+      )
+
+      proposalTxs <- EitherT.right[PartyManagementServiceError](
+        store.findPositiveTransactions(
+          asOf = CantonTimestamp.MaxValue,
+          asOfInclusive = false,
+          isProposal = true,
+          types = Seq(TopologyMapping.Code.PartyToParticipant),
+          filterUid = Some(NonEmpty(Seq, partyId.uid)),
+          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+        )
+      )
+
+      allTxs = effectiveTxs.result ++ proposalTxs.result
+
+      onboardingTxs = allTxs.filter { tx =>
+        tx.mapping match {
+          case ptp: PartyToParticipant =>
+            ptp.participants.exists(p => p.participantId == participantId && p.onboarding)
+          case _ => false
+        }
+      }
+
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        onboardingTxs.nonEmpty,
+        (),
+        PartyManagementServiceError.AcsImportMissingOnboardingMapping
+          .Error(partyId): PartyManagementServiceError,
+      )
+
+      // If an effective transaction already exists (unexpected, but possible not following OffPR steps), extract its timestamp
+      effectiveTimestamp = onboardingTxs
+        .filterNot(_.transaction.isProposal)
+        .map(_.validFrom)
+        .maxOption
+
+    } yield effectiveTimestamp
 
   override def getHighestOffsetByTimestamp(
       request: v30.GetHighestOffsetByTimestampRequest
@@ -853,7 +818,7 @@ class GrpcPartyManagementService(
       _ <- EitherT.cond[FutureUnlessShutdown](
         forceFlag || foundRecordTime == timestamp,
         (),
-        PartyManagementServiceError.InvalidState.SynchronizerOffsetRecordTimeInvariantViolation(
+        PartyManagementServiceError.ExactRecordTimeMatchNotFound.Error(
           foundOffset,
           timestamp,
           foundRecordTime,
@@ -916,6 +881,7 @@ class GrpcPartyManagementService(
       ledgerEnd <- EitherT
         .fromEither[FutureUnlessShutdown](ParticipantCommon.findLedgerEnd(sync))
         .leftMap(PartyManagementServiceError.InvalidState.Error(_))
+
       allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
 
       validRequest <- validateClearPartyOnboardingFlagRequest(
@@ -923,6 +889,7 @@ class GrpcPartyManagementService(
         ledgerEnd,
         allLogicalSynchronizerIds,
       )
+
       ValidPartyReplicationCommonRequestParams(
         party,
         synchronizerId,
@@ -934,23 +901,110 @@ class GrpcPartyManagementService(
         sync.readyConnectedSynchronizerById(synchronizerId),
         PartyManagementServiceError.InvalidState.Error(
           s"A connection to synchronizer $synchronizerId is required to perform this operation."
-        ),
+        ): PartyManagementServiceError,
       )
 
       indexService <- EitherT.fromOption[FutureUnlessShutdown](
         sync.internalIndexService,
-        PartyManagementServiceError.InvalidState.Error("Unavailable internal index service"),
+        PartyManagementServiceError.InvalidState.Error(
+          "Unavailable internal index service"
+        ): PartyManagementServiceError,
       )
 
-      topologyTx <-
-        findSinglePartyActivationTopologyTransaction(
-          indexService,
-          party,
-          beginOffsetExclusive,
-          synchronizerId,
-          targetParticipant = participantId,
-          waitForActivationTimeout,
-        )
+      activationTimestamp <- validateTopologyStateForClearance(
+        indexService,
+        connectedSynchronizer,
+        party,
+        synchronizerId,
+        beginOffsetExclusive,
+        waitForActivationTimeout,
+      )
+
+      // Persist intent; wanting to clear the onboarding flag
+      _ <- persistPendingOnboardingClearance(party, synchronizerId, Some(activationTimestamp))
+
+      onboardingFlagClearanceOutcome <- connectedSynchronizer.ephemeral.onboardingClearanceScheduler
+        .requestClearance(party, activationTimestamp)
+        .leftMap(PartyManagementServiceError.InvalidState.Error(_): PartyManagementServiceError)
+
+    } yield onboardingFlagClearanceOutcome
+
+  private def getPersistentState(
+      synchronizerId: SynchronizerId
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, SyncPersistentState] =
+    for {
+      psid <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.activePsidForLsid(synchronizerId),
+        PartyManagementServiceError.InvalidState.Error(
+          s"No active physical synchronizer found for $synchronizerId."
+        ): PartyManagementServiceError,
+      )
+      persistentState <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.syncPersistentStateManager.get(psid),
+        PartyManagementServiceError.InvalidState.Error(
+          s"No persistent state found for $psid."
+        ): PartyManagementServiceError,
+      )
+    } yield persistentState
+
+  private def persistPendingOnboardingClearance(
+      partyId: PartyId,
+      synchronizerId: SynchronizerId,
+      effectiveTimestampO: Option[EffectiveTime],
+      logAction: ProtocolVersion => Unit = _ => (),
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Unit] =
+    for {
+      persistentState <- getPersistentState(synchronizerId)
+      protocolVersion = persistentState.staticSynchronizerParameters.protocolVersion
+
+      _ <-
+        if (protocolVersion >= ProtocolVersion.v35) {
+          logAction(protocolVersion)
+
+          val pendingOp = OnboardingClearanceOperation(effectiveTimestampO)(
+            OnboardingClearanceOperation.protocolVersionRepresentativeFor(protocolVersion)
+          ).toPendingOperation(synchronizerId, partyId)
+
+          persistentState.pendingOnboardingClearanceStore
+            .insert(pendingOp)
+            .leftMap(err =>
+              PartyManagementServiceError.InvalidState
+                .Error(
+                  s"Failed to insert pending onboarding operation for party $partyId on synchronizer $synchronizerId: $err."
+                ): PartyManagementServiceError
+            )
+        } else {
+          logger.info(
+            s"Action Required: Skipped pending onboarding clearance for $partyId on $synchronizerId (requires protocol v35+, found $protocolVersion). " +
+              "Please invoke the onboarding flag clearance endpoint after reconnecting to the synchronizer."
+          )
+          EitherT.rightT[FutureUnlessShutdown, PartyManagementServiceError](())
+        }
+    } yield ()
+
+  private def validateTopologyStateForClearance(
+      indexService: InternalIndexService,
+      connectedSynchronizer: com.digitalasset.canton.participant.sync.ConnectedSynchronizer,
+      party: PartyId,
+      synchronizerId: SynchronizerId,
+      beginOffsetExclusive: Offset,
+      waitForActivationTimeout: Option[NonNegativeFiniteDuration],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, EffectiveTime] =
+    for {
+      topologyTx <- findSinglePartyActivationTopologyTransaction(
+        indexService,
+        party,
+        beginOffsetExclusive,
+        synchronizerId,
+        targetParticipant = participantId,
+        waitForActivationTimeout,
+      )
 
       (_activationOffset, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
 
@@ -964,49 +1018,18 @@ class GrpcPartyManagementService(
       activeParticipants <- EitherT.right(
         snapshot.activeParticipantsOf(party.toLf)
       )
+
       _ <- EitherT.cond[FutureUnlessShutdown](
         activeParticipants.exists { case (pId, participantAttributes) =>
-          pId == participantId &&
-          participantAttributes.onboarding
+          pId == participantId && participantAttributes.onboarding
         },
         (),
-        PartyManagementServiceError.InvalidState.MissingOnboardingFlagCannotCompleteOnboarding(
+        PartyManagementServiceError.OnboardingClearanceMissingMapping.Error(
           party,
           participantId,
         ): PartyManagementServiceError,
       )
-
-      psid <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.activePsidForLsid(synchronizerId),
-        PartyManagementServiceError.InvalidState.Error(
-          s"No active physical synchronizer found for $synchronizerId"
-        ),
-      )
-
-      persistentState <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.syncPersistentStateManager.get(psid),
-        PartyManagementServiceError.InvalidState.Error(
-          s"No persistent state found for $psid"
-        ),
-      )
-
-      protocolVersion = persistentState.staticSynchronizerParameters.protocolVersion
-
-      _ = persistentState.pendingOnboardingClearanceStore.insert(
-        OnboardingClearanceOperation(Some(activationTimestamp))(
-          OnboardingClearanceOperation.protocolVersionRepresentativeFor(protocolVersion)
-        ).toPendingOperation(synchronizerId, party)
-      )
-
-      onboardingFlagClearanceOutcome <-
-        connectedSynchronizer.ephemeral.onboardingClearanceScheduler
-          .requestClearance(
-            party,
-            activationTimestamp,
-          )
-          .leftMap(PartyManagementServiceError.InvalidState.Error(_): PartyManagementServiceError)
-
-    } yield onboardingFlagClearanceOutcome
+    } yield activationTimestamp
 
   private def validateClearPartyOnboardingFlagRequest(
       request: v30.ClearPartyOnboardingFlagRequest,
@@ -1030,8 +1053,8 @@ class GrpcPartyManagementService(
 
 object GrpcPartyManagementService {
 
-  /** OffPR getHighestOffsetByTimestamp computation of offset from timestamp placed in a pure
-    * function for unit testing.
+  /** [[com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService#getHighestOffsetByTimestamp]]
+    * computation of offset from timestamp placed in a pure function for unit testing.
     */
   def identifyHighestOffsetByTimestamp(
       requestedTimestamp: CantonTimestamp,
@@ -1046,26 +1069,26 @@ object GrpcPartyManagementService {
     val synchronizerTimestampBeforeOrAtRequestedTimestamp =
       CantonTimestamp(synchronizerOffsetBeforeOrAtRequestedTimestamp.recordTime)
     for {
+      // Paranoid check: The DB query for `synchronizerTimestampBeforeOrAtRequestedTimestamp` should never ever have returned a timestamp > requested
       _ <- Either.cond(
         synchronizerTimestampBeforeOrAtRequestedTimestamp <= requestedTimestamp,
         (),
-        PartyManagementServiceError.InvalidTimestamp.Error(
-          synchronizerId,
-          requestedTimestamp,
-          forceFlag,
-          s"Coding bug: Returned offset record time $synchronizerTimestampBeforeOrAtRequestedTimestamp must be before or at the requested timestamp $requestedTimestamp.",
+        PartyManagementServiceError.InternalInvariantViolation.Error(
+          s"Coding bug: Returned offset record time $synchronizerTimestampBeforeOrAtRequestedTimestamp must be before or at the requested timestamp $requestedTimestamp."
         ),
       )
+
+      // User asked for an unprocessed timestamp without the force flag
       _ <- Either.cond(
         forceFlag || requestedTimestamp <= cleanSynchronizerTimestamp,
         (),
-        PartyManagementServiceError.InvalidTimestamp.Error(
+        PartyManagementServiceError.UnprocessedRequestedTimestamp.Error(
           synchronizerId,
           requestedTimestamp,
-          forceFlag,
-          s"Not all events have been processed fully and/or published to the Ledger API DB until the requested timestamp: $requestedTimestamp",
+          cleanSynchronizerTimestamp,
         ),
       )
+
       offsetAndRecordTimeBeforeOrAtRequestedTimestamp <-
         // Use the ledger end offset only if the requested timestamp is at least
         // the clean synchronizer timestamp which caps the ledger end offset.
@@ -1074,6 +1097,7 @@ object GrpcPartyManagementService {
             ledgerEnd.lastOffset -> cleanSynchronizerTimestamp
           )
           .orElse(
+            // Paranoid check: Historical offset must be <= ledger end from the same DB snapshot
             Option.when(
               synchronizerOffsetBeforeOrAtRequestedTimestamp.offset <= ledgerEnd.lastOffset
             )(
@@ -1083,11 +1107,8 @@ object GrpcPartyManagementService {
             )
           )
           .toRight(
-            PartyManagementServiceError.InvalidTimestamp.Error(
-              synchronizerId,
-              requestedTimestamp,
-              forceFlag,
-              s"The synchronizer offset ${synchronizerOffsetBeforeOrAtRequestedTimestamp.offset} is not less than or equal to the ledger end offset ${ledgerEnd.lastOffset}",
+            PartyManagementServiceError.InternalInvariantViolation.Error(
+              s"The synchronizer offset ${synchronizerOffsetBeforeOrAtRequestedTimestamp.offset} exceeds the ledger end offset ${ledgerEnd.lastOffset}."
             )
           )
     } yield offsetAndRecordTimeBeforeOrAtRequestedTimestamp

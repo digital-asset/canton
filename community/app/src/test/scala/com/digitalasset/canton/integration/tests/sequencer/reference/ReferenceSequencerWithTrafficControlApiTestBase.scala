@@ -331,6 +331,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       futureSupervisor,
       SequencerMetrics.noop("reference-sequencer-traffic-control"),
       timeouts,
+      lsuSequencingBounds = None,
       this.loggerFactory,
     ) {
       override def getTrafficPurchasedAt(

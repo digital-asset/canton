@@ -46,7 +46,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.{LfGlobalKeyMapping, LfPartyId, checked}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.CreationTime
 
@@ -79,7 +79,7 @@ class TransactionRoutingProcessor(
       synchronizerState: RoutingSynchronizerState,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       explicitlyDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -423,13 +423,14 @@ object TransactionRoutingProcessor {
       tx: LfVersionedTransaction
   ): Map[LfContractId, Stakeholders] = {
 
-    // TODO(#16065) Revisit this value
-    val keyLookupMap = tx.nodes.values.collect {
-      case LfNodeLookupByKey(_, _, key, Some(cid), _) if !tx.localContractIds.contains(cid) =>
-        cid -> checked(
+    val keyLookupMap = tx.nodes.values
+      .collect { case LfNodeQueryByKey(_, _, _, key, result, _) =>
+        result.filterNot(tx.localContractIds.contains) -> checked(
           Stakeholders.tryCreate(stakeholders = key.maintainers, signatories = Set.empty)
         )
-    }.toMap
+      }
+      .flatMap { case (cids, stakeholders) => cids.map(_ -> stakeholders) }
+      .toMap
 
     val mainMap = tx.nodes.values.collect {
       case n: LfNodeFetch if !tx.localContractIds.contains(n.coid) =>
@@ -443,7 +444,8 @@ object TransactionRoutingProcessor {
         )
         n.targetCoid -> stakeholders
     }.toMap
-    (keyLookupMap ++ mainMap)
+
+    keyLookupMap ++ mainMap
   }
 
 }

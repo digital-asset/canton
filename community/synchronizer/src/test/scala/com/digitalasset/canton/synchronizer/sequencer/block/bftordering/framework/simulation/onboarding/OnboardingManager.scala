@@ -42,14 +42,16 @@ trait OnboardingManager[OnboardingDataT] {
       endpoint: P2PEndpoint,
       node: BftNodeId,
   ): Seq[(Command, FiniteDuration)]
+
+  def connectionAdded(endpoint: P2PEndpoint, to: BftNodeId): Unit
 }
 
 object OnboardingManager {
   sealed trait ReasonForProvide
 
   object ReasonForProvide {
-    final case object ProvideForInit extends ReasonForProvide
-    final case object ProvideForRestart extends ReasonForProvide
+    case object ProvideForInit extends ReasonForProvide
+    case object ProvideForRestart extends ReasonForProvide
   }
 }
 
@@ -72,4 +74,6 @@ object EmptyOnboardingManager extends OnboardingManager[Unit] {
       node: BftNodeId,
   ): Seq[(Command, FiniteDuration)] =
     Seq.empty
+
+  override def connectionAdded(endpoint: P2PEndpoint, to: BftNodeId): Unit = ()
 }

@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.Port
@@ -40,6 +39,7 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   PackageServiceConfig,
   PartyManagementServiceConfig,
+  StateServiceConfig,
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -64,8 +64,8 @@ object ApiServiceOwner {
       address: Option[String] = DefaultAddress, // This defaults to "localhost" when set to `None`.
       maxInboundMessageSize: Int = DefaultMaxInboundMessageSize,
       maxInboundMetadataSize: Int = ServerConfig.defaultMaxInboundMetadataSize.unwrap,
-      maxConcurrentStreamsPerConnection: Int =
-        ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
+      maxConcurrentCallsPerConnection: Int =
+        ServerConfig.defaultMaxConcurrentCallsPerConnection.unwrap,
       port: Port = DefaultPort,
       tls: Option[TlsServerConfig] = DefaultTls,
       seeding: Seeding = DefaultSeeding,
@@ -105,7 +105,7 @@ object ApiServiceOwner {
       partyManagementServiceConfig: PartyManagementServiceConfig =
         ApiServiceOwner.DefaultPartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig = ApiServiceOwner.DefaultPackageServiceConfig,
-      telemetry: Telemetry,
+      stateServiceConfig: StateServiceConfig,
       loggerFactory: NamedLoggerFactory,
       contractAuthenticator: ContractAuthenticatorFn,
       dynParamGetter: DynamicSynchronizerParameterGetter,
@@ -139,7 +139,6 @@ object ApiServiceOwner {
         loggerFactory = loggerFactory,
       )(commandExecutionContext, traceContext),
       jwtTimestampLeeway = jwtTimestampLeeway,
-      telemetry = telemetry,
       loggerFactory = loggerFactory,
     )
     val healthChecksWithIndexService = healthChecks + ("index" -> indexService)
@@ -202,7 +201,7 @@ object ApiServiceOwner {
         userManagementServiceConfig = userManagement,
         partyManagementServiceConfig = partyManagementServiceConfig,
         packageServiceConfig = packageServiceConfig,
-        telemetry = telemetry,
+        stateServiceConfig = stateServiceConfig,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractAuthenticator,
         dynParamGetter = dynParamGetter,
@@ -219,13 +218,12 @@ object ApiServiceOwner {
         port,
         maxInboundMessageSize,
         maxInboundMetadataSize,
-        maxConcurrentStreamsPerConnection,
+        maxConcurrentCallsPerConnection,
         address,
         tls,
         // TODO (i28340) fix order of interceptors
         new GrpcAuthInterceptor(
           userAuthInterceptor,
-          telemetry,
           loggerFactory,
           apiLoggingConfig = apiLoggingConfig,
           commandExecutionContext,

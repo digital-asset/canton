@@ -115,7 +115,7 @@ private[repair] final class RepairServiceHelpers(
         new PackageDependencyResolverImpl(participantId, packageMetadataView, loggerFactory),
         preferCaching = true,
       )
-      synchronizerParameters <- OptionT(persistentState.parameterStore.lastParameters)
+      synchronizerParameters <- OptionT(persistentState.connectivityStatusStore.lastParameters)
         .toRight(s"No static synchronizer parameters found for $psid")
     } yield RepairRequest.SynchronizerData(
       psid,

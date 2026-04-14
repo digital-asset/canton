@@ -12,7 +12,6 @@ import com.daml.ledger.api.v2.command_submission_service.{
 }
 import com.daml.ledger.api.v2.commands.Commands
 import com.daml.metrics.Timed
-import com.daml.tracing.Telemetry
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
@@ -52,7 +51,6 @@ final class ApiCommandSubmissionService(
     submissionIdGenerator: SubmissionIdGenerator,
     tracker: CommandProgressTracker,
     metrics: LedgerApiServerMetrics,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends CommandSubmissionServiceGrpc.CommandSubmissionService
@@ -62,7 +60,7 @@ final class ApiCommandSubmissionService(
   private val validator = new SubmitRequestValidator(commandsValidator)
 
   override def submit(request: SubmitRequest): Future[SubmitResponse] = {
-    implicit val traceContext = getAnnotatedCommandTraceContext(request.commands, telemetry)
+    implicit val traceContext = getAnnotatedCommandTraceContext(request.commands)
     submitWithTraceContext(Traced(request)).asGrpcResponse
   }
 
@@ -134,7 +132,7 @@ final class ApiCommandSubmissionService(
       request: SubmitReassignmentRequest
   ): Future[SubmitReassignmentResponse] = {
     implicit val traceContext: TraceContext =
-      getAnnotatedReassignmentCommandTraceContext(request.reassignmentCommands, telemetry)
+      getAnnotatedReassignmentCommandTraceContext(request.reassignmentCommands)
     submitReassignmentWithTraceContext(Traced(request)).asGrpcResponse
   }
 

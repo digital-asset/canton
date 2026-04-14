@@ -23,9 +23,13 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.TransactionTreeConversionError
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  ContractInstanceOfId,
+  ContractLookupError,
+  TransactionTreeConversionError,
+}
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
-import com.digitalasset.canton.participant.store.ExtendedContractLookup
+import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.*
 import com.digitalasset.canton.platform.store.dao.events.InputContractPackages
@@ -253,13 +257,10 @@ class ModelConformanceChecker(
 
     val inputContracts = view.inputContracts.fmap(_.contract)
 
-    // TODO(#31527): SPM this will be changed once many contracts are supported
-    val keys = inputContracts.view
-      .map { case (cid, c) => (cid, c.inst.contractKeyWithMaintainers.map(_.globalKey)) }
-      .collect { case (cid, Some(key)) => (cid, key) }
-      .groupMapReduce(_._2) { case (cid, _) => Vector(cid) }(_ ++ _)
-
-    val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, keys)
+    val contractAndKeyLookup = new ReplayContractLookup(
+      inputContracts,
+      view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
+    )
 
     for {
 
@@ -328,7 +329,7 @@ class ModelConformanceChecker(
         ReInterpretationResult(
           lfTx,
           metadata,
-          resolverFromReinterpretation,
+          legacyKeyResolver,
           usedPackages,
           _,
         ),
@@ -352,9 +353,15 @@ class ModelConformanceChecker(
       }
       absolutizer = new ContractIdAbsolutizer(hashOps, absolutizationData)
 
+      replayContractInstanceLookup: ContractInstanceOfId = { (id: LfContractId) =>
+        EitherT.fromEither[FutureUnlessShutdown](
+          contractAndKeyLookup.lookup(id).toRight(ContractLookupError(id, "Unknown contract"))
+        )
+      }
+
       reconstructedViewAndTx <- checked(
         transactionTreeFactory.tryReconstruct(
-          subaction = wfTx,
+          transaction = wfTx,
           rootPosition = viewPosition,
           rbContext = rbContext,
           mediator = mediator,
@@ -362,8 +369,8 @@ class ModelConformanceChecker(
           salts = salts,
           transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,
-          contractOfId = TransactionTreeFactory.contractInstanceLookup(contractAndKeyLookup),
-          keyResolver = resolverFromReinterpretation,
+          contractOfId = replayContractInstanceLookup,
+          legacyKeyResolver = legacyKeyResolver,
           absolutizer = absolutizer,
         )
       ).leftMap(err => TransactionTreeError(err, view.viewHash))
@@ -435,7 +442,7 @@ object ModelConformanceChecker {
   type LazyAsyncReInterpretationMap = Map[ViewHash, LazyAsyncReInterpretation]
   private[protocol] final case class ConformanceReInterpretationResult(
       reInterpretationResult: ReInterpretationResult,
-      contractLookup: ExtendedContractLookup,
+      contractLookup: ReplayContractLookup,
       viewInputContracts: Map[LfContractId, GenContractInstance],
   ) {
 

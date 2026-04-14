@@ -18,9 +18,8 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   LAPITTVersion,
   releasesFromArtifactory,
 }
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.{ExcludedTests, LedgerApiConformanceBase}
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -38,30 +37,48 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   protected def ledgerApiTestToolVersions: Seq[String]
 
+  protected val oldestVersionToCheck = ReleaseVersion(3, 4, 10, Some("snapshot"))
+
+  protected val numberOfVersionsToCheck = 2
+
+  protected def versionShouldBeChecked(v: ReleaseVersion): Boolean =
+    v >= oldestVersionToCheck
+
   protected val ledgerApiTestToolPlugins: Map[String, UseLedgerApiTestTool] =
     ledgerApiTestToolVersions
-      .map(version =>
+      .filter { version =>
+        // This is initial filtering of versions -> done to prevent downloading of too many historic versions
+        versionShouldBeChecked(ReleaseVersion.tryCreate(version))
+      }
+      .map { version =>
         version -> new UseLedgerApiTestTool(
           loggerFactory = loggerFactory,
           connectedSynchronizersCount = connectedSynchronizersCount,
           version = LAPITTVersion.Explicit(version),
         )
-      )
+      }
       .toMap
 
   ledgerApiTestToolPlugins.values.foreach(registerPlugin)
 
   def runShardedTests(
-      version: ReleaseVersion
+      version: ReleaseVersion,
+      useJsonApi: Boolean,
   )(shard: Int, numShards: Int)(
       env: TestConsoleEnvironment
-  ): String =
+  ): String = {
+
+    val jsonExclusions = ExcludedTests.findExcludedTests(useJsonApi)
     ledgerApiTestToolPlugins(version.toString)
       .runShardedSuites(
         shard,
         numShards,
-        exclude = excludedTests,
+        exclude = excludedTests() ++ jsonExclusions,
+        useJson = useJsonApi,
       )(env)
+  }
+  def excludedTests(): Seq[String] = LedgerApiConformanceBase.excludedTests
+
 }
 
 /** The Protocol continuity tests test that we don't accidentally break protocol compatibility with
@@ -154,7 +171,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
       setupLedgerApiConformanceEnvironment(env)
 
       loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        runShardedTests(release)(shard, numShards)(env)
+        runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
       }
 
       // Shutdown
@@ -213,7 +230,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
 
         setupLedgerApiConformanceEnvironment(env)
 
-        runShardedTests(release)(shard, numShards)(env)
+        runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
 
         // Shutdown
         shutdownLedgerApiConformanceEnvironment(env)

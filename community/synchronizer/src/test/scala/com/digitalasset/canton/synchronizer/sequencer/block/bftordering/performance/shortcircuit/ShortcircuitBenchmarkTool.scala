@@ -18,5 +18,8 @@ object ShortcircuitBenchmarkTool extends App {
     .load[BftBenchmarkConfig]
     .getOrElse(throw new RuntimeException("Invalid configuration"))
 
-  new BftBenchmarkTool(ShortCircuitBindingFactory, NamedLoggerFactory.root).run(config)
+  new BftBenchmarkTool(
+    new ShortCircuitBindingFactory(NamedLoggerFactory.root),
+    NamedLoggerFactory.root,
+  ).run(config)
 }

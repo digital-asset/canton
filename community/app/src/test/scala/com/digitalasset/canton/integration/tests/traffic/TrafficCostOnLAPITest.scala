@@ -18,6 +18,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   WildcardFilter,
 }
 import com.daml.ledger.javaapi.data.CreatedEvent
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.UpdateWrapper
@@ -46,6 +47,7 @@ import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -53,7 +55,6 @@ import com.digitalasset.canton.integration.{
   TrafficTestUtils,
 }
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, SequencerErrors}
@@ -62,8 +63,9 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.FutureInstances.*
 import org.slf4j.event.Level
 
+import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
 import scala.concurrent.{Await, Future}
 import scala.jdk.CollectionConverters.*
@@ -92,6 +94,7 @@ sealed trait TrafficCostOnLAPITest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
+      .addConfigTransform(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
         import env.*
         val synchronizerConfig = SynchronizerConnectionConfig(
@@ -113,17 +116,6 @@ sealed trait TrafficCostOnLAPITest
           participant.dars.upload(CantonExamplesPath)
           participant.dars.upload(CantonTestsPath)
         }
-
-        sequencer1.topology.synchronizer_parameters.propose_update(
-          synchronizerId = daId,
-          _.update(
-            // Lower confirmation response timeout so tests emitting a mediator verdict finish faster
-            confirmationResponseTimeout = config.NonNegativeFiniteDuration.ofSeconds(2),
-            // Shorten the ledgerTimeRecordTimeTolerance so that the max sequencing time is also short
-            // to trigger completion timeouts quickly
-            ledgerTimeRecordTimeTolerance = config.NonNegativeFiniteDuration.ofSeconds(2),
-          ),
-        )
 
         pureCryptoRef.set(sequencer1.crypto.pureCrypto)
 
@@ -327,7 +319,7 @@ sealed trait TrafficCostOnLAPITest
         val nonConsumingExercise = inside(universal.getEvents.loneElement) {
           case created: CreatedEvent =>
             UniversalContract.Contract
-              .fromCreatedEvent(created)
+              .fromCreatedEvent(created, UnknownTrailingFieldPolicy.STRICT)
               .id
               .exerciseTouch(List(bob.toProtoPrimitive).asJava)
               .commands()
@@ -504,6 +496,8 @@ sealed trait TrafficCostOnLAPITest
       )
       participant1.ledger_api.commands.submit_async(Seq(alice), Seq(cycle), commandId = commandId)
 
+      environment.simClock.value.advance(Duration.ofSeconds(3))
+
       assertWithRestart { cluePrefix =>
         withClue(s"[$cluePrefix] completion has 0 traffic cost") {
           val Seq(_, reject) = participant1.ledger_api.completions.list(alice, 2, ledgerEnd)
@@ -540,46 +534,37 @@ sealed trait TrafficCostOnLAPITest
           // We disabled time proofs in this test suite but here we'll need them
           // for the participant to realize the request has been dropped
           // and it needs to timeout the transaction to emit the completion.
-          // So request time proofs in the background until we receive the completion
-          val requestTimeProofs = new AtomicBoolean(true)
-          def requestTimeProof(): FutureUnlessShutdown[Unit] = if (requestTimeProofs.get()) {
-            env.environment.clock
-              .scheduleAfter(
-                _ =>
-                  participant1.underlying.flatTraverse(
-                    _.sync
-                      .connectedSynchronizerForAlias(daName)
-                      .traverse(
-                        _.ephemeral.timeTracker
-                          .fetchTimeProof()
-                      )
-                  ),
-                java.time.Duration.ofSeconds(1),
-              )
-              .flatten
-              .flatMap(_ => requestTimeProof())
-          } else FutureUnlessShutdown.unit
+          // So advance the clock passed the ledgerTimeRecordTimeTolerance and request a timeproof
+          environment.simClock.value.advance(
+            sequencer1.topology.synchronizer_parameters
+              .latest(daId)
+              .ledgerTimeRecordTimeTolerance
+              .asJava
+              .plusSeconds(1)
+          )
 
-          val requestTimeProofF = requestTimeProof()
+          participant1.underlying
+            .flatTraverse(
+              _.sync
+                .connectedSynchronizerForAlias(daName)
+                .traverse(
+                  _.ephemeral.timeTracker
+                    .fetchTimeProof()
+                )
+            )
+            .futureValueUS
 
           assertWithRestart { cluePrefix =>
             withClue(s"[$cluePrefix] completion has 0 traffic cost") {
               // Observe the completion on P1, and assert it's the expected failure
               val completion =
-                try {
-                  participant1.ledger_api.completions.list(alice, 1, ledgerEnd).loneElement
-                } finally {
-                  // Stop requesting time proofs even if we didn't get a completion above
-                  requestTimeProofs.set(false)
-                }
+                participant1.ledger_api.completions.list(alice, 1, ledgerEnd).loneElement
               completion.status.value.message should include(SubmissionErrors.TimeoutError.id)
 
               // Traffic cost is 0 because we couldn't sequence the confirmation request
               completion.paidTrafficCost shouldBe 0L
             }
           }
-
-          requestTimeProofF.futureValueUS
         }),
         LogEntry.assertLogSeq(
           Seq(
@@ -602,6 +587,20 @@ sealed trait TrafficCostOnLAPITest
       participant1.stop()
       // Exercise the choice through P2
       participant2.ledger_api.javaapi.commands.submit_async(Seq(bob), Seq(iouCall))
+
+      // Wait for the mediator to receive the confirmation request
+      eventually() {
+        mediator1.underlying.value.replicaManager.mediatorRuntime.value.mediator.state.getPendingRequestsSize shouldBe 1
+      }
+
+      // Then advance time so it times out the request
+      environment.simClock.value.advance(
+        sequencer1.topology.synchronizer_parameters
+          .latest(daId)
+          .confirmationResponseTimeout
+          .asJava
+          .plusSeconds(1)
+      )
 
       loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
         assertWithRestart { cluePrefix =>

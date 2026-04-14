@@ -10,11 +10,10 @@ import com.digitalasset.canton.protocol.{
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
-  LfNodeLookupByKey,
+  LfNodeQueryByKey,
   LfNodeRollback,
   LfVersionedTransaction,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 /** Pretty printing implicits for use by tests only. These enable showing readable multiline diffs
   * when expected and actual transactions differ unexpectedly.
@@ -37,7 +36,7 @@ trait PrettyTestInstances {
     case n: LfNodeCreate => prettyLfNodeCreate.treeOf(n)
     case n: LfNodeExercises => prettyLfNodeExercises.treeOf(n)
     case n: LfNodeFetch => prettyLfNodeFetch.treeOf(n)
-    case n: LfNodeLookupByKey => prettyLfNodeLookupByKey.treeOf(n)
+    case n: LfNodeQueryByKey => prettyLfNodeQueryByKey.treeOf(n)
     case n: LfNodeRollback => prettyLfNodeRollback.treeOf(n)
   }
 
@@ -79,9 +78,10 @@ trait PrettyTestInstances {
     paramIfDefined("key", _.keyOpt),
   )
 
-  implicit lazy val prettyLfNodeLookupByKey: Pretty[LfNodeLookupByKey] = prettyOfClass(
-    param("result", _.result.asCidOption.showValueOrNone),
+  implicit lazy val prettyLfNodeQueryByKey: Pretty[LfNodeQueryByKey] = prettyOfClass(
+    param("result", _.result),
     param("templateId", _.templateId),
+    param("exhausive", _.exhaustive),
     param("version", _.version),
     param("key", _.key),
   )

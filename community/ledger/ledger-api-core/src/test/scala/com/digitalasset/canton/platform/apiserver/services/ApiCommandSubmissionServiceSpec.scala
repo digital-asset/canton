@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.ledger.api.v2.commands.{Command, CreateCommand}
 import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
-import com.daml.tracing.{DefaultOpenTelemetry, SpanAttribute}
+import com.daml.tracing.SpanAttribute
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.MockMessages.*
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
@@ -18,9 +18,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.tracing.TestTelemetrySetup
+import com.digitalasset.canton.tracing.{Spanning, TestTelemetrySetup, TraceContextGrpc}
 import com.digitalasset.daml.lf.data.Ref
-import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
@@ -35,7 +34,8 @@ class ApiCommandSubmissionServiceSpec
     with Matchers
     with ArgumentMatchersSugar
     with BaseTest
-    with BeforeAndAfterEach {
+    with BeforeAndAfterEach
+    with Spanning {
   private val generatedSubmissionId = "generated-submission-id"
 
   var testTelemetrySetup: TestTelemetrySetup = _
@@ -47,23 +47,20 @@ class ApiCommandSubmissionServiceSpec
   import ApiCommandSubmissionServiceSpec.*
   "ApiCommandSubmissionService" should {
     "propagate trace context" in {
-      val span = testTelemetrySetup.anEmptySpan()
-      val scope = span.makeCurrent()
-      val mockCommandSubmissionService = createMockCommandSubmissionService
-      try {
-        grpcCommandSubmissionService(mockCommandSubmissionService)
-          .submit(aSubmitRequest)
-          .map { _ =>
-            val spanAttributes = testTelemetrySetup.reportedSpanAttributes
-            spanAttributes should contain(SpanAttribute.UserId -> userId)
-            spanAttributes should contain(SpanAttribute.CommandId -> commandId)
-            spanAttributes should contain(SpanAttribute.Submitter -> party)
-            spanAttributes should contain(SpanAttribute.WorkflowId -> workflowId)
-          }
-      } finally {
-        scope.close()
-        span.end()
-      }
+      // Simulate the creation of a span and attaching it to the gRPC context, as would happen in a real interceptor.
+      withSpan("grpc-span") { tc => _ =>
+        TraceContextGrpc.withGrpcContext(tc) {
+          grpcCommandSubmissionService(createMockCommandSubmissionService)
+            .submit(aSubmitRequest)
+        }
+      }(traceContext, testTelemetrySetup.tracer)
+        .map { _ =>
+          val spanAttributes = testTelemetrySetup.reportedSpanAttributes
+          spanAttributes should contain(SpanAttribute.UserId -> userId)
+          spanAttributes should contain(SpanAttribute.CommandId -> commandId)
+          spanAttributes should contain(SpanAttribute.Submitter -> party)
+          spanAttributes should contain(SpanAttribute.WorkflowId -> workflowId)
+        }
     }
 
     "propagate submission id" in {
@@ -139,7 +136,6 @@ class ApiCommandSubmissionServiceSpec
       submissionIdGenerator = () => Ref.SubmissionId.assertFromString(generatedSubmissionId),
       tracker = CommandProgressTracker.NoOp,
       metrics = LedgerApiServerMetrics.ForTesting,
-      telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
       loggerFactory = loggerFactory,
     )
 }

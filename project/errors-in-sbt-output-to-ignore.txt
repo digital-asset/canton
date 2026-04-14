@@ -123,4 +123,10 @@ ERROR c\.d\.d\.lf - LF internal error in com\.digitalasset\.daml\.lf\.speedy\.Sp
 ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported.*
 com\.digitalasset\.daml\.lf\.speedy\.SError\$SErrorCrash: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported.*
 
+# Transient Artifactory errors when fetching dependencies
+java\.io\.IOException.*No Content-Disposition header in response.*
+java\.io\.UncheckedIOException.*No Content-Disposition header in response.*
+Caused by: java\.io\.IOException.*No Content-Disposition header in response.*
+Caused by: java\.io\.UncheckedIOException.*No Content-Disposition header in response.*
+
 # Make sure to have a trailing newline

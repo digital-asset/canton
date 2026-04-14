@@ -17,6 +17,10 @@ object FieldNames {
       resolveFieldName(admin.user_management_service.User)(_.METADATA_FIELD_NUMBER)
     val identityProviderId: String =
       resolveFieldName(admin.user_management_service.User)(_.IDENTITY_PROVIDER_ID_FIELD_NUMBER)
+    val primaryPartyAuthentication: String =
+      resolveFieldName(admin.user_management_service.User)(
+        _.PRIMARY_PARTY_AUTHENTICATION_FIELD_NUMBER
+      )
   }
   object Metadata {
     val annotations: String =

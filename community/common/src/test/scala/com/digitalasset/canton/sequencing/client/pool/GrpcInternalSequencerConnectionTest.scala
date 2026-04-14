@@ -40,7 +40,10 @@ class GrpcInternalSequencerConnectionTest
     }
 
     "refuse to start if it is in a fatal state" in {
-      val errorMessage = "Validation failure: Failed handshake: bad handshake"
+      val errorMessage =
+        """Grpc client error: Request failed for server-test-0.
+          |  GrpcClientError: INVALID_ARGUMENT/bad handshake
+          |  Request: perform handshake""".stripMargin
 
       val responses = TestResponses(
         apiResponses = Seq(correctApiResponse),
@@ -66,7 +69,7 @@ class GrpcInternalSequencerConnectionTest
         // Try to restart
         inside(connection.start()) {
           case Left(SequencerConnectionError.InvalidStateError(message)) =>
-            message shouldBe s"The connection is in Fatal($errorMessage) state and cannot be started"
+            message shouldBe s"The connection is in Fatal(\n  $errorMessage\n) state and cannot be started"
         }
 
         responses.assertAllResponsesSent()
@@ -100,7 +103,10 @@ class GrpcInternalSequencerConnectionTest
     }
 
     "fail validation if the protocol handshake fails" in {
-      val errorMessage = "Validation failure: Failed handshake: bad handshake"
+      val errorMessage =
+        """Grpc client error: Request failed for server-test-0.
+          |  GrpcClientError: INVALID_ARGUMENT/bad handshake
+          |  Request: perform handshake""".stripMargin
 
       val responses = TestResponses(
         apiResponses = Seq(correctApiResponse),

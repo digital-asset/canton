@@ -36,6 +36,7 @@ object CantonNodeParameters {
     def watchdog: Option[WatchdogConfig]
     def startupMemoryCheckConfig: StartupMemoryCheckConfig
     def dispatchQueueBackpressureLimit: NonNegativeInt
+    def sanitizePublicErrorMessages: Boolean
   }
   object General {
     final case class Impl(
@@ -55,6 +56,7 @@ object CantonNodeParameters {
         override val watchdog: Option[WatchdogConfig],
         override val startupMemoryCheckConfig: StartupMemoryCheckConfig,
         override val dispatchQueueBackpressureLimit: NonNegativeInt,
+        override val sanitizePublicErrorMessages: Boolean,
     ) extends CantonNodeParameters.General
   }
   trait Protocol {
@@ -94,6 +96,7 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
   override def startupMemoryCheckConfig: StartupMemoryCheckConfig = general.startupMemoryCheckConfig
   override def dispatchQueueBackpressureLimit: NonNegativeInt =
     general.dispatchQueueBackpressureLimit
+  override def sanitizePublicErrorMessages: Boolean = general.sanitizePublicErrorMessages
 }
 
 trait HasProtocolCantonNodeParameters extends CantonNodeParameters.Protocol {

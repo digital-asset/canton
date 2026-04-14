@@ -52,6 +52,8 @@ public abstract class ContractCompanion<Ct, Id, Data>
     return this.valueDecoder;
   }
 
+  // TODO (#31893): Clean up once older codegen versions are deprecated. Switch implementation to {
+  // return companion.getValueDecoder(); }
   /**
    * Static method to generate an implementation of {@code ValueDecoder} of type {@code Data} with
    * metadata from the provided {@code ContractCompanion}.

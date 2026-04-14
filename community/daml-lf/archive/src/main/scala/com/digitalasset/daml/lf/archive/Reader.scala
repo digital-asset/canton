@@ -89,18 +89,25 @@ object Reader {
     case DamlLf.ArchivePayload.SumCase.DAML_LF_1 =>
       if (lf.getPatch != 0)
         Left(Error.Parsing("Patch version is not supported for LF1"))
-      else
+      else {
+        val minor = Minor.assertParsingSuccessful(Minor.fromString(lf.getMinor))
         for {
           _ <- validateUnknownFields(lf, schemaMode)
           pkg <- lf1PackageParser.fromByteString(lf.getDamlLf1)
-        } yield ArchivePayload.Lf1(hash, pkg, Minor.assertFromString(lf.getMinor))
+        } yield ArchivePayload.Lf1(hash, pkg, minor)
+      }
     case DamlLf.ArchivePayload.SumCase.DAML_LF_2 =>
+      val minor = Minor.assertParsingSuccessful(Minor.fromString(lf.getMinor))
       for {
         _ <- validateUnknownFields(lf, schemaMode)
-        minor = Minor.assertFromString(lf.getMinor)
         pkg <- lf2PackageParser(minor).fromByteString(lf.getDamlLf2)
         _ <- validateUnknownFields(pkg, schemaMode)
-      } yield ArchivePayload.Lf2(hash, pkg, Minor.assertFromString(lf.getMinor), lf.getPatch)
+      } yield ArchivePayload.Lf2(
+        hash,
+        pkg,
+        Minor.assertParsingSuccessful(Minor.fromString(lf.getMinor)),
+        lf.getPatch,
+      )
     case DamlLf.ArchivePayload.SumCase.SUM_NOT_SET =>
       Left(Error.Parsing("Unrecognized or Unsupported LF version"))
   }

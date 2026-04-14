@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.synchronizer
 import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.*
@@ -23,6 +24,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
 }
 import com.digitalasset.canton.data.SynchronizerPredecessor
+import com.digitalasset.canton.environment.StoreBasedSynchronizerTopologyInitializationCallback
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
@@ -32,6 +34,7 @@ import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{
   PackageDependencyResolverImpl,
   SyncPersistentState,
+  SynchronizerConnectivityStatusStore,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.HandshakeErrors.SynchronizerIdMismatch
@@ -51,7 +54,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
-import com.digitalasset.canton.topology.processing.{InitialTopologySnapshotValidator, SequencedTime}
+import com.digitalasset.canton.topology.processing.InitialTopologySnapshotValidator
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
@@ -108,7 +111,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           sequencerAggregatedInfo.staticSynchronizerParameters,
         )
 
-      _ <- copyTopologyStateFromLocalPredecessorIfNeeded(
+      _ <- SynchronizerRegistryHelpers.copyTopologyStateFromLocalPredecessorIfNeeded(
         synchronizerPredecessor,
         persistentState,
         syncPersistentStateManager,
@@ -297,8 +300,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         }
 
       _ <- downloadSynchronizerTopologyStateForInitializationIfNeeded(
-        syncPersistentStateManager,
-        psid,
+        persistentState.connectivityStatusStore,
         topologyFactory.createInitialTopologySnapshotValidator(),
         topologyClient,
         sequencerClient,
@@ -345,37 +347,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
     synchronizerHandleET
   }
 
-  private def copyTopologyStateFromLocalPredecessorIfNeeded(
-      synchronizerPredecessor: Option[SynchronizerPredecessor],
-      persistentState: SyncPersistentState,
-      syncPersistentStateManager: SyncPersistentStateManager,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Nothing, Option[Unit]] = {
-    val predecessorSyncStateO = synchronizerPredecessor
-      .flatMap(pre => syncPersistentStateManager.get(pre.psid).map(pre -> _))
-    EitherT.right(
-      predecessorSyncStateO
-        .traverse { case (predecessor, predecessorSyncState) =>
-          for {
-            maxTimestampO <- persistentState.topologyStore.maxTimestamp(
-              SequencedTime.MaxValue,
-              includeRejected = true,
-            )
-            // if the local synchronizer store is empty, transfer the topology state from the predecessor,
-            // but only if this is not a late upgrade
-            _ <- MonadUtil.when(maxTimestampO.isEmpty && !predecessor.isLateUpgrade)(
-              persistentState.topologyStore.copyFromPredecessorSynchronizerStore(
-                predecessorSyncState.topologyStore
-              )
-            )
-          } yield ()
-        }
-    )
-  }
-
-  // TODO(#30013): make topology initialization crash tolerant
   private def downloadSynchronizerTopologyStateForInitializationIfNeeded(
-      syncPersistentStateManager: SyncPersistentStateManager,
-      synchronizerId: PhysicalSynchronizerId,
+      connectivityStatusStore: SynchronizerConnectivityStatusStore,
       topologySnapshotValidator: InitialTopologySnapshotValidator,
       topologyClient: SynchronizerTopologyClientWithInit,
       sequencerClient: SequencerClient,
@@ -385,15 +358,12 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
     synchronizeWithClosing("check-for-synchronizer-topology-initialization")(
-      syncPersistentStateManager.synchronizerTopologyStateInitFor(
-        synchronizerId,
-        participantId,
-      )
+      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized)
     ).flatMap {
-      case None =>
+      case true =>
         EitherT.right[SynchronizerRegistryError](FutureUnlessShutdown.unit)
-      case Some(topologyInitializationCallback) =>
-        topologyInitializationCallback
+      case false =>
+        new StoreBasedSynchronizerTopologyInitializationCallback()
           .callback(
             topologySnapshotValidator,
             topologyClient,
@@ -403,6 +373,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           .leftMap[SynchronizerRegistryError](
             SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
           )
+          .semiflatMap(_ => connectivityStatusStore.setTopologyInitialized())
     }
 
   // if participant has provided synchronizer id previously, compare and make sure the synchronizer being
@@ -529,4 +500,34 @@ object SynchronizerRegistryHelpers {
       case SynchronizerAliasManager.GenericError(reason) =>
         SynchronizerRegistryError.HandshakeErrors.HandshakeFailed.Error(reason)
     }
+
+  private[participant] def copyTopologyStateFromLocalPredecessorIfNeeded(
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
+      persistentState: SyncPersistentState,
+      syncPersistentStateManager: SyncPersistentStateManager,
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] = {
+    implicit val traceContext: TraceContext = loggingContext.traceContext
+    val predecessorSyncStateO = synchronizerPredecessor
+      .flatMap(pre => syncPersistentStateManager.get(pre.psid).map(pre -> _))
+    EitherT.right(
+      predecessorSyncStateO
+        .traverse_ { case (predecessor, predecessorSyncState) =>
+          for {
+            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized
+            // if topology is not initialized, transfer the topology state from the predecessor,
+            // but only if this is not a late upgrade
+            _ <- MonadUtil.when(!isTopologyInitialized && !predecessor.isLateUpgrade)(
+              persistentState.topologyStore
+                .copyFromPredecessorSynchronizerStore(
+                  predecessorSyncState.topologyStore
+                )
+                .flatMap(_ => persistentState.connectivityStatusStore.setTopologyInitialized())
+            )
+          } yield ()
+        }
+    )
+  }
 }

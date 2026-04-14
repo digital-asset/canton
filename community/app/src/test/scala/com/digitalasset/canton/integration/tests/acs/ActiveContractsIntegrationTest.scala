@@ -11,6 +11,7 @@ import com.daml.ledger.api.v2.event.CreatedEvent.toJavaProto
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
 import com.daml.ledger.api.v2.value.{Identifier, Record}
 import com.daml.ledger.javaapi.data.CreatedEvent.fromProto as createdEventFromProto
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
   AssignedWrapper,
   UnassignedWrapper,
@@ -279,7 +280,10 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
         updates.map(_.createEvents)
       }
     }.flatten.loneElement
-    val contract = Iou.Contract.fromCreatedEvent(createdEventFromProto(toJavaProto(createdEvent)))
+    val contract = Iou.Contract.fromCreatedEvent(
+      createdEventFromProto(toJavaProto(createdEvent)),
+      UnknownTrailingFieldPolicy.STRICT,
+    )
     ContractData(contract, createdEvent)
   }
 

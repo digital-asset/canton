@@ -42,7 +42,7 @@ class InMemoryPendingOperationStoreTest
 
   "InMemoryPendingOperationStore" should {
     behave like pendingOperationsStore(() =>
-      new InMemoryPendingOperationStore(TestPendingOperationMessage)
+      new InMemoryPendingOperationStore(TestPendingOperationMessage, loggerFactory)
     )
   }
 }

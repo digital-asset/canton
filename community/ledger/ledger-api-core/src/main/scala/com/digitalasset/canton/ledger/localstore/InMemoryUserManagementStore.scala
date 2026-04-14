@@ -55,6 +55,7 @@ class InMemoryUserManagementStore(
             resourceVersion = 0,
             annotations = user.metadata.annotations,
             identityProviderId = user.identityProviderId,
+            primaryPartyAuthentication = user.primaryPartyAuthentication,
           )
         state.update(user.id, InMemUserInfo(userWithResourceVersion, rights))
         toApiUser(userWithResourceVersion)
@@ -77,6 +78,10 @@ class InMemoryUserManagementStore(
             existing = existingAnnotations,
           )
         }
+      val updatedPrimaryPartyAuthentication =
+        userUpdate.primaryPartyAuthenticationUpdateO.getOrElse(
+          userInfo.user.primaryPartyAuthentication
+        )
       val currentResourceVersion = userInfo.user.resourceVersion
       val newResourceVersionEither = userUpdate.metadataUpdate.resourceVersionO match {
         case None => Right(currentResourceVersion + 1)
@@ -98,6 +103,7 @@ class InMemoryUserManagementStore(
             resourceVersion = newResourceVersion,
             annotations = updatedAnnotations,
             identityProviderId = identityProviderId,
+            primaryPartyAuthentication = updatedPrimaryPartyAuthentication,
           )
         )
         state.update(userUpdate.id, updatedUserInfo)
@@ -239,6 +245,7 @@ object InMemoryUserManagementStore {
       resourceVersion: Long,
       annotations: Map[String, String],
       identityProviderId: IdentityProviderId,
+      primaryPartyAuthentication: Boolean = false,
   )
   final case class InMemUserInfo(user: InMemUser, rights: Set[UserRight])
 
@@ -258,6 +265,7 @@ object InMemoryUserManagementStore {
         annotations = user.annotations,
       ),
       identityProviderId = user.identityProviderId,
+      primaryPartyAuthentication = user.primaryPartyAuthentication,
     )
 
   private val AdminUser = InMemUserInfo(
@@ -268,6 +276,7 @@ object InMemoryUserManagementStore {
       resourceVersion = 0,
       annotations = Map.empty,
       identityProviderId = IdentityProviderId.Default,
+      primaryPartyAuthentication = false,
     ),
     rights = Set(UserRight.ParticipantAdmin),
   )

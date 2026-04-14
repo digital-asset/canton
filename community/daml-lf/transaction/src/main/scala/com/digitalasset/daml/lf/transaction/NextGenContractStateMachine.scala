@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package transaction
 
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
@@ -155,7 +156,8 @@ object NextGenContractStateMachine {
     ): ErrOr[LLState]
 
     private[lf] def queryById(
-        cid: ContractId
+        tmplId: Ref.TypeConId,
+        cid: ContractId,
     ): Either[NeedContract[LLState], ErrOr[LLState]]
 
     private[lf] def queryNByKey(
@@ -164,7 +166,7 @@ object NextGenContractStateMachine {
     ): Either[NeedKey[LLState], ErrOr[(KeyMapping, LLState)]]
 
     // return None if cid is unknown
-    private[lf] def archive(cid: ContractId, nid: NodeId): Option[ErrOr[State]]
+    private[lf] def archive(tmplId: Ref.TypeConId, cid: ContractId, nid: NodeId): Option[ErrOr[State]]
 
     private[lf] def beginTry: LLState
 
@@ -176,9 +178,9 @@ object NextGenContractStateMachine {
 
     private[lf] def knownContract(cid: ContractId): Boolean
 
-    // TODO(#30398) review the interface of LLState
+    // TODO(#31848) review the interface of LLState
     //  - check if we really need those methods
-    //  - check if it will be better to have lazz val for the Sets/Maps
+    //  - check if it will be better to have lazy val for the Sets/Maps
     def knownContracts: Set[ContractId]
 
     def knownKeys: Set[GlobalKey]
@@ -194,10 +196,10 @@ object NextGenContractStateMachine {
     @VisibleForTesting
     private[transaction] def toStateMachineResult: StateMachineResult
 
-    //  TODO(#30913): remove this method
+    //  TODO(#31848): remove this method
     def consumedByOrInactive(cid: ContractId): Option[Either[NodeId, Unit]]
 
-    //  TODO(#30913): remove this method
+    //  TODO(#31848): remove this method
     def localContracts: immutable.VectorMap[ContractId, ?]
 
     /** A deterministic total order over all contracts known to the state machine.
@@ -225,10 +227,11 @@ object NextGenContractStateMachine {
       llState.create(nid, contractId, mbKey)
 
     def visitFetchById(
+        tmplId: Ref.TypeConId,
         contractId: ContractId,
         mbKey: Option[GlobalKey],
     ): ErrOr[LLState] =
-      llState.queryById(contractId) match {
+      llState.queryById(tmplId, contractId) match {
         case Left(needContract) =>
           needContract.resume(mbKey)
         case Right(result) =>
@@ -276,6 +279,7 @@ object NextGenContractStateMachine {
     }
 
     def visitFetch(
+        tmplId: Ref.TypeConId,
         contractId: ContractId,
         mbKey: Option[GlobalKey],
         byKey: Boolean,
@@ -283,21 +287,22 @@ object NextGenContractStateMachine {
       if (byKey)
         visitQueryByKey(mbKey.get, Vector(contractId), exhaustive = false)
       else
-        visitFetchById(contractId, mbKey)
+        visitFetchById(tmplId, contractId, mbKey)
 
     def visitExercise(
-        nodeId: NodeId,
+                       nodeId: NodeId,
+        tmplId: Ref.TypeConId,
         targetId: ContractId,
         mbKey: Option[GlobalKey],
         byKey: Boolean,
         consuming: Boolean,
     ): ErrOr[LLState] =
       for {
-        state <- this.visitFetch(targetId, mbKey, byKey)
+        state <- this.visitFetch(tmplId, targetId, mbKey, byKey)
         state <-
           if (consuming) {
             state
-              .archive(targetId, nodeId)
+              .archive(tmplId, targetId, nodeId)
               .getOrElse(
                 // This should never happen since visitFetch should have already verified that the contract is known and active.
                 throw new IllegalStateException(
@@ -312,7 +317,7 @@ object NextGenContractStateMachine {
       visitCreate(nid, node.coid, node.gkeyOpt)
 
     def handleFetch(node: Node.Fetch): ErrOr[LLState] =
-      visitFetch(node.coid, node.gkeyOpt, node.byKey)
+      visitFetch(node.templateId, node.coid, node.gkeyOpt, node.byKey)
 
     def handleQueryByKey(node: Node.QueryByKey): ErrOr[LLState] =
       visitQueryByKey(node.gkey, node.result, node.exhaustive)
@@ -320,6 +325,7 @@ object NextGenContractStateMachine {
     def handleExercise(nid: NodeId, exe: Node.Exercise): ErrOr[LLState] =
       visitExercise(
         nid,
+        exe.templateId,
         exe.targetCoid,
         exe.gkeyOpt,
         exe.byKey,
@@ -434,11 +440,12 @@ object NextGenContractStateMachine {
     }
 
     def queryById(
-        cid: ContractId
+        tmplId: Ref.TypeConId,
+        cid: ContractId,
     ): Either[NeedContract[State], ErrOr[State]] =
       Either.cond(
         knownContract(cid),
-        consumedBy.get(cid).map(TransactionError.AlreadyConsumed(cid, _)).toLeft(this),
+        consumedBy.get(cid).map(TransactionError.AlreadyConsumed(cid, tmplId, _)).toLeft(this),
         NeedContract(continueQueryById(cid)),
       )
 
@@ -571,8 +578,8 @@ object NextGenContractStateMachine {
       )
     }
 
-    def archive(cid: ContractId, nid: NodeId): Option[ErrOr[State]] =
-      queryById(cid).toOption.map(
+    def archive(tmplId: Ref.TypeConId, cid: ContractId, nid: NodeId): Option[ErrOr[State]] =
+      queryById(tmplId, cid).toOption.map(
         _.map(state =>
           state.copy(
             activeLedgerState = state.activeLedgerState.copy(

@@ -263,9 +263,9 @@ object Dependencies {
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
 
-  // When updating opentelemetry, check that the workaround implemented in
-  // com.digitalasset.canton.telemetry.UnsetSpanEndingThreadReferenceSpanProcessor
-  // a) is still needed, and if yes, b) still works.
+  // Update the protobuf version override in the `community-app` sbt project definition
+  // to the same version used by OpenTelemetry, otherwise the protobuf version conflict could
+  // break the performance runner (and possibly other stuff).
   lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
   lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
   lazy val opentelemetry_context = resolveDependency("io.opentelemetry", "opentelemetry-context")

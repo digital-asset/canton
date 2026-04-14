@@ -268,7 +268,7 @@ private class SymbolicSolver(
       ),
     )
 
-  // TODO(#30398): where possible, scope the auxiliary functions of these "collect from ledger" functions to the
+  // TODO(#31844): where possible, scope the auxiliary functions of these "collect from ledger" functions to the
   //   body of the main function, to avoid polluting the namespace.
   private def collectCreatedContractIds(ledger: Ledger): Set[ContractId] =
     ledger.flatMap(_.commands.flatMap(collectCreatedContractIds)).toSet

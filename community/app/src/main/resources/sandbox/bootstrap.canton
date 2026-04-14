@@ -38,6 +38,12 @@ syncDefs.foreach{ syncDef =>
   })
 }
 
+// For multisync sidebox testing participant is only connected to synchronizer-2
+participants.local.filter(_.name == "sidebox").foreach { p =>
+  p.synchronizers.disconnect("synchronizer-1")
+}
+
+
 participants.local.foreach{p =>
   println(s"${p.name} listening at ports: ${p.config.ledgerApi.port.unwrap}(gRPC) and ${p.config.httpLedgerApi.port.unwrap}(HTTP)")}
 

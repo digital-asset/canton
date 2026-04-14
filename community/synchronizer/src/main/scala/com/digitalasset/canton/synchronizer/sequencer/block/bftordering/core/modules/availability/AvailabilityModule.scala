@@ -133,6 +133,8 @@ final class AvailabilityModule[E <: Env[E]](
   @VisibleForTesting
   private[availability] def getActiveMembership = activeMembership
   @VisibleForTesting
+  private[availability] def getLastKnownEpochNumber = lastKnownEpochNumber
+  @VisibleForTesting
   private[availability] def getActiveCryptoProvider = activeCryptoProvider
   @VisibleForTesting
   private[availability] def getMessageAuthorizer = messageAuthorizer
@@ -374,7 +376,8 @@ final class AvailabilityModule[E <: Env[E]](
       implicit
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
-  ): Unit =
+  ): Unit = {
+    val signingMembership = activeMembership
     pipeToSelf(
       context.sequenceFuture(
         batches.map { case (batchId, batch) =>
@@ -400,11 +403,12 @@ final class AvailabilityModule[E <: Env[E]](
             batches.zip(signatures).map { case ((batchId, batch), signature) =>
               spanManager.addEventToBatchSpans(batchId.value, "Batch signed")
               Availability.LocalDissemination
-                .LocalBatchStoredSigned(batchId, batch, Some(signature))
+                .LocalBatchStoredSigned(batchId, batch, signingMembership, Some(signature))
             }
           )
         }
     }
+  }
 
   private def disseminateLocalBatches(
       actingOnMessageType: => String,
@@ -421,6 +425,7 @@ final class AvailabilityModule[E <: Env[E]](
       case Availability.LocalDissemination.LocalBatchStoredSigned(
             tracedBatchId,
             batch,
+            signingMembership,
             maybeSignature,
           ) =>
         val batchId = tracedBatchId.value
@@ -432,7 +437,7 @@ final class AvailabilityModule[E <: Env[E]](
               .fold[DisseminationStatus](
                 DisseminationStatus
                   .InProgress(
-                    activeMembership,
+                    signingMembership,
                     tracedBatchId,
                     acks = Set(AvailabilityAck(thisNode, signature)),
                     epochNumber = batch.epochNumber,
@@ -445,11 +450,18 @@ final class AvailabilityModule[E <: Env[E]](
                 // The local ack is missing if we check dissemination after re-signing, so we need to add it
                 _.addAck(AvailabilityAck(thisNode, signature))
               )
-              // When freshly (re-)signed, we check if the progress is already complete; this happens with F == 0,
-              //  as the local node's AvailabilityAck already constitutes a weak quorum (F + 1) by itself
-              .update()
+          val reviewedProgress =
+            // When freshly (re-)signed, review the progress again by taking into account
+            //  the most recent membership (which could have changed during the signing process).
+            //  Also, a freshly signed batch could be already complete, and in particular
+            //  this happens with F == 0, as the local node's `AvailabilityAck` already
+            //  constitutes a weak quorum (F + 1) by itself.
+            if (signingMembership != activeMembership)
+              progress.changeMembership(activeMembership)
+            else
+              progress.update()
           logger.debug(s"$actingOnMessageType: progress of stored and signed $batchId is $progress")
-          setProgress(actingOnMessageType, batchId, progress)
+          setProgress(actingOnMessageType, batchId, reviewedProgress)
         }
         // Disseminate [further] if needed
         disseminationProtocolState.disseminationProgress
@@ -520,6 +532,26 @@ final class AvailabilityModule[E <: Env[E]](
       disseminationProtocolState.disseminationQuotas.evictBatches(evictionEpoch)
     } else Seq.empty
 
+  private def updateLastKnownEpochNumberAndEvictExpiredBatches(
+      messageType: => String,
+      currentEpochNumber: EpochNumber,
+  )(implicit
+      traceContext: TraceContext,
+      context: E#ActorContextT[Availability.Message[E]],
+  ): Unit = {
+    val batchesToBeEvicted =
+      updateLastKnownEpochNumberAndForgetExpiredBatches(messageType, currentEpochNumber)
+    if (batchesToBeEvicted.nonEmpty)
+      context.pipeToSelf(availabilityStore.gc(batchesToBeEvicted)) {
+        case Failure(error) =>
+          logger.error("Failed to remove batches", error)
+          None
+        case Success(_) =>
+          logger.debug(s"Evicted ${batchesToBeEvicted.size} batches")
+          None
+      }
+  }
+
   private def handleConsensusMessage(
       consensusMessage: Availability.Consensus[E]
   )(implicit
@@ -543,20 +575,9 @@ final class AvailabilityModule[E <: Env[E]](
             currentCryptoProvider: CryptoProvider[E],
             ordered,
           ) =>
-        val batchesToBeEvicted =
-          updateLastKnownEpochNumberAndForgetExpiredBatches(messageType, currentEpochNumber)
-
         spanManager.finishBlockSpan(ordered)
 
-        if (batchesToBeEvicted.nonEmpty)
-          context.pipeToSelf(availabilityStore.gc(batchesToBeEvicted)) {
-            case Failure(error) =>
-              logger.error("Failed to remove batches", error)
-              None
-            case Success(_) =>
-              logger.debug(s"Evicted ${batchesToBeEvicted.size} batches")
-              None
-          }
+        updateLastKnownEpochNumberAndEvictExpiredBatches(messageType, currentEpochNumber)
 
         handleProposalRequest(
           messageType,
@@ -568,8 +589,10 @@ final class AvailabilityModule[E <: Env[E]](
 
       case Availability.Consensus.UpdateTopologyDuringStateTransfer(
             currentMembership,
+            currentEpochNumber,
             currentCryptoProvider: CryptoProvider[E],
           ) =>
+        updateLastKnownEpochNumberAndEvictExpiredBatches(messageType, currentEpochNumber)
         // During state transfer we only try to keep the topology up-to-date to increase the chance that
         //  the output module can fetch, but we don't trigger a review of the dissemination progress
         //  because we won't receive proposal requests until state transfer is complete, at which point
@@ -637,13 +660,13 @@ final class AvailabilityModule[E <: Env[E]](
       (currentTime - previousTime).toScala
     ) match {
       case Some(lastBlockDuration)
-          if ((lastBlockDuration < config.availabilityMaxProposalCreationDelay) && !reachedMaxBatchesPerProposal) =>
+          if ((lastBlockDuration < config.availabilityMinProposalCreationDelay) && !reachedMaxBatchesPerProposal) =>
         // but we only delay the response if the time to complete the last block was below
         // the configured max proposal creation delay.
         // And the delay will be the difference between the two durations.
         proposeResponseCancellableEvent = Some(
           context.delayedEvent(
-            delay = config.availabilityMaxProposalCreationDelay - lastBlockDuration,
+            delay = config.availabilityMinProposalCreationDelay - lastBlockDuration,
             Availability.DelayedProposalResponse,
           )
         )
@@ -754,17 +777,19 @@ final class AvailabilityModule[E <: Env[E]](
         Availability.LocalDissemination.LocalBatchesStored(_)
       )
 
-    if (batchesThatNeedMoreDissemination.sizeIs > 0)
+    if (batchesThatNeedMoreDissemination.sizeIs > 0) {
+      val currentMembership = activeMembership
       fetchBatchesAndThenSelfSend(batchesThatNeedMoreDissemination.map(_._1)) { batches =>
         Availability.LocalDissemination.LocalBatchesStoredSigned(
           batches.zip(batchesThatNeedMoreDissemination.map(_._2)).map {
             case ((batchId, batch), _) =>
               // "signature = None" will trigger further dissemination without resigning
               Availability.LocalDissemination
-                .LocalBatchStoredSigned(batchId, batch, signature = None)
+                .LocalBatchStoredSigned(batchId, batch, currentMembership, signature = None)
           }
         )
       }
+    }
   }
 
   private def updateAllDisseminationProgressBasedOnActiveMembership[X <: DisseminationStatus](

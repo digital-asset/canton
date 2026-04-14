@@ -3074,7 +3074,7 @@ private[backend] trait StorageBackendTestsEvents
     ) shouldBe Vector(4L, 11L)
   }
 
-  behavior of "addActivationsToACHS"
+  behavior of "addActivationsToAchs"
   private val signatory = Ref.Party.assertFromString("signatory")
 
   it should "add activations to ACHS respecting the limits" in {
@@ -3097,7 +3097,7 @@ private[backend] trait StorageBackendTestsEvents
 
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 1L, endInclusive = 3L, activeAt = 1000L)
         )
     )
@@ -3157,7 +3157,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 2L, activeAt = 2L)
         )
     )
@@ -3190,7 +3190,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 3L, activeAt = 3L)
         )
     )
@@ -3219,7 +3219,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 3L, activeAt = 4L)
         )
     )
@@ -3275,7 +3275,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 4L, activeAt = 4L)
         )
     )
@@ -3302,7 +3302,7 @@ private[backend] trait StorageBackendTestsEvents
 
     executeSql(
       backend.event
-        .removeDeactivatedFromACHS(
+        .removeDeactivatedFromAchs(
           AchsRemoveDeactivatedParams(startExclusive = 4L, endInclusive = 8L)
         )
     )
@@ -3332,7 +3332,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 2L, activeAt = 2L)
         )
     )
@@ -3385,7 +3385,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(updateLedgerEnd(offset(5), 5L))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0L, endInclusive = 5L, activeAt = 1000L)
         )
     )

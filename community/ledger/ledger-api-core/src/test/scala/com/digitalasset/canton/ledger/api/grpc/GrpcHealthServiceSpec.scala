@@ -7,7 +7,6 @@ import com.daml.grpc.GrpcException
 import com.daml.grpc.adapter.server.rs.MockServerCallStreamObserver
 import com.daml.scalautil.Statement.discard
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.health.{
   HealthChecks,
@@ -38,7 +37,6 @@ final class GrpcHealthServiceSpec
     "report SERVING if there are no health checks" in {
       val service = new GrpcHealthService(
         new HealthChecks,
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -52,7 +50,6 @@ final class GrpcHealthServiceSpec
     "report SERVING if there is one healthy check" in {
       val service = new GrpcHealthService(
         new HealthChecks("component" -> healthyComponent),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -66,7 +63,6 @@ final class GrpcHealthServiceSpec
     "report NOT_SERVING if there is one unhealthy check" in {
       val service = new GrpcHealthService(
         new HealthChecks("component" -> unhealthyComponent),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -84,7 +80,6 @@ final class GrpcHealthServiceSpec
           "component B" -> healthyComponent,
           "component C" -> healthyComponent,
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -103,7 +98,6 @@ final class GrpcHealthServiceSpec
           "component B" -> unhealthyComponent,
           "component C" -> healthyComponent,
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -117,7 +111,6 @@ final class GrpcHealthServiceSpec
     "report SERVING when querying a single, healthy component" in {
       val service = new GrpcHealthService(
         new HealthChecks("component" -> healthyComponent),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -131,7 +124,6 @@ final class GrpcHealthServiceSpec
     "report NOT_SERVING when querying a single, unhealthy component" in {
       val service = new GrpcHealthService(
         new HealthChecks("component" -> unhealthyComponent),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -149,7 +141,6 @@ final class GrpcHealthServiceSpec
           "component B" -> healthyComponent,
           "component C" -> unhealthyComponent,
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -167,7 +158,6 @@ final class GrpcHealthServiceSpec
           "component B" -> healthyComponent,
           "component C" -> healthyComponent,
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -190,7 +180,6 @@ final class GrpcHealthServiceSpec
           "component B" -> componentWithHealthBackedBy(() => componentBHealth),
           "component C" -> componentWithHealthBackedBy(() => componentCHealth),
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
         maximumWatchFrequency = 1.millisecond,
       )
@@ -257,7 +246,6 @@ final class GrpcHealthServiceSpec
           "component B" -> componentWithHealthBackedBy(() => componentBHealth),
           "component C" -> componentWithHealthBackedBy(() => componentCHealth),
         ),
-        telemetry = NoOpTelemetry,
         loggerFactory = loggerFactory,
         maximumWatchFrequency = 1.millisecond,
       )
@@ -313,7 +301,6 @@ final class GrpcHealthServiceSpec
   "fail gracefully when a non-existent component is checked" in {
     val service = new GrpcHealthService(
       new HealthChecks("component" -> unhealthyComponent),
-      telemetry = NoOpTelemetry,
       loggerFactory = loggerFactory,
     )
 
@@ -324,7 +311,6 @@ final class GrpcHealthServiceSpec
     val responseObserver = new MockServerCallStreamObserver[HealthCheckResponse]
     val service = new GrpcHealthService(
       new HealthChecks("component" -> unhealthyComponent),
-      telemetry = NoOpTelemetry,
       loggerFactory = loggerFactory,
     )
 

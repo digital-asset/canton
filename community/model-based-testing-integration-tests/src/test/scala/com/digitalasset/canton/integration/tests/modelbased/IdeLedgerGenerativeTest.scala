@@ -44,9 +44,9 @@ class IdeLedgerGenerativeTest
           ContractStateMachine.Mode.NoKey,
         ),
         (
-          "pvdev",
+          "pv35",
           new ConcreteGenerators(
-            languageVersion = LanguageVersion.v2_dev,
+            languageVersion = LanguageVersion.v2_3,
             readOnlyRollbacks = true,
             keyMode = KeyMode.NonUniqueContractKeys,
             generateQueryByKey = true,

@@ -13,7 +13,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.SigningKeyUsage.{Protocol, SequencerAuthentication}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import org.scalatest.Inspectors.forAll
 
 trait OffboardsSequencerNode {
@@ -48,12 +47,13 @@ trait OffboardsSequencerNode {
             .flatMap(_.keys.public.list())
             .map(_.publicKey)
         )
-    sequencerToOffboard.topology.owner_to_key_mappings
-      .propose(
-        sequencerToOffboard.id,
-        sequencerToOffboardExclusivePubKeys,
-        ops = TopologyChangeOp.Remove,
-      )
+    sequencerToOffboardExclusivePubKeys.foreach { key =>
+      sequencerToOffboard.topology.owner_to_key_mappings
+        .remove_key(
+          key.fingerprint,
+          key.purpose,
+        )
+    }
     // user-manual-entry-end: SequencerOffboardingRemoveExclusiveKeys
 
     // fetch the latest SequencerSynchronizerState mapping
@@ -63,6 +63,7 @@ trait OffboardsSequencerNode {
       .getOrElse(fail("No sequencer state found"))
       .item
 
+    // user-manual-entry-begin: SequencerOffboardingRemoveFromTopology
     // propose the SequencerSynchronizerState that removes the sequencer
     synchronizerOwnersNE
       .foreach(
@@ -72,6 +73,7 @@ trait OffboardsSequencerNode {
           active = seqState1.active.filterNot(_ == sequencerToOffboard.id),
         )
       )
+    // user-manual-entry-end: SequencerOffboardingRemoveFromTopology
 
     BaseTest.eventually() {
       sequencersOnSynchronizer.head1.topology.sequencers

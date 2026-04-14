@@ -11,8 +11,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcFUSExtended
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.api.v30 as proto
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
@@ -42,11 +42,13 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /** Sequencer connect service on gRPC
   */
@@ -58,6 +60,7 @@ class GrpcSequencerConnectService(
     cryptoApi: SynchronizerCryptoClient,
     clock: Clock,
     lsuSequencingBounds: Option[LsuSequencingBounds],
+    sanitizePublicErrorMessages: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends proto.SequencerConnectServiceGrpc.SequencerConnectService
@@ -69,6 +72,7 @@ class GrpcSequencerConnectService(
   override def getSynchronizerId(
       request: GetSynchronizerIdRequest
   ): Future[GetSynchronizerIdResponse] =
+    // No need to sanitize error messages, as long as this cannot fail in any way.
     Future.successful(
       GetSynchronizerIdResponse(
         physicalSynchronizerId = psid.toProtoPrimitive,
@@ -78,86 +82,75 @@ class GrpcSequencerConnectService(
 
   override def getSynchronizerParameters(
       request: GetSynchronizerParametersRequest
-  ): Future[GetSynchronizerParametersResponse] = {
-    val response = staticSynchronizerParameters.protoVersion.v match {
-      case 30 => Future.successful(Parameters.ParametersV1(staticSynchronizerParameters.toProtoV30))
-      case unsupported =>
-        Future.failed(
-          new IllegalStateException(
-            s"Unsupported Proto version $unsupported for static synchronizer parameters"
+  ): Future[GetSynchronizerParametersResponse] =
+    mapErrorEither(
+      staticSynchronizerParameters.protoVersion.v match {
+        case 30 =>
+          Right(
+            GetSynchronizerParametersResponse(
+              Parameters.ParametersV1(staticSynchronizerParameters.toProtoV30)
+            )
           )
-        )
-    }
-
-    response.map(GetSynchronizerParametersResponse(_))
-  }
+        case unsupported =>
+          // If we hit this branch, something is severely broken. Therefore the extra error logging.
+          logger.error(
+            s"Unable to serialize StaticSynchronizerParameters to Proto version $unsupported. Failing..."
+          )(TraceContext.empty)
+          Left(
+            internal(
+              new IllegalStateException(
+                s"Unable to serialize StaticSynchronizerParameters to Proto version $unsupported. Failing..."
+              )
+            )
+          )
+      }
+    )
 
   override def verifyActive(request: VerifyActiveRequest): Future[VerifyActiveResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val resultF = for {
-      participant <- EitherT.fromEither[FutureUnlessShutdown](getParticipantFromGrpcContext())
-      // for status reads use the currentSnapshotApproximation
-      topologySnapshot <- EitherT.liftF(
-        cryptoApi.ips.currentSnapshotApproximation
-      )
-      isActive <- EitherT(
-        topologySnapshot
-          .isParticipantActive(participant)
-          .map(_.asRight[String])
-      )
-    } yield VerifyActiveResponse.Success(isActive)
+    mapErrorEitherFUS(
+      for {
+        participant <- EitherT.fromEither[FutureUnlessShutdown](getParticipantFromGrpcContext())
 
-    resultF
-      .fold[VerifyActiveResponse.Value](
-        reason => VerifyActiveResponse.Value.Failure(VerifyActiveResponse.Failure(reason)),
-        success =>
-          VerifyActiveResponse.Value.Success(VerifyActiveResponse.Success(success.isActive)),
+        // for status reads use the currentSnapshotApproximation
+        topologySnapshot <- EitherT.liftF(
+          cryptoApi.ips.currentSnapshotApproximation
+        )
+
+        isActive <- EitherT.liftF(
+          topologySnapshot.isParticipantActive(participant)
+        ): EitherT[FutureUnlessShutdown, Status, Boolean]
+      } yield VerifyActiveResponse(
+        VerifyActiveResponse.Value.Success(VerifyActiveResponse.Success(isActive))
       )
-      .map(VerifyActiveResponse(_))
-      .asGrpcResponse
+    )
   }
 
   override def handshake(request: HandshakeRequest): Future[HandshakeResponse] =
-    Future.successful {
-      val response = HandshakeValidator
+    mapErrorEither(
+      HandshakeValidator
         .clientIsCompatible(
           serverProtocolVersion,
           request.clientProtocolVersions,
           request.minimumProtocolVersion,
         )
-        .fold[HandshakeResponse.Value](
-          failure =>
-            HandshakeResponse.Value
-              .Failure(SequencerConnect.HandshakeResponse.Failure(failure)),
-          _ =>
+        .map(_ =>
+          HandshakeResponse(
+            serverProtocolVersion.toProtoPrimitive,
             HandshakeResponse.Value
               .Success(SequencerConnect.HandshakeResponse.Success()),
+          )
         )
-      HandshakeResponse(serverProtocolVersion.toProtoPrimitive, response)
-    }
+    )
 
   override def registerOnboardingTopologyTransactions(
       request: SequencerConnect.RegisterOnboardingTopologyTransactionsRequest
   ): Future[SequencerConnect.RegisterOnboardingTopologyTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    val resultET = for {
-
-      // check that the header has a member ID
-      member <- EitherT.fromEither[Future](
-        IdentityContextHelper.getCurrentStoredMember.toRight(
-          invalidRequest("Unable to find member id in gRPC context")
-        )
-      )
-
+    mapErrorEitherF(for {
       // refuse requests from non-participants
-      participantId <- member match {
-        case p: ParticipantId => EitherT.rightT[Future, StatusRuntimeException](p)
-        case other =>
-          EitherT.leftT[Future, ParticipantId](
-            failedPrecondition(s"This endpoint is only for participants. Refused: ${other.code}")
-          )
-      }
+      participantId <- EitherT.fromEither[Future](getParticipantFromGrpcContext())
 
       now = clock.now
 
@@ -168,16 +161,13 @@ class GrpcSequencerConnectService(
       - unnecessary warnings in the logs
       - unnecessary delay for the participant to figure out that onboarding has failed
        */
-      _ <- lsuSequencingBounds.map(_.upgradeTime) match {
-        case Some(boundExclusive) if now <= boundExclusive =>
-          EitherT.leftT[Future, Unit](
-            failedPrecondition(
-              s"Onboarding is possible only from $boundExclusive but current time is $now"
-            )
-          )
-
-        case _ => EitherTUtil.unit[StatusRuntimeException]
-      }
+      upgradeTimeExclusive = lsuSequencingBounds.map(_.upgradeTime)
+      _ <- EitherTUtil.condUnitET[Future](
+        upgradeTimeExclusive.forall(now > _),
+        failedPrecondition(
+          show"Onboarding is possible only after ${upgradeTimeExclusive.showValue}. Aborting..."
+        ),
+      )
 
       // grab the head snapshot to use in all subsequent checks
       // use head snapshot here to make sure we see the results of all sequenced transactions
@@ -186,7 +176,10 @@ class GrpcSequencerConnectService(
       // get the synchronizer parameters from the snapshot
       params <- EitherT(
         topologySnapshot.findDynamicSynchronizerParameters().asGrpcFuture
-      ).leftMap(err => failedPrecondition(s"Could not fetch synchronizer parameters: $err"))
+      )
+        .leftMap(err =>
+          internal(new IllegalStateException(s"Unable to fetch synchronizer parameters: $err"))
+        )
 
       // Reject request if the synchronizer is locked
       _ <- EitherTUtil.condUnitET[Future](
@@ -194,15 +187,17 @@ class GrpcSequencerConnectService(
         failedPrecondition("Synchronizer is locked for onboarding."),
       )
 
-      transactions <- CantonGrpcUtil.mapErrNew(
-        request.topologyTransactions
-          .traverse(
-            SignedTopologyTransaction
-              .fromProtoV30(ProtocolVersionValidation(serverProtocolVersion), _)
-          )
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-          .map(_.distinctBy(_.mapping.uniqueKey))
-      )
+      transactions <-
+        EitherT.fromEither[Future](
+          request.topologyTransactions
+            .traverse(
+              SignedTopologyTransaction
+                .fromProtoV30(ProtocolVersionValidation(serverProtocolVersion), _)
+            )
+            .leftMap(ProtoDeserializationFailure.Wrap(_))
+            .map(_.distinctBy(_.mapping.uniqueKey))
+            .leftMap(_.asGrpcError.getStatus)
+        )
 
       // Perform validations on the transactions
       // Pass a limit of 7 for total number of transactions
@@ -210,48 +205,66 @@ class GrpcSequencerConnectService(
       // should more than suffice during onboarding. Assuming even one NSD for each of
       // the other mappings (STC, OTK), one to manage them, plus one root mapping
       // requires 4 NSDs in total. More mappings can be added after onboarding
-      _ <- validateOnboardingTransactions(participantId, transactions, PositiveInt.tryCreate(7))
+      _ <- EitherT.fromEither[Future](
+        validateOnboardingTransactions(participantId, transactions, PositiveInt.tryCreate(7))
+      )
 
       // query whether the participant has ever onboarded before (regardless of whether it is presently active)
-      wasEverOnboarded <- EitherT.liftF(
-        topologySnapshot.wasEverOnboarded(participantId).asGrpcFuture
+      wasEverOnboarded <- leftOnShutdown(
+        EitherT
+          .liftF(
+            topologySnapshot.wasEverOnboarded(participantId)
+          )
       )
 
       _ <- EitherTUtil.condUnitET[Future](
         !wasEverOnboarded,
         failedPrecondition(
-          s"Participant $participantId is either active on the synchronizer or has previously been offboarded."
+          if (sanitizePublicErrorMessages) {
+            // Sanitize so that an attacker cannot determine who is or has been registered.
+            "Unable to register onboarding topology transactions"
+          } else
+            s"Participant $participantId is either active on the synchronizer or has previously been offboarded."
         ),
       )
 
-      _ <- CantonGrpcUtil.mapErrNewETUS(
+      _ <- leftOnShutdown(
         synchronizerTopologyManager
           // TopologyStateProcessor.validateAndApply sets expectFullAuthorization = expectFullAuthorization || !tx.isProposal,
           // so in the usual case (isProposal=false, also checked above that this holds), the authorization checks are active
           // even with expectFullAuthorization = false. But to be safe, set it to be true.
-          .add(transactions, ForceFlags.all, expectFullAuthorization = true)
+          .add(
+            transactions,
+            ForceFlags.all,
+            expectFullAuthorization = true,
+          )
+          .leftMap(err =>
+            if (sanitizePublicErrorMessages) {
+              // Sanitize because it is too hard to reason about the contents of err.
+              failedPrecondition("Unable to register onboarding topology transactions")
+            } else err.asGrpcError.getStatus
+          )
       )
-    } yield RegisterOnboardingTopologyTransactionsResponse.defaultInstance
-
-    EitherTUtil
-      .toFuture(resultET)
+    } yield RegisterOnboardingTopologyTransactionsResponse.defaultInstance)
   }
 
   private[service] def validateOnboardingTransactions(
       participantId: ParticipantId,
       transactions: Seq[GenericSignedTopologyTransaction],
       maxMappings: PositiveInt,
-  ): EitherT[Future, StatusRuntimeException, Unit] = {
+  ): Either[Status, Unit] = {
 
     val expectedMappings = TopologyStore.initialParticipantDispatchingSet.forgetNE
 
-    val resultET = for {
+    for {
       _ <- {
         // 0. Reject the transactions if the number exceeds the limit
         val totalCount = transactions.size
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           totalCount <= maxMappings.value,
-          s"Too many topology transactions. Limit: ${maxMappings.value}, Found: $totalCount",
+          invalidArgument(
+            s"Too many topology transactions. Limit: ${maxMappings.value}, Found: $totalCount"
+          ),
         )
       }
 
@@ -261,21 +274,19 @@ class GrpcSequencerConnectService(
       otks = transactions.flatMap(_.mapping.select[OwnerToKeyMapping])
 
       // 1. Participants must have exactly 1 STC
-      _ <- EitherTUtil.condUnitET[Future](
+      _ <- EitherUtil.condUnit(
         stcCount == 1,
-        s"Exactly one SynchronizerTrustCertificate is required for Participants. Found: $stcCount",
+        invalidArgument(
+          s"Exactly one SynchronizerTrustCertificate is required for Participants. Found: $stcCount"
+        ),
       )
 
       // 2. All members must send exactly 1 OTK at a time
-      singleOtk <- otks.toList match {
-        case single :: Nil => EitherT.rightT[Future, String](single)
-        case Nil =>
-          EitherT.leftT[Future, OwnerToKeyMapping](
-            "Exactly one OwnerToKeyMapping is required. Found: 0"
-          )
-        case more =>
-          EitherT.leftT[Future, OwnerToKeyMapping](
-            s"Exactly one OwnerToKeyMapping is required. Found: ${more.size}"
+      _ <- otks.toList match {
+        case _single :: Nil => Right(())
+        case notSingle =>
+          Left(
+            invalidArgument(s"Exactly one OwnerToKeyMapping is required. Found: ${notSingle.size}")
           )
       }
 
@@ -283,9 +294,11 @@ class GrpcSequencerConnectService(
       _ <- {
         val firstUnexpectedMapping =
           transactions.find(t => !expectedMappings.contains(t.mapping.code))
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           firstUnexpectedMapping.isEmpty,
-          s"Unexpected topology mapping found. Allowed: $expectedMappings. Found: ${firstUnexpectedMapping.map(_.mapping.code).toString}",
+          invalidArgument(
+            s"Unexpected topology mapping found. Allowed: $expectedMappings. Found: ${firstUnexpectedMapping.map(_.mapping.code).toString}"
+          ),
         )
       }
 
@@ -295,36 +308,44 @@ class GrpcSequencerConnectService(
       _ <- {
         val submittedMappings = transactions.map(_.mapping.code).toSet
         val missingMappings = expectedMappings -- submittedMappings
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           missingMappings.isEmpty,
-          s"Missing mappings for onboarding $participantId. Missing: $missingMappings",
+          invalidArgument(
+            s"Missing mappings for onboarding $participantId. Missing: $missingMappings"
+          ),
         )
       }
 
       // 5. check for proposals. if any is found, reject the request
       _ <- {
         val firstProposal = transactions.find(_.isProposal)
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           firstProposal.isEmpty,
-          s"Unexpected proposals for onboarding $participantId. Found: ${firstProposal.toString}",
+          invalidArgument(
+            s"Unexpected proposals for onboarding $participantId. Found: ${firstProposal.toString}"
+          ),
         )
       }
 
       // 6. check for removals. if any is found, reject the request
       _ <- {
         val firstRemoval = transactions.find(_.operation.equals(Remove))
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           firstRemoval.isEmpty,
-          s"Unexpected removals for onboarding $participantId. Found: ${firstRemoval.toString}",
+          invalidArgument(
+            s"Unexpected removals for onboarding $participantId. Found: ${firstRemoval.toString}"
+          ),
         )
       }
 
       // 7. check for unexpected UIDs
       _ <- {
         val firstBadUidTx = transactions.find(_.mapping.maybeUid.exists(_ != participantId.uid))
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           firstBadUidTx.isEmpty,
-          s"Mappings for unexpected UIDs for onboarding $participantId: ${firstBadUidTx.toString}",
+          invalidArgument(
+            s"Mappings for unexpected UIDs for onboarding $participantId: ${firstBadUidTx.toString}"
+          ),
         )
       }
 
@@ -332,30 +353,84 @@ class GrpcSequencerConnectService(
       _ <- {
         val firstUnexpectedNamespace =
           transactions.find(_.mapping.namespace != participantId.namespace)
-        EitherTUtil.condUnitET[Future](
+        EitherUtil.condUnit(
           firstUnexpectedNamespace.isEmpty,
-          s"Mappings for unexpected namespaces for onboarding $participantId: ${firstUnexpectedNamespace.toString}",
+          invalidArgument(
+            s"Mappings for unexpected namespaces for onboarding $participantId: ${firstUnexpectedNamespace.toString}"
+          ),
         )
       }
     } yield ()
-    resultET.leftMap(msg => invalidRequest(msg))
   }
-
-  private def invalidRequest(message: String): StatusRuntimeException =
-    Status.INVALID_ARGUMENT.withDescription(message).asRuntimeException()
-
-  private def failedPrecondition(message: String): StatusRuntimeException =
-    Status.FAILED_PRECONDITION.withDescription(message).asRuntimeException()
 
   /*
    Note: we only get the participantId from the context; we have no idea
    whether the member is authenticated or not.
    */
-  private def getParticipantFromGrpcContext(): Either[String, ParticipantId] =
-    IdentityContextHelper.getCurrentStoredMember
-      .toRight("Unable to find participant id in gRPC context")
-      .flatMap {
-        case participantId: ParticipantId => Right(participantId)
-        case member => Left(s"Expecting participantId ; found $member")
-      }
+  private def getParticipantFromGrpcContext(): Either[Status, ParticipantId] = for {
+    member <- IdentityContextHelper.getCurrentStoredMember
+      .toRight(
+        invalidArgument("Unable to find participant id in gRPC context")
+      )
+
+    participantId <- member match {
+      case participantId: ParticipantId => Right(participantId)
+      case member =>
+        Left(
+          invalidArgument(
+            s"Only participants should use this endpoint, but found member of type ${member.getClass.getSimpleName} in the gRPC context."
+          )
+        )
+    }
+  } yield participantId
+
+  private def invalidArgument(message: String): Status =
+    Status.INVALID_ARGUMENT.withDescription(message)
+
+  private def failedPrecondition(message: String): Status =
+    Status.FAILED_PRECONDITION.withDescription(message)
+
+  private def internal(cause: Throwable): Status =
+    Status.INTERNAL
+      .withDescription(
+        // Deliberately hardcoding a generic error message here, as GRPC forwards it to clients.
+        "An error has occurred. Please contact the operator and inquire about the request."
+      )
+      // Including cause so that ApiRequestLogger logs it server side.
+      // Grpc does not forward exceptions to clients.
+      .withCause(cause)
+
+  private def leftOnShutdown[A](f: EitherT[FutureUnlessShutdown, Status, A])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Status, A] =
+    // Deliberately converting to io.grpc.Status here to remove any metadata (e.g., line number)
+    // that should not be disclosed to clients.
+    f.onShutdown(Left(AbortedDueToShutdown.Error().asGrpcError.getStatus))
+
+  private def mapErrorEitherFUS[A](f: EitherT[FutureUnlessShutdown, Status, A])(implicit
+      traceContext: TraceContext
+  ): Future[A] =
+    mapErrorEitherF(
+      f.onShutdown(
+        Left(
+          // Deliberately converting to io.grpc.Status here, as this strips out any metadata (e.g. line number)
+          // that should not be disclosed to clients.
+          GrpcErrors.AbortedDueToShutdown.Error().asGrpcError.getStatus
+        )
+      )
+    )
+
+  private def mapErrorEitherF[A](f: EitherT[Future, Status, A]): Future[A] =
+    f.value.transformWith {
+      case Success(resultOrErr) => mapErrorEither(resultOrErr)
+      case Failure(ex: StatusRuntimeException) => Future.failed(ex)
+      case Failure(ex) =>
+        Future.failed(
+          // Calling internal here, as GRPC would disclose the exception message to clients.
+          internal(ex).asRuntimeException()
+        )
+    }
+
+  private def mapErrorEither[A](f: Either[Status, A]): Future[A] =
+    Future.fromTry(f.leftMap(_.asRuntimeException()).toTry)
 }

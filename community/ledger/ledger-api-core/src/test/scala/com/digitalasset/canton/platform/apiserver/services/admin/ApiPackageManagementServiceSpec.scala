@@ -12,8 +12,6 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
 }
 import com.daml.nonempty.NonEmpty
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.tracing.DefaultOpenTelemetry
-import com.daml.tracing.TelemetrySpecBase.*
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -55,15 +53,13 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
 }
-import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
-import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{BaseTest, LfKeyResolver, LfPackageId, LfPartyId}
+import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.{BaseTest, LfGlobalKeyMapping, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, Party, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
-import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.Eventually
@@ -96,54 +92,32 @@ class ApiPackageManagementServiceSpec
     testTelemetrySetup.close()
 
   "ApiPackageManagementService $suffix" should {
-    "propagate trace context" in {
-      val apiService = createApiService()
-      val span = testTelemetrySetup.anEmptySpan()
-      val scope = span.makeCurrent()
-      apiService
-        .uploadDarFile(
-          UploadDarFileRequest(
-            ByteString.EMPTY,
-            aSubmissionId,
-            UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES,
-            synchronizerId = "",
-          )
-        )
-        .thereafter { _ =>
-          scope.close()
-          span.end()
-        }
-        .map { _ =>
-          testTelemetrySetup.reportedSpanAttributes should contain(anUserIdSpanAttribute)
-          succeed
-        }
-    }
-
     "have a tid" in {
       val apiService = createApiService()
       val span = testTelemetrySetup.anEmptySpan()
       val _ = span.makeCurrent()
-
-      loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(DEBUG))(
-        within = {
-          apiService
-            .uploadDarFile(
-              UploadDarFileRequest(
-                ByteString.EMPTY,
-                aSubmissionId,
-                UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES,
-                synchronizerId = "",
+      TraceContextGrpc.withGrpcContext(TraceContext.createNew("tid-test")) {
+        loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(DEBUG))(
+          within = {
+            apiService
+              .uploadDarFile(
+                UploadDarFileRequest(
+                  ByteString.EMPTY,
+                  aSubmissionId,
+                  UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES,
+                  synchronizerId = "",
+                )
               )
-            )
-            .map(_ => succeed)
-        },
-        { logEntries =>
-          logEntries should not be empty
+              .map(_ => succeed)
+          },
+          { logEntries =>
+            logEntries should not be empty
 
-          val mdcs = logEntries.map(_.mdc)
-          forEvery(mdcs)(_.getOrElse("trace-id", "") should not be empty)
-        },
-      )
+            val mdcs = logEntries.map(_.mdc)
+            forEvery(mdcs)(_.getOrElse("trace-id", "") should not be empty)
+          },
+        )
+      }
     }
 
     "validate a dar" in {
@@ -157,7 +131,6 @@ class ApiPackageManagementServiceSpec
   private def createApiService(): PackageManagementServiceGrpc.PackageManagementService =
     ApiPackageManagementService.createApiService(
       TestSyncService(testTelemetrySetup.tracer),
-      telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
       loggerFactory = loggerFactory,
     )
 }
@@ -173,14 +146,8 @@ object ApiPackageManagementServiceSpec {
         synchronizerId: Option[SynchronizerId],
     )(implicit
         traceContext: TraceContext
-    ): Future[SubmissionResult] = {
-      val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
-      telemetryContext.setAttribute(
-        anUserIdSpanAttribute._1,
-        anUserIdSpanAttribute._2,
-      )
+    ): Future[SubmissionResult] =
       Future.successful(state.SubmissionResult.Acknowledged)
-    }
 
     override def validateDar(
         dar: ByteString,
@@ -188,14 +155,8 @@ object ApiPackageManagementServiceSpec {
         synchronizerId: Option[SynchronizerId],
     )(implicit
         traceContext: TraceContext
-    ): Future[SubmissionResult] = {
-      val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
-      telemetryContext.setAttribute(
-        anUserIdSpanAttribute._1,
-        anUserIdSpanAttribute._2,
-      )
+    ): Future[SubmissionResult] =
       Future.successful(state.SubmissionResult.Acknowledged)
-    }
 
     override def internalIndexService: Option[InternalIndexService] =
       throw new UnsupportedOperationException()
@@ -219,7 +180,7 @@ object ApiPackageManagementServiceSpec {
         transactionMeta: TransactionMeta,
         // Currently, the estimated interpretation cost is not used
         _estimatedInterpretationCost: Long,
-        keyResolver: LfKeyResolver,
+        keyResolver: LfGlobalKeyMapping,
         processedDisclosedContracts: ImmArray[LfFatContractInst],
     )(implicit
         traceContext: TraceContext
@@ -297,7 +258,7 @@ object ApiPackageManagementServiceSpec {
         transaction: LfVersionedTransaction,
         transactionMetadata: TransactionMeta,
         submitterInfo: SubmitterInfo,
-        keyResolver: LfKeyResolver,
+        keyResolver: LfGlobalKeyMapping,
         disclosedContracts: Map[LfContractId, LfFatContractInst],
         costHints: CostEstimationHints,
     )(implicit

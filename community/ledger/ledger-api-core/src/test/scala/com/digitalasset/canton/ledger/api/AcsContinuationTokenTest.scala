@@ -26,26 +26,26 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
   private val participantId = Ref.ParticipantId.assertFromString("Ledger")
   private val originalRequestChecksum =
     AcsContinuationToken.calcChecksum(originalRequest, participantId)
-  private val originalToken = AcsContinuationTokenActive(originalRequestChecksum, 42)
-  private val encodedToken = originalToken.encode
+  private val sequentialId = 42L
+  private val originalPointer = AcsContinuationPointerActiveContracts(sequentialId)
+  private val encodedToken =
+    AcsContinuationToken.activeContracts(sequentialId, originalRequestChecksum)
 
   private implicit val elc: ErrorLoggingContext =
     ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)(TraceContext.empty)
 
   "AcsContinuationToken" should "successfully decode an untampered token from the request" in {
-    val requestWithToken = originalRequest.copy(streamContinuationToken = Some(encodedToken))
-    val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
+    val checksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
-    decodedToken.value should equal(Some(originalToken))
+      AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
+    decodedToken.value should equal(originalPointer)
   }
 
   it should "fail if used on a different participant" in {
     val differentParticipantId = Ref.ParticipantId.assertFromString("different")
-    val requestWithToken = originalRequest.copy(streamContinuationToken = Some(encodedToken))
-    val checksum = AcsContinuationToken.calcChecksum(requestWithToken, differentParticipantId)
+    val checksum = AcsContinuationToken.calcChecksum(originalRequest, differentParticipantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
+      AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
       "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in ACS " +
         "requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
@@ -60,7 +60,7 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     )
     val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
+      AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
       "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
@@ -75,7 +75,7 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     )
     val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
+      AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
       "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
@@ -85,10 +85,9 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
 
   it should "reject an invalid token" in {
     val tamperedToken = encodedToken.substring(5)
-    val requestWithToken = originalRequest.copy(streamContinuationToken = Some(tamperedToken))
-    val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
+    val checksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
+      AcsContinuationToken.decodeAndValidate(checksum, tamperedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
       "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field stream_continuation_token: " +
         "Invalid continuation token for GetActiveContractsRequest"
@@ -110,21 +109,21 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     )
     val originalRequest = GetActiveContractsRequest(125, Some(eventFormatHashMap), None)
     val originalRequestChecksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
-    val originalToken = AcsContinuationTokenActive(originalRequestChecksum, 42)
-
+    val originalPointer = AcsContinuationPointerActiveContracts(sequentialId)
+    val newToken = AcsContinuationToken.activeContracts(sequentialId, originalRequestChecksum)
     val requestWithToken = originalRequest.copy(
       eventFormat = Some(eventFormatTreeMap),
-      streamContinuationToken = Some(originalToken.encode),
+      streamContinuationToken = Some(newToken),
     )
     val checksum = AcsContinuationToken.calcChecksum(requestWithToken, participantId)
     val decodedToken =
-      AcsContinuationToken.decodeAndValidate(checksum, requestWithToken.streamContinuationToken)
-    decodedToken.value should equal(Some(originalToken))
+      AcsContinuationToken.decodeAndValidate(checksum, newToken)
+    decodedToken.value should equal(originalPointer)
   }
 
   it should "calculate the same checksum all the time" in {
     originalRequestChecksum should equal(
-      Checksum(ByteString.copyFrom(Array[Byte](109, -108, -75, 116)))
+      Checksum(ByteString.copyFrom(Array[Byte](87, -103, -53, 56)))
     )
   }
 }

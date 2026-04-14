@@ -8,17 +8,15 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.contractsToRequestEachTime
 import com.digitalasset.canton.participant.store.{
@@ -81,7 +79,6 @@ class PartyReplicationTargetParticipantProcessor(
     protected val onDisconnect: (String, TraceContext) => Unit,
     persistsContracts: TargetParticipantAcsPersistence.PersistsContracts,
     requestTracker: RequestTracker,
-    indexingWorkflow: PartyReplicationIndexingWorkflow,
     indexingStore: PartyReplicationIndexingStore,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
@@ -103,7 +100,7 @@ class PartyReplicationTargetParticipantProcessor(
 
   protected val processorStore: TargetParticipantStore = InMemoryProcessorStore.targetParticipant()
 
-  override def replicatedContractsCount: NonNegativeInt = processorStore.processedContractsCount
+  override def replicatedContractsCount: NonNegativeLong = processorStore.processedContractsCount
 
   override protected def name: String = "party-replication-target-processor"
 
@@ -211,13 +208,9 @@ class PartyReplicationTargetParticipantProcessor(
     replicatedContractCount = replicationProgress.processedContractCount
     _ <-
       if (replicationProgress.fullyProcessedAcs) {
-        indexingWorkflow
-          .indexAllContractBatches()
-          .flatMap(_ =>
-            sendCompleted(
-              "completing in response to source participant notification of end of data"
-            )
-          )
+        sendCompleted(
+          "completing in response to source participant notification of end of data"
+        )
       } else if (processorStore.initialContractOrdinalInclusiveO.isEmpty) {
         val initialContractOrdinalInclusive = replicatedContractCount
         logger.info(
@@ -256,7 +249,7 @@ class PartyReplicationTargetParticipantProcessor(
     val inclusiveContractOrdinal = updatedContractOrdinalToRequestExclusive.unwrap - 1
     val instructionMessage = PartyReplicationTargetParticipantMessage(
       PartyReplicationTargetParticipantMessage.SendAcsUpTo(
-        NonNegativeInt.tryCreate(inclusiveContractOrdinal)
+        NonNegativeLong.tryCreate(inclusiveContractOrdinal)
       )
     )(
       PartyReplicationTargetParticipantMessage.protocolVersionRepresentativeFor(protocolVersion)
@@ -270,7 +263,7 @@ class PartyReplicationTargetParticipantProcessor(
   override protected def hasEndOfACSBeenReached: Boolean = processorStore.hasEndOfACSBeenReached
 
   override protected def newProgress(
-      updatedProcessedContractsCount: NonNegativeInt,
+      updatedProcessedContractsCount: NonNegativeLong,
       usedRepairCounter: RepairCounter,
   ): PartyReplicationStatus.AcsReplicationProgress =
     PartyReplicationStatus.EphemeralSequencerChannelProgress(
@@ -291,8 +284,6 @@ object PartyReplicationTargetParticipantProcessor {
       onDisconnect: (String, TraceContext) => Unit,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
-      config: AlphaOnlinePartyReplicationConfig,
-      batchingConfig: BatchingConfig,
       futureSupervisor: FutureSupervisor,
       exitOnFatalFailures: Boolean,
       timeouts: ProcessingTimeout,
@@ -303,10 +294,6 @@ object PartyReplicationTargetParticipantProcessor {
     val partyReplicationIndexingStore =
       connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
         .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
-    val requestSpecificLoggerFactory = loggerFactory
-      .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
-      .append("partyId", partyId.toProtoPrimitive)
-      .append("requestId", requestId.toHexString)
     new PartyReplicationTargetParticipantProcessor(
       partyId,
       requestId,
@@ -317,22 +304,14 @@ object PartyReplicationTargetParticipantProcessor {
       onDisconnect,
       new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
       connectedSynchronizer.ephemeral.requestTracker,
-      new PartyReplicationIndexingWorkflow(
-        partyId,
-        connectedSynchronizer.psid,
-        partyReplicationIndexingStore,
-        participantNodePersistentState.map(_.contractStore),
-        connectedSynchronizer.ephemeral.recordOrderPublisher,
-        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
-        config.pauseSynchronizerIndexingDuringPartyReplication,
-        batchingConfig,
-        requestSpecificLoggerFactory,
-      ),
       partyReplicationIndexingStore,
       futureSupervisor,
       exitOnFatalFailures,
       timeouts,
-      requestSpecificLoggerFactory,
+      loggerFactory
+        .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
+        .append("partyId", partyId.toProtoPrimitive)
+        .append("requestId", requestId.toHexString),
       testInterceptor,
     )
   }

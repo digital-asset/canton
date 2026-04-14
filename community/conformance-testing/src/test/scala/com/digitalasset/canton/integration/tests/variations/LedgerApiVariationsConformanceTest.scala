@@ -54,6 +54,7 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
           numShards = numShards,
           exclude = excludedTests,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+          useJson = false,
         )
       }
     }
@@ -121,6 +122,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
           numShards = numShards,
           exclude = excludedTests,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+          useJson = false,
         )
       }
     }
@@ -256,6 +258,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
           numShards = 1,
           exclude = excludedTests ++ exclusions,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+          useJson = false,
         )
       }
     }

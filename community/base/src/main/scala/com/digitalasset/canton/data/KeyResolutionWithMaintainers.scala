@@ -28,7 +28,7 @@ object KeyResolutionWithMaintainers {
       resolution: LfVersioned[KeyResolutionWithMaintainers],
   ): v31.ViewParticipantData.KeyResolutionWithMaintainers =
     v31.ViewParticipantData.KeyResolutionWithMaintainers(
-      key = Some(GlobalKeySerialization.assertToProto(resolution.map(_ => key))),
+      key = Some(GlobalKeySerialization.assertToProtoV31(resolution.map(_ => key))),
       maintainers = resolution.unversioned.maintainers.toSeq,
       contractIds = resolution.unversioned.contracts.map(_.toProtoPrimitive),
     )
@@ -41,7 +41,7 @@ object KeyResolutionWithMaintainers {
     for {
       key <- ProtoConverter
         .required("KeyResolutionWithMaintainers.key", keyP)
-        .flatMap(GlobalKeySerialization.fromProtoV30)
+        .flatMap(GlobalKeySerialization.fromProtoV31)
       contractIds <- contractIdsP.traverse(ProtoConverter.parseLfContractId)
       maintainers <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
     } yield (

@@ -14,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   NetworkSettings,
   PartitionMode,
   PartitionSymmetry,
+  PhaseDurations,
   Probability,
   SimulationSettings,
 }
@@ -31,9 +32,6 @@ import scala.util.Random
 
 class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 10
-
-  private val durationOfFirstPhaseWithFaults = 1.minute
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random =
     new Random(4) // Manually remove the seed for fully randomized local runs.
@@ -53,8 +51,10 @@ class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 1.minute,
+            livenessChecking = 1.minute,
+          ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
       ),
@@ -105,8 +105,10 @@ class BftOrderingSimulationTestWithProgressiveOnboardingAndDelayNoFaults
         FutureSettings(
           randomSeed = randomSourceToCreateSettings.nextLong()
         ),
-        durationOfFirstPhaseWithFaults,
-        durationOfSecondPhaseWithoutFaults,
+        phaseDurations = PhaseDurations(
+          faulty = durationOfFirstPhaseWithFaults,
+          livenessChecking = durationOfSecondPhaseWithoutFaults,
+        ),
       ),
       TopologySettings(
         randomSeed = randomSourceToCreateSettings.nextLong(),
@@ -139,8 +141,6 @@ class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults extends BftOrde
 
   // Onboard all nodes around the same time in the middle of the first phase.
   private val baseOnboardingDelay = 30.seconds
-  private val durationOfFirstPhase = 1.minute
-  private val durationOfSecondPhase = 1.minute
 
   override def generateSettings: SimulationTestSettings = SimulationTestSettings(
     numberOfInitialNodes = 1, // f = 0
@@ -157,8 +157,7 @@ class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults extends BftOrde
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhase,
-          durationOfSecondPhase,
+          phaseDurations = PhaseDurations(faulty = 1.minute, livenessChecking = 1.minute),
         ),
         TopologySettings(
           randomSeed = randomSourceToCreateSettings.nextLong(),
@@ -207,7 +206,7 @@ class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
           LocalSettings(randomSeed = randomSourceToCreateSettings.nextLong()),
           NetworkSettings(randomSeed = randomSourceToCreateSettings.nextLong()),
           FutureSettings(randomSeed = randomSourceToCreateSettings.nextLong()),
-          durationOfFirstPhaseWithFaults,
+          phaseDurations = PhaseDurations(faulty = durationOfFirstPhaseWithFaults),
         ),
         TopologySettings(
           randomSourceToCreateSettings.nextLong(),
@@ -227,8 +226,6 @@ class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
 // Allows catch-up state transfer testing without requiring CFT.
 class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 4
-
-  private val durationOfFirstPhaseWithPartitions = 2.minutes
 
   // Manually remove the seed for fully randomized local runs.
   private val randomSourceToCreateSettings: Random = new Random(4)
@@ -251,7 +248,7 @@ class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest 
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithPartitions,
+          phaseDurations = PhaseDurations(faulty = 2.minutes),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
       ),
@@ -261,9 +258,6 @@ class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest 
 
 class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 100
-
-  private val durationOfFirstPhaseWithFaults = 2.seconds
-  private val durationOfSecondPhaseWithoutFaults = 2.seconds
 
   private val randomSourceToCreateSettings: Random =
     new Random(4) // Manually remove the seed for fully randomized local runs.
@@ -283,8 +277,10 @@ class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 2.seconds,
+            livenessChecking = 2.seconds,
+          ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
       ),
@@ -295,9 +291,6 @@ class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest
 // Simulation test about empty blocks, needed to pass the liveness check.
 class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 15
-
-  private val durationOfFirstPhaseWithFaults = 1.minute
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random = new Random(4)
 
@@ -316,8 +309,10 @@ class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 1.minute,
+            livenessChecking = 1.minute,
+          ),
           // This will result in empty blocks only.
           clientSettings = ClientSettings(
             requestInterval = None,
@@ -338,9 +333,6 @@ class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
 class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 1
 
-  private val durationOfFirstPhaseWithFaults = 1.minute
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
-
   private val randomSourceToCreateSettings: Random =
     new Random(4) // Manually remove the seed for fully randomized local runs.
 
@@ -359,8 +351,10 @@ class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulation
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 1.minute,
+            livenessChecking = 1.minute,
+          ),
           clientSettings = ClientSettings(
             // The test is a bit slow with the default interval
             requestInterval = Some(10.seconds),
@@ -378,9 +372,6 @@ class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulation
 
 class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 10
-
-  private val durationOfFirstPhaseWithFaults = 2.minutes
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random =
     new Random(4) // remove seed to randomly explore seeds
@@ -401,8 +392,10 @@ class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTe
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 2.minutes,
+            livenessChecking = 1.minute,
+          ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
       ),
@@ -412,9 +405,6 @@ class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTe
 
 class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 5
-
-  private val durationOfFirstPhaseWithFaults = 2.minutes
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random =
     new Random(4) // remove seed to randomly explore seeds
@@ -435,8 +425,10 @@ class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTe
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 2.minutes,
+            livenessChecking = 1.minute,
+          ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
       ),
@@ -446,9 +438,6 @@ class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTe
 
 class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 4
-
-  private val durationOfFirstPhaseWithFaults = 1.minute
-  private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random =
     new Random(4) // Manually remove the seed for fully randomized local runs.
@@ -486,8 +475,10 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
           ),
-          durationOfFirstPhaseWithFaults,
-          durationOfSecondPhaseWithoutFaults,
+          phaseDurations = PhaseDurations(
+            faulty = 1.minute,
+            livenessChecking = 1.minute,
+          ),
         ),
         TopologySettings(
           randomSeed = randomSourceToCreateSettings.nextLong(),

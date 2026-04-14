@@ -17,14 +17,15 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.protocol.v30
+import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   DbSequencerStorePruning,
   RegisteredMember,
   SequencerStore,
 }
-import com.digitalasset.canton.synchronizer.sequencer.{InFlightAggregations, *}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
@@ -79,6 +80,7 @@ class DbSequencerStateManagerStore(
           )
       }
       .map(_.fold(Map.empty)(_ ++ _))
+      .map(InFlightAggregations.fromMap)
   }
 
   /** Compute the state up until (inclusive) the given timestamp. */

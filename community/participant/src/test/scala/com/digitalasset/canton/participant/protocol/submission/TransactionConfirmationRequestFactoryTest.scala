@@ -149,7 +149,7 @@ class TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: ContractInstanceOfId,
-          _keyResolver: LfKeyResolver,
+          legacyKeyResolver: LfGlobalKeyMapping,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
       )(implicit
@@ -175,7 +175,7 @@ class TransactionConfirmationRequestFactoryTest
       }
 
       override def tryReconstruct(
-          subaction: WellFormedTransaction[WithoutSuffixes],
+          transaction: WellFormedTransaction[WithoutSuffixes],
           rootPosition: ViewPosition,
           mediator: MediatorGroupRecipient,
           submittingParticipantO: Option[ParticipantId],
@@ -184,7 +184,7 @@ class TransactionConfirmationRequestFactoryTest
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
           _rbContext: RollbackContext,
-          _keyResolver: LfKeyResolver,
+          legacyKeyResolver: LfGlobalKeyMapping,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,

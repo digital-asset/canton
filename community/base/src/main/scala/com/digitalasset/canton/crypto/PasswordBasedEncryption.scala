@@ -61,11 +61,22 @@ object PasswordBasedEncrypted extends HasVersionedMessageCompanion[PasswordBased
         encryptedP.symmetricKeyScheme,
       )
       pbkdfScheme <- PbkdfScheme.fromProtoEnum("pbkdf_scheme", encryptedP.pbkdfScheme)
+      // Validate that the salt has the expected length for the PBKDF scheme.
+      // An empty or short salt defeats the purpose of password-based key derivation by
+      // enabling precomputation attacks (rainbow tables) against the password.
+      salt <- SecureRandomness
+        .fromByteString(pbkdfScheme.defaultSaltLengthInBytes)(encryptedP.salt)
+        .leftMap(err =>
+          ProtoDeserializationError.InvariantViolation(
+            None,
+            s"Invalid salt for PBKDF scheme $pbkdfScheme: ${err.message}",
+          )
+        )
     } yield PasswordBasedEncrypted(
       ciphertext = encryptedP.ciphertext,
       symmetricKeyScheme = symmetricKeyScheme,
       pbkdfScheme = pbkdfScheme,
-      salt = SecureRandomness.apply(encryptedP.salt),
+      salt = salt,
     )
 }
 

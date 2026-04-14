@@ -41,6 +41,9 @@ class PruningDtoQueries {
   def filterActivateWitness(implicit c: Connection): Seq[Long] =
     SQL"SELECT event_sequential_id FROM lapi_filter_activate_witness ORDER BY event_sequential_id"
       .asVectorOf(long("event_sequential_id"))(c)
+  def filterAchsStakeholder(implicit c: Connection): Seq[Long] =
+    SQL"SELECT event_sequential_id FROM lapi_filter_achs_stakeholder ORDER BY event_sequential_id"
+      .asVectorOf(long("event_sequential_id"))(c)
   def filterDeactivateStakeholder(implicit c: Connection): Seq[Long] =
     SQL"SELECT event_sequential_id FROM lapi_filter_deactivate_stakeholder ORDER BY event_sequential_id"
       .asVectorOf(long("event_sequential_id"))(c)

@@ -121,6 +121,7 @@ abstract class BaseTopologySnapshot(
                 .flatMap(_.packages.map(vp => (vp.packageId, vp)))
                 .toMap
             }
+            .filter { case (_, vettedPackages) => vettedPackages.nonEmpty }
             .toMap
         }
       }
@@ -551,6 +552,7 @@ abstract class BaseTopologySnapshot(
             .collectOfMapping[OwnerToKeyMapping]
             .result
             .groupBy(_.mapping.member)
+            .view
             .map { case (member, otks) =>
               val keys = collectLatestMapping[OwnerToKeyMapping](
                 TopologyMapping.Code.OwnerToKeyMapping,
@@ -558,6 +560,8 @@ abstract class BaseTopologySnapshot(
               ).toList.flatMap(_.keys.forgetNE)
               member -> KeyCollection.empty.addAll(keys)
             }
+            .filter { case (_, keys) => !keys.isEmpty }
+            .toMap
         }
       )
       .getOrElse(FutureUnlessShutdown.pure(Map.empty))

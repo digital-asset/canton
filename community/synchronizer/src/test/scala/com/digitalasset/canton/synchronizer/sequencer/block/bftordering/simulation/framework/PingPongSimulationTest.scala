@@ -262,7 +262,7 @@ class PingPongSimulationTest extends AnyFlatSpec with BaseTest {
       localSettings = LocalSettings(randomSeed = 4),
       networkSettings = NetworkSettings(randomSeed = 4),
       futureSettings = FutureSettings(randomSeed = 4),
-      durationOfFirstPhaseWithFaults = 2.minutes,
+      phaseDurations = PhaseDurations(2.minutes),
     )
 
     val fakePort = Port.tryCreate(0)

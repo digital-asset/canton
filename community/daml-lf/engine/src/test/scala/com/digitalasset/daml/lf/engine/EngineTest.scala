@@ -17,8 +17,7 @@ import com.digitalasset.daml.lf.command._
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.engine.Error.Interpretation
-import com.digitalasset.daml.lf.engine.Error.Interpretation.DamlException
+import com.digitalasset.daml.lf.engine.Error.{Interpretation => IErr}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.Util._
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
@@ -26,6 +25,7 @@ import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.speedy.SValue._
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue, svalue}
 import com.digitalasset.daml.lf.stablepackages.{StablePackages, StablePackagesV2}
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Mode
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine => ContractStateMachine,
@@ -60,6 +60,13 @@ import scala.language.implicitConversions
 
 class EngineTestCidV1 extends EngineTest(ContractIdVersion.V1)
 class EngineTestCidV2 extends EngineTest(ContractIdVersion.V2)
+class EngineTestNUCKCidV1 extends EngineTestNUCK(ContractIdVersion.V1)
+class EngineTestNUCKCidV2 extends EngineTestNUCK(ContractIdVersion.V2)
+
+class EngineTestExceptionsNoKeyCidV1 extends EngineTestExceptionsNoKey(ContractIdVersion.V1)
+class EngineTestExceptionsNoKeyCidV2 extends EngineTestExceptionsNoKey(ContractIdVersion.V2)
+class EngineTestExceptionsNUCKCidV1 extends EngineTestExceptionsNUCK(ContractIdVersion.V1)
+class EngineTestExceptionsNUCKCidV2 extends EngineTestExceptionsNUCK(ContractIdVersion.V2)
 
 @SuppressWarnings(
   Array(
@@ -76,7 +83,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     with SecurityTestSuite
     with SuppressingLogging {
 
-  val helpers = new EngineTestHelpers(contractIdVersion, loggerFactory)
+  val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-nokey.dar", loggerFactory)
   import helpers._
 
   "minimal create command" should {
@@ -89,7 +96,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       )
     val submissionSeed = hash("minimal create command")
     val submitters = Set(party)
-    val readAs = (Set.empty: Set[Party])
+    val readAs = Set.empty[Party]
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
@@ -195,7 +202,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         signatories: Set[(String, Party)],
         actAs: Set[Party],
     ) = {
-      val readAs = (Set.empty: Set[Party])
+      val readAs = Set.empty[Party]
       val cmd = command(templateId, signatories)
       val res = preprocessor
         .preprocessApiCommands(Map.empty, ImmArray(cmd))
@@ -324,7 +331,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         ValueRecord(Some(hello), ImmArray.Empty),
       )
     val submitters = Set(party)
-    val readAs = (Set.empty: Set[Party])
+    val readAs = Set.empty[Party]
 
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
@@ -495,6 +502,1445 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     }
   }
 
+  "create-and-exercise command" should {
+    val submissionSeed = hash("create-and-exercise command")
+    val templateId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val hello = Identifier(basicTestsPkgId, "BasicTests:Hello")
+    val let = Time.Timestamp.now()
+    val txSeed = crypto.Hash.deriveTransactionSeed(submissionSeed, participant, let)
+    val command =
+      ApiCommand.CreateAndExercise(
+        templateId.toRef,
+        ValueRecord(Some(templateId), ImmArray(Some[Name]("p") -> ValueParty(party))),
+        "Hello",
+        ValueRecord(Some(hello), ImmArray.Empty),
+      )
+
+    val submitters = Set(party)
+
+    val res = preprocessor
+      .preprocessApiCommands(Map.empty, ImmArray(command))
+      .consume(lookupContract, lookupPackage, lookupKey)
+    res shouldBe a[Right[_, _]]
+    val interpretResult =
+      res
+        .flatMap { cmds =>
+          suffixLenientEngine
+            .interpretCommands(
+              validating = false,
+              submitters = submitters,
+              readAs = Set.empty,
+              commands = cmds,
+              ledgerTime = let,
+              preparationTime = let,
+              seeding = InitialSeeding.TransactionSeed(txSeed),
+              contractIdVersion = contractIdVersion,
+              contractStateMode = ContractStateMachine.Mode.NoKey,
+            )
+            .consume(lookupContract, lookupPackage, lookupKey)
+        }
+
+    val Right((tx, txMeta, _)) = interpretResult
+    val Right(submitter) = tx.guessSubmitter
+
+    "be translated" in {
+      tx.roots should have length 2
+      tx.nodes.keySet.toList should have length 2
+      val ImmArray(create, exercise) = tx.roots.map(tx.nodes)
+      create shouldBe a[Node.Create]
+      exercise shouldBe a[Node.Exercise]
+    }
+
+    "reinterpret to the same result" in {
+      val stx = suffix(tx)
+
+      val Right((rtx, _)) =
+        reinterpret(
+          suffixStrictEngine,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          Set(party),
+          stx.roots,
+          stx,
+          txMeta,
+          let,
+          lookupPackage,
+        )
+
+      isReplayedBy(stx, rtx) shouldBe Right(())
+    }
+
+    "be validated" in {
+      val ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
+      val validated = suffixLenientEngine
+        .validate(
+          Set(submitter),
+          ntx,
+          let,
+          participant,
+          let,
+          submissionSeed,
+          contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+      validated match {
+        case Left(e) =>
+          fail(e.message)
+        case Right(()) => ()
+      }
+    }
+
+    "not mark any node as byKey" in {
+      interpretResult.map { case (tx, _, _) => byKeyNodes(tx).size } shouldBe Right(0)
+    }
+  }
+
+  "translate list value" should {
+    "translate empty list" in {
+      val list = ValueNil
+      val res = preprocessor
+        .translateValue(TList(TBuiltin(BTInt64)), list)
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldEqual Right(SList(FrontStack.empty))
+    }
+
+    "translate singleton" in {
+      val list = ValueList(FrontStack(ValueInt64(1)))
+      val res = preprocessor
+        .translateValue(TList(TBuiltin(BTInt64)), list)
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldEqual Right(SList(FrontStack(SInt64(1))))
+    }
+
+    "translate average list" in {
+      val list = ValueList(
+        FrontStack(ValueInt64(1), ValueInt64(2), ValueInt64(3), ValueInt64(4), ValueInt64(5))
+      )
+      val res = preprocessor
+        .translateValue(TList(TBuiltin(BTInt64)), list)
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldEqual Right(
+        SValue.SList(FrontStack(SInt64(1), SInt64(2), SInt64(3), SInt64(4), SInt64(5)))
+      )
+    }
+
+    "does not translate command with nesting of more than the value limit" in {
+      val nested = (1 to 149).foldRight(ValueRecord(None, ImmArray((None, ValueInt64(42))))) {
+        case (_, v) => ValueRecord(None, ImmArray((None, v)))
+      }
+      preprocessor
+        .translateValue(
+          TTyConApp(TypeConId(basicTestsPkgId, "BasicTests:Nesting0"), ImmArray.Empty),
+          nested,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+        .swap
+        .toOption
+        .get
+        .message should include("Provided value exceeds maximum nesting level")
+    }
+  }
+
+  "record value translation" should {
+    "work with nested records" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec")),
+        ImmArray(
+          (Some[Name]("bar"), ValueText("bar")),
+          (
+            Some[Name]("nested"),
+            ValueRecord(
+              Some(Identifier(basicTestsPkgId, "BasicTests:MyRec")),
+              ImmArray(
+                (Some[Name]("foo"), ValueText("bar"))
+              ),
+            ),
+          ),
+        ),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec"))
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+      res shouldBe a[Right[_, _]]
+    }
+
+    "work with fields with type parameters" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
+        ImmArray(
+          (Some[Name]("p"), ValueParty(alice)),
+          (Some[Name]("v"), ValueOptional(Some(ValueInt64(42)))),
+        ),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(
+          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
+        )
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldBe a[Right[_, _]]
+    }
+
+    "work with fields with labels, in the wrong order" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
+        ImmArray(
+          (Some[Name]("v"), ValueOptional(Some(ValueInt64(42)))),
+          (Some[Name]("p"), ValueParty(alice)),
+        ),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(
+          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
+        )
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldBe a[Right[_, _]]
+    }
+
+    "fail with fields with labels, with repetitions" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
+        ImmArray((Some(toName("p")), ValueParty(alice)), (Some(toName("p")), ValueParty(bob))),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(
+          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
+        )
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      inside(res) { case Left(Error.Preprocessing(error)) =>
+        error shouldBe a[Error.Preprocessing.TypeMismatch]
+      }
+    }
+
+    "work with fields without labels, in right order" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
+        ImmArray((None, ValueParty(alice)), (None, ValueOptional(Some(ValueInt64(42))))),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(
+          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
+        )
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res shouldBe a[Right[_, _]]
+    }
+
+    "fail with fields without labels, in the wrong order" in {
+      val rec = ValueRecord(
+        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
+        ImmArray((None, ValueOptional(Some(ValueInt64(42)))), (None, ValueParty(alice))),
+      )
+
+      val Right(DDataType(_, ImmArray(), _)) =
+        basicTestsSignatures.lookupDataType(
+          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
+        )
+      val res = preprocessor
+        .translateValue(
+          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
+          rec,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      inside(res) { case Left(Error.Preprocessing(error)) =>
+        error shouldBe a[Error.Preprocessing.TypeMismatch]
+      }
+    }
+
+  }
+
+  "exercise callable command" should {
+    val submissionSeed = hash("exercise callable command")
+    val originalCoid = toContractId("BasicTests:CallablePayout:1")
+    val templateId = Identifier(basicTestsPkgId, "BasicTests:CallablePayout")
+    // we need to fix time as cid are depending on it
+    val let = Time.Timestamp.assertFromString("1969-07-20T20:17:00Z")
+    val command = ApiCommand.Exercise(
+      templateId.toRef,
+      originalCoid,
+      "Transfer",
+      ValueRecord(None, ImmArray((Some[Name]("newReceiver"), ValueParty(clara)))),
+    )
+
+    val submitters = Set(bob)
+    val readAs = Set.empty[Party]
+
+    val Right((tx, txMeta)) = suffixLenientEngine
+      .submit(
+        submitters = submitters,
+        readAs = readAs,
+        cmds = ApiCommands(ImmArray(command), let, "test"),
+        participantId = participant,
+        submissionSeed = submissionSeed,
+        contractIdVersion = contractIdVersion,
+        contractStateMode = ContractStateMachine.Mode.NoKey,
+        prefetchKeys = Seq.empty,
+      )
+      .consume(lookupContract, lookupPackage, lookupKey)
+
+    val preparationTime = txMeta.preparationTime
+
+    val txSeed =
+      crypto.Hash.deriveTransactionSeed(submissionSeed, participant, preparationTime)
+    val Right(cmds) = preprocessor
+      .preprocessApiCommands(Map.empty, ImmArray(command))
+      .consume(lookupContract, lookupPackage, lookupKey)
+    val Right((rtx, _, _)) = suffixLenientEngine
+      .interpretCommands(
+        validating = false,
+        submitters = submitters,
+        readAs = Set.empty,
+        commands = cmds,
+        ledgerTime = let,
+        preparationTime = preparationTime,
+        seeding = InitialSeeding.TransactionSeed(txSeed),
+        contractIdVersion = contractIdVersion,
+        contractStateMode = ContractStateMachine.Mode.NoKey,
+      )
+      .consume(lookupContract, lookupPackage, lookupKey)
+
+    "be translated" in {
+      isReplayedBy(tx, rtx) shouldBe Right(())
+    }
+
+    val blindingInfo = Blinding.blind(tx)
+
+    "reinterpret to the same result" in {
+      val stx = suffix(tx)
+
+      val Right((rtx, _)) =
+        reinterpret(
+          suffixStrictEngine,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          Set(bob),
+          stx.transaction.roots,
+          stx,
+          txMeta,
+          let,
+          lookupPackage,
+          defaultContracts,
+        )
+
+      isReplayedBy(rtx, stx) shouldBe Right(())
+    }
+
+    "blinded correctly" in {
+
+      // Bob sees both the archive and the create
+      val bobView = Blinding.divulgedTransaction(blindingInfo.disclosure, bob, tx.transaction)
+      bobView.nodes.size shouldBe 2
+      findNodeByIdx(bobView.nodes, 0).getOrElse(fail("node not found")) match {
+        case exe: Node.Exercise =>
+          exe.targetCoid shouldBe originalCoid
+          exe.consuming shouldBe true
+          exe.actingParties shouldBe Set(bob)
+          exe.children.map(_.index) shouldBe ImmArray(1)
+          exe.choiceId shouldBe "Transfer"
+        case _ => fail("exercise expected first for Bob")
+      }
+
+      findNodeByIdx(bobView.nodes, 1).getOrElse(fail("node not found")) match {
+        case create: Node.Create =>
+          create.templateId shouldBe templateId
+          create.stakeholders shouldBe Set(alice, clara)
+        case _ => fail("create event is expected")
+      }
+
+      // clara only sees create
+      val claraView =
+        Blinding.divulgedTransaction(blindingInfo.disclosure, clara, tx.transaction)
+
+      claraView.nodes.size shouldBe 1
+      findNodeByIdx(claraView.nodes, 1).getOrElse(fail("node not found")) match {
+        case create: Node.Create =>
+          create.templateId shouldBe templateId
+          create.stakeholders shouldBe Set(alice, clara)
+        case _ => fail("create event is expected")
+      }
+    }
+  }
+
+  "dynamic fetch actors" should {
+    // Basic test: an exercise (on a "Fetcher" contract) with a single consequence, a fetch of the "Fetched" contract
+    // Test a couple of scenarios, with different combination of signatories/observers/actors on the parent action
+
+    val submissionSeed = hash("dynamic fetch actors")
+    val fetchedCid = toContractId("1")
+    val fetchedStrTid = "BasicTests:Fetched"
+    val fetchedTArgs = ImmArray(
+      (None /* sig1 */, ValueParty(alice)),
+      (None /* sig2 */, ValueParty(bob)),
+      (None /* obs */, ValueParty(clara)),
+    )
+    val fetchedSignatories = List(alice, bob)
+    val fetchedObservers = List(clara)
+
+    val fetcherStrTid = "BasicTests:Fetcher"
+    val fetcherTid = Identifier(basicTestsPkgId, fetcherStrTid)
+
+    val fetcher1Cid = toContractId("2")
+    val fetcher1TArgs = ImmArray(
+      (None /* sig */, ValueParty(alice)),
+      (None /* obs */, ValueParty(bob)),
+      (None /* fetcher */, ValueParty(clara)),
+    )
+    val fetcher1Signatories = List(alice)
+    val fetcher1Observers = List(bob)
+
+    val fetcher2Cid = toContractId("3")
+    val fetcher2TArgs = ImmArray(
+      (None /* sig */, ValueParty(party)),
+      (None /* obs */, ValueParty(alice)),
+      (None /* fetcher */, ValueParty(clara)),
+    )
+    val fetcher2Signatories = List(party)
+    val fetcher2Observers = List(alice)
+
+    val fetcher3Cid = toContractId("4")
+    val fetcher3TArgs = ImmArray(
+      (None /* sig */, ValueParty(clara)),
+      (None /* obs */, ValueParty(alice)),
+      (None /* fetcher */, ValueParty(party)),
+    )
+    val fetcher3Signatories = List(clara)
+    val fetcher3Observers = List(alice)
+
+    def makeContract(
+        tid: Ref.QualifiedName,
+        targs: ImmArray[(Option[Name], Value)],
+        signatories: Iterable[Party],
+        observers: Iterable[Party],
+    ) =
+      TransactionBuilder.fatContractInstanceWithDummyDefaults(
+        version = defaultSerializationVersion,
+        packageName = basicTestsPkg.pkgName,
+        template = TypeConId(basicTestsPkgId, tid),
+        arg = ValueRecord(None /* Identifier(basicTestsPkgId, tid) */, targs),
+        signatories = signatories,
+        observers = observers,
+      )
+
+    val lookupContract: PartialFunction[ContractId, FatContractInstance] = {
+      case `fetchedCid` =>
+        makeContract(fetchedStrTid, fetchedTArgs, fetchedSignatories, fetchedObservers)
+      case `fetcher1Cid` =>
+        makeContract(fetcherStrTid, fetcher1TArgs, fetcher1Signatories, fetcher1Observers)
+      case `fetcher2Cid` =>
+        makeContract(fetcherStrTid, fetcher2TArgs, fetcher2Signatories, fetcher2Observers)
+      case `fetcher3Cid` =>
+        makeContract(fetcherStrTid, fetcher3TArgs, fetcher3Signatories, fetcher3Observers)
+    }
+
+    val let = Time.Timestamp.now()
+    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
+
+    def actFetchActors(n: Node): Set[Party] =
+      n match {
+        case fetch: Node.Fetch => fetch.actingParties
+        case _ => Set()
+      }
+
+    def txFetchActors(tx: Tx): Set[Party] =
+      tx.fold(Set[Party]()) { case (actors, (_, n)) =>
+        actors union actFetchActors(n)
+      }
+
+    def runExample(cid: ContractId, exerciseActor: Party, readAs: Party) = {
+      val command = ApiCommand.Exercise(
+        fetcherTid.toRef,
+        cid,
+        "DoFetch",
+        ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(fetchedCid)))),
+      )
+
+      val submitters = Set(exerciseActor)
+
+      val res = preprocessor
+        .preprocessApiCommands(Map.empty, ImmArray(command))
+        .consume(lookupContract, lookupPackage, lookupKey)
+
+      res
+        .flatMap { cmds =>
+          suffixLenientEngine
+            .interpretCommands(
+              validating = false,
+              submitters = submitters,
+              readAs = Set(readAs),
+              commands = cmds,
+              ledgerTime = let,
+              preparationTime = let,
+              seeding = seeding,
+              contractIdVersion = contractIdVersion,
+              contractStateMode = ContractStateMachine.Mode.NoKey,
+            )
+            .consume(lookupContract, lookupPackage, lookupKey)
+        }
+        .map { case (tx, meta, _) =>
+          (tx, meta)
+        }
+    }
+
+    "propagate the parent's signatories and actors (but not observers) when stakeholders" taggedAs SecurityTest(
+      Authorization,
+      "ledger",
+      Attack(
+        "ledger api user",
+        "try to authorize an action through exercise observers", // i.e. bob
+        "only record signatories and actors as fetch actors",
+      ),
+    ) in {
+
+      // fetch stakeholders: alice, bob, clara
+
+      // alice: parent signatory
+      // bob: parent observer
+      // clara: parent actor
+
+      val Right((tx, _)) = runExample(fetcher1Cid, clara, alice)
+      txFetchActors(tx.transaction) shouldBe Set(alice, clara)
+    }
+
+    "not propagate the parent's signatories nor actors when not stakeholders" taggedAs SecurityTest(
+      Authorization,
+      "ledger",
+      Attack(
+        "ledger api user",
+        "try to fetch a contract without authorization from a stakeholder of the fetched contract",
+        "only record stakeholders of the fetched contract as fetch actors", // i.e., clara
+      ),
+    ) in {
+
+      // fetch stakeholders: alice, bob, clara
+
+      // party: parent signatory
+      // alice: parent observer
+      // clara: parent actor
+      val Right((tx1, _)) = runExample(fetcher2Cid, clara, alice)
+      txFetchActors(tx1.transaction) shouldBe Set(clara)
+
+      // clara: parent signatory
+      // alice: parent observer
+      // party: parent actor
+      val Right((tx2, _)) = runExample(fetcher3Cid, party, alice)
+      txFetchActors(tx2.transaction) shouldBe Set(clara)
+    }
+
+    "be retained when reinterpreting single fetch nodes" in {
+      val Right((tx, txMeta)) = runExample(fetcher1Cid, clara, alice)
+      val fetchNodes = tx.nodes.iterator.collect { case (nid, fetch: Node.Fetch) =>
+        nid -> fetch
+      }
+
+      fetchNodes.foreach { case (_, n) =>
+        val nid = NodeId(0) // we must use node-0 so the constructed tx is normalized
+        val fetchTx = VersionedTransaction(n.version, Map(nid -> n), ImmArray(nid))
+        val Right((reinterpreted, _)) =
+          suffixLenientEngine
+            .reinterpret(
+              n.requiredAuthorizers,
+              ReplayCommand.Fetch(n.templateId, n.interfaceId, n.coid),
+              txMeta.nodeSeeds.toSeq.collectFirst { case (`nid`, seed) => seed },
+              txMeta.preparationTime,
+              let,
+              contractIdVersion = contractIdVersion,
+              contractStateMode = ContractStateMachine.Mode.NoKey,
+            )
+            .consume(lookupContract, lookupPackage, lookupKey)
+        isReplayedBy(fetchTx, reinterpreted) shouldBe Right(())
+      }
+    }
+
+    "not mark any node as byKey" in {
+      runExample(fetcher2Cid, clara, alice).map { case (tx, _) =>
+        byKeyNodes(tx).size
+      } shouldBe Right(0)
+    }
+  }
+
+  "reinterpreting fetch nodes" should {
+
+    val fetchedCid = toContractId("1")
+    val fetchedStrTid = "BasicTests:Fetched"
+    val fetchedTid = Identifier(basicTestsPkgId, fetchedStrTid)
+
+    val fetchedContract =
+      TransactionBuilder.fatContractInstanceWithDummyDefaults(
+        version = defaultSerializationVersion,
+        packageName = basicTestsPkg.pkgName,
+        template = TypeConId(basicTestsPkgId, fetchedStrTid),
+        arg = ValueRecord(
+          None /* Identifier(basicTestsPkgId, fetchedStrTid) */,
+          ImmArray(
+            (None /* sig1 */, ValueParty(alice)),
+            (None /* sig2 */, ValueParty(bob)),
+            (None /* obs */, ValueParty(clara)),
+          ),
+        ),
+        signatories = List(alice, bob),
+        observers = List(clara),
+      )
+
+    val lookupContract: PartialFunction[ContractId, FatContractInstance] = { case `fetchedCid` =>
+      fetchedContract
+    }
+
+    "succeed with a fresh engine, correctly compiling packages" in {
+      val engine = newEngine()
+
+      val fetchNode = ReplayCommand.Fetch(
+        templateId = fetchedTid,
+        interfaceId = None,
+        coid = fetchedCid,
+      )
+
+      val let = Time.Timestamp.now()
+
+      val submitters = Set(alice)
+
+      val reinterpreted =
+        engine
+          .reinterpret(
+            submitters,
+            fetchNode,
+            None,
+            let,
+            let,
+            contractIdVersion,
+            contractStateMode = ContractStateMachine.Mode.NoKey,
+          )
+          .consume(lookupContract, lookupPackage, lookupKey)
+
+      reinterpreted shouldBe a[Right[_, _]]
+    }
+  }
+
+  "getTime set dependsOnTime flag" in {
+    val templateId = Identifier(basicTestsPkgId, "BasicTests:TimeGetter")
+
+    def run(choiceName: ChoiceName) = {
+      val submissionSeed = hash(s"getTime set dependsOnTime flag: ($choiceName)")
+      val command =
+        ApiCommand.CreateAndExercise(
+          templateRef = templateId.toRef,
+          createArgument = ValueRecord(None, ImmArray(None -> ValueParty(party))),
+          choiceId = choiceName,
+          choiceArgument = ValueRecord(None, ImmArray.Empty),
+        )
+      val submitters = Set(party)
+      val readAs = Set.empty[Party]
+      suffixLenientEngine
+        .submit(
+          submitters = submitters,
+          readAs = readAs,
+          cmds = ApiCommands(ImmArray(command), Time.Timestamp.now(), "test"),
+          participantId = participant,
+          submissionSeed = submissionSeed,
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(lookupContract, lookupPackage, lookupKey)
+    }
+
+    run("FactorialOfThree").map(_._2.dependsOnTime) shouldBe Right(false)
+    run("GetTime").map(_._2.dependsOnTime) shouldBe Right(true)
+    run("FactorialOfThree").map(_._2.dependsOnTime) shouldBe Right(false)
+
+  }
+
+  "wrongly typed contract id" should {
+    val tId = Identifier(basicTestsPkgId, "BasicTests:T")
+    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:Fetcher")
+    val cid = toContractId("BasicTests:T")
+    val fetcherCid = toContractId("42")
+    val fetcherInst = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+      version = defaultSerializationVersion,
+      packageName = basicTestsPkg.pkgName,
+      template = fetcherId,
+      arg = ValueRecord(
+        None,
+        ImmArray(
+          (None, ValueParty(alice)),
+          (None, ValueParty(alice)),
+          (None, ValueParty(alice)),
+        ),
+      ),
+      signatories = List(alice),
+    )
+    val contracts = defaultContracts + (fetcherCid -> fetcherInst)
+    val correctCommand =
+      ApiCommand.Exercise(
+        tId.toRef,
+        cid,
+        "C",
+        ValueRecord(None, ImmArray()),
+      )
+    val incorrectCommand =
+      ApiCommand.Exercise(
+        simpleId.toRef,
+        cid,
+        "Hello",
+        ValueRecord(None, ImmArray.Empty),
+      )
+    val incorrectFetch =
+      ApiCommand.Exercise(
+        fetcherId.toRef,
+        fetcherCid,
+        "DoFetch",
+        ValueRecord(None, ImmArray((None, ValueContractId(cid)))),
+      )
+
+    val now = Time.Timestamp.now()
+    val submissionSeed = hash("wrongly-typed cid")
+    val submitters = Set(alice)
+    val readAs = Set.empty[Party]
+
+    def run(cmds: ImmArray[ApiCommand]) =
+      suffixLenientEngine
+        .submit(
+          submitters = submitters,
+          readAs = readAs,
+          cmds = ApiCommands(cmds, now, ""),
+          participantId = participant,
+          submissionSeed = submissionSeed,
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(contracts, lookupPackage, lookupKey)
+
+    "error on fetch" in {
+      val result = run(ImmArray(incorrectFetch))
+      inside(result) { case Left(e) =>
+        e.message should include("wrongly typed contract id")
+      }
+    }
+    "error on exercise" in {
+      val result = run(ImmArray(incorrectCommand))
+      inside(result) { case Left(e) =>
+        e.message should include("wrongly typed contract id")
+      }
+    }
+    "error on exercise even if used correctly before" in {
+      val result = run(ImmArray(correctCommand, incorrectCommand))
+      inside(result) { case Left(e) =>
+        e.message should include("wrongly typed contract id")
+      }
+    }
+  }
+
+  "nested transactions" should {
+
+    val forkableTemplate = "BasicTests:Forkable"
+    val forkableTemplateId = Identifier(basicTestsPkgId, forkableTemplate)
+    val forkableInst =
+      ValueRecord(
+        Some(forkableTemplateId),
+        ImmArray(
+          (Some[Name]("party"), ValueParty(party)),
+          (Some[Name]("parent"), ValueOptional(None)),
+        ),
+      )
+
+    val submissionSeed = hash("nested transaction test")
+    val let = Time.Timestamp.now()
+
+    def run(n: Int) = {
+      val command = ApiCommand.CreateAndExercise(
+        templateRef = forkableTemplateId.toRef,
+        createArgument = forkableInst,
+        choiceId = "Fork",
+        choiceArgument = ValueRecord(None, ImmArray((None, ValueInt64(n.toLong)))),
+      )
+      val submitters = Set(party)
+      val readAs = Set.empty[Party]
+      suffixLenientEngine
+        .submit(
+          submitters = submitters,
+          readAs = readAs,
+          cmds = ApiCommands(ImmArray(command), let, "test"),
+          participantId = participant,
+          submissionSeed = submissionSeed,
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
+    }
+
+    "produce a quadratic number of nodes" in {
+      run(0).map(_._1.transaction.nodes.size) shouldBe Right(2)
+      run(1).map(_._1.transaction.nodes.size) shouldBe Right(6)
+      run(2).map(_._1.transaction.nodes.size) shouldBe Right(14)
+      run(3).map(_._1.transaction.nodes.size) shouldBe Right(30)
+    }
+
+    "be validable in whole" in {
+      def validate(tx: SubmittedTransaction, metaData: Tx.Metadata) =
+        for {
+          submitter <- tx.guessSubmitter
+          ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
+          res <- suffixLenientEngine
+            .validate(
+              Set(submitter),
+              ntx,
+              let,
+              participant,
+              metaData.preparationTime,
+              submissionSeed,
+              contractIdVersion = contractIdVersion,
+              contractStateMode = ContractStateMachine.Mode.NoKey,
+            )
+            .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
+            .left
+            .map(_.message)
+        } yield res
+
+      @nowarn("cat=lint-infer-any")
+      def assertRun(n: Int): Assertion =
+        run(n).flatMap { case (tx, metaData) => validate(tx, metaData) } shouldBe Right(())
+      assertRun(0)
+      assertRun(3)
+    }
+
+    "be partially reinterpretable" in {
+      val Right((tx, txMeta)) = run(3)
+      val stx = suffix(tx)
+
+      val ImmArray(_, exeNode1) = tx.transaction.roots
+      val exe = tx.transaction.nodes(exeNode1).asInstanceOf[Node.Exercise]
+      val nids = exe.children.toSeq.take(2).toImmArray
+
+      reinterpret(
+        suffixStrictEngine,
+        contractStateMode = ContractStateMachine.Mode.NoKey,
+        Set(party),
+        nids,
+        stx,
+        txMeta,
+        let,
+        lookupPackage,
+      ) shouldBe a[Right[_, _]]
+
+    }
+  }
+
+  "Engine.preloadPackage" should {
+    import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
+
+    def engine(min: LV, max: LV) =
+      new Engine(
+        EngineConfig(
+          allowedLanguageVersions = VersionRange(min, max),
+          forbidLocalContractIds = true,
+        ),
+        loggerFactory,
+      )
+
+    val devVersion = LanguageVersion.devLfVersion
+    val (_, _, allPackagesDev) =
+      new EngineTestHelpers(contractIdVersion, "BasicTests-keys.dar", loggerFactory)
+        .loadAndAddPackage(
+          s"MinimalisticDevPackage.dar"
+        )
+    val compatibleLanguageVersions = LanguageVersion.allLfVersions
+    // Following stable packages are deps of other stable packages, so we sort such that these are preloaded first
+    val stablePackagesToLoadFirst = List("daml-prim-DA-Types", "daml-stdlib-DA-NonEmpty-Types")
+    val stablePackages =
+      StablePackages.stablePackages.allPackages
+        .sortBy { sp =>
+          val i = stablePackagesToLoadFirst.indexOf(sp.name)
+          if (i == -1) Int.MaxValue else i
+        }
+
+    s"accept stable packages from ${devVersion} even if version is smaller than min version" in {
+      for {
+        lv <- compatibleLanguageVersions.filter(_ <= devVersion)
+        eng = engine(min = lv, max = devVersion)
+        pkg <- stablePackages
+        pkgId = pkg.packageId
+        pkg <- allPackagesDev.get(pkgId).toList
+      } yield eng.preloadPackage(pkgId, pkg) shouldBe a[ResultDone[_]]
+    }
+
+    s"reject stable packages from ${devVersion} if version is greater than max version" in {
+      for {
+        lv <- compatibleLanguageVersions
+        eng = engine(min = compatibleLanguageVersions.min, max = lv)
+        pkg <- stablePackages
+        pkgId = pkg.packageId
+        pkg <- allPackagesDev.get(pkgId).toList
+      } yield inside(eng.preloadPackage(pkgId, pkg)) {
+        case ResultDone(_) => pkg.languageVersion shouldBe <=(lv)
+        case ResultError(_) => pkg.languageVersion shouldBe >(lv)
+      }
+    }
+  }
+
+  "wrongly typed contract" should {
+    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
+    val cid = toContractId("simple")
+    val fetcherCid = toContractId("fetcher")
+    val contracts =
+      Map(
+        cid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = simpleId,
+            arg = ValueRecord(
+              None /* BasicTests:Simple */,
+              ImmArray((None /* p */, ValueInt64(0))), // value is wrongly-typed: p has type Party
+            ),
+            signatories = List(party),
+            observers = List.empty,
+          ),
+        fetcherCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = fetcherId,
+            arg = ValueRecord(
+              None /* BasicTests:SimpleFetcher */,
+              ImmArray(
+                (None /* p */, ValueParty(alice))
+              ),
+            ),
+            signatories = List(alice),
+          ),
+      )
+
+    def run(cmds: ImmArray[ApiCommand]) =
+      suffixLenientEngine
+        .submit(
+          submitters = Set(alice),
+          readAs = Set.empty: Set[Party],
+          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
+          participantId = participant,
+          submissionSeed = hash("wrongly-typed contract"),
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(contracts, lookupPackage, lookupKey)
+
+    "error on fetch" in {
+      val result = run(
+        ImmArray(
+          ApiCommand.Exercise(
+            fetcherId.toRef,
+            fetcherCid,
+            "DoFetchSimple",
+            ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(cid)))),
+          )
+        )
+      )
+      inside(result) {
+        case Left(
+              IErr(
+                IErr.DamlException(
+                  interpretation.Error.Upgrade(
+                    interpretation.Error.Upgrade.TranslationFailed(
+                      Some(coid),
+                      srcTemplateId,
+                      dstTemplateId,
+                      createArg,
+                      error,
+                    )
+                  )
+                ),
+                _,
+              )
+            ) =>
+          coid shouldBe cid
+          srcTemplateId shouldBe simpleId
+          dstTemplateId shouldBe simpleId
+          createArg shouldBe contracts(cid).createArg
+          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.TypeMismatch]
+      }
+    }
+
+    "error on exercise" in {
+      val result = run(
+        ImmArray(
+          ApiCommand.Exercise(
+            simpleId.toRef,
+            cid,
+            "Hello",
+            ValueRecord(None, ImmArray.empty),
+          )
+        )
+      )
+      inside(result) {
+        case Left(
+              IErr(
+                IErr.DamlException(
+                  interpretation.Error.Upgrade(
+                    interpretation.Error.Upgrade.TranslationFailed(
+                      Some(coid),
+                      srcTemplateId,
+                      dstTemplateId,
+                      createArg,
+                      error,
+                    )
+                  )
+                ),
+                _,
+              )
+            ) =>
+          coid shouldBe cid
+          srcTemplateId shouldBe simpleId
+          dstTemplateId shouldBe simpleId
+          createArg shouldBe contracts(cid).createArg
+          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.TypeMismatch]
+      }
+    }
+  }
+
+  "ill-formed contract" should {
+    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
+    val cid = toContractId("simple")
+    val fetcherCid = toContractId("fetcher")
+    val contracts =
+      Map(
+        cid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = simpleId,
+            // ill-formed argument: values imported by the engine cannot contain labels
+            arg = ValueRecord(
+              None,
+              ImmArray((Some[Name]("p"), ValueParty(alice))),
+            ),
+            signatories = List(party),
+            observers = List.empty,
+          ),
+        fetcherCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = fetcherId,
+            arg = ValueRecord(
+              None /* BasicTests:SimpleFetcher */,
+              ImmArray(
+                (None /* p */, ValueParty(alice))
+              ),
+            ),
+            signatories = List(alice),
+          ),
+      )
+
+    def run(cmds: ImmArray[ApiCommand]) =
+      suffixLenientEngine
+        .submit(
+          submitters = Set(alice),
+          readAs = Set.empty: Set[Party],
+          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
+          participantId = participant,
+          submissionSeed = hash("ill-formed contract"),
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(contracts, lookupPackage, lookupKey)
+
+    "error on fetch" in {
+      val result = run(
+        ImmArray(
+          ApiCommand.Exercise(
+            fetcherId.toRef,
+            fetcherCid,
+            "DoFetchSimple",
+            ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(cid)))),
+          )
+        )
+      )
+      inside(result) {
+        case Left(
+              IErr(
+                IErr.DamlException(
+                  interpretation.Error.Upgrade(
+                    interpretation.Error.Upgrade.TranslationFailed(
+                      Some(coid),
+                      srcTemplateId,
+                      dstTemplateId,
+                      createArg,
+                      error,
+                    )
+                  )
+                ),
+                _,
+              )
+            ) =>
+          coid shouldBe cid
+          srcTemplateId shouldBe simpleId
+          dstTemplateId shouldBe simpleId
+          createArg shouldBe contracts(cid).createArg
+          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
+      }
+    }
+
+    "error on exercise" in {
+      val result = run(
+        ImmArray(
+          ApiCommand.Exercise(
+            simpleId.toRef,
+            cid,
+            "Hello",
+            ValueRecord(None, ImmArray.empty),
+          )
+        )
+      )
+      inside(result) {
+        case Left(
+              IErr(
+                IErr.DamlException(
+                  interpretation.Error.Upgrade(
+                    interpretation.Error.Upgrade.TranslationFailed(
+                      Some(coid),
+                      srcTemplateId,
+                      dstTemplateId,
+                      createArg,
+                      error,
+                    )
+                  )
+                ),
+                _,
+              )
+            ) =>
+          coid shouldBe cid
+          srcTemplateId shouldBe simpleId
+          dstTemplateId shouldBe simpleId
+          createArg shouldBe contracts(cid).createArg
+          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
+      }
+    }
+  }
+
+  "trailing nones" should {
+    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
+    val simpleCid = toContractId("simple")
+    val fetcherCid = toContractId("fetcher")
+    val createArg = ValueRecord(
+      None /* BasicTests:Simple */,
+      ImmArray(None /* p */ -> ValueParty(alice), None -> ValueOptional(None)),
+    )
+    val contracts =
+      Map(
+        simpleCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = simpleId,
+            arg = createArg,
+            signatories = List(alice),
+            observers = List.empty,
+          ),
+        fetcherCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = fetcherId,
+            arg = ValueRecord(
+              None /* BasicTests:SimpleFetcher */,
+              ImmArray(
+                (None /* p */, ValueParty(alice))
+              ),
+            ),
+            signatories = List(alice),
+          ),
+      )
+
+    def run(
+        cmds: ImmArray[ApiCommand],
+        hashingMethod: Hash.HashingMethod,
+    ): Either[Error, (SubmittedTransaction, Transaction.Metadata)] =
+      suffixLenientEngine
+        .submit(
+          submitters = Set(alice),
+          readAs = Set.empty: Set[Party],
+          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
+          participantId = participant,
+          submissionSeed = hash("contract with trailing nones"),
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(
+          contracts,
+          lookupPackage,
+          lookupKey,
+          hashingMethod = _ => hashingMethod,
+          idValidator = (_, _) => true,
+        )
+
+    def runFetch(hashingMethod: Hash.HashingMethod) = run(
+      cmds = ImmArray(
+        ApiCommand.Exercise(
+          fetcherId.toRef,
+          fetcherCid,
+          "DoFetchSimple",
+          ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(simpleCid)))),
+        )
+      ),
+      hashingMethod = hashingMethod,
+    )
+
+    def runExercise(hashingMethod: Hash.HashingMethod) = run(
+      cmds = ImmArray(
+        ApiCommand.Exercise(simpleId.toRef, simpleCid, "Hello", ValueRecord(None, ImmArray.empty))
+      ),
+      hashingMethod = hashingMethod,
+    )
+
+    def expectSuccess(
+        result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
+    ): Assertion =
+      result shouldBe a[Right[_, _]]
+
+    def expectInvalidValue(
+        result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
+    ): Assertion =
+      inside(result) {
+        case Left(
+              IErr(
+                IErr.DamlException(
+                  interpretation.Error.Upgrade(
+                    interpretation.Error.Upgrade.TranslationFailed(_, _, _, _, error)
+                  )
+                ),
+                _,
+              )
+            ) =>
+          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
+      }
+
+    "be allowed in fetches for v10 contracts" in {
+      expectSuccess(runFetch(Hash.HashingMethod.Legacy))
+    }
+
+    "be allowed in exercises for v10 contracts" in {
+      expectSuccess(runExercise(Hash.HashingMethod.Legacy))
+    }
+
+    "be rejected in fetches for v11 contracts" in {
+      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendly))
+    }
+
+    "be rejected in exercises for v11 contracts" in {
+      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendly))
+    }
+
+    "be rejected in fetches for v12 contracts" in {
+      expectInvalidValue(runFetch(Hash.HashingMethod.TypedNormalForm))
+    }
+
+    "be rejected in exercises for v12 contracts" in {
+      expectInvalidValue(runExercise(Hash.HashingMethod.TypedNormalForm))
+    }
+  }
+
+  "contract authentication" should {
+    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
+    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
+    val simpleCid = toContractId("simple")
+    val fetcherCid = toContractId("fetcher")
+    val createArg = ValueRecord(
+      None /* BasicTests:Simple */,
+      ImmArray((None /* p */, ValueParty(alice))),
+    )
+    val contracts =
+      Map(
+        simpleCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = simpleId,
+            arg = createArg,
+            signatories = List(alice),
+            observers = List.empty,
+          ),
+        fetcherCid ->
+          TransactionBuilder.fatContractInstanceWithDummyDefaults(
+            version = defaultSerializationVersion,
+            packageName = basicTestsPkg.pkgName,
+            template = fetcherId,
+            arg = ValueRecord(
+              None /* BasicTests:SimpleFetcher */,
+              ImmArray(
+                (None /* p */, ValueParty(alice))
+              ),
+            ),
+            signatories = List(alice),
+          ),
+      )
+
+    val expectedLegacyHash =
+      Hash
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = false)
+        .value
+    val expectedUpgradeFriendlyHash =
+      Hash
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = true)
+        .value
+    def expectedTypedNormalFormHash = SValueHash
+      .hashContractInstance(
+        basicTestsPkg.pkgName,
+        simpleId.qualifiedName,
+        SValue.SRecord(
+          simpleId,
+          ImmArray(Ref.Name.assertFromString("p")),
+          ArraySeq(SValue.SParty(alice)),
+        ),
+      )
+      .value
+
+    def run(
+        cmds: ImmArray[ApiCommand],
+        hashingMethod: ContractId => Hash.HashingMethod,
+        idValidator: (ContractId, Hash) => Boolean,
+    ): Either[Error, (SubmittedTransaction, Transaction.Metadata)] =
+      suffixLenientEngine
+        .submit(
+          submitters = Set(alice),
+          readAs = Set.empty: Set[Party],
+          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
+          participantId = participant,
+          submissionSeed = hash("contract auth"),
+          contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.NoKey,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(
+          contracts,
+          lookupPackage,
+          lookupKey,
+          hashingMethod = hashingMethod,
+          idValidator = idValidator,
+        )
+
+    val cases = Table(
+      ("hashingMethod", "expectedHash"),
+      (Hash.HashingMethod.Legacy, expectedLegacyHash),
+      (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
+      (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
+    )
+
+    "happen on fetch" in {
+      forEvery(cases) { case (hashingMethod, expectedHash) =>
+        var idValidatorCalledWithExpectedHash = false
+        val result = run(
+          cmds = ImmArray(
+            ApiCommand.Exercise(
+              fetcherId.toRef,
+              fetcherCid,
+              "DoFetchSimple",
+              ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(simpleCid)))),
+            )
+          ),
+          hashingMethod = _ => hashingMethod,
+          idValidator = { (cid, h) =>
+            // We're only interested in fetches of mainCid, when fetcherCid is fetched we simply return true but
+            // do not record the call.
+            if (cid == simpleCid) {
+              idValidatorCalledWithExpectedHash = (h == expectedHash)
+              idValidatorCalledWithExpectedHash
+            } else true
+          },
+        )
+        idValidatorCalledWithExpectedHash shouldBe true
+        result shouldBe a[Right[_, _]]
+      }
+    }
+
+    "happen on exercise" in {
+      forEvery(cases) { case (hashingMethod, expectedHash) =>
+        var idValidatorCalledWithExpectedHash = false
+        val result = run(
+          cmds = ImmArray(
+            ApiCommand.Exercise(
+              simpleId.toRef,
+              simpleCid,
+              "Hello",
+              ValueRecord(None, ImmArray.empty),
+            )
+          ),
+          hashingMethod = _ => hashingMethod,
+          idValidator = { (cid, h) =>
+            // We're only interested in exercises of mainCid, when fetcherCid is exercised we simply return true but
+            // do not record the call.
+            if (cid == simpleCid) {
+              idValidatorCalledWithExpectedHash = (h == expectedHash)
+              idValidatorCalledWithExpectedHash
+            } else true
+          },
+        )
+        idValidatorCalledWithExpectedHash shouldBe true
+        result shouldBe a[Right[_, _]]
+      }
+    }
+  }
+}
+
+@SuppressWarnings(
+  Array(
+    "org.wartremover.warts.Any",
+    "org.wartremover.warts.Serializable",
+    "org.wartremover.warts.Product",
+  )
+)
+class EngineTestNUCK(contractIdVersion: ContractIdVersion)
+    extends AnyWordSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with EitherValues
+    with SecurityTestSuite
+    with SuppressingLogging {
+
+  val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-keys.dar", loggerFactory)
+  import helpers._
+
   "exercise-by-key command with missing key" should {
     val submissionSeed = hash("exercise-by-key command with missing key")
     val templateId = Identifier(basicTestsPkgId, "BasicTests:WithKey")
@@ -526,9 +1972,9 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
-      inside(submitResult) { case Left(Error.Interpretation(err, _)) =>
+      inside(submitResult) { case Left(IErr(err, _)) =>
         val sKey = mkSValuePair(SValue.SParty(alice), SValue.SInt64(43))
-        err shouldBe Interpretation.DamlException(
+        err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
             GlobalKey.assertBuild(
               templateId = BasicTests_WithKey,
@@ -558,7 +2004,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       ValueRecord(None, ImmArray((None, ValueInt64(5)))),
     )
     val submitters = Set(alice)
-    val readAs = (Set.empty: Set[Party])
+    val readAs = Set.empty[Party]
 
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
@@ -898,8 +2344,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
-      inside(result) { case Left(Error.Interpretation(err, _)) =>
-        err shouldBe Interpretation.DamlException(
+      inside(result) { case Left(IErr(err, _)) =>
+        err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
             GlobalKey.assertBuild(
               templateId = BasicTests_WithKey,
@@ -948,8 +2394,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
-      inside(result) { case Left(Error.Interpretation(err, _)) =>
-        err shouldBe Interpretation.DamlException(
+      inside(result) { case Left(IErr(err, _)) =>
+        err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
             GlobalKey.assertBuild(
               templateId = BasicTests_WithKey,
@@ -964,646 +2410,6 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           )
         )
       }
-    }
-  }
-
-  "create-and-exercise command" should {
-    val submissionSeed = hash("create-and-exercise command")
-    val templateId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val hello = Identifier(basicTestsPkgId, "BasicTests:Hello")
-    val let = Time.Timestamp.now()
-    val txSeed = crypto.Hash.deriveTransactionSeed(submissionSeed, participant, let)
-    val command =
-      ApiCommand.CreateAndExercise(
-        templateId.toRef,
-        ValueRecord(Some(templateId), ImmArray(Some[Name]("p") -> ValueParty(party))),
-        "Hello",
-        ValueRecord(Some(hello), ImmArray.Empty),
-      )
-
-    val submitters = Set(party)
-
-    val res = preprocessor
-      .preprocessApiCommands(Map.empty, ImmArray(command))
-      .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
-    val interpretResult =
-      res
-        .flatMap { cmds =>
-          suffixLenientEngine
-            .interpretCommands(
-              validating = false,
-              submitters = submitters,
-              readAs = Set.empty,
-              commands = cmds,
-              ledgerTime = let,
-              preparationTime = let,
-              seeding = InitialSeeding.TransactionSeed(txSeed),
-              contractIdVersion = contractIdVersion,
-              contractStateMode = ContractStateMachine.Mode.NoKey,
-            )
-            .consume(lookupContract, lookupPackage, lookupKey)
-        }
-
-    val Right((tx, txMeta, _)) = interpretResult
-    val Right(submitter) = tx.guessSubmitter
-
-    "be translated" in {
-      tx.roots should have length 2
-      tx.nodes.keySet.toList should have length 2
-      val ImmArray(create, exercise) = tx.roots.map(tx.nodes)
-      create shouldBe a[Node.Create]
-      exercise shouldBe a[Node.Exercise]
-    }
-
-    "reinterpret to the same result" in {
-      val stx = suffix(tx)
-
-      val Right((rtx, _)) =
-        reinterpret(
-          suffixStrictEngine,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          Set(party),
-          stx.roots,
-          stx,
-          txMeta,
-          let,
-          lookupPackage,
-        )
-
-      isReplayedBy(stx, rtx) shouldBe Right(())
-    }
-
-    "be validated" in {
-      val ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
-      val validated = suffixLenientEngine
-        .validate(
-          Set(submitter),
-          ntx,
-          let,
-          participant,
-          let,
-          submissionSeed,
-          contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-      validated match {
-        case Left(e) =>
-          fail(e.message)
-        case Right(()) => ()
-      }
-    }
-
-    "not mark any node as byKey" in {
-      interpretResult.map { case (tx, _, _) => byKeyNodes(tx).size } shouldBe Right(0)
-    }
-  }
-
-  "translate list value" should {
-    "translate empty list" in {
-      val list = ValueNil
-      val res = preprocessor
-        .translateValue(TList(TBuiltin(BTInt64)), list)
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldEqual Right(SList(FrontStack.empty))
-    }
-
-    "translate singleton" in {
-      val list = ValueList(FrontStack(ValueInt64(1)))
-      val res = preprocessor
-        .translateValue(TList(TBuiltin(BTInt64)), list)
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldEqual Right(SList(FrontStack(SInt64(1))))
-    }
-
-    "translate average list" in {
-      val list = ValueList(
-        FrontStack(ValueInt64(1), ValueInt64(2), ValueInt64(3), ValueInt64(4), ValueInt64(5))
-      )
-      val res = preprocessor
-        .translateValue(TList(TBuiltin(BTInt64)), list)
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldEqual Right(
-        SValue.SList(FrontStack(SInt64(1), SInt64(2), SInt64(3), SInt64(4), SInt64(5)))
-      )
-    }
-
-    "does not translate command with nesting of more than the value limit" in {
-      val nested = (1 to 149).foldRight(ValueRecord(None, ImmArray((None, ValueInt64(42))))) {
-        case (_, v) => ValueRecord(None, ImmArray((None, v)))
-      }
-      preprocessor
-        .translateValue(
-          TTyConApp(TypeConId(basicTestsPkgId, "BasicTests:Nesting0"), ImmArray.Empty),
-          nested,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-        .swap
-        .toOption
-        .get
-        .message should include("Provided value exceeds maximum nesting level")
-    }
-  }
-
-  "record value translation" should {
-    "work with nested records" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec")),
-        ImmArray(
-          (Some[Name]("bar"), ValueText("bar")),
-          (
-            Some[Name]("nested"),
-            ValueRecord(
-              Some(Identifier(basicTestsPkgId, "BasicTests:MyRec")),
-              ImmArray(
-                (Some[Name]("foo"), ValueText("bar"))
-              ),
-            ),
-          ),
-        ),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec"))
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:MyNestedRec"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-      res shouldBe a[Right[_, _]]
-    }
-
-    "work with fields with type parameters" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
-        ImmArray(
-          (Some[Name]("p"), ValueParty(alice)),
-          (Some[Name]("v"), ValueOptional(Some(ValueInt64(42)))),
-        ),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(
-          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
-        )
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldBe a[Right[_, _]]
-    }
-
-    "work with fields with labels, in the wrong order" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
-        ImmArray(
-          (Some[Name]("v"), ValueOptional(Some(ValueInt64(42)))),
-          (Some[Name]("p"), ValueParty(alice)),
-        ),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(
-          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
-        )
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldBe a[Right[_, _]]
-    }
-
-    "fail with fields with labels, with repetitions" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
-        ImmArray((Some(toName("p")), ValueParty(alice)), (Some(toName("p")), ValueParty(bob))),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(
-          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
-        )
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      inside(res) { case Left(Error.Preprocessing(error)) =>
-        error shouldBe a[Error.Preprocessing.TypeMismatch]
-      }
-    }
-
-    "work with fields without labels, in right order" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
-        ImmArray((None, ValueParty(alice)), (None, ValueOptional(Some(ValueInt64(42))))),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(
-          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
-        )
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res shouldBe a[Right[_, _]]
-    }
-
-    "fail with fields without labels, in the wrong order" in {
-      val rec = ValueRecord(
-        Some(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")),
-        ImmArray((None, ValueOptional(Some(ValueInt64(42)))), (None, ValueParty(alice))),
-      )
-
-      val Right(DDataType(_, ImmArray(), _)) =
-        basicTestsSignatures.lookupDataType(
-          Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters")
-        )
-      val res = preprocessor
-        .translateValue(
-          TTyConApp(Identifier(basicTestsPkgId, "BasicTests:TypeWithParameters"), ImmArray.Empty),
-          rec,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      inside(res) { case Left(Error.Preprocessing(error)) =>
-        error shouldBe a[Error.Preprocessing.TypeMismatch]
-      }
-    }
-
-  }
-
-  "exercise callable command" should {
-    val submissionSeed = hash("exercise callable command")
-    val originalCoid = toContractId("BasicTests:CallablePayout:1")
-    val templateId = Identifier(basicTestsPkgId, "BasicTests:CallablePayout")
-    // we need to fix time as cid are depending on it
-    val let = Time.Timestamp.assertFromString("1969-07-20T20:17:00Z")
-    val command = ApiCommand.Exercise(
-      templateId.toRef,
-      originalCoid,
-      "Transfer",
-      ValueRecord(None, ImmArray((Some[Name]("newReceiver"), ValueParty(clara)))),
-    )
-
-    val submitters = Set(bob)
-    val readAs = (Set.empty: Set[Party])
-
-    val Right((tx, txMeta)) = suffixLenientEngine
-      .submit(
-        submitters = submitters,
-        readAs = readAs,
-        cmds = ApiCommands(ImmArray(command), let, "test"),
-        participantId = participant,
-        submissionSeed = submissionSeed,
-        contractIdVersion = contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.NoKey,
-        prefetchKeys = Seq.empty,
-      )
-      .consume(lookupContract, lookupPackage, lookupKey)
-
-    val preparationTime = txMeta.preparationTime
-
-    val txSeed =
-      crypto.Hash.deriveTransactionSeed(submissionSeed, participant, preparationTime)
-    val Right(cmds) = preprocessor
-      .preprocessApiCommands(Map.empty, ImmArray(command))
-      .consume(lookupContract, lookupPackage, lookupKey)
-    val Right((rtx, _, _)) = suffixLenientEngine
-      .interpretCommands(
-        validating = false,
-        submitters = submitters,
-        readAs = Set.empty,
-        commands = cmds,
-        ledgerTime = let,
-        preparationTime = preparationTime,
-        seeding = InitialSeeding.TransactionSeed(txSeed),
-        contractIdVersion = contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.NoKey,
-      )
-      .consume(lookupContract, lookupPackage, lookupKey)
-
-    "be translated" in {
-      isReplayedBy(tx, rtx) shouldBe Right(())
-    }
-
-    val blindingInfo = Blinding.blind(tx)
-
-    "reinterpret to the same result" in {
-      val stx = suffix(tx)
-
-      val Right((rtx, _)) =
-        reinterpret(
-          suffixStrictEngine,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          Set(bob),
-          stx.transaction.roots,
-          stx,
-          txMeta,
-          let,
-          lookupPackage,
-          defaultContracts,
-        )
-
-      isReplayedBy(rtx, stx) shouldBe Right(())
-    }
-
-    "blinded correctly" in {
-
-      // Bob sees both the archive and the create
-      val bobView = Blinding.divulgedTransaction(blindingInfo.disclosure, bob, tx.transaction)
-      bobView.nodes.size shouldBe 2
-      findNodeByIdx(bobView.nodes, 0).getOrElse(fail("node not found")) match {
-        case exe: Node.Exercise =>
-          exe.targetCoid shouldBe originalCoid
-          exe.consuming shouldBe true
-          exe.actingParties shouldBe Set(bob)
-          exe.children.map(_.index) shouldBe ImmArray(1)
-          exe.choiceId shouldBe "Transfer"
-        case _ => fail("exercise expected first for Bob")
-      }
-
-      findNodeByIdx(bobView.nodes, 1).getOrElse(fail("node not found")) match {
-        case create: Node.Create =>
-          create.templateId shouldBe templateId
-          create.stakeholders shouldBe Set(alice, clara)
-        case _ => fail("create event is expected")
-      }
-
-      // clara only sees create
-      val claraView =
-        Blinding.divulgedTransaction(blindingInfo.disclosure, clara, tx.transaction)
-
-      claraView.nodes.size shouldBe 1
-      findNodeByIdx(claraView.nodes, 1).getOrElse(fail("node not found")) match {
-        case create: Node.Create =>
-          create.templateId shouldBe templateId
-          create.stakeholders shouldBe Set(alice, clara)
-        case _ => fail("create event is expected")
-      }
-    }
-  }
-
-  "dynamic fetch actors" should {
-    // Basic test: an exercise (on a "Fetcher" contract) with a single consequence, a fetch of the "Fetched" contract
-    // Test a couple of scenarios, with different combination of signatories/observers/actors on the parent action
-
-    val submissionSeed = hash("dynamic fetch actors")
-    val fetchedCid = toContractId("1")
-    val fetchedStrTid = "BasicTests:Fetched"
-    val fetchedTArgs = ImmArray(
-      (None /* sig1 */, ValueParty(alice)),
-      (None /* sig2 */, ValueParty(bob)),
-      (None /* obs */, ValueParty(clara)),
-    )
-    val fetchedSignatories = List(alice, bob)
-    val fetchedObservers = List(clara)
-
-    val fetcherStrTid = "BasicTests:Fetcher"
-    val fetcherTid = Identifier(basicTestsPkgId, fetcherStrTid)
-
-    val fetcher1Cid = toContractId("2")
-    val fetcher1TArgs = ImmArray(
-      (None /* sig */, ValueParty(alice)),
-      (None /* obs */, ValueParty(bob)),
-      (None /* fetcher */, ValueParty(clara)),
-    )
-    val fetcher1Signatories = List(alice)
-    val fetcher1Observers = List(bob)
-
-    val fetcher2Cid = toContractId("3")
-    val fetcher2TArgs = ImmArray(
-      (None /* sig */, ValueParty(party)),
-      (None /* obs */, ValueParty(alice)),
-      (None /* fetcher */, ValueParty(clara)),
-    )
-    val fetcher2Signatories = List(party)
-    val fetcher2Observers = List(alice)
-
-    val fetcher3Cid = toContractId("4")
-    val fetcher3TArgs = ImmArray(
-      (None /* sig */, ValueParty(clara)),
-      (None /* obs */, ValueParty(alice)),
-      (None /* fetcher */, ValueParty(party)),
-    )
-    val fetcher3Signatories = List(clara)
-    val fetcher3Observers = List(alice)
-
-    def makeContract(
-        tid: Ref.QualifiedName,
-        targs: ImmArray[(Option[Name], Value)],
-        signatories: Iterable[Party],
-        observers: Iterable[Party],
-    ) =
-      TransactionBuilder.fatContractInstanceWithDummyDefaults(
-        version = defaultSerializationVersion,
-        packageName = basicTestsPkg.pkgName,
-        template = TypeConId(basicTestsPkgId, tid),
-        arg = ValueRecord(None /* Identifier(basicTestsPkgId, tid) */, targs),
-        signatories = signatories,
-        observers = observers,
-      )
-
-    val lookupContract: PartialFunction[ContractId, FatContractInstance] = {
-      case `fetchedCid` =>
-        makeContract(fetchedStrTid, fetchedTArgs, fetchedSignatories, fetchedObservers)
-      case `fetcher1Cid` =>
-        makeContract(fetcherStrTid, fetcher1TArgs, fetcher1Signatories, fetcher1Observers)
-      case `fetcher2Cid` =>
-        makeContract(fetcherStrTid, fetcher2TArgs, fetcher2Signatories, fetcher2Observers)
-      case `fetcher3Cid` =>
-        makeContract(fetcherStrTid, fetcher3TArgs, fetcher3Signatories, fetcher3Observers)
-    }
-
-    val let = Time.Timestamp.now()
-    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
-
-    def actFetchActors(n: Node): Set[Party] =
-      n match {
-        case fetch: Node.Fetch => fetch.actingParties
-        case _ => Set()
-      }
-
-    def txFetchActors(tx: Tx): Set[Party] =
-      tx.fold(Set[Party]()) { case (actors, (_, n)) =>
-        actors union actFetchActors(n)
-      }
-
-    def runExample(cid: ContractId, exerciseActor: Party, readAs: Party) = {
-      val command = ApiCommand.Exercise(
-        fetcherTid.toRef,
-        cid,
-        "DoFetch",
-        ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(fetchedCid)))),
-      )
-
-      val submitters = Set(exerciseActor)
-
-      val res = preprocessor
-        .preprocessApiCommands(Map.empty, ImmArray(command))
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      res
-        .flatMap { cmds =>
-          suffixLenientEngine
-            .interpretCommands(
-              validating = false,
-              submitters = submitters,
-              readAs = Set(readAs),
-              commands = cmds,
-              ledgerTime = let,
-              preparationTime = let,
-              seeding = seeding,
-              contractIdVersion = contractIdVersion,
-              contractStateMode = ContractStateMachine.Mode.NoKey,
-            )
-            .consume(lookupContract, lookupPackage, lookupKey)
-        }
-        .map { case (tx, meta, _) =>
-          (tx, meta)
-        }
-    }
-
-    "propagate the parent's signatories and actors (but not observers) when stakeholders" taggedAs SecurityTest(
-      Authorization,
-      "ledger",
-      Attack(
-        "ledger api user",
-        "try to authorize an action through exercise observers", // i.e. bob
-        "only record signatories and actors as fetch actors",
-      ),
-    ) in {
-
-      // fetch stakeholders: alice, bob, clara
-
-      // alice: parent signatory
-      // bob: parent observer
-      // clara: parent actor
-
-      val Right((tx, _)) = runExample(fetcher1Cid, clara, alice)
-      txFetchActors(tx.transaction) shouldBe Set(alice, clara)
-    }
-
-    "not propagate the parent's signatories nor actors when not stakeholders" taggedAs SecurityTest(
-      Authorization,
-      "ledger",
-      Attack(
-        "ledger api user",
-        "try to fetch a contract without authorization from a stakeholder of the fetched contract",
-        "only record stakeholders of the fetched contract as fetch actors", // i.e., clara
-      ),
-    ) in {
-
-      // fetch stakeholders: alice, bob, clara
-
-      // party: parent signatory
-      // alice: parent observer
-      // clara: parent actor
-      val Right((tx1, _)) = runExample(fetcher2Cid, clara, alice)
-      txFetchActors(tx1.transaction) shouldBe Set(clara)
-
-      // clara: parent signatory
-      // alice: parent observer
-      // party: parent actor
-      val Right((tx2, _)) = runExample(fetcher3Cid, party, alice)
-      txFetchActors(tx2.transaction) shouldBe Set(clara)
-    }
-
-    "be retained when reinterpreting single fetch nodes" in {
-      val Right((tx, txMeta)) = runExample(fetcher1Cid, clara, alice)
-      val fetchNodes = tx.nodes.iterator.collect { case (nid, fetch: Node.Fetch) =>
-        nid -> fetch
-      }
-
-      fetchNodes.foreach { case (_, n) =>
-        val nid = NodeId(0) // we must use node-0 so the constructed tx is normalized
-        val fetchTx = VersionedTransaction(n.version, Map(nid -> n), ImmArray(nid))
-        val Right((reinterpreted, _)) =
-          suffixLenientEngine
-            .reinterpret(
-              n.requiredAuthorizers,
-              ReplayCommand.Fetch(n.templateId, n.interfaceId, n.coid),
-              txMeta.nodeSeeds.toSeq.collectFirst { case (`nid`, seed) => seed },
-              txMeta.preparationTime,
-              let,
-              contractIdVersion = contractIdVersion,
-              contractStateMode = ContractStateMachine.Mode.NoKey,
-            )
-            .consume(lookupContract, lookupPackage, lookupKey)
-        isReplayedBy(fetchTx, reinterpreted) shouldBe Right(())
-      }
-    }
-
-    "not mark any node as byKey" in {
-      runExample(fetcher2Cid, clara, alice).map { case (tx, _) =>
-        byKeyNodes(tx).size
-      } shouldBe Right(0)
-    }
-  }
-
-  "reinterpreting fetch nodes" should {
-
-    val fetchedCid = toContractId("1")
-    val fetchedStrTid = "BasicTests:Fetched"
-    val fetchedTid = Identifier(basicTestsPkgId, fetchedStrTid)
-
-    val fetchedContract =
-      TransactionBuilder.fatContractInstanceWithDummyDefaults(
-        version = defaultSerializationVersion,
-        packageName = basicTestsPkg.pkgName,
-        template = TypeConId(basicTestsPkgId, fetchedStrTid),
-        arg = ValueRecord(
-          None /* Identifier(basicTestsPkgId, fetchedStrTid) */,
-          ImmArray(
-            (None /* sig1 */, ValueParty(alice)),
-            (None /* sig2 */, ValueParty(bob)),
-            (None /* obs */, ValueParty(clara)),
-          ),
-        ),
-        signatories = List(alice, bob),
-        observers = List(clara),
-      )
-
-    val lookupContract: PartialFunction[ContractId, FatContractInstance] = { case `fetchedCid` =>
-      fetchedContract
-    }
-
-    "succeed with a fresh engine, correctly compiling packages" in {
-      val engine = newEngine()
-
-      val fetchNode = ReplayCommand.Fetch(
-        templateId = fetchedTid,
-        interfaceId = None,
-        coid = fetchedCid,
-      )
-
-      val let = Time.Timestamp.now()
-
-      val submitters = Set(alice)
-
-      val reinterpreted =
-        engine
-          .reinterpret(submitters, fetchNode, None, let, let, contractIdVersion,  contractStateMode = ContractStateMachine.Mode.NoKey)
-          .consume(lookupContract, lookupPackage, lookupKey)
-
-      reinterpreted shouldBe a[Right[_, _]]
     }
   }
 
@@ -1627,7 +2433,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       lookedUpInst.contractId -> lookedUpInst,
       lookerUpInst.contractId -> lookerUpInst,
     )
-    lazy val lookupKey = Map(lookedUpInst.contractKeyWithMaintainers.get.globalKey -> Vector(lookedUpInst))
+    lazy val lookupKey =
+      Map(lookedUpInst.contractKeyWithMaintainers.get.globalKey -> Vector(lookedUpInst))
 
     def firstLookupNode(tx: Tx): Option[(NodeId, Node.LookupByKey)] =
       tx.nodes.collectFirst { case (nid, nl: Node.LookupByKey) =>
@@ -1644,7 +2451,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         ValueRecord(None, ImmArray((Some[Name]("n"), ValueInt64(42)))),
       )
       val submitters = Set(alice)
-      val readAs = (Set.empty: Set[Party])
+      val readAs = Set.empty[Party]
       val Right((tx, _)) = suffixStrictEngine
         .submit(
           submitters = submitters,
@@ -1674,7 +2481,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         ValueRecord(None, ImmArray((Some[Name]("n"), ValueInt64(42)))),
       )
       val submitters = Set(alice)
-      val readAs = (Set.empty: Set[Party])
+      val readAs = Set.empty[Party]
 
       val Right((tx, txMeta)) = suffixStrictEngine
         .submit(
@@ -1717,7 +2524,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         ValueRecord(None, ImmArray((Some[Name]("n"), ValueInt64(57)))),
       )
       val submitters = Set(alice)
-      val readAs = (Set.empty: Set[Party])
+      val readAs = Set.empty[Party]
 
       val Right((tx, txMeta)) = suffixStrictEngine
         .submit(
@@ -1785,38 +2592,100 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     }
   }
 
-  "getTime set dependsOnTime flag" in {
-    val templateId = Identifier(basicTestsPkgId, "BasicTests:TimeGetter")
+  "global key lookups" should {
+    val (pkgId, pkg, allPkgs) =
+      loadAndAddPackage("MultiKeys-v23.dar")
+    val tId = Identifier(pkgId, "MultiKeys:GlobalLookups")
+    val let = Time.Timestamp.now()
+    val submissionSeed = hash("global-keys")
+    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
+    val cid = toContractId("1")
+    val sKey = SValue.SParty(party)
+    val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+      version = defaultSerializationVersion,
+      contractId = cid,
+      packageName = pkg.pkgName,
+      template = TypeConId(pkgId, "MultiKeys:Keyed"),
+      arg = ValueRecord(None, ImmArray((None, ValueParty(party)))),
+      signatories = List(party),
+      contractKeyWithMaintainers = Some(
+        GlobalKeyWithMaintainers(
+          GlobalKey.assertBuild(
+            templateId = TypeConId(pkgId, "MultiKeys:Keyed"),
+            packageName = pkg.pkgName,
+            key = sKey.toNormalizedValue,
+            keyHash = SValueHash.assertHashContractKey(
+              pkg.pkgName,
+              "MultiKeys:Keyed",
+              sKey,
+            ),
+          ),
+          Set(party),
+        )
+      ),
+    )
+    val contracts = Map(contract.contractId -> contract)
+    val lookupKey =
+      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
 
-    def run(choiceName: ChoiceName) = {
-      val submissionSeed = hash(s"getTime set dependsOnTime flag: ($choiceName)")
-      val command =
-        ApiCommand.CreateAndExercise(
-          templateRef = templateId.toRef,
-          createArgument = ValueRecord(None, ImmArray(None -> ValueParty(party))),
-          choiceId = choiceName,
-          choiceArgument = ValueRecord(None, ImmArray.Empty),
-        )
+    def run(cmd: ApiCommand): Int = {
       val submitters = Set(party)
-      val readAs = (Set.empty: Set[Party])
-      suffixLenientEngine
-        .submit(
+      var keyLookups = 0
+
+      val mockedKeyLookup = Function.unlift { (key: GlobalKey) =>
+        keyLookups += 1
+        lookupKey.lift(key)
+      }
+
+      val Right(cmds) = preprocessor
+        .preprocessApiCommands(Map.empty, ImmArray(cmd))
+        .consume(contracts, allPkgs, mockedKeyLookup)
+      val result = suffixStrictEngine
+        .interpretCommands(
+          validating = false,
           submitters = submitters,
-          readAs = readAs,
-          cmds = ApiCommands(ImmArray(command), Time.Timestamp.now(), "test"),
-          participantId = participant,
-          submissionSeed = submissionSeed,
+          readAs = Set.empty,
+          commands = cmds,
+          ledgerTime = let,
+          preparationTime = let,
+          seeding = seeding,
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
+          contractStateMode = ContractStateMachine.Mode.NUCK,
         )
-        .consume(lookupContract, lookupPackage, lookupKey)
+        .consume(
+          contracts,
+          allPkgs,
+          mockedKeyLookup,
+        )
+      inside(result) { case Right(_) =>
+        keyLookups
+      }
     }
 
-    run("FactorialOfThree").map(_._2.dependsOnTime) shouldBe Right(false)
-    run("GetTime").map(_._2.dependsOnTime) shouldBe Right(true)
-    run("FactorialOfThree").map(_._2.dependsOnTime) shouldBe Right(false)
-
+    val cidArg = ValueRecord(None, ImmArray((None, ValueContractId(cid))))
+    val emptyArg = ValueRecord(None, ImmArray.empty)
+    "Lookup a global key at most once" in {
+      val cases = Table(
+        ("choice", "argument", "lookups"),
+        ("LookupTwice", emptyArg, 1),
+        ("LookupAfterCreate", emptyArg, 0),
+        ("LookupAfterCreateArchive", emptyArg, 0),
+        ("LookupAfterFetch", cidArg, 1),
+        ("LookupAfterArchive", cidArg, 1),
+        // ("LookupAfterRollbackCreate", emptyArg, 0),
+        ("LookupAfterRollbackLookup", emptyArg, 1),
+        ("LookupAfterArchiveAfterRollbackLookup", cidArg, 1),
+      )
+      forEvery(cases) { case (choice, argument, lookups) =>
+        val command = ApiCommand.CreateAndExercise(
+          tId.toRef,
+          ValueRecord(None, ImmArray((None, ValueParty(party)))),
+          choice,
+          argument,
+        )
+        run(command) shouldBe lookups
+      }
+    }
   }
 
   "fetching contracts that have keys correctly fills in the transaction structure" when {
@@ -1845,7 +2714,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
+          contractStateMode = ContractStateMachine.Mode.NUCK,
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -1880,7 +2749,11 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         fetcherInst.contractId -> fetcherInst,
       )
       lazy val lookupKey =
-        Map(withKeyContractInst.contractKeyWithMaintainers.get.globalKey -> Vector(withKeyContractInst))
+        Map(
+          withKeyContractInst.contractKeyWithMaintainers.get.globalKey -> Vector(
+            withKeyContractInst
+          )
+        )
 
       val submitters = Set(alice)
 
@@ -1908,7 +2781,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
+          contractStateMode = ContractStateMachine.Mode.NUCK,
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -1926,247 +2799,124 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     }
   }
 
-  "wrongly typed contract id" should {
-    val withKeyId = Identifier(basicTestsPkgId, "BasicTests:WithKey")
-    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:Fetcher")
-    val cid = toContractId("BasicTests:WithKey:1")
-    val fetcherCid = toContractId("42")
-    val fetcherInst = TransactionBuilder.fatContractInstanceWithDummyDefaults(
-      version = defaultSerializationVersion,
-      packageName = basicTestsPkg.pkgName,
-      template = fetcherId,
-      arg = ValueRecord(
-        None,
-        ImmArray(
-          (None, ValueParty(alice)),
-          (None, ValueParty(alice)),
-          (None, ValueParty(alice)),
-        ),
-      ),
-      signatories = List(alice),
+}
+
+class EngineTestExceptionsNoKey(contractIdVersion: ContractIdVersion)
+    extends EngineTestExceptions(
+      contractIdVersion,
+      ContractStateMachine.Mode.NoKey,
+      "Exceptions-nokey.dar",
     )
-    val contracts = defaultContracts + (fetcherCid -> fetcherInst)
-    val correctCommand =
-      ApiCommand.Exercise(
-        withKeyId.toRef,
-        cid,
-        "SumToK",
-        ValueRecord(None, ImmArray((None, ValueInt64(42)))),
-      )
-    val incorrectCommand =
-      ApiCommand.Exercise(
-        simpleId.toRef,
-        cid,
-        "Hello",
-        ValueRecord(None, ImmArray.Empty),
-      )
-    val incorrectFetch =
-      ApiCommand.Exercise(
-        fetcherId.toRef,
-        fetcherCid,
-        "DoFetch",
-        ValueRecord(None, ImmArray((None, ValueContractId(cid)))),
-      )
 
-    val now = Time.Timestamp.now()
-    val submissionSeed = hash("wrongly-typed cid")
-    val submitters = Set(alice)
-    val readAs = (Set.empty: Set[Party])
+class EngineTestExceptionsNUCK(contractIdVersion: ContractIdVersion)
+    extends EngineTestExceptions(
+      contractIdVersion,
+      ContractStateMachine.Mode.NUCK,
+      "Exceptions-keys.dar",
+    )
 
-    def run(cmds: ImmArray[ApiCommand]) =
-      suffixLenientEngine
-        .submit(
-          submitters = submitters,
-          readAs = readAs,
-          cmds = ApiCommands(cmds, now, ""),
-          participantId = participant,
-          submissionSeed = submissionSeed,
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(contracts, lookupPackage, lookupKey)
+@SuppressWarnings(
+  Array(
+    "org.wartremover.warts.Any",
+    "org.wartremover.warts.Serializable",
+    "org.wartremover.warts.Product",
+  )
+)
+class EngineTestExceptions(
+    contractIdVersion: ContractIdVersion,
+    contractStateMode: ContractStateMachine.Mode,
+    darFile: String,
+) extends AnyWordSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with EitherValues
+    with SecurityTestSuite
+    with SuppressingLogging {
 
-    "error on fetch" in {
-      val result = run(ImmArray(incorrectFetch))
-      inside(result) { case Left(e) =>
-        e.message should include("wrongly typed contract id")
-      }
-    }
-    "error on exercise" in {
-      val result = run(ImmArray(incorrectCommand))
-      inside(result) { case Left(e) =>
-        e.message should include("wrongly typed contract id")
-      }
-    }
-    "error on exercise even if used correctly before" in {
-      val result = run(ImmArray(correctCommand, incorrectCommand))
-      inside(result) { case Left(e) =>
-        e.message should include("wrongly typed contract id")
-      }
-    }
-  }
+  val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-nokey.dar", loggerFactory)
+  import helpers._
 
-  "nested transactions" should {
+  val (exceptionsPkgId, exceptionsPkg, allExceptionsPkgs) =
+    // TODO(https://github.com/digital-asset/daml/issues/18457): split key test cases and revert
+    //  to non-dev dar
+    loadAndAddPackage(darFile)
 
-    val forkableTemplate = "BasicTests:Forkable"
-    val forkableTemplateId = Identifier(basicTestsPkgId, forkableTemplate)
-    val forkableInst =
-      ValueRecord(
-        Some(forkableTemplateId),
-        ImmArray(
-          (Some[Name]("party"), ValueParty(party)),
-          (Some[Name]("parent"), ValueOptional(None)),
+  val helperId = Identifier(exceptionsPkgId, "Exceptions:Helper")
+  val let = Time.Timestamp.now()
+  val submissionSeed = hash("rollback")
+  val seeding = Engine.initialSeeding(submissionSeed, participant, let)
+  val sKey = mkSValuePair(SValue.SParty(party), SValue.SInt64(666))
+  val contractK = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+    version = defaultSerializationVersion,
+    contractId = toContractId("Exceptions:K:1"),
+    packageName = exceptionsPkg.pkgName,
+    template = TypeConId(exceptionsPkgId, "Exceptions:K"),
+    arg = ValueRecord(
+      None,
+      ImmArray(
+        (None, ValueParty(party)),
+        (None, ValueInt64(666)),
+        (None, ValueText("text666")),
+      ),
+    ),
+    signatories = List(party),
+    contractKeyWithMaintainers = Some(
+      GlobalKeyWithMaintainers(
+        GlobalKey.assertBuild(
+          templateId = TypeConId(exceptionsPkgId, "Exceptions:K"),
+          packageName = exceptionsPkg.pkgName,
+          key = sKey.toNormalizedValue,
+          keyHash = SValueHash.assertHashContractKey(
+            exceptionsPkg.pkgName,
+            "Exceptions:K",
+            sKey,
+          ),
         ),
-      )
-
-    val submissionSeed = hash("nested transaction test")
-    val let = Time.Timestamp.now()
-
-    def run(n: Int) = {
-      val command = ApiCommand.CreateAndExercise(
-        templateRef = forkableTemplateId.toRef,
-        createArgument = forkableInst,
-        choiceId = "Fork",
-        choiceArgument = ValueRecord(None, ImmArray((None, ValueInt64(n.toLong)))),
-      )
-      val submitters = Set(party)
-      val readAs = (Set.empty: Set[Party])
-      suffixLenientEngine
-        .submit(
-          submitters = submitters,
-          readAs = readAs,
-          cmds = ApiCommands(ImmArray(command), let, "test"),
-          participantId = participant,
-          submissionSeed = submissionSeed,
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
-    }
-
-    "produce a quadratic number of nodes" in {
-      run(0).map(_._1.transaction.nodes.size) shouldBe Right(2)
-      run(1).map(_._1.transaction.nodes.size) shouldBe Right(6)
-      run(2).map(_._1.transaction.nodes.size) shouldBe Right(14)
-      run(3).map(_._1.transaction.nodes.size) shouldBe Right(30)
-    }
-
-    "be validable in whole" in {
-      def validate(tx: SubmittedTransaction, metaData: Tx.Metadata) =
-        for {
-          submitter <- tx.guessSubmitter
-          ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
-          res <- suffixLenientEngine
-            .validate(
-              Set(submitter),
-              ntx,
-              let,
-              participant,
-              metaData.preparationTime,
-              submissionSeed,
-              contractIdVersion = contractIdVersion,
-              contractStateMode = ContractStateMachine.Mode.NoKey,
-            )
-            .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
-            .left
-            .map(_.message)
-        } yield res
-
-      @nowarn("cat=lint-infer-any")
-      def assertRun(n: Int): Assertion =
-        run(n).flatMap { case (tx, metaData) => validate(tx, metaData) } shouldBe Right(())
-      assertRun(0)
-      assertRun(3)
-    }
-
-    "be partially reinterpretable" in {
-      val Right((tx, txMeta)) = run(3)
-      val stx = suffix(tx)
-
-      val ImmArray(_, exeNode1) = tx.transaction.roots
-      val exe = tx.transaction.nodes(exeNode1).asInstanceOf[Node.Exercise]
-      val nids = exe.children.toSeq.take(2).toImmArray
-
-      reinterpret(
-        suffixStrictEngine,
-        contractStateMode = ContractStateMachine.Mode.NoKey,
         Set(party),
-        nids,
-        stx,
-        txMeta,
-        let,
-        lookupPackage,
-      ) shouldBe a[Right[_, _]]
-
-    }
+      )
+    ),
+  )
+  val contractT = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+    version = defaultSerializationVersion,
+    contractId = toContractId("Exceptions:T:1"),
+    packageName = exceptionsPkg.pkgName,
+    template = TypeConId(exceptionsPkgId, "Exceptions:T"),
+    arg = ValueRecord(
+      None,
+      ImmArray(
+        (None, ValueParty(party)),
+        (None, ValueInt64(666)),
+        (None, ValueText("text666")),
+      ),
+    ),
+    signatories = List(party),
+    contractKeyWithMaintainers = None,
+  )
+  val contracts = Map(contractT.contractId -> contractT, contractK.contractId -> contractK)
+  lazy val lookupKey =
+    Map(contractK.contractKeyWithMaintainers.get.globalKey -> Vector(contractK))
+  def run(cmd: ApiCommand) = {
+    val submitters = Set(party)
+    val Right(cmds) = preprocessor
+      .preprocessApiCommands(Map.empty, ImmArray(cmd))
+      .consume(contracts, allExceptionsPkgs, lookupKey)
+    val engine = suffixStrictEngine
+    engine
+      .interpretCommands(
+        validating = false,
+        submitters = submitters,
+        readAs = Set.empty,
+        commands = cmds,
+        ledgerTime = let,
+        preparationTime = let,
+        seeding = seeding,
+        contractIdVersion = contractIdVersion,
+        contractStateMode = contractStateMode,
+      )
+      .consume(contracts, allExceptionsPkgs, lookupKey)
   }
 
   "exceptions" should {
-    val (exceptionsPkgId, exceptionsPkg, allExceptionsPkgs) =
-      // TODO(https://github.com/digital-asset/daml/issues/18457): split key test cases and revert
-      //  to non-dev dar
-      loadAndAddPackage(s"Exceptions-v23.dar")
-    val helperId = Identifier(exceptionsPkgId, "Exceptions:Helper")
-    val let = Time.Timestamp.now()
-    val submissionSeed = hash("rollback")
-    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
-    val sKey = mkSValuePair(SValue.SParty(party), SValue.SInt64(666))
-    val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
-      version = defaultSerializationVersion,
-      contractId = toContractId("Exceptions:K:1"),
-      packageName = exceptionsPkg.pkgName,
-      template = TypeConId(exceptionsPkgId, "Exceptions:K"),
-      arg = ValueRecord(
-        None,
-        ImmArray(
-          (None, ValueParty(party)),
-          (None, ValueInt64(666)),
-          (None, ValueText("text666")),
-        ),
-      ),
-      signatories = List(party),
-      contractKeyWithMaintainers = Some(
-        GlobalKeyWithMaintainers(
-          GlobalKey.assertBuild(
-            templateId = TypeConId(exceptionsPkgId, "Exceptions:K"),
-            packageName = exceptionsPkg.pkgName,
-            key = sKey.toNormalizedValue,
-            keyHash = SValueHash.assertHashContractKey(
-              exceptionsPkg.pkgName,
-              "Exceptions:K",
-              sKey,
-            ),
-          ),
-          Set(party),
-        )
-      ),
-    )
-    val contracts = Map(contract.contractId -> contract)
-    lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
-    def run(cmd: ApiCommand, withKey: Boolean = false) = {
-      val submitters = Set(party)
-      val Right(cmds) = preprocessor
-        .preprocessApiCommands(Map.empty, ImmArray(cmd))
-        .consume(contracts, allExceptionsPkgs, lookupKey)
-      val engine = suffixStrictEngine
-      engine
-        .interpretCommands(
-          validating = false,
-          submitters = submitters,
-          readAs = Set.empty,
-          commands = cmds,
-          ledgerTime = let,
-          preparationTime = let,
-          seeding = seeding,
-          contractIdVersion = contractIdVersion,
-          contractStateMode = if (withKey) ContractStateMachine.Mode.NUCK else ContractStateMachine.Mode.NoKey,
-        )
-        .consume(contracts, allExceptionsPkgs, lookupKey)
-    }
 
     "rolled-back archive of transient contract does not prevent consuming choice after rollback" in {
       val command = ApiCommand.CreateAndExercise(
@@ -2175,7 +2925,15 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         "RollbackArchiveTransient",
         ValueRecord(None, ImmArray((None, ValueInt64(0)))),
       )
-      run(command, withKey = false) shouldBe a[Right[_, _]]
+      contractStateMode match {
+        case Mode.NoKey =>
+          run(command) shouldBe a[Right[_, _]]
+        case Mode.NUCK =>
+          inside(run(command)) {
+            case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
+              succeed
+          }
+      }
     }
     "archive of transient contract in try prevents consuming choice after try if not rolled back" in {
       val command = ApiCommand.CreateAndExercise(
@@ -2184,44 +2942,60 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         "ArchiveTransient",
         ValueRecord(None, ImmArray((None, ValueInt64(0)))),
       )
-      run(command) shouldBe a[Left[_, _]]
+      inside(run(command)) {
+        case Left(IErr(IErr.DamlException(interpretation.Error.ContractNotActive(_, _, _)), _)) =>
+          succeed
+      }
     }
     "rolled-back archive of non-transient contract does not prevent consuming choice after rollback" in {
       val command = ApiCommand.CreateAndExercise(
         helperId.toRef,
         ValueRecord(None, ImmArray((None, ValueParty(party)))),
         "RollbackArchiveNonTransient",
-        ValueRecord(None, ImmArray((None, ValueContractId(contract.contractId)))),
+        ValueRecord(None, ImmArray((None, ValueContractId(contractT.contractId)))),
       )
-      run(command) shouldBe a[Right[_, _]]
+      contractStateMode match {
+        case Mode.NoKey =>
+          run(command) shouldBe a[Right[_, _]]
+        case Mode.NUCK =>
+          inside(run(command)) {
+            case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
+              succeed
+          }
+      }
     }
     "archive of non-transient contract in try prevents consuming choice after try if not rolled back" in {
       val command = ApiCommand.CreateAndExercise(
         helperId.toRef,
         ValueRecord(None, ImmArray((None, ValueParty(party)))),
         "ArchiveNonTransient",
-        ValueRecord(None, ImmArray((None, ValueContractId(contract.contractId)))),
+        ValueRecord(None, ImmArray((None, ValueContractId(contractT.contractId)))),
       )
-      run(command) shouldBe a[Left[_, _]]
+      inside(run(command)) {
+        case Left(IErr(IErr.DamlException(interpretation.Error.ContractNotActive(_, _, _)), _)) =>
+          succeed
+      }
     }
-    "key updates in rollback node crash" in {
-      val command = ApiCommand.CreateAndExercise(
-        helperId.toRef,
-        ValueRecord(None, ImmArray((None, ValueParty(party)))),
-        "RollbackKey",
-        ValueRecord(None, ImmArray((None, ValueInt64(0)))),
-      )
-      run(command, withKey=true) shouldBe a[Left[_, _]]
-    }
-    "key updates in try are not rolled back if no exception is thrown" in {
-      val command = ApiCommand.CreateAndExercise(
-        helperId.toRef,
-        ValueRecord(None, ImmArray((None, ValueParty(party)))),
-        "Key",
-        ValueRecord(None, ImmArray((None, ValueInt64(0)))),
-      )
-      run(command, withKey = true) shouldBe a[Right[_, _]]
-    }
+    if (contractStateMode == ContractStateMachine.Mode.NUCK)
+      "key updates in rollback node crash" in {
+        val command = ApiCommand.CreateAndExercise(
+          helperId.toRef,
+          ValueRecord(None, ImmArray((None, ValueParty(party)))),
+          "RollbackKey",
+          ValueRecord(None, ImmArray((None, ValueInt64(0)))),
+        )
+        run(command) shouldBe a[Left[_, _]]
+      }
+    if (contractStateMode == ContractStateMachine.Mode.NUCK)
+      "key updates in try are not rolled back if no exception is thrown" in {
+        val command = ApiCommand.CreateAndExercise(
+          helperId.toRef,
+          ValueRecord(None, ImmArray((None, ValueParty(party)))),
+          "Key",
+          ValueRecord(None, ImmArray((None, ValueInt64(0)))),
+        )
+        run(command) shouldBe a[Right[_, _]]
+      }
     // TEST_EVIDENCE: Integrity: Rollback creates cannot be exercise
     "creates in rollback are rolled back" in {
       val command = ApiCommand.CreateAndExercise(
@@ -2230,8 +3004,17 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         "ExerciseAfterRollbackCreate",
         ValueRecord(None, ImmArray.empty),
       )
-      inside(run(command)) {
-        case Left(Interpretation(DamlException(interpretation.Error.ContractNotFound(_)), _)) =>
+      contractStateMode match {
+        case Mode.NoKey =>
+          inside(run(command)) {
+            case Left(IErr(IErr.DamlException(interpretation.Error.ContractNotFound(_)), _)) =>
+              succeed
+          }
+        case Mode.NUCK =>
+          inside(run(command)) {
+            case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
+              succeed
+          }
       }
     }
     "ThrowInHandler" in {
@@ -2264,758 +3047,38 @@ class EngineTest(contractIdVersion: ContractIdVersion)
   }
 
   "action node seeds" should {
-    val (exceptionsPkgId, exceptionsPkg, allExceptionsPkgs) =
-      loadAndAddPackage(s"Exceptions-v23.dar")
+
     val seedId = Identifier(exceptionsPkgId, "Exceptions:NodeSeeds")
-    val let = Time.Timestamp.now()
-    val submissionSeed = hash("rollback")
-    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
-    val sKey = mkSValuePair(SValue.SParty(party), SValue.SInt64(777))
-    val contract =
-      TransactionBuilder.fatContractInstanceWithDummyDefaults(
-        version = defaultSerializationVersion,
-        contractId = toContractId("Exceptions:K:2"),
-        packageName = exceptionsPkg.pkgName,
-        template = TypeConId(exceptionsPkgId, "Exceptions:K"),
-        arg = ValueRecord(
-          None,
-          ImmArray(
-            (None, ValueParty(party)),
-            (None, ValueInt64(777)),
-            (None, ValueText("text777")),
-          ),
-        ),
-        signatories = List(party),
-        contractKeyWithMaintainers = Some(
-          GlobalKeyWithMaintainers(
-            GlobalKey.assertBuild(
-              templateId = TypeConId(exceptionsPkgId, "Exceptions:K"),
-              packageName = exceptionsPkg.pkgName,
-              key = sKey.toNormalizedValue,
-              keyHash = SValueHash.assertHashContractKey(
-                exceptionsPkg.pkgName,
-                "Exceptions:K",
-                sKey,
-              ),
-            ),
-            Set(party),
-          )
-        ),
-      )
-    val contracts = Map(contract.contractId -> contract)
-    lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
 
-    def run(cmd: ApiCommand, withKey: Boolean) = {
-      val submitters = Set(party)
-      val Right(cmds) = preprocessor
-        .preprocessApiCommands(Map.empty, ImmArray(cmd))
-        .consume(contracts, allExceptionsPkgs, lookupKey)
-      val engine = if (withKey) suffixStrictEngine else suffixLenientEngine
-        engine
-        .interpretCommands(
-          validating = false,
-          submitters = submitters,
-          readAs = Set.empty,
-          commands = cmds,
-          ledgerTime = let,
-          preparationTime = let,
-          seeding = seeding,
-          contractIdVersion = contractIdVersion,
-          contractStateMode = if (withKey) ContractStateMachine.Mode.NUCK else ContractStateMachine.Mode.NoKey,
-        )
-        .consume(contracts, allExceptionsPkgs, lookupKey)
-    }
+    if (contractStateMode == ContractStateMachine.Mode.NoKey)
+      "Only create and exercise nodes end up in actionNodeSeeds" in {
 
-
-    //  TODO(#30398) review in context of roolback and by-key node
-    "Only create and exercise nodes end up in actionNodeSeeds" ignore {
-      val command = ApiCommand.CreateAndExercise(
-        seedId.toRef,
-        ValueRecord(None, ImmArray((None, ValueParty(party)))),
-        "CreateAllTypes",
-        ValueRecord(None, ImmArray((None, ValueContractId(contract.contractId)))),
-      )
-      inside(run(command, withKey = true)) { case Right((tx, meta, _)) =>
-        tx.nodes.size shouldBe 9
-        tx.nodes(NodeId(0)) shouldBe a[Node.Create]
-        tx.nodes(NodeId(1)) shouldBe a[Node.Exercise]
-        tx.nodes(NodeId(2)) shouldBe a[Node.Fetch]
-        tx.nodes(NodeId(3)) shouldBe a[Node.LookupByKey]
-        tx.nodes(NodeId(4)) shouldBe a[Node.Create]
-        tx.nodes(NodeId(5)) shouldBe a[Node.Rollback]
-        tx.nodes(NodeId(6)) shouldBe a[Node.Fetch]
-        tx.nodes(NodeId(7)) shouldBe a[Node.LookupByKey]
-        tx.nodes(NodeId(8)) shouldBe a[Node.Create]
-        meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 4, 8)
-      }
-    }
-  }
-
-  "global key lookups" should {
-    val (exceptionsPkgId, exceptionsPkg, allExceptionsPkgs) =
-      loadAndAddPackage(s"Exceptions-v23.dar")
-    val tId = Identifier(exceptionsPkgId, "Exceptions:GlobalLookups")
-    val let = Time.Timestamp.now()
-    val submissionSeed = hash("global-keys")
-    val seeding = Engine.initialSeeding(submissionSeed, participant, let)
-    val cid = toContractId("1")
-    val sKey = mkSValuePair(SValue.SParty(party), SValue.SInt64(0))
-    val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
-      version = defaultSerializationVersion,
-      contractId = cid,
-      packageName = exceptionsPkg.pkgName,
-      template = TypeConId(exceptionsPkgId, "Exceptions:K"),
-      arg = ValueRecord(
-        None,
-        ImmArray(
-          (None, ValueParty(party)),
-          (None, ValueInt64(0)), // matches 0 in the daml code
-          (None, ValueText("text0")),
-        ),
-      ),
-      signatories = List(party),
-      contractKeyWithMaintainers = Some(
-        GlobalKeyWithMaintainers(
-          GlobalKey.assertBuild(
-            templateId = TypeConId(exceptionsPkgId, "Exceptions:K"),
-            packageName = exceptionsPkg.pkgName,
-            key = sKey.toNormalizedValue,
-            keyHash = SValueHash.assertHashContractKey(
-              exceptionsPkg.pkgName,
-              "Exceptions:K",
-              sKey,
-            ),
-          ),
-          Set(party),
-        )
-      ),
-    )
-    val contracts = Map(contract.contractId -> contract)
-    lazy val lookupKey =
-      Map(contract.contractKeyWithMaintainers.get.globalKey -> Vector(contract))
-
-    def run(cmd: ApiCommand): Int = {
-      val submitters = Set(party)
-      var keyLookups = 0
-
-      val mockedKeyLookup = Function.unlift { (key: GlobalKey) =>
-        keyLookups += 1
-        lookupKey.lift(key)
-      }
-
-      val Right(cmds) = preprocessor
-        .preprocessApiCommands(Map.empty, ImmArray(cmd))
-        .consume(contracts, allExceptionsPkgs, mockedKeyLookup)
-      val result = suffixStrictEngine
-        .interpretCommands(
-          validating = false,
-          submitters = submitters,
-          readAs = Set.empty,
-          commands = cmds,
-          ledgerTime = let,
-          preparationTime = let,
-          seeding = seeding,
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NUCK,
-        )
-        .consume(
-          contracts,
-          allExceptionsPkgs,
-          mockedKeyLookup,
-        )
-      inside(result) { case Right(_) =>
-        keyLookups
-      }
-    }
-
-    val cidArg = ValueRecord(None, ImmArray((None, ValueContractId(cid))))
-    val emptyArg = ValueRecord(None, ImmArray.empty)
-    "Lookup a global key at most once" in {
-      val cases = Table(
-        ("choice", "argument", "lookups"),
-        ("LookupTwice", emptyArg, 1),
-        ("LookupAfterCreate", emptyArg, 0),
-        ("LookupAfterCreateArchive", emptyArg, 0),
-        ("LookupAfterFetch", cidArg, 1),
-        ("LookupAfterArchive", cidArg, 1),
-        //("LookupAfterRollbackCreate", emptyArg, 0),
-        ("LookupAfterRollbackLookup", emptyArg, 1),
-        ("LookupAfterArchiveAfterRollbackLookup", cidArg, 1),
-      )
-      forEvery(cases) { case (choice, argument, lookups) =>
         val command = ApiCommand.CreateAndExercise(
-          tId.toRef,
+          seedId.toRef,
           ValueRecord(None, ImmArray((None, ValueParty(party)))),
-          choice,
-          argument,
+          "CreateAllTypes",
+          ValueRecord(None, ImmArray((None, ValueContractId(contractT.contractId)))),
         )
-        run(command) shouldBe lookups
-      }
-    }
-  }
-
-  "Engine.preloadPackage" should {
-    import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
-
-    def engine(min: LV, max: LV) =
-      new Engine(
-        EngineConfig(
-          allowedLanguageVersions = VersionRange(min, max),
-          forbidLocalContractIds = true,
-        ),
-        loggerFactory,
-      )
-
-    val devVersion = LanguageVersion.devLfVersion
-    val (_, _, allPackagesDev) =
-      new EngineTestHelpers(contractIdVersion, loggerFactory).loadAndAddPackage(
-        s"MinimalisticDevPackage.dar"
-      )
-    val compatibleLanguageVersions = LanguageVersion.allLfVersions
-    // Following stable packages are deps of other stable packages, so we sort such that these are preloaded first
-    val stablePackagesToLoadFirst = List("daml-prim-DA-Types", "daml-stdlib-DA-NonEmpty-Types")
-    val stablePackages =
-      StablePackages.stablePackages.allPackages
-        .sortBy { sp =>
-          val i = stablePackagesToLoadFirst.indexOf(sp.name)
-          if (i == -1) Int.MaxValue else i
+        inside(run(command)) { case Right((tx, meta, _)) =>
+          tx.nodes.size shouldBe 7
+          tx.nodes(NodeId(0)) shouldBe a[Node.Create]
+          tx.nodes(NodeId(1)) shouldBe a[Node.Exercise]
+          tx.nodes(NodeId(2)) shouldBe a[Node.Fetch]
+          tx.nodes(NodeId(3)) shouldBe a[Node.Create]
+          tx.nodes(NodeId(4)) shouldBe a[Node.Rollback]
+          tx.nodes(NodeId(5)) shouldBe a[Node.Fetch]
+          tx.nodes(NodeId(6)) shouldBe a[Node.Create]
+          meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 6)
         }
-
-    s"accept stable packages from ${devVersion} even if version is smaller than min version" in {
-      for {
-        lv <- compatibleLanguageVersions.filter(_ <= devVersion)
-        eng = engine(min = lv, max = devVersion)
-        pkg <- stablePackages
-        pkgId = pkg.packageId
-        pkg <- allPackagesDev.get(pkgId).toList
-      } yield eng.preloadPackage(pkgId, pkg) shouldBe a[ResultDone[_]]
-    }
-
-    s"reject stable packages from ${devVersion} if version is greater than max version" in {
-      for {
-        lv <- compatibleLanguageVersions
-        eng = engine(min = compatibleLanguageVersions.min, max = lv)
-        pkg <- stablePackages
-        pkgId = pkg.packageId
-        pkg <- allPackagesDev.get(pkgId).toList
-      } yield inside(eng.preloadPackage(pkgId, pkg)) {
-        case ResultDone(_) => pkg.languageVersion shouldBe <=(lv)
-        case ResultError(_) => pkg.languageVersion shouldBe >(lv)
       }
-    }
-  }
-
-  "wrongly typed contract" should {
-    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
-    val cid = toContractId("simple")
-    val fetcherCid = toContractId("fetcher")
-    val contracts =
-      Map(
-        cid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = simpleId,
-            arg = ValueRecord(
-              None /* BasicTests:Simple */,
-              ImmArray((None /* p */, ValueInt64(0))), // value is wrongly-typed: p has type Party
-            ),
-            signatories = List(party),
-            observers = List.empty,
-          ),
-        fetcherCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = fetcherId,
-            arg = ValueRecord(
-              None /* BasicTests:SimpleFetcher */,
-              ImmArray(
-                (None /* p */, ValueParty(alice))
-              ),
-            ),
-            signatories = List(alice),
-          ),
-      )
-
-    def run(cmds: ImmArray[ApiCommand]) =
-      suffixLenientEngine
-        .submit(
-          submitters = Set(alice),
-          readAs = Set.empty: Set[Party],
-          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
-          participantId = participant,
-          submissionSeed = hash("wrongly-typed contract"),
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(contracts, lookupPackage, lookupKey)
-
-    "error on fetch" in {
-      val result = run(
-        ImmArray(
-          ApiCommand.Exercise(
-            fetcherId.toRef,
-            fetcherCid,
-            "DoFetchSimple",
-            ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(cid)))),
-          )
-        )
-      )
-      inside(result) {
-        case Left(
-              Interpretation(
-                DamlException(
-                  interpretation.Error.Upgrade(
-                    interpretation.Error.Upgrade.TranslationFailed(
-                      Some(coid),
-                      srcTemplateId,
-                      dstTemplateId,
-                      createArg,
-                      error,
-                    )
-                  )
-                ),
-                _,
-              )
-            ) =>
-          coid shouldBe cid
-          srcTemplateId shouldBe simpleId
-          dstTemplateId shouldBe simpleId
-          createArg shouldBe contracts(cid).createArg
-          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.TypeMismatch]
-      }
-    }
-
-    "error on exercise" in {
-      val result = run(
-        ImmArray(
-          ApiCommand.Exercise(
-            simpleId.toRef,
-            cid,
-            "Hello",
-            ValueRecord(None, ImmArray.empty),
-          )
-        )
-      )
-      inside(result) {
-        case Left(
-              Interpretation(
-                DamlException(
-                  interpretation.Error.Upgrade(
-                    interpretation.Error.Upgrade.TranslationFailed(
-                      Some(coid),
-                      srcTemplateId,
-                      dstTemplateId,
-                      createArg,
-                      error,
-                    )
-                  )
-                ),
-                _,
-              )
-            ) =>
-          coid shouldBe cid
-          srcTemplateId shouldBe simpleId
-          dstTemplateId shouldBe simpleId
-          createArg shouldBe contracts(cid).createArg
-          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.TypeMismatch]
-      }
-    }
-  }
-
-  "ill-formed contract" should {
-    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
-    val cid = toContractId("simple")
-    val fetcherCid = toContractId("fetcher")
-    val contracts =
-      Map(
-        cid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = simpleId,
-            // ill-formed argument: values imported by the engine cannot contain labels
-            arg = ValueRecord(
-              None,
-              ImmArray((Some[Name]("p"), ValueParty(alice))),
-            ),
-            signatories = List(party),
-            observers = List.empty,
-          ),
-        fetcherCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = fetcherId,
-            arg = ValueRecord(
-              None /* BasicTests:SimpleFetcher */,
-              ImmArray(
-                (None /* p */, ValueParty(alice))
-              ),
-            ),
-            signatories = List(alice),
-          ),
-      )
-
-    def run(cmds: ImmArray[ApiCommand]) =
-      suffixLenientEngine
-        .submit(
-          submitters = Set(alice),
-          readAs = Set.empty: Set[Party],
-          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
-          participantId = participant,
-          submissionSeed = hash("ill-formed contract"),
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(contracts, lookupPackage, lookupKey)
-
-    "error on fetch" in {
-      val result = run(
-        ImmArray(
-          ApiCommand.Exercise(
-            fetcherId.toRef,
-            fetcherCid,
-            "DoFetchSimple",
-            ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(cid)))),
-          )
-        )
-      )
-      inside(result) {
-        case Left(
-              Interpretation(
-                DamlException(
-                  interpretation.Error.Upgrade(
-                    interpretation.Error.Upgrade.TranslationFailed(
-                      Some(coid),
-                      srcTemplateId,
-                      dstTemplateId,
-                      createArg,
-                      error,
-                    )
-                  )
-                ),
-                _,
-              )
-            ) =>
-          coid shouldBe cid
-          srcTemplateId shouldBe simpleId
-          dstTemplateId shouldBe simpleId
-          createArg shouldBe contracts(cid).createArg
-          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
-      }
-    }
-
-    "error on exercise" in {
-      val result = run(
-        ImmArray(
-          ApiCommand.Exercise(
-            simpleId.toRef,
-            cid,
-            "Hello",
-            ValueRecord(None, ImmArray.empty),
-          )
-        )
-      )
-      inside(result) {
-        case Left(
-              Interpretation(
-                DamlException(
-                  interpretation.Error.Upgrade(
-                    interpretation.Error.Upgrade.TranslationFailed(
-                      Some(coid),
-                      srcTemplateId,
-                      dstTemplateId,
-                      createArg,
-                      error,
-                    )
-                  )
-                ),
-                _,
-              )
-            ) =>
-          coid shouldBe cid
-          srcTemplateId shouldBe simpleId
-          dstTemplateId shouldBe simpleId
-          createArg shouldBe contracts(cid).createArg
-          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
-      }
-    }
-  }
-
-  "trailing nones" should {
-    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
-    val simpleCid = toContractId("simple")
-    val fetcherCid = toContractId("fetcher")
-    val createArg = ValueRecord(
-      None /* BasicTests:Simple */,
-      ImmArray(None /* p */ -> ValueParty(alice), None -> ValueOptional(None)),
-    )
-    val contracts =
-      Map(
-        simpleCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = simpleId,
-            arg = createArg,
-            signatories = List(alice),
-            observers = List.empty,
-          ),
-        fetcherCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = fetcherId,
-            arg = ValueRecord(
-              None /* BasicTests:SimpleFetcher */,
-              ImmArray(
-                (None /* p */, ValueParty(alice))
-              ),
-            ),
-            signatories = List(alice),
-          ),
-      )
-
-    def run(
-        cmds: ImmArray[ApiCommand],
-        hashingMethod: Hash.HashingMethod,
-    ): Either[Error, (SubmittedTransaction, Transaction.Metadata)] =
-      suffixLenientEngine
-        .submit(
-          submitters = Set(alice),
-          readAs = Set.empty: Set[Party],
-          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
-          participantId = participant,
-          submissionSeed = hash("contract with trailing nones"),
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(
-          contracts,
-          lookupPackage,
-          lookupKey,
-          hashingMethod = _ => hashingMethod,
-          idValidator = (_, _) => true,
-        )
-
-    def runFetch(hashingMethod: Hash.HashingMethod) = run(
-      cmds = ImmArray(
-        ApiCommand.Exercise(
-          fetcherId.toRef,
-          fetcherCid,
-          "DoFetchSimple",
-          ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(simpleCid)))),
-        )
-      ),
-      hashingMethod = hashingMethod,
-    )
-
-    def runExercise(hashingMethod: Hash.HashingMethod) = run(
-      cmds = ImmArray(
-        ApiCommand.Exercise(simpleId.toRef, simpleCid, "Hello", ValueRecord(None, ImmArray.empty))
-      ),
-      hashingMethod = hashingMethod,
-    )
-
-    def expectSuccess(
-        result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
-    ): Assertion =
-      result shouldBe a[Right[_, _]]
-
-    def expectInvalidValue(
-        result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
-    ): Assertion =
-      inside(result) {
-        case Left(
-              Error.Interpretation(
-                DamlException(
-                  interpretation.Error.Upgrade(
-                    interpretation.Error.Upgrade.TranslationFailed(_, _, _, _, error)
-                  )
-                ),
-                _,
-              )
-            ) =>
-          error shouldBe a[interpretation.Error.Upgrade.TranslationFailed.InvalidValue]
-      }
-
-    "be allowed in fetches for v10 contracts" in {
-      expectSuccess(runFetch(Hash.HashingMethod.Legacy))
-    }
-
-    "be allowed in exercises for v10 contracts" in {
-      expectSuccess(runExercise(Hash.HashingMethod.Legacy))
-    }
-
-    "be rejected in fetches for v11 contracts" in {
-      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendly))
-    }
-
-    "be rejected in exercises for v11 contracts" in {
-      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendly))
-    }
-
-    "be rejected in fetches for v12 contracts" in {
-      expectInvalidValue(runFetch(Hash.HashingMethod.TypedNormalForm))
-    }
-
-    "be rejected in exercises for v12 contracts" in {
-      expectInvalidValue(runExercise(Hash.HashingMethod.TypedNormalForm))
-    }
-  }
-
-  "contract authentication" should {
-    val simpleId = Identifier(basicTestsPkgId, "BasicTests:Simple")
-    val fetcherId = Identifier(basicTestsPkgId, "BasicTests:SimpleFetcher")
-    val simpleCid = toContractId("simple")
-    val fetcherCid = toContractId("fetcher")
-    val createArg = ValueRecord(
-      None /* BasicTests:Simple */,
-      ImmArray((None /* p */, ValueParty(alice))),
-    )
-    val contracts =
-      Map(
-        simpleCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = simpleId,
-            arg = createArg,
-            signatories = List(alice),
-            observers = List.empty,
-          ),
-        fetcherCid ->
-          TransactionBuilder.fatContractInstanceWithDummyDefaults(
-            version = defaultSerializationVersion,
-            packageName = basicTestsPkg.pkgName,
-            template = fetcherId,
-            arg = ValueRecord(
-              None /* BasicTests:SimpleFetcher */,
-              ImmArray(
-                (None /* p */, ValueParty(alice))
-              ),
-            ),
-            signatories = List(alice),
-          ),
-      )
-
-    val expectedLegacyHash =
-      Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = false)
-        .value
-    val expectedUpgradeFriendlyHash =
-      Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = true)
-        .value
-    def expectedTypedNormalFormHash = SValueHash
-      .hashContractInstance(
-        basicTestsPkg.pkgName,
-        simpleId.qualifiedName,
-        SValue.SRecord(
-          simpleId,
-          ImmArray(Ref.Name.assertFromString("p")),
-          ArraySeq(SValue.SParty(alice)),
-        ),
-      )
-      .value
-
-    def run(
-        cmds: ImmArray[ApiCommand],
-        hashingMethod: ContractId => Hash.HashingMethod,
-        idValidator: (ContractId, Hash) => Boolean,
-    ): Either[Error, (SubmittedTransaction, Transaction.Metadata)] =
-      suffixLenientEngine
-        .submit(
-          submitters = Set(alice),
-          readAs = Set.empty: Set[Party],
-          cmds = ApiCommands(cmds, Time.Timestamp.now(), ""),
-          participantId = participant,
-          submissionSeed = hash("contract auth"),
-          contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.NoKey,
-          prefetchKeys = Seq.empty,
-        )
-        .consume(
-          contracts,
-          lookupPackage,
-          lookupKey,
-          hashingMethod = hashingMethod,
-          idValidator = idValidator,
-        )
-
-    val cases = Table(
-      ("hashingMethod", "expectedHash"),
-      (Hash.HashingMethod.Legacy, expectedLegacyHash),
-      (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
-      (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
-    )
-
-    "happen on fetch" in {
-      forEvery(cases) { case (hashingMethod, expectedHash) =>
-        var idValidatorCalledWithExpectedHash = false
-        val result = run(
-          cmds = ImmArray(
-            ApiCommand.Exercise(
-              fetcherId.toRef,
-              fetcherCid,
-              "DoFetchSimple",
-              ValueRecord(None, ImmArray((Some[Name]("cid"), ValueContractId(simpleCid)))),
-            )
-          ),
-          hashingMethod = _ => hashingMethod,
-          idValidator = { (cid, h) =>
-            // We're only interested in fetches of mainCid, when fetcherCid is fetched we simply return true but
-            // do not record the call.
-            if (cid == simpleCid) {
-              idValidatorCalledWithExpectedHash = (h == expectedHash)
-              idValidatorCalledWithExpectedHash
-            } else true
-          },
-        )
-        idValidatorCalledWithExpectedHash shouldBe true
-        result shouldBe a[Right[_, _]]
-      }
-    }
-
-    "happen on exercise" in {
-      forEvery(cases) { case (hashingMethod, expectedHash) =>
-        var idValidatorCalledWithExpectedHash = false
-        val result = run(
-          cmds = ImmArray(
-            ApiCommand.Exercise(
-              simpleId.toRef,
-              simpleCid,
-              "Hello",
-              ValueRecord(None, ImmArray.empty),
-            )
-          ),
-          hashingMethod = _ => hashingMethod,
-          idValidator = { (cid, h) =>
-            // We're only interested in exercises of mainCid, when fetcherCid is exercised we simply return true but
-            // do not record the call.
-            if (cid == simpleCid) {
-              idValidatorCalledWithExpectedHash = (h == expectedHash)
-              idValidatorCalledWithExpectedHash
-            } else true
-          },
-        )
-        idValidatorCalledWithExpectedHash shouldBe true
-        result shouldBe a[Right[_, _]]
-      }
-    }
   }
 }
 
-class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class EngineTestAllVersions
+    extends AnyWordSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   "Engine.preloadPackage" should {
 
@@ -3064,6 +3127,7 @@ class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPr
 
 class EngineTestHelpers(
     contractIdVersion: ContractIdVersion,
+    basicTestDarFile: String,
     loggerFactory: NamedLoggerFactory,
 ) {
   val defaultSerializationVersion =
@@ -3102,7 +3166,7 @@ class EngineTestHelpers(
   }
 
   val (basicTestsPkgId, basicTestsPkg, allPackages) = loadAndAddPackage(
-    s"BasicTests-v23.dar"
+    basicTestDarFile
   )
 
   val basicTestsSignatures: PackageInterface =
@@ -3176,6 +3240,15 @@ class EngineTestHelpers(
           ),
           signatories = List(alice),
           observers = List(bob),
+        ),
+      toContractId("BasicTests:T") ->
+        TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = defaultSerializationVersion,
+          packageName = basicTestsPkg.pkgName,
+          template = TypeConId(basicTestsPkgId, "BasicTests:T"),
+          arg = ValueRecord(None, ImmArray((None, ValueParty(alice)))),
+          signatories = List(alice),
+          observers = List(),
         ),
       withKeyContractInst.contractId ->
         withKeyContractInst,

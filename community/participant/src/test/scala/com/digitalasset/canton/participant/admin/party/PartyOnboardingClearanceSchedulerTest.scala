@@ -4,9 +4,10 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import cats.syntax.either.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.participant.admin.data.{
@@ -14,29 +15,41 @@ import com.digitalasset.canton.participant.admin.data.{
   FlagSet,
   PartyOnboardingFlagStatus,
 }
-import com.digitalasset.canton.participant.sync.{ConnectedSynchronizer, SyncEphemeralState}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.store.PendingOperation
+import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.{
+  SynchronizerTopologyClientWithInit,
+  TopologySnapshotLoader,
+}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.TopologyStoreTestData
+import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreTestData}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  ProtocolVersionChecksAsyncWordSpec,
+  SequencerCounter,
+}
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.mockito.MockitoSugar
-import org.mockito.invocation.InvocationOnMock
-import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
 
 import java.util.concurrent.ConcurrentLinkedQueue
-import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
 
 class PartyOnboardingClearanceSchedulerTest
-    extends AnyWordSpec
+    extends AsyncWordSpec
     with BaseTest
+    with ProtocolVersionChecksAsyncWordSpec
     with MockitoSugar
     with HasExecutionContext {
 
@@ -49,34 +62,38 @@ class PartyOnboardingClearanceSchedulerTest
       ) {
 
     // Queue of predefined responses (success or failure) for the fake workflow.
-    private val responses = new mutable.Queue[Either[String, PartyOnboardingFlagStatus]]()
+    private val responses =
+      new ConcurrentLinkedQueue[Either[AuthorizeClearanceError, PartyOnboardingFlagStatus]]()
 
-    // Records the arguments passed to `authorizeOnboardedTopology` for assertion.
+    // Records the arguments passed to `authorizeClearingOnboardingFlag` for assertion.
     val calls = new ConcurrentLinkedQueue[(PartyId, EffectiveTime)]
 
     def addResponse(response: PartyOnboardingFlagStatus): Unit =
-      responses.enqueue(Right(response))
+      responses.add(Right(response))
 
-    def addFailure(error: String): Unit = responses.enqueue(Left(error))
+    def addFailure(error: AuthorizeClearanceError): Unit =
+      responses.add(Left(error))
 
     override def authorizeClearingOnboardingFlag(
         partyId: PartyId,
         targetParticipantId: ParticipantId,
         onboardingEffectiveAt: EffectiveTime,
-        connectedSynchronizer: ConnectedSynchronizer,
+        context: PartyReplicationTopologyWorkflow.SynchronizerTopologyContext,
         requestId: Option[Hash] = None,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, PartyOnboardingFlagStatus] = {
+    ): EitherT[FutureUnlessShutdown, AuthorizeClearanceError, PartyOnboardingFlagStatus] = {
       calls.add((partyId, onboardingEffectiveAt))
-      val result = if (responses.isEmpty) {
-        EitherT.leftT[FutureUnlessShutdown, PartyOnboardingFlagStatus](
-          "FakePartyReplicationTopologyWorkflow has no more responses"
+
+      val result = Option(responses.poll()).getOrElse(
+        Left(
+          AuthorizeClearanceError.ProposeError(
+            "FakePartyReplicationTopologyWorkflow has no more responses"
+          )
         )
-      } else {
-        EitherT.fromEither[FutureUnlessShutdown](responses.dequeue())
-      }
-      result
+      )
+
+      EitherT.fromEither[FutureUnlessShutdown](result)
     }
   }
 
@@ -106,405 +123,721 @@ class PartyOnboardingClearanceSchedulerTest
     * thread-safe in such scenarios.
     */
   private class PartyOnboardingClearanceSchedulerTestFixture {
-    val mockConnectedSynchronizer = mock[ConnectedSynchronizer]
-    val mockEphemeralState = mock[SyncEphemeralState]
     val mockTimeTracker = mock[SynchronizerTimeTracker]
+    val mockTopologyClient = mock[SynchronizerTopologyClientWithInit]
+    val mockTopologyManager = mock[SynchronizerTopologyManager]
+    val mockTopologyStore = mock[TopologyStore[SynchronizerStore]]
+
+    // We must mock TopologySnapshotLoader instead of TopologySnapshot because
+    // SynchronizerTopologyClientWithInit.currentSnapshotApproximation expects the Loader type.
+    val mockSnapshot = mock[TopologySnapshotLoader]
     val fakeWorkflow = new FakePartyReplicationTopologyWorkflow(loggerFactory)
 
-    // Default setup for mocks
-    when(mockConnectedSynchronizer.ephemeral).thenReturn(mockEphemeralState)
-    when(mockConnectedSynchronizer.psid).thenReturn(psid)
-    when(mockEphemeralState.timeTracker).thenReturn(mockTimeTracker)
-
-    // Properly stub the lifecycle methods used by the Backoff retry policy
-    when(mockConnectedSynchronizer.isClosing).thenReturn(false)
-    when(
-      mockConnectedSynchronizer.synchronizeWithClosingUS(
-        any[String]
-      )(any[FutureUnlessShutdown[Any]])(
-        any[TraceContext],
-        any[Thereafter[FutureUnlessShutdown]],
+    // Use the actual in-memory store instead of a mock
+    val inMemoryStore =
+      new InMemoryPendingOperationStore[OnboardingClearanceOperation, SynchronizerId](
+        OnboardingClearanceOperation,
+        loggerFactory,
       )
-    ).thenAnswer { (inv: InvocationOnMock) =>
-      val actionResult = inv.getArgument[FutureUnlessShutdown[Any]](1)
-      UnlessShutdown.Outcome(actionResult)
+
+    // Create a valid, real operation to avoid Mockito issues with final classes
+    val rpv = OnboardingClearanceOperation
+      .protocolVersionRepresentativeFor(ProtoVersion(30))
+      .valueOr(err => fail(s"Failed to get RPV: $err"))
+
+    val realOperation = OnboardingClearanceOperation(Some(onboardingEffectiveAt))(rpv)
+
+    val pendingOp = PendingOperation(
+      name = OnboardingClearanceOperation.operationName,
+      key = OnboardingClearanceOperation.operationKey(partyId),
+      operation = realOperation,
+      synchronizer = psid.logical,
+    )
+
+    // Setup topology mocks to return "No LSU Announced" by default to keep existing tests green.
+    // Explicitly typed as Option.empty to satisfy the invariant FutureUnlessShutdown Mockito macro.
+    when(mockTopologyClient.currentSnapshotApproximation(any[TraceContext]))
+      .thenReturn(FutureUnlessShutdown.pure(mockSnapshot))
+    when(mockSnapshot.announcedLsu()(any[TraceContext]))
+      .thenReturn(FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)]))
+
+    // Build the resolved context for the active synchronizer mock
+    val mockSynchronizerContext = new PartyReplicationTopologyWorkflow.SynchronizerTopologyContext {
+      override def topologyClient = mockTopologyClient
+      override def topologyManager = mockTopologyManager
+      override def topologyStore = mockTopologyStore
+      override def timeTracker = mockTimeTracker
+    }
+
+    // Build the outer static context
+    val workflowContext = new PartyReplicationTopologyWorkflow.TopologyWorkflowContext {
+      override def psid: PhysicalSynchronizerId = PartyOnboardingClearanceSchedulerTest.this.psid
+      override def workflow: PartyReplicationTopologyWorkflow = fakeWorkflow
+      override def synchronizerContext
+          : Option[PartyReplicationTopologyWorkflow.SynchronizerTopologyContext] =
+        Some(mockSynchronizerContext)
     }
 
     // The scheduler instance under test.
     val scheduler =
       new OnboardingClearanceScheduler(
         participantId,
-        psid,
-        () => Some(mockConnectedSynchronizer),
+        workflowContext,
         loggerFactory,
-        fakeWorkflow,
+        inMemoryStore, // Inject the active in-memory store
         timeouts,
         retryInitialDelay = 1.millisecond,
         retryMaxDelay = 5.milliseconds,
       )
   }
 
+  /** Factory method to safely and asynchronously build and initialize the fixture.
+    */
+  private def createFixture(): Future[PartyOnboardingClearanceSchedulerTestFixture] = {
+    val fixture = new PartyOnboardingClearanceSchedulerTestFixture
+    fixture.inMemoryStore
+      .insert(fixture.pendingOp)
+      .value
+      .failOnShutdown
+      .map(_ => fixture)
+  }
+
   "PartyOnboardingClearanceScheduler" when {
 
-    "requestOnboardingFlagClearance is called" should {
-
-      "fail if the synchronizer psid mismatches" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        // A mock synchronizer configured with an incorrect psid.
-        val mockWrongSync = mock[ConnectedSynchronizer]
-        // A different psid used to trigger the mismatch error.
-        val wrongPsid = DefaultTestIdentities.physicalSynchronizerId
-        when(mockWrongSync.psid).thenReturn(wrongPsid)
-
-        // Create a scheduler that provides the *wrong* synchronizer
-        val scheduler = new OnboardingClearanceScheduler(
-          participantId,
-          psid,
-          () => Some(mockWrongSync), // Provider returns the wrong sync
-          loggerFactory,
-          fixture.fakeWorkflow,
-          timeouts,
-        )
-
-        val error = scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
-          )
-          .leftOrFailShutdown("Request should have failed due to psid mismatch")
-          .futureValue
-
-        error should include(s"Psid mismatch: Expected $psid, got $wrongPsid")
-      }
+    "requestClearance is called synchronously" should {
 
       "fail if the synchronizer provider returns None" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
+        createFixture().flatMap { fixture =>
+          // Create a context that returns None for the synchronizer context
+          val failingWorkflowContext =
+            new PartyReplicationTopologyWorkflow.TopologyWorkflowContext {
+              override def psid: PhysicalSynchronizerId =
+                PartyOnboardingClearanceSchedulerTest.this.psid
+              override def workflow: PartyReplicationTopologyWorkflow = fixture.fakeWorkflow
+              override def synchronizerContext
+                  : Option[PartyReplicationTopologyWorkflow.SynchronizerTopologyContext] = None
+            }
 
-        // Create a scheduler whose provider returns None
-        val scheduler = new OnboardingClearanceScheduler(
-          participantId,
-          psid,
-          () => None, // <-- Provider returns None
-          loggerFactory,
-          fixture.fakeWorkflow,
-          timeouts,
-        )
-
-        val error = scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
+          val scheduler = new OnboardingClearanceScheduler(
+            participantId,
+            failingWorkflowContext,
+            loggerFactory,
+            fixture.inMemoryStore,
+            timeouts,
           )
-          .leftOrFailShutdown("Request should have failed as synchronizer provider returned None")
-          .futureValue
 
-        error shouldBe s"Synchronizer connection is not ready (absent): Onboarding flag clearance request for $psid (party: $partyId, participant: $participantId)."
+          scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .leftOrFailShutdown("Request should have failed as synchronizer provider returned None")
+            .map { error =>
+              error should include("Synchronizer connection is not yet available")
+            }
+        }
+      }
+
+      "abort clearance and remove task if no pending clearance record is found (PV >= 35)" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+        createFixture().flatMap { fixture =>
+          // Clear the fake store to simulate a missing record in the DB
+          fixture.inMemoryStore
+            .delete(
+              psid.logical,
+              OnboardingClearanceOperation.operationKey(partyId),
+              OnboardingClearanceOperation.operationName,
+            )
+            .failOnShutdown
+            .flatMap { _ =>
+              // Put a dummy task in the map to ensure it actually gets actively removed
+              fixture.scheduler.pendingClearances.put(partyId, task)
+
+              fixture.scheduler
+                .requestClearance(partyId, onboardingEffectiveAt)
+                .value
+                .failOnShutdown
+                .map { result =>
+                  result shouldBe Left(
+                    OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord.message
+                  )
+
+                  // Workflow should NOT be called since it was aborted early
+                  fixture.fakeWorkflow.calls shouldBe empty
+
+                  // The task should be cleanly removed from the map
+                  fixture.scheduler.pendingClearances.get(partyId) shouldBe None
+                }
+            }
+        }
+      }
+
+      "return FlagSet with the upgrade time's immediate successor and schedule a background task if an LSU is announced" in {
+        createFixture().flatMap { fixture =>
+          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+          // Define a specific future upgrade time to assert against
+          val upgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
+          val expectedSafeTime = upgradeTime.value.immediateSuccessor
+
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Mock the topology to simulate an active LSU.
+          when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
+            .thenReturn(
+              FutureUnlessShutdown.pure(Some((successor, upgradeTime)))
+            )
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("Request should have succeeded with FlagSet")
+            .map { result =>
+              // It should return FlagSet with the immediate successor of the LSU upgrade time
+              result shouldBe FlagSet(expectedSafeTime)
+
+              // Ensure the workflow is never called if an LSU is active
+              fixture.fakeWorkflow.calls shouldBe empty
+
+              // Ensure the background task was successfully scheduled for the new time
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(expectedSafeTime))(
+                any[TraceContext]
+              )
+              succeed
+            }
+        }
+      }
+
+      "update an existing scheduled task if polled again and the safe time has changed (e.g. LSU cancelled)" in {
+        createFixture().flatMap { fixture =>
+          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+
+          // 1st time: LSU is active.
+          val lsuUpgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
+          val lsuSafeTime = lsuUpgradeTime.value.immediateSuccessor
+
+          // 2nd time: LSU is cancelled, workflow is called, and a new (earlier) safe time is returned.
+          val newSafeTime = CantonTimestamp.now().plusSeconds(10)
+
+          // Mock topology to return LSU active, then LSU cancelled
+          when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
+            .thenReturn(FutureUnlessShutdown.pure(Some((successor, lsuUpgradeTime))))
+            .andThen(
+              FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)])
+            )
+
+          // Mock workflow to return a completely new safe time when finally called
+          fixture.fakeWorkflow.addResponse(FlagSet(newSafeTime))
+
+          val tickPromise1 = Promise[Unit]()
+          val tickPromise2 = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise1.future), Some(tickPromise2.future))
+
+          // Request 1: Polling during LSU
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("First request failed")
+            .flatMap { res1 =>
+              res1 shouldBe FlagSet(lsuSafeTime)
+
+              // Ensure the task was scheduled for the LSU safe time
+              fixture.scheduler
+                .pendingClearances(partyId)
+                .earliestClearanceTime shouldBe lsuSafeTime
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(lsuSafeTime))(
+                any[TraceContext]
+              )
+
+              // Request 2: Polling after LSU is cancelled
+              fixture.scheduler
+                .requestClearance(partyId, onboardingEffectiveAt)
+                .valueOrFailShutdown("Second request failed")
+                .map { res2 =>
+                  res2 shouldBe FlagSet(newSafeTime)
+
+                  // Ensure the task was UPDATED to the new safe time, and a new trigger was scheduled
+                  fixture.scheduler.pendingClearances.size shouldBe 1
+                  fixture.scheduler
+                    .pendingClearances(partyId)
+                    .earliestClearanceTime shouldBe newSafeTime
+                  verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(newSafeTime))(
+                    any[TraceContext]
+                  )
+                  succeed
+                }
+            }
+        }
       }
 
       "not schedule a task if the flag is already FlagNotSet" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        fixture.fakeWorkflow.addResponse(FlagNotSet)
+        createFixture().flatMap { fixture =>
+          fixture.fakeWorkflow.addResponse(FlagNotSet)
 
-        fixture.scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
-          )
-          .valueOrFailShutdown("Initial check failed")
-          .map { result =>
-            result shouldBe FlagNotSet
-            fixture.fakeWorkflow.calls.size shouldBe 1
-            fixture.scheduler.pendingClearances.size shouldBe 0
-            verify(fixture.mockTimeTracker, never).awaitTick(any[CantonTimestamp])(
-              any[TraceContext]
-            )
-            succeed
-          }
-          .futureValue
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("Initial check failed")
+            .map { result =>
+              result shouldBe FlagNotSet
+              fixture.fakeWorkflow.calls.size shouldBe 1
+              fixture.scheduler.pendingClearances.size shouldBe 0
+              verify(fixture.mockTimeTracker, never).awaitTick(any[CantonTimestamp])(
+                any[TraceContext]
+              )
+              succeed
+            }
+        }
       }
 
       "schedule a task only once for the same party" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
 
-        val flagSet = FlagSet(earliestClearanceTime)
-        fixture.fakeWorkflow.addResponse(flagSet)
-        fixture.fakeWorkflow.addResponse(flagSet)
+          val flagSet = FlagSet(earliestClearanceTime)
+          fixture.fakeWorkflow.addResponse(flagSet)
+          fixture.fakeWorkflow.addResponse(flagSet)
 
-        val f1 = fixture.scheduler.requestClearance(partyId, onboardingEffectiveAt).value
-        val f2 = fixture.scheduler.requestClearance(partyId, onboardingEffectiveAt).value
+          val f1 = fixture.scheduler.requestClearance(partyId, onboardingEffectiveAt).value
+          val f2 = fixture.scheduler.requestClearance(partyId, onboardingEffectiveAt).value
 
-        FutureUnlessShutdown
-          .sequence(Seq(f1, f2))
-          .map { results =>
-            results.foreach(_ shouldBe Right(flagSet))
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            fixture.scheduler.pendingClearances(partyId) shouldBe task
-            verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
-              any[TraceContext]
-            )
-            fixture.fakeWorkflow.calls.size shouldBe 2
-            succeed
-          }
-          .failOnShutdown
-          .futureValue
+          FutureUnlessShutdown
+            .sequence(Seq(f1, f2))
+            .failOnShutdown
+            .map { results =>
+              results.foreach(_ shouldBe Right(flagSet))
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              fixture.scheduler.pendingClearances(partyId) shouldBe task
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
+                any[TraceContext]
+              )
+              fixture.fakeWorkflow.calls.size shouldBe 2
+              succeed
+            }
+        }
       }
 
       "handle concurrent requests correctly" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
 
-        val flagSet = FlagSet(earliestClearanceTime)
-        (1 to 10).foreach(_ => fixture.fakeWorkflow.addResponse(flagSet))
+          val flagSet = FlagSet(earliestClearanceTime)
+          (1 to 10).foreach(_ => fixture.fakeWorkflow.addResponse(flagSet))
 
-        val allCalls = Future
-          .traverse((1 to 10).toList) { _ =>
-            fixture.scheduler
-              .requestClearance(
-                partyId,
-                onboardingEffectiveAt,
-              )
-              .value
-              .unwrap
+          val allCalls = Future
+            .traverse((1 to 10).toList) { _ =>
+              fixture.scheduler
+                .requestClearance(partyId, onboardingEffectiveAt)
+                .value
+                .failOnShutdown
+            }
+
+          allCalls.map { _ =>
+            fixture.scheduler.pendingClearances.size shouldBe 1
+            verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
+              any[TraceContext]
+            )
+            fixture.fakeWorkflow.calls.size shouldBe 10
+            succeed
+          }
+        }
+      }
+    }
+
+    "requestClearanceInBackground is called asynchronously" should {
+
+      "evaluate the flag and schedule a task seamlessly in the background" in {
+        createFixture().map { fixture =>
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          // Fire and "forget"
+          fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+
+          // Wait for the background task to update the observable state safely
+          eventually() {
+            fixture.fakeWorkflow.calls.size shouldBe 1
+            fixture.scheduler.pendingClearances.size shouldBe 1
           }
 
-        allCalls.map { _ =>
-          fixture.scheduler.pendingClearances.size shouldBe 1
-          verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
-            any[TraceContext]
-          )
-          fixture.fakeWorkflow.calls.size shouldBe 10
+          // Verify the side-effect outside the previous eventually block (flake prevention)
+          // Safely wait for the asynchronous mock invocation (up to 3 seconds)
+          verify(fixture.mockTimeTracker, timeout(millis = 3000).times(1))
+            .awaitTick(any[CantonTimestamp])(
+              any[TraceContext]
+            )
           succeed
-        }.futureValue
+        }
       }
 
-      "propose a transaction when the trigger fires" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
+      "treat an announced LSU as a transient error and silently retry until cancelled" in {
+        createFixture().map { fixture =>
+          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
 
-        when(
-          fixture.mockTimeTracker.awaitTick(
-            isEq(task.earliestClearanceTime.immediateSuccessor)
-          )(
-            any[TraceContext]
+          // 1st attempt: LSU is announced (should backoff safely without spamming INFO/WARN logs)
+          // 2nd attempt: LSU is cancelled (None) -> Proceeds to call workflow
+          when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
+            .thenReturn(
+              FutureUnlessShutdown.pure(Some((successor, EffectiveTime(CantonTimestamp.now()))))
+            )
+            .andThen(
+              FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)])
+            )
+
+          // Once LSU cancels, the workflow is called and succeeds
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Note: Because of our custom retry policy, we suppress DEBUG/TRACE,
+          // ensuring the standard INFO logging is clean.
+          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+
+            eventually() {
+              // Workflow is only called ONCE because the LSU block prevented it the first time
+              fixture.fakeWorkflow.calls.size shouldBe 1
+              fixture.scheduler.pendingClearances.size shouldBe 1
+            }
+          }
+        }
+      }
+
+      "retry transient failures infinitely until it succeeds" in {
+        createFixture().map { fixture =>
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Queue 2 transient failures, followed by a success
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.ProposeError("Transient network error 1")
           )
-        )
-          .thenReturn(Some(tickPromise.future))
-
-        fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
-        fixture.fakeWorkflow.addResponse(FlagNotSet)
-
-        fixture.scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.ProposeError("Transient network error 2")
           )
-          .valueOrFailShutdown("make the initial request")
-          .flatMap { firstResult =>
-            firstResult shouldBe FlagSet(earliestClearanceTime)
-            fixture.scheduler.pendingClearances.size shouldBe 1
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+
+            eventually() {
+              // It should have executed the workflow 3 times (2 fails + 1 success)
+              fixture.fakeWorkflow.calls.size shouldBe 3
+              // The task should be successfully scheduled after the loop breaks
+              fixture.scheduler.pendingClearances.size shouldBe 1
+            }
+          }
+        }
+      }
+
+      "abort the retry loop immediately on a terminal failure" in {
+        createFixture().map { fixture =>
+          // Queue a transient failure to trigger a retry, then a terminal failure
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.ProposeError("Transient network error 1")
+          )
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.PartyNotHosted("Party is not hosted by target participant")
+          )
+
+          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+
+            eventually() {
+              // It should evaluate exactly twice, then safely abort the infinite loop
+              fixture.fakeWorkflow.calls.size shouldBe 2
+            }
+          }
+
+          // Ensure it did not schedule anything
+          fixture.scheduler.pendingClearances.size shouldBe 0
+          succeed
+        }
+      }
+
+      "prevent redundant concurrent background loops using the idempotency lock" in {
+        createFixture().map { fixture =>
+          // Race flake/prevention: Set up the mock before releasing the pause!
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Create a promise to artificially pause the background task.
+          // This ensures the lock remains held while we fire subsequent concurrent requests.
+          val holdExecutionPromise = Promise[UnlessShutdown[TopologySnapshotLoader]]()
+
+          when(fixture.mockTopologyClient.currentSnapshotApproximation(any[TraceContext]))
+            .thenReturn(FutureUnlessShutdown(holdExecutionPromise.future))
+
+          // Fire 5 concurrent background requests
+          (1 to 5).foreach { _ =>
+            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+          }
+
+          // Assert the lock is currently held
+          fixture.scheduler.inFlightBackgroundRequests.contains(partyId) shouldBe true
+
+          // Prevent flakiness: Queue the success response before releasing the pause!
+          // This prevents the background task from waking up, finding an empty queue, and triggering a retry.
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+          // Release the pause, allowing the single background task to complete
+          holdExecutionPromise.success(UnlessShutdown.Outcome(fixture.mockSnapshot))
+
+          eventually() {
+            // Only one request should have made it through the lock to hit the workflow
             fixture.fakeWorkflow.calls.size shouldBe 1
 
-            tickPromise.success(())
+            // The lock must be cleanly released after completion
+            fixture.scheduler.inFlightBackgroundRequests.contains(partyId) shouldBe false
+          }
+        }
+      }
+    }
 
-            eventuallyAsync() {
-              fixture.fakeWorkflow.calls.size shouldBe 2
-            }.unwrap.map { _ =>
-              fixture.fakeWorkflow.calls.poll() shouldBe (partyId, onboardingEffectiveAt)
+    "the scheduled trigger fires" should {
+
+      "propose a transaction successfully in the background" in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+
+          when(
+            fixture.mockTimeTracker.awaitTick(
+              isEq(
+                task.earliestClearanceTime
+              ) // NOTE: Trigger awaits the *exact* earliestClearanceTime now
+            )(any[TraceContext])
+          ).thenReturn(Some(tickPromise.future))
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+          // Trigger response
+          fixture.fakeWorkflow.addResponse(FlagNotSet)
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .flatMap { firstResult =>
+              firstResult shouldBe FlagSet(earliestClearanceTime)
               fixture.scheduler.pendingClearances.size shouldBe 1
-              verify(fixture.mockTimeTracker, times(1))
-                .awaitTick(isEq(task.earliestClearanceTime.immediateSuccessor))(any[TraceContext])
+              fixture.fakeWorkflow.calls.size shouldBe 1
+
+              // Release the timer tick
+              tickPromise.success(())
+
+              eventuallyAsync() {
+                fixture.fakeWorkflow.calls.size shouldBe 2
+              }.unwrap.map { _ =>
+                fixture.fakeWorkflow.calls.poll() shouldBe (partyId, onboardingEffectiveAt)
+                fixture.scheduler.pendingClearances.size shouldBe 1
+                verify(fixture.mockTimeTracker, times(1))
+                  .awaitTick(isEq(task.earliestClearanceTime))(any[TraceContext])
+                succeed
+              }
+            }
+        }
+      }
+
+      "gracefully ignore a stale trigger if the task time was updated" in {
+        createFixture().flatMap { fixture =>
+          val oldTime = earliestClearanceTime
+          val newTime = CantonTimestamp.now().plusSeconds(60)
+
+          val tickPromise1 = Promise[Unit]() // Stale trigger
+          val tickPromise2 = Promise[Unit]() // New trigger
+
+          when(fixture.mockTimeTracker.awaitTick(isEq(oldTime))(any[TraceContext]))
+            .thenReturn(Some(tickPromise1.future))
+          when(fixture.mockTimeTracker.awaitTick(isEq(newTime))(any[TraceContext]))
+            .thenReturn(Some(tickPromise2.future))
+
+          // Initial setup response creates the task at oldTime
+          fixture.fakeWorkflow.addResponse(FlagSet(oldTime))
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("Initial request failed")
+            .flatMap { _ =>
+              // Now, a second request updates the task to newTime
+              fixture.fakeWorkflow.addResponse(FlagSet(newTime))
+              fixture.scheduler
+                .requestClearance(partyId, onboardingEffectiveAt)
+                .valueOrFailShutdown("Update request failed")
+                .map { _ =>
+                  // Fire the FIRST (stale) trigger
+                  tickPromise1.success(())
+
+                  // The stale trigger should be completely ignored by `triggerClearanceAttempt`.
+                  // The workflow should NOT be called again, remaining at exactly 2 calls (from the 2 sync requests).
+                  eventually() {
+                    fixture.fakeWorkflow.calls.size shouldBe 2
+                  }
+                  succeed
+                }
+            }
+        }
+      }
+
+      "abort the trigger retry loop and remove task if no pending clearance record is found" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .flatMap { _ =>
+              // Now, before the tick fires, simulate the record disappearing from the store
+              fixture.inMemoryStore
+                .delete(
+                  psid.logical,
+                  OnboardingClearanceOperation.operationKey(partyId),
+                  OnboardingClearanceOperation.operationName,
+                )
+                .failOnShutdown
+                .map { _ =>
+                  loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+                    // Release the timer tick, allowing the background trigger to fire
+                    tickPromise.success(())
+
+                    eventually() {
+                      // Task should be removed, and no further workflow calls made
+                      fixture.scheduler.pendingClearances.get(partyId) shouldBe None
+                      fixture.fakeWorkflow.calls.size shouldBe 1 // only the initial one
+                    }
+                  }
+                  succeed
+                }
+            }
+        }
+      }
+
+      "retry transient errors during the background trigger" in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          // Background trigger responses
+          fixture.fakeWorkflow.addFailure(AuthorizeClearanceError.ProposeError("Transient error 1"))
+          fixture.fakeWorkflow.addFailure(AuthorizeClearanceError.ProposeError("Transient error 2"))
+          fixture.fakeWorkflow.addResponse(FlagNotSet)
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .map { _ =>
+              fixture.fakeWorkflow.calls.size shouldBe 1
+
+              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+                tickPromise.success(())
+
+                eventually() {
+                  // 1 initial + 3 trigger attempts (2 fail, 1 success) = 4
+                  fixture.fakeWorkflow.calls.size shouldBe 4
+                }
+              }
               succeed
             }
-          }
-          .futureValue
-      }
-
-      "log an error if the triggered proposal fails" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
-
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
-
-        fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
-
-        // Provide enough failures to exhaust the background 3-retry loop (1 initial + 3 retries)
-        (1 to 4).foreach(_ => fixture.fakeWorkflow.addFailure("Topology workflow failed"))
-
-        fixture.scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
-          )
-          .valueOrFailShutdown("Initial onboarding request failed")
-          .flatMap { firstResult =>
-            firstResult shouldBe FlagSet(earliestClearanceTime)
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            fixture.fakeWorkflow.calls.size shouldBe 1
-
-            loggerFactory.suppress(SuppressionRule.Level(Level.ERROR)) {
-              tickPromise.success(())
-
-              eventuallyAsync() {
-                val logs = loggerFactory.fetchRecordedLogEntries
-                logs.loneElement.errorMessage should include(
-                  s"Onboarding flag clearance attempt for party $partyId failed"
-                )
-                logs.loneElement.errorMessage should include("Topology workflow failed")
-              }.unwrap
-            }
-          }
-          .map { assertionAsUnlessShutdown =>
-            assertionAsUnlessShutdown shouldBe UnlessShutdown.Outcome(succeed)
-            // 1 initial + 4 background attempts
-            fixture.fakeWorkflow.calls.size shouldBe 5
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            succeed
-          }
-          .futureValue
-      }
-
-      "allow manual recovery via requestClearance after a transient background failure" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
-
-        // We only expect one tick promise to ever be requested since the map deduplicates
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
-
-        // Queue up the sequence of events:
-        // 1. Initial successful flag check (schedules task)
-        fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
-        // 2. The async trigger fails (4 failures to exhaust the background retry loop)
-        (1 to 4).foreach(_ => fixture.fakeWorkflow.addFailure("Transient network error"))
-        // 3. A later manual retry or reconnection attempt
-        fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
-
-        fixture.scheduler
-          .requestClearance(partyId, onboardingEffectiveAt)
-          .valueOrFailShutdown("Initial onboarding request failed")
-          .flatMap { _ =>
-            // Initial task is scheduled
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
-              any[TraceContext]
-            )
-
-            // Fire the trigger, which will fail after exhausting retries
-            loggerFactory.suppress(SuppressionRule.Level(Level.ERROR)) {
-              tickPromise.success(())
-              eventuallyAsync() {
-                fixture.fakeWorkflow.calls.size shouldBe 5
-              }.unwrap
-            }
-          }
-          .flatMap { _ =>
-            // The task remains in the map after the background failure
-            fixture.scheduler.pendingClearances.size shouldBe 1
-
-            // Simulate manual recovery: admin hits the endpoint, calling requestClearance
-            fixture.scheduler
-              .requestClearance(partyId, onboardingEffectiveAt)
-              .valueOrFailShutdown("Recovery request failed")
-          }
-          .map { _ =>
-            // Manual recovery should work: The workflow was successfully evaluated again
-            fixture.fakeWorkflow.calls.size shouldBe 6
-
-            // Task idempotency: The deduplication map prevented a redundant time tracker thread
-            verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
-              any[TraceContext]
-            )
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            succeed
-          }
-          .futureValue
-      }
-
-      "retry the initial clearance request if maxInitialRetries > 0" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
-
-        // Queue up the sequence of events for the Fake Workflow:
-        // 1. First attempt fails
-        fixture.fakeWorkflow.addFailure("Transient network error 1")
-        // 2. Second attempt fails
-        fixture.fakeWorkflow.addFailure("Transient network error 2")
-        // 3. Third attempt succeeds
-        val successResponse = FlagSet(earliestClearanceTime)
-        fixture.fakeWorkflow.addResponse(successResponse)
-
-        // Execute with maxInitialRetries = 2.
-        // This gives it exactly enough retries (1 initial + 2 retries = 3 attempts) to succeed.
-        loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-          fixture.scheduler
-            .requestClearance(
-              partyId,
-              onboardingEffectiveAt,
-              maxInitialRetries = NonNegativeInt.tryCreate(2),
-            )
-            .valueOrFailShutdown("Request should have recovered via retries")
-            .futureValue shouldBe successResponse
         }
-
-        // Assert that the workflow was indeed called 3 times
-        fixture.fakeWorkflow.calls.size shouldBe 3
-
-        // Assert that the successful third attempt correctly scheduled the background task
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(any[TraceContext])
       }
 
-      "retry the triggered clearance request and eventually succeed" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise = Promise[Unit]()
+      "treat an announced LSU as a transient error during the background trigger" in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
 
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise.future))
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
 
-        // 1. Initial request evaluates the flag and schedules the background task
-        fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+          // Initial setup response (LSU is not active yet)
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
 
-        // 2. The trigger fires. The first two background attempts fail due to transient errors.
-        fixture.fakeWorkflow.addFailure("Transient network error 1")
-        fixture.fakeWorkflow.addFailure("Transient network error 2")
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .map { _ =>
+              // Initial setup succeeded
+              fixture.fakeWorkflow.calls.size shouldBe 1
 
-        // 3. The third background attempt succeeds!
-        val successResponse = FlagSet(earliestClearanceTime)
-        fixture.fakeWorkflow.addResponse(successResponse)
+              // Now, simulate the LSU activating while the timer was ticking
+              val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+              when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
+                .thenReturn(
+                  FutureUnlessShutdown
+                    .pure(Some((successor, EffectiveTime(CantonTimestamp.now()))))
+                )
+                .andThen(
+                  FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)])
+                )
 
-        fixture.scheduler
-          .requestClearance(partyId, onboardingEffectiveAt)
-          .valueOrFailShutdown("Initial onboarding request failed")
-          .flatMap { _ =>
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            fixture.fakeWorkflow.calls.size shouldBe 1
+              // Background trigger responses (once the LSU drops, it succeeds)
+              fixture.fakeWorkflow.addResponse(FlagNotSet)
 
-            // Trigger the background task
-            loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-              tickPromise.success(())
+              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+                // Fire the timer tick to kick off the background trigger
+                tickPromise.success(())
 
-              eventuallyAsync() {
-                // 1 initial + 3 background attempts (2 failed, 1 success) = 4 total calls
-                fixture.fakeWorkflow.calls.size shouldBe 4
-              }.unwrap
+                eventually() {
+                  // 1 initial + 1 trigger attempt (LSU blocked the first, then succeeded)
+                  fixture.fakeWorkflow.calls.size shouldBe 2
+                }
+              }
+              succeed
             }
-          }
-          .map { _ =>
-            // The task remains pending until `observed` detects the effective transaction
-            fixture.scheduler.pendingClearances.size shouldBe 1
-            succeed
-          }
-          .futureValue
+        }
       }
 
+      "abort the trigger retry loop on a terminal error" in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+
+          // We only expect one tick promise to ever be requested since the map deduplicates
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          // Background trigger responses
+          fixture.fakeWorkflow.addFailure(AuthorizeClearanceError.ProposeError("Transient error 1"))
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.PartyNotHosted("Party is not hosted by target participant")
+          )
+          // If the loop doesn't break, it would hit this and fail the assertion
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.ProposeError("SHOULD NOT BE REACHED")
+          )
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .map { _ =>
+              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
+                tickPromise.success(())
+
+                eventually() {
+                  // 1 initial + 2 trigger attempts (1 transient, 1 terminal) = 3
+                  fixture.fakeWorkflow.calls.size shouldBe 3
+                }
+              }
+              succeed
+            }
+        }
+      }
     }
 
     "observing transactions" should {
@@ -545,87 +878,96 @@ class PartyOnboardingClearanceSchedulerTest
       }
 
       "remove a pending task if clearance is effective" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        fixture.scheduler.pendingClearances.put(task.partyId, task)
-        fixture.scheduler.pendingClearances.size shouldBe 1
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+          fixture.scheduler.pendingClearances.size shouldBe 1
 
-        val clearanceTx = createTx(partyId, participantId, onboarding = false)
+          val clearanceTx = createTx(partyId, participantId, onboarding = false)
 
-        fixture.scheduler
-          .observed(
-            SequencedTime(CantonTimestamp.now()),
-            EffectiveTime(CantonTimestamp.now()),
-            SequencerCounter.One,
-            Seq(clearanceTx),
-          )
-          .futureValueUS
-
-        fixture.scheduler.pendingClearances.size shouldBe 0
-        succeed
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(clearanceTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              fixture.scheduler.pendingClearances.size shouldBe 0
+              succeed
+            }
+        }
       }
 
       "not remove a task if the onboarding flag is still true" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        fixture.scheduler.pendingClearances.put(task.partyId, task)
-        val clearanceTx = createTx(partyId, participantId, onboarding = true)
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+          val clearanceTx = createTx(partyId, participantId, onboarding = true)
 
-        fixture.scheduler
-          .observed(
-            SequencedTime(CantonTimestamp.now()),
-            EffectiveTime(CantonTimestamp.now()),
-            SequencerCounter.One,
-            Seq(clearanceTx),
-          )
-          .futureValueUS
-
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        succeed
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(clearanceTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              succeed
+            }
+        }
       }
 
       "not remove a task if the participantId does not match" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        fixture.scheduler.pendingClearances.put(task.partyId, task)
-        val otherParticipant = testData.p2Id
-        val clearanceTx = createTx(partyId, otherParticipant, onboarding = false)
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+          val otherParticipant = testData.p2Id
+          val clearanceTx = createTx(partyId, otherParticipant, onboarding = false)
 
-        fixture.scheduler
-          .observed(
-            SequencedTime(CantonTimestamp.now()),
-            EffectiveTime(CantonTimestamp.now()),
-            SequencerCounter.One,
-            Seq(clearanceTx),
-          )
-          .futureValueUS
-
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        succeed
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(clearanceTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              succeed
+            }
+        }
       }
 
       "only remove the task matching the partyId" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val otherParty = testData.party2
-        val taskOtherParty = task.copy(partyId = otherParty)
+        createFixture().flatMap { fixture =>
+          val otherParty = testData.party2
+          val taskOtherParty = task.copy(partyId = otherParty)
 
-        fixture.scheduler.pendingClearances.put(task.partyId, task)
-        fixture.scheduler.pendingClearances.put(taskOtherParty.partyId, taskOtherParty)
-        fixture.scheduler.pendingClearances.size shouldBe 2
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+          fixture.scheduler.pendingClearances.put(taskOtherParty.partyId, taskOtherParty)
+          fixture.scheduler.pendingClearances.size shouldBe 2
 
-        val clearanceTx = createTx(partyId, participantId, onboarding = false)
+          val clearanceTx = createTx(partyId, participantId, onboarding = false)
 
-        fixture.scheduler
-          .observed(
-            SequencedTime(CantonTimestamp.now()),
-            EffectiveTime(CantonTimestamp.now()),
-            SequencerCounter.One,
-            Seq(clearanceTx),
-          )
-          .futureValueUS
-
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        fixture.scheduler.pendingClearances.get(task.partyId) shouldBe None
-        fixture.scheduler.pendingClearances.get(taskOtherParty.partyId) shouldBe Some(
-          taskOtherParty
-        )
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(clearanceTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              fixture.scheduler.pendingClearances.get(task.partyId) shouldBe None
+              fixture.scheduler.pendingClearances.get(taskOtherParty.partyId) shouldBe Some(
+                taskOtherParty
+              )
+              succeed
+            }
+        }
       }
 
       /** "onboard, offboard, onboard" the same party in a sequence:
@@ -638,65 +980,56 @@ class PartyOnboardingClearanceSchedulerTest
         *   1. Onboard (2): Finally, onboard the same party again.
         *   1. Verification: It checks that a *new* clearance task is successfully scheduled,
         *      proving that the stale task from step 1 was properly cleaned up.
-        *
-        * The goal is to assert that the implementation prevents a stale clearance task from
-        * blocking future onboarding.
-        *
-        * The original implementation had this issue: If a party is onboarded (scheduling task 1),
-        * then offboarded (which wasn't clearing the task), and then onboarded again (scheduling
-        * task 2), the stale task 1 would remain. This would cause the scheduler to ignore task 2,
-        * and the party's flag would never be cleared.
         */
       "remove a pending task on offboarding to allow subsequent onboarding" in {
-        val fixture = new PartyOnboardingClearanceSchedulerTestFixture
-        val tickPromise1 = Promise[Unit]()
-        val tickPromise2 = Promise[Unit]()
+        createFixture().flatMap { fixture =>
+          val tickPromise1 = Promise[Unit]()
+          val tickPromise2 = Promise[Unit]()
 
-        when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
-          .thenReturn(Some(tickPromise1.future), Some(tickPromise2.future))
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise1.future), Some(tickPromise2.future))
 
-        val flagSet = FlagSet(earliestClearanceTime)
-        fixture.fakeWorkflow.addResponse(flagSet) // For first request
-        fixture.fakeWorkflow.addResponse(flagSet) // For second request
+          val flagSet = FlagSet(earliestClearanceTime)
+          fixture.fakeWorkflow.addResponse(flagSet) // For first request
+          fixture.fakeWorkflow.addResponse(flagSet) // For second request
 
-        // 1. Onboard (1)
-        fixture.scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
-          )
-          .valueOrFailShutdown("First onboarding request failed")
-          .futureValue
+          // 1. Onboard (1)
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("First onboarding request failed")
+            .flatMap { _ =>
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(
+                any[TraceContext]
+              )
 
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        verify(fixture.mockTimeTracker, times(1)).awaitTick(any[CantonTimestamp])(any[TraceContext])
+              // 2. Offboard
+              val removeTx = createRemoveTx(partyId, participantId)
+              fixture.scheduler
+                .observed(
+                  SequencedTime(CantonTimestamp.now()),
+                  EffectiveTime(CantonTimestamp.now()),
+                  SequencerCounter.One,
+                  Seq(removeTx),
+                )
+                .failOnShutdown
+                .flatMap { _ =>
+                  fixture.scheduler.pendingClearances.size shouldBe 0
 
-        // 2. Offboard
-        val removeTx = createRemoveTx(partyId, participantId)
-        fixture.scheduler
-          .observed(
-            SequencedTime(CantonTimestamp.now()),
-            EffectiveTime(CantonTimestamp.now()),
-            SequencerCounter.One,
-            Seq(removeTx),
-          )
-          .futureValueUS
-
-        fixture.scheduler.pendingClearances.size shouldBe 0
-
-        // 3. Onboard (2)
-        fixture.scheduler
-          .requestClearance(
-            partyId,
-            onboardingEffectiveAt,
-          )
-          .valueOrFailShutdown("Second onboarding request failed")
-          .futureValue
-
-        fixture.scheduler.pendingClearances.size shouldBe 1
-        verify(fixture.mockTimeTracker, times(2)).awaitTick(any[CantonTimestamp])(any[TraceContext])
-
-        succeed
+                  // 3. Onboard (2)
+                  fixture.scheduler
+                    .requestClearance(partyId, onboardingEffectiveAt)
+                    .valueOrFailShutdown("Second onboarding request failed")
+                    .map { _ =>
+                      fixture.scheduler.pendingClearances.size shouldBe 1
+                      verify(fixture.mockTimeTracker, times(2)).awaitTick(any[CantonTimestamp])(
+                        any[TraceContext]
+                      )
+                      succeed
+                    }
+                }
+            }
+        }
       }
     }
   }

@@ -6,10 +6,9 @@ package com.digitalasset.canton.participant.protocol.party
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -26,6 +25,7 @@ import com.digitalasset.canton.participant.store.AcsReplicationProgress
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.{RepairCounter, checked}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -79,7 +79,7 @@ final class PartyReplicationSourceParticipantProcessor private (
   // TODO(#22251): Make this configurable.
   private val contractsPerBatch = PositiveInt.two
 
-  override def replicatedContractsCount: NonNegativeInt = processorStore.sentContractsCount
+  override def replicatedContractsCount: NonNegativeLong = processorStore.sentContractsCount
 
   override protected def name: String = "party-replication-source-processor"
 
@@ -111,7 +111,7 @@ final class PartyReplicationSourceParticipantProcessor private (
     } yield ())
   }
 
-  private def handleSendAcsUpTo(maxContractOrdinalInclusive: NonNegativeInt)(implicit
+  private def handleSendAcsUpTo(maxContractOrdinalInclusive: NonNegativeLong)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     logger.debug(
@@ -132,13 +132,13 @@ final class PartyReplicationSourceParticipantProcessor private (
         s"Target participant requested contract ordinals that are not strictly increasing $maxContractOrdinalInclusive compared to previous ordinal $previousMaxOrdinalInclusive",
       )
       _ = processorStore.setContractOrdinalToSendUpToExclusive(
-        maxContractOrdinalInclusive + NonNegativeInt.one // +1 for inclusive to exclusive
+        maxContractOrdinalInclusive + NonNegativeLong.one // +1 for inclusive to exclusive
       )
     } yield progressPartyReplication()
   }
 
   private def handleInitialize(
-      initialContractOrdinalInclusive: NonNegativeInt
+      initialContractOrdinalInclusive: NonNegativeLong
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
@@ -185,17 +185,21 @@ final class PartyReplicationSourceParticipantProcessor private (
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     notifyCounterParticipantAndPartyReplicatorOnError {
       val fromInclusive = processorStore.sentContractsCount
-      val toInclusive: NonNegativeInt = processorStore.contractOrdinalToSendUpToExclusive.map(_ - 1)
+      val toInclusive: NonNegativeLong =
+        processorStore.contractOrdinalToSendUpToExclusive.map(_ - 1)
       logger.debug(
         s"Source participant looking up contract ordinals [${fromInclusive.unwrap},${toInclusive.unwrap}]"
       )
 
-      val maxNumActiveContractsToProcess =
-        PositiveInt.tryCreate(
-          processorStore.contractOrdinalToSendUpToExclusive.unwrap - fromInclusive.unwrap
-        )
+      val deltaLong =
+        processorStore.contractOrdinalToSendUpToExclusive.unwrap - fromInclusive.unwrap
 
       for {
+        maxNumActiveContractsToProcess <- EitherT.cond[FutureUnlessShutdown](
+          deltaLong <= Int.MaxValue.toLong,
+          PositiveInt.tryCreate(deltaLong.toInt),
+          s"request to send up to ${processorStore.contractOrdinalToSendUpToExclusive} too large relative to $fromInclusive",
+        )
         acsReader <- EitherT.fromEither[FutureUnlessShutdown](
           processorStore.acsReaderO.toRight("ACS reader not initialized")
         )
@@ -237,7 +241,7 @@ final class PartyReplicationSourceParticipantProcessor private (
 
   private def sendContracts(
       contractBatches: Seq[NonEmpty[Seq[ActiveContract]]],
-      firstContractOrdinal: NonNegativeInt,
+      firstContractOrdinal: NonNegativeLong,
       numContractsSending: Int,
   )(implicit
       traceContext: TraceContext
@@ -247,8 +251,10 @@ final class PartyReplicationSourceParticipantProcessor private (
     )
     val indexedContractBatches = contractBatches.zipWithIndex.map { case (batch, index) =>
       val fromInclusive = firstContractOrdinal +
-        (NonNegativeInt.tryCreate(index) * contractsPerBatch.toNonNegative)
-      val toInclusive = fromInclusive + NonNegativeInt.tryCreate(batch.size - 1)
+        (checked(NonNegativeLong.tryCreate(index.toLong)) * checked(
+          NonNegativeLong.tryCreate(contractsPerBatch.unwrap.toLong)
+        ))
+      val toInclusive = fromInclusive + checked(NonNegativeLong.tryCreate(batch.size.toLong - 1L))
       (batch, (fromInclusive, toInclusive))
     }
     MonadUtil.sequentialTraverse_(indexedContractBatches) {

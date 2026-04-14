@@ -16,8 +16,8 @@ import com.digitalasset.daml.lf.data.Ref.{
   TypeConId,
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.Error.{Interpretation => IErr}
 import com.digitalasset.daml.lf.language.Ast.Package
-import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
 import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine => ContractStateMachine,
@@ -48,12 +48,6 @@ import java.util.zip.ZipInputStream
 import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 
-//  TODO(#30398)
-//   review those test when queryNKey is implemented.
-//   For now those do not make a lot of sens as the lookupKey function use
-//   to emulate the indexer do not return all the keys.
-abstract class ContractKeySpecV2 extends ContractKeySpec(LanguageVersion.Major.V2)
-
 @SuppressWarnings(
   Array(
     "org.wartremover.warts.Any",
@@ -61,7 +55,7 @@ abstract class ContractKeySpecV2 extends ContractKeySpec(LanguageVersion.Major.V
     "org.wartremover.warts.Product",
   )
 )
-class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
+class ContractKeySpec
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
@@ -89,9 +83,8 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
     (mainPkgId, mainPkg, packages.all.toMap)
   }
 
-  private val (basicTestsPkgId, basicTestsPkg, allPackages) = loadAndAddPackage(
-    s"BasicTests-v${majorLanguageVersion.pretty}dev.dar"
-  )
+  private val (basicTestsPkgId, basicTestsPkg, allPackages) =
+    loadAndAddPackage(s"BasicTests-keys.dar")
 
   val basicTestsSignatures = language.PackageInterface(Map(basicTestsPkgId -> basicTestsPkg))
 
@@ -161,17 +154,17 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         ),
       )
         ->
-          Vector(withKeyContractInst)
+        Vector(withKeyContractInst)
     )
   }
 
   private[this] val lookupKey
-      : PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
+  : PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
     case
-        GlobalKey(
-          BasicTests_WithKey,
-          ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
-        ) =>
+      GlobalKey(
+      BasicTests_WithKey,
+      ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
+      ) =>
       Vector(withKeyContractInst)
   }
 
@@ -306,7 +299,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         loggerFactory,
       )
       val (multiKeysPkgId, multiKeysPkg, allMultiKeysPkgs) =
-        loadAndAddPackage(s"MultiKeys-v${majorLanguageVersion.pretty}dev.dar")
+        loadAndAddPackage(s"MultiKeys-v23.dar")
       val keyedId = Identifier(multiKeysPkgId, "MultiKeys:Keyed")
       val opsId = Identifier(multiKeysPkgId, "MultiKeys:KeyOperations")
       val let = Time.Timestamp.now()
@@ -316,17 +309,18 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
 
       val cid1 = toContractId("1")
       val cid2 = toContractId("2")
+
       def keyedInst(cid: ContractId) = TransactionBuilder.fatContractInstanceWithDummyDefaults(
         version = version,
         contractId = cid,
         packageName = multiKeysPkg.pkgName,
-        template = TypeConId(multiKeysPkgId, "MultiKeys:Keyed"),
+        template = keyedId,
         arg = ValueRecord(None, ImmArray((None, ValueParty(party)))),
         signatories = List(party),
         contractKeyWithMaintainers = Some(
           GlobalKeyWithMaintainers(
             GlobalKey.assertBuild(
-              templateId = TypeConId(multiKeysPkgId, "MultiKeys:Keyed"),
+              templateId = keyedId,
               packageName = multiKeysPkg.pkgName,
               key = sKey.toNormalizedValue,
               SValueHash.assertHashContractKey(
@@ -339,19 +333,25 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           )
         ),
       )
+
       val contracts =
         List(keyedInst(cid1), keyedInst(cid2)).map(inst => inst.contractId -> inst).toMap
       val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
-        case GlobalKey(`keyedId`, ValueParty(`party`)) =>
-          Vector(keyedInst(cid1))
+        contracts.foldLeft(Map.empty[GlobalKey, Vector[FatContractInstance]]) {
+          case (acc, (_, inst)) =>
+            inst.contractKeyWithMaintainers match {
+              case Some(key) => acc.updated(key.globalKey, acc.getOrElse(key.globalKey, Vector.empty) :+ inst)
+              case None => acc
+            }
+        }
       }
 
       def run(
-          engine: Engine,
-          choice: String,
-          argument: Value,
-          contractStateMode: ContractStateMachine.Mode,
-      ) = {
+               engine: Engine,
+               choice: String,
+               argument: Value,
+               contractStateMode: ContractStateMachine.Mode,
+             ) = {
         val cmd = ApiCommand.CreateAndExercise(
           opsId.toRef,
           ValueRecord(None, ImmArray((None, ValueParty(party)))),
@@ -388,32 +388,21 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
       val createOverwritesKnownGlobal = ("CreateOverwritesKnownGlobal", emptyRecord)
       val fetchDoesNotOverwriteGlobal = ("FetchDoesNotOverwriteGlobal", nonKeyResultCid)
       val fetchDoesNotOverwriteLocal = ("FetchDoesNotOverwriteLocal", keyResultCid)
-      val localArchiveOverwritesUnknownGlobal = ("LocalArchiveOverwritesUnknownGlobal", emptyRecord)
-      val localArchiveOverwritesKnownGlobal = ("LocalArchiveOverwritesKnownGlobal", emptyRecord)
-      val globalArchiveOverwritesUnknownGlobal = ("GlobalArchiveOverwritesUnknownGlobal", twoCids)
-      val globalArchiveOverwritesKnownGlobal1 = ("GlobalArchiveOverwritesKnownGlobal1", twoCids)
-      val globalArchiveOverwritesKnownGlobal2 = ("GlobalArchiveOverwritesKnownGlobal2", twoCids)
-      val rollbackCreateNonRollbackFetchByKey = ("RollbackCreateNonRollbackFetchByKey", emptyRecord)
-      val rollbackFetchByKeyRollbackCreateNonRollbackFetchByKey =
-        ("RollbackFetchByKeyRollbackCreateNonRollbackFetchByKey", emptyRecord)
+      val localArchivePreservesUnknownGlobal = ("LocalArchivePreservesUnknownGlobal", emptyRecord)
+      val localArchivePreservesKnownGlobal = ("LocalArchivePreservesKnownGlobal", emptyRecord)
+      val globalArchivePreservesUnknownGlobal = ("GlobalArchivePreservesUnknownGlobal", twoCids)
+      val globalArchivePreservesKnownGlobal1 = ("GlobalArchivePreservesKnownGlobal1", twoCids)
+      val globalArchivePreservesKnownGlobal2 = ("GlobalArchivePreservesKnownGlobal2", twoCids)
+      val rollbackCreate = ("RollbackCreate", emptyRecord)
+      val rollbackLocalArchive = ("RollbackLocalArchive", emptyRecord)
       val rollbackFetchByKeyNonRollbackCreate = ("RollbackFetchByKeyNonRollbackCreate", emptyRecord)
       val rollbackFetchNonRollbackCreate = ("RollbackFetchNonRollbackCreate", keyResultCid)
-      val rollbackGlobalArchiveNonRollbackCreate =
-        ("RollbackGlobalArchiveNonRollbackCreate", keyResultCid)
-      val rollbackCreateNonRollbackGlobalArchive =
-        ("RollbackCreateNonRollbackGlobalArchive", keyResultCid)
-      val rollbackGlobalArchiveUpdates =
-        ("RollbackGlobalArchiveUpdates", twoCids)
+      val rollbackGlobalArchive =
+        ("RollbackGlobalArchive", twoCids)
       val rollbackGlobalArchivedLookup =
         ("RollbackGlobalArchivedLookup", keyResultCid)
       val rollbackGlobalArchivedCreate =
         ("RollbackGlobalArchivedCreate", keyResultCid)
-
-      // regression tests for https://github.com/digital-asset/daml/issues/14171
-      val rollbackExerciseCreateFetchByKey =
-        ("RollbackExerciseCreateFetchByKey", keyResultCid)
-      val rollbackExerciseCreateLookup =
-        ("RollbackExerciseCreateLookup", keyResultCid)
 
       val allCases = Table(
         ("choice", "argument"),
@@ -422,35 +411,31 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         createOverwritesKnownGlobal,
         fetchDoesNotOverwriteGlobal,
         fetchDoesNotOverwriteLocal,
-        localArchiveOverwritesUnknownGlobal,
-        localArchiveOverwritesKnownGlobal,
-        globalArchiveOverwritesUnknownGlobal,
-        globalArchiveOverwritesKnownGlobal1,
-        globalArchiveOverwritesKnownGlobal2,
-        rollbackCreateNonRollbackFetchByKey,
-        rollbackFetchByKeyRollbackCreateNonRollbackFetchByKey,
+        localArchivePreservesUnknownGlobal,
+        localArchivePreservesKnownGlobal,
+        globalArchivePreservesUnknownGlobal,
+        globalArchivePreservesKnownGlobal1,
+        globalArchivePreservesKnownGlobal2,
+        rollbackCreate,
+        rollbackLocalArchive,
         rollbackFetchByKeyNonRollbackCreate,
         rollbackFetchNonRollbackCreate,
-        rollbackGlobalArchiveNonRollbackCreate,
-        rollbackCreateNonRollbackGlobalArchive,
-        rollbackGlobalArchiveUpdates,
+        rollbackGlobalArchive,
         rollbackGlobalArchivedLookup,
         rollbackGlobalArchivedCreate,
-        rollbackExerciseCreateFetchByKey,
-        rollbackExerciseCreateLookup,
       )
 
-      val nonUckFailures = Set(
-        "RollbackExerciseCreateLookup",
-        "RollbackExerciseCreateFetchByKey",
-      )
+      val failures =
+        List("RollbackCreate", "RollbackLocalArchive", "RollbackGlobalArchive")
 
       // TEST_EVIDENCE: Integrity: contract key behaviour (non-unique mode)
       "non-uck mode" in {
         val contractStateMode = ContractStateMachine.Mode.NUCK
         forEvery(allCases) { case (name, arg) =>
-          if (nonUckFailures.contains(name)) {
-            run(engine, name, arg, contractStateMode) shouldBe a[Left[_, _]]
+          if (failures.contains(name)) {
+            inside(run(engine, name, arg, contractStateMode)) {
+              case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
+            }
           } else {
             run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]
           }

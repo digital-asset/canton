@@ -216,7 +216,7 @@ message PartyReplicationStatus {
   message AcsReplicationProgress {
     // Non negative number of ACS contracts sent by the source or persisted by the target participant.
     // required
-    uint32 processed_contract_count = 1;
+    uint64 processed_contract_count = 1;
     // Whether replication has been fully processed the ACS.
     // required
     bool fully_processed_acs = 2;
@@ -353,8 +353,9 @@ message ImportPartyAcsRequest {
   // Optional in the first request, ignored in any subsequent request messages.
   optional RepresentativePackageIdOverride representative_package_id_override = 5;
 
-  // The party (ID) for which the ACS is being imported. If present, enables crash-resilient scheduling of the
-  // onboarding flag clearance.
+  // The ID of the party for which the ACS is being imported.
+  // If provided, and the protocol version is 35 or higher, this enables
+  // crash-resilient scheduling for clearing the onboarding flag.
   //
   // Optional in the first request, ignored in all subsequent request messages.
   optional string party_id = 6;

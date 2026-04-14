@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.contract_service.{
   GetContractResponse,
 }
 import com.daml.nonempty.NonEmpty
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -22,6 +21,7 @@ import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.Projection
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
 import io.grpc.ServerServiceDefinition
@@ -31,7 +31,6 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ApiContractService(
     ledgerApiContractStore: LedgerApiContractStore,
     lfValueTranslation: LfValueTranslation,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends ContractServiceGrpc.ContractService
@@ -40,7 +39,7 @@ final class ApiContractService(
 
   override def getContract(request: GetContractRequest): Future[GetContractResponse] = {
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     (for {
       contractId <- FieldValidator.requireContractId(request.contractId, "contract_id")
       queryingParties <- FieldValidator.requireParties(request.queryingParties.toSet)

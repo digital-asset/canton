@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.party
 
-import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Hash, TestHash}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
@@ -22,15 +21,12 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.party.{
-  GeneratesUniqueUpdateIds,
-  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.store.{
-  ContractStore,
   PartyReplicationIndexingStore,
   PartyReplicationStateManager,
 }
@@ -99,7 +95,6 @@ final class PartyReplicationProcessorTest
       val rop = mock[RecordOrderPublisher]
       val requestTracker = mock[RequestTracker]
       val indexingStore = mock[PartyReplicationIndexingStore]
-      val contractStoreEval = Eval.always(mock[ContractStore])
       when(
         rop.schedulePublishAddContracts(any[CantonTimestamp => SynchronizerUpdate])(
           anyTraceContext
@@ -129,17 +124,6 @@ final class PartyReplicationProcessorTest
         )(anyTraceContext)
       )
         .thenReturn(FutureUnlessShutdown.unit)
-      // Don't bother handling indexing of contracts as indexing is to be driven asynchronously by the PartyReplicator.
-      when(
-        indexingStore.consumeNextActivationChangesBatch(
-          any[PartyId],
-          any[NonNegativeLong],
-          any[PositiveInt],
-        )(any[GeneratesUniqueUpdateIds])(anyTraceContext)
-      )
-        .thenReturn(FutureUnlessShutdown.pure(None))
-      when(indexingStore.purgeContractActivationChanges(any[PartyId])(anyTraceContext))
-        .thenReturn(FutureUnlessShutdown.unit)
 
       val inMemoryStorageForTesting = new MemoryStorage(loggerFactory, timeouts)
       val sourceParticipantId = DefaultTestIdentities.participant1
@@ -157,7 +141,7 @@ final class PartyReplicationProcessorTest
         testedProtocolVersion,
         replicationO = Some(
           PartyReplicationStatus.PersistentProgress(
-            processedContractCount = NonNegativeInt.zero,
+            processedContractCount = NonNegativeLong.zero,
             nextPersistenceCounter = RepairCounter.Genesis,
             fullyProcessedAcs = false,
           )
@@ -197,17 +181,6 @@ final class PartyReplicationProcessorTest
         onDisconnect = logger.info(_)(_),
         persistsContracts = persistsContracts,
         requestTracker = requestTracker,
-        new PartyReplicationIndexingWorkflow(
-          partyId = alice,
-          psid = psid,
-          indexingStore = indexingStore,
-          contractStore = contractStoreEval,
-          recordOrderPublisher = rop,
-          pureCrypto = testSymbolicCrypto,
-          pauseSynchronizerIndexingDuringPartyReplication = true,
-          batchingConfig = BatchingConfig(),
-          loggerFactory = loggerFactory,
-        ),
         indexingStore = indexingStore,
         futureSupervisor = futureSupervisor,
         exitOnFatalFailures = true,
@@ -322,10 +295,11 @@ final class PartyReplicationProcessorTest
         } yield {
           val messagesSent = eventually()(env.messagesSentByTP.toList.tap(_.size shouldBe 2))
           messagesSent.head._2 shouldBe PartyReplicationTargetParticipantMessage.Initialize(
-            NonNegativeInt.zero
+            NonNegativeLong.zero
           )
-          val firstBatchEndOrdinal =
-            TargetParticipantAcsPersistence.contractsToRequestEachTime.decrement
+          val firstBatchEndOrdinal = NonNegativeLong.tryCreate(
+            TargetParticipantAcsPersistence.contractsToRequestEachTime.decrement.unwrap.toLong
+          )
           messagesSent(1)._2 shouldBe PartyReplicationTargetParticipantMessage.SendAcsUpTo(
             firstBatchEndOrdinal
           )

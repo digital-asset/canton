@@ -12,6 +12,7 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   latestVersionFromArtifactory,
   releasesFromArtifactory,
 }
+import com.digitalasset.canton.integration.plugins.{ArtifactoryToolVersion, ToolVersion}
 import com.digitalasset.canton.version.{ReleaseVersion, ReleaseVersionToProtocolVersions}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,7 @@ import org.scalatest.matchers.should.Matchers
 import scala.util.matching.Regex
 
 final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with BaseTest {
-  private val versions = Seq(
+  private val versionStrings = Seq(
     "3.3.0-snapshot.20250416.15779.0.v6cccc0c4",
     "3.3.0-ad-hoc.20250905.16091.0.v704bf59d",
     "3.3.0-snapshot.20251007.16123.0.v670c8fae",
@@ -30,18 +31,20 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     "dev",
   )
 
+  private val versions: Seq[ToolVersion] = versionStrings.map(ArtifactoryToolVersion.apply)
+
   "findAllReleases" should "find the major.minor.patch releases correctly" in {
     findAllReleases(versions) shouldBe Seq("3.3.0", "3.3.1", "3.3.10", "3.4.0")
   }
 
   "findMatchingVersions" should "find and sort (by date) all the versions matching the given release" in {
-    findMatchingVersions(versions, "3.3.0") shouldBe Seq(
+    findMatchingVersions(versions, "3.3.0").map(_.id()) shouldBe Seq(
       "3.3.0-snapshot.20250416.15779.0.v6cccc0c4",
       "3.3.0-ad-hoc.20250905.16091.0.v704bf59d",
       "3.3.0-snapshot.20251007.16123.0.v670c8fae",
     )
 
-    findMatchingVersions(versions, "3.4.0") shouldBe Seq(
+    findMatchingVersions(versions, "3.4.0").map(_.id()) shouldBe Seq(
       "3.4.0-snapshot.20250429.15866.0.vc8f10812",
       "3.4.0-snapshot.20251003.17075.0.v69d92264",
     )

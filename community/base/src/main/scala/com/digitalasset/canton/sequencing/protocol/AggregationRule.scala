@@ -67,11 +67,11 @@ object AggregationRule
     extends VersioningCompanion[AggregationRule]
     with ProtocolVersionedCompanionDbHelpers[AggregationRule] {
   def apply(
-      eligibleMembers: NonEmpty[Seq[Member]],
+      eligibleSenders: NonEmpty[Seq[Member]],
       threshold: PositiveInt,
       protocolVersion: ProtocolVersion,
   ): AggregationRule =
-    AggregationRule(eligibleMembers, threshold)(protocolVersionRepresentativeFor(protocolVersion))
+    AggregationRule(eligibleSenders, threshold)(protocolVersionRepresentativeFor(protocolVersion))
 
   override def name: String = "AggregationRule"
 

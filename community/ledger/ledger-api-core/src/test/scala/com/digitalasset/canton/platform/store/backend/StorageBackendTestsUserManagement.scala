@@ -494,6 +494,7 @@ private[backend] trait StorageBackendTestsUserManagement
       isDeactivated: Boolean = false,
       primaryPartyOverride: Option[Option[Ref.Party]] = None,
       identityProviderId: IdentityProviderId = IdentityProviderId.Default,
+      primaryPartyAuthentication: Boolean = false,
       resourceVersion: Long = 0,
       createdAt: Long = zeroMicros,
   ): UserManagementStorageBackend.DbUserPayload = {
@@ -507,6 +508,7 @@ private[backend] trait StorageBackendTestsUserManagement
       primaryPartyO = primaryParty,
       isDeactivated = isDeactivated,
       resourceVersion = resourceVersion,
+      primaryPartyAuthentication = primaryPartyAuthentication,
       identityProviderId = identityProviderId.toDb,
       createdAt = createdAt,
     )

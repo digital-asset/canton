@@ -15,7 +15,6 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.{UpdateService, UpdateServiceStub}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.auth.{
   AuthInterceptor,
   Authorizer,
@@ -246,7 +245,6 @@ class StreamAuthorizationComponentSpec
         loggerFactory = loggerFactory,
       )(ec, traceContext),
       jwtTimestampLeeway = None,
-      telemetry = NoOpTelemetry,
       loggerFactory = loggerFactory,
     )
     val outerLoggerFactory = loggerFactory
@@ -293,8 +291,7 @@ class StreamAuthorizationComponentSpec
       desiredPort = grpcServerPort,
       maxInboundMessageSize = ApiServiceOwner.DefaultMaxInboundMessageSize,
       maxInboundMetadataSize = ServerConfig.defaultMaxInboundMetadataSize.unwrap,
-      maxConcurrentStreamsPerConnection =
-        ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
+      maxConcurrentCallsPerConnection = ServerConfig.defaultMaxConcurrentCallsPerConnection.unwrap,
       sslContext = None,
       interceptors = List(authorizationClaimSetFixtureInterceptor),
       metrics = LedgerApiServerMetrics.ForTesting,

@@ -22,7 +22,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   MessageFrom,
   SignedMessage,
@@ -58,7 +61,13 @@ object Consensus {
 
   sealed trait Admin extends Message[Nothing]
   object Admin {
-    final case class GetOrderingTopology(callback: (EpochNumber, Set[BftNodeId]) => Unit)
+    final case class GetOrderingTopologyResponse(
+        epochNumber: EpochNumber,
+        nodes: Set[BftNodeId],
+        sequencingParameters: SequencingParameters,
+    )
+
+    final case class GetOrderingTopology(callback: GetOrderingTopologyResponse => Unit)
         extends Admin
     final case class SetPerformanceMetricsEnabled(enabled: Boolean) extends Admin
   }

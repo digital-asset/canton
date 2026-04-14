@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
@@ -22,10 +23,11 @@ import scala.concurrent.ExecutionContext
 import scala.util.Try
 
 class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
-    override protected val opCompanion: VersioningCompanion[Op]
-)(implicit
-    val executionContext: ExecutionContext
-) extends PendingOperationStore[Op, SId] {
+    override protected val opCompanion: VersioningCompanion[Op],
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit val executionContext: ExecutionContext)
+    extends PendingOperationStore[Op, SId]
+    with NamedLogging {
 
   // Allows tests to bypass validation and insert malformed data into the store
   @VisibleForTesting
@@ -50,13 +52,13 @@ class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <
 
       storedOperationO match {
         case Some(existingSerializedOp) if existingSerializedOp != serializedOp =>
-          Left(
-            ConflictingPendingOperationError(
-              operation.synchronizer,
-              operation.key,
-              operation.name,
-            )
+          val error = ConflictingPendingOperationError(
+            operation.synchronizer,
+            operation.key,
+            operation.name,
           )
+          logger.info(error.message)
+          Left(error)
         case Some(_) => Right(())
         case None =>
           throw new IllegalStateException(

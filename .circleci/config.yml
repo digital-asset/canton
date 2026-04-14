@@ -4,7 +4,7 @@ _canton_docker_executor:
     auth:
         password: $DOCKERHUB_PASSWORD
         username: $DOCKERHUB_USERNAME
-    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
 _postgres_docker_executor:
     command: |-
         postgres
@@ -270,7 +270,7 @@ commands:
                         echo "export JAVA_HOME_FOR_TESTS=$nix_java_home" >> $BASH_ENV
             - run:
                 command: |
-                    ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
+                    .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
                 environment:
                     CUSTOM_JAVA_HOME: << parameters.custom_java_home >>
                     DEBUG: << parameters.debug >>
@@ -711,7 +711,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1076,7 +1076,6 @@ commands:
                         "U020XUXADCP" # Raf
                         "UDDVDCKD0" # Raphael
                         "U04DC4NAK1S" # Yves
-                        "U0AHRL04HPV" #Tbo
                         # LAPI
                         "U08LBV2U75H" # Adrien
                         "U03HVEFHGLU" # Andreas T.
@@ -1091,6 +1090,8 @@ commands:
                         "U04TG4XMJ" # Danilo
                         "USE2D5GB1" # Fabio
                         "U04P9CS4F6Z" # Tom
+                        # QA
+                        "U0AHRL04HPV" #Tbo
                       )
 
                       # Takes the first bytes of the sha and convert to and int
@@ -1283,7 +1284,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 3200M
@@ -1295,7 +1296,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1325,7 +1326,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 12000M
@@ -1337,7 +1338,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1367,7 +1368,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1379,7 +1380,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1390,7 +1391,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1420,7 +1421,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 2500M
             EXECUTOR_JVM_METASPACE_SIZE: 400M
@@ -1432,7 +1433,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 1200M
             EXECUTOR_JVM_METASPACE_SIZE: 200M
@@ -1444,7 +1445,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 6500M
             EXECUTOR_JVM_METASPACE_SIZE: 3100M
@@ -1456,7 +1457,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1486,7 +1487,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1517,7 +1518,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1542,7 +1543,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1567,7 +1568,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1592,7 +1593,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1617,7 +1618,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1918,6 +1919,16 @@ jobs:
                 name: Upload data continuity dumps to S3
             - cleanup_test_job
             - slack_red_main_with_volunteer
+    ledger_api_compatibility_tests:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 5
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity\.api
+                num_parallel_tasks: "1"
+                num_test_buckets: "5"
+                timeout: 40m
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
         steps:
@@ -1935,7 +1946,7 @@ jobs:
         steps:
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
-                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
     nightly_integration_test_bftordering_only:
@@ -2389,8 +2400,7 @@ jobs:
                     # Run the todo checker only on the private repo
                     # TODO(i30871): Enable again on all projects
                     if [ "${CIRCLE_PROJECT_USERNAME}" = "DACH-NY" ]; then
-                      # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
-                      nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
+                      .ci/nix-exec amm .circleci/todo-script/src/checkTodos.sc
                     fi
                 name: Run the todo checker
             - slack_red_main_with_volunteer
@@ -2995,6 +3005,22 @@ workflows:
                 only_for_selected_users: true
                 requires:
                     - compile
+            - ledger_api_compatibility_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
             - scalafix:
                 context:
                     - datadog
@@ -3281,6 +3307,33 @@ workflows:
             equal:
                 - generate-data-continuity-dumps
                 - << pipeline.parameters.manual_job >>
+    manual_ledger_api_compatibility_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - ledger_api_compatibility_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - ledger-api-compatibility-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
     manual_model_based_test:
         jobs:
             - compile:

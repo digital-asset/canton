@@ -5,7 +5,6 @@ package com.digitalasset.canton.logging
 
 import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingEntry}
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -25,14 +24,6 @@ object LoggingContextWithTrace {
 
   val empty = LoggingContextWithTrace(TraceContext.empty)(LoggingContext.empty)
 
-  def apply(telemetry: Telemetry)(implicit
-      loggingContext: LoggingContext
-  ): LoggingContextWithTrace = {
-    val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
-    new LoggingContextWithTrace(loggingContext.entries, traceContext)
-  }
-
   val ForTesting: LoggingContextWithTrace =
     LoggingContextWithTrace.empty
 
@@ -45,12 +36,6 @@ object LoggingContextWithTrace {
       traceContext: TraceContext
   ): LoggingContextWithTrace =
     new LoggingContextWithTrace(createLoggingContext(loggerFactory)(identity).entries, traceContext)
-
-  def apply(loggerFactory: NamedLoggerFactory, telemetry: Telemetry): LoggingContextWithTrace = {
-    implicit val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
-    LoggingContextWithTrace(loggerFactory)
-  }
 
   /** ## Principles to follow when enriching the logging context
     *
@@ -70,12 +55,12 @@ object LoggingContextWithTrace {
     * parse, so stick to simple values (strings, numbers, dates, etc.).
     */
   def withEnrichedLoggingContext[A](
-      telemetry: Telemetry
+      traceContext: TraceContext
   )(entry: LoggingEntry, entries: LoggingEntry*)(
       f: LoggingContextWithTrace => A
   )(implicit loggingContext: LoggingContext): A =
     LoggingContext.withEnrichedLoggingContext(entry, entries*) { implicit loggingContext =>
-      f(LoggingContextWithTrace(telemetry)(loggingContext))
+      f(LoggingContextWithTrace(traceContext)(loggingContext))
     }
 
   def withEnrichedLoggingContext[A](
