@@ -603,11 +603,12 @@ class ParticipantNodeBootstrap(
         )
 
         sequencerInfoLoader = new SequencerInfoLoader(
+          participantId,
           parameters.processingTimeouts,
           parameters.tracing.propagation,
           ProtocolVersionCompatibility.supportedProtocols(parameters),
           parameters.protocolConfig.minimumProtocolVersion,
-          parameters.protocolConfig.dontWarnOnDeprecatedPV,
+          dontWarnOnDeprecatedPV = parameters.protocolConfig.dontWarnOnDeprecatedPV,
           loggerFactory,
         )
 

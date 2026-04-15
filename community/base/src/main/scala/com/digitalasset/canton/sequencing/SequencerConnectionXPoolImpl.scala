@@ -792,6 +792,7 @@ class GrpcSequencerConnectionXPoolFactory(
     val loggerWithPoolName = loggerFactory.append("pool", name)
 
     val connectionFactory = new GrpcInternalSequencerConnectionXFactory(
+      member,
       clientProtocolVersions,
       minimumProtocolVersion,
       keepAliveClientConfigO,

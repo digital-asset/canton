@@ -380,7 +380,7 @@ class MediatorNodeBootstrap(
         EitherT.pure(InitializeMediatorResponse())
       } else {
         val synchronizerAlias = SynchronizerAlias.tryCreate("synchronizer")
-        val sequencerInfoLoader = createSequencerInfoLoader()
+        val sequencerInfoLoader = createSequencerInfoLoader(mediatorId)
         completeWithExternalUS {
           logger.info(
             s"Assigning mediator to ${request.synchronizerId} via sequencers ${request.sequencerConnections}"
@@ -531,8 +531,9 @@ class MediatorNodeBootstrap(
     }
   }
 
-  private def createSequencerInfoLoader() =
+  private def createSequencerInfoLoader(mediatorId: MediatorId) =
     new SequencerInfoLoader(
+      mediatorId,
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
       clientProtocolVersions =
@@ -567,7 +568,7 @@ class MediatorNodeBootstrap(
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
     val synchronizerAlias = SynchronizerAlias(psid.uid.toLengthLimitedString)
-    val sequencerInfoLoader = createSequencerInfoLoader()
+    val sequencerInfoLoader = createSequencerInfoLoader(mediatorId)
     def getSequencerConnectionFromStore: FutureUnlessShutdown[Option[SequencerConnections]] =
       synchronizerConfigurationStore.fetchConfiguration().map(_.map(_.sequencerConnections))
 
