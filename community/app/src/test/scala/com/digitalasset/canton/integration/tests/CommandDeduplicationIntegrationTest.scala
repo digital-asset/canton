@@ -29,6 +29,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.CommandDeduplicationIntegrationTest.DelayPromises
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -197,6 +198,10 @@ trait CommandDeduplicationIntegrationTest
 
       logger.debug("Resubmit with short deduplication duration")
       simClock.advance(java.time.Duration.ofSeconds(600))
+      // Flake prevention/band-aid: Wait to prevent flaking on "Time validation has failed" warnings
+      TestUtils.waitForTargetTimeOnSynchronizerNode(targetTime = simClock.now, logger = logger)(
+        sequencer1
+      )
       val submissionId5 = "fifth-submission"
       submit(submissionId5, DeduplicationDuration(java.time.Duration.ofSeconds(599)))
       val (completion5, _) =

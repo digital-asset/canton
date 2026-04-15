@@ -2,7 +2,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- Check that the compiler bits of contract keys work.
--- @SINCE-LF 1.4
 module ContractKeys where
 
 import Daml.Script

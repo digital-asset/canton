@@ -7,7 +7,7 @@ import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
+import com.digitalasset.canton.{LfGlobalKeyMapping, LfPartyId}
 
 /** Encapsulates the most widely used representations of a transaction.
   */
@@ -38,7 +38,7 @@ trait ExampleTransaction {
     )
 
   /** The key resolver to be used for iterating over the transaction nodes */
-  def keyResolver: LfKeyResolver
+  def keyResolver: LfGlobalKeyMapping
 
   /** The root views of the transaction in execution order */
   def rootViewDecompositions: Seq[TransactionViewDecomposition.NewView]
@@ -66,7 +66,7 @@ trait ExampleTransaction {
   def reinterpretedSubtransactions: Seq[
     (
         FullTransactionViewTree,
-        (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+        (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
         Witnesses,
     )
   ]

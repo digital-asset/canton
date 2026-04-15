@@ -7,7 +7,6 @@ import cats.data.OptionT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.logging.entries.LoggingEntries
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidator
 import com.digitalasset.canton.ledger.api.{UpdateFormat, ValidationLogger}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.protocol.UpdateId
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.Materializer
@@ -34,7 +34,6 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ApiUpdateService(
     updateService: IndexUpdateService,
     metrics: LedgerApiServerMetrics,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     esf: ExecutionSequencerFactory,
@@ -49,7 +48,7 @@ final class ApiUpdateService(
       responseObserver: StreamObserver[GetUpdatesResponse],
   ): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     registerStream(responseObserver) {
       implicit val errorLoggingContext: ErrorLoggingContext =
         ErrorLoggingContext(logger, loggingContextWithTrace)
@@ -88,7 +87,7 @@ final class ApiUpdateService(
       req: GetUpdateByOffsetRequest
   ): Future[GetUpdateResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext(logger, loggingContextWithTrace)
 
@@ -128,7 +127,8 @@ final class ApiUpdateService(
   override def getUpdateById(
       req: GetUpdateByIdRequest
   ): Future[GetUpdateResponse] = {
-    val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     UpdateServiceRequestValidator

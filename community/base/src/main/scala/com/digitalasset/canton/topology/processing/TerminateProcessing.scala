@@ -32,7 +32,10 @@ trait TerminateProcessing {
       executionContext: ExecutionContext,
   ): Unit
 
-  def notifyUpgradeCancellation()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  def notifyUpgradeCancellation()(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Unit]
 }
 
 object TerminateProcessing {
@@ -59,7 +62,8 @@ object TerminateProcessing {
     ): Unit = ()
 
     override def notifyUpgradeCancellation()(implicit
-        traceContext: TraceContext
+        traceContext: TraceContext,
+        executionContext: ExecutionContext,
     ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
   }
 }

@@ -242,6 +242,7 @@ abstract class BlockSequencerFactory(
         futureSupervisor,
         metrics,
         nodeParameters.processingTimeouts,
+        lsuSequencingBounds,
         loggerFactory,
       )
       rateLimitManager = makeRateLimitManager(

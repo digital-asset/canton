@@ -137,7 +137,7 @@ class TrafficPurchasedSubmissionHandler(
         ),
       )
       aggregationRule = AggregationRule(
-        eligibleMembers = activeSequencers,
+        eligibleSenders = activeSequencers,
         threshold = sequencerGroup.threshold,
         protocolVersion,
       )

@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 final case class Membership(
@@ -36,11 +37,11 @@ object Membership {
   private[bftordering] def forTesting(
       myId: BftNodeId,
       otherNodes: Set[BftNodeId] = Set.empty,
-      sequencingParameters: SequencingParameters = SequencingParameters.Default,
+      sequencingParameters: Option[SequencingParameters] = None,
       leaders: Option[Seq[BftNodeId]] = None,
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
       epochLength: EpochLength = DefaultEpochLength,
-  ): Membership = {
+  )(implicit synchronizerProtocolVersion: ProtocolVersion): Membership = {
     val orderingTopology = OrderingTopology.forTesting(
       otherNodes + myId,
       sequencingParameters,

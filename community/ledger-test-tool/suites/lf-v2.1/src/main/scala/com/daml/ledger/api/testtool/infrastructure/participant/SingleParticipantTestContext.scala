@@ -3,7 +3,6 @@
 
 package com.daml.ledger.api.testtool.infrastructure.participant
 
-import cats.syntax.traverse.*
 import com.daml.grpc.test.StreamConsumer
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -595,11 +594,88 @@ final class SingleParticipantTestContext private[participant] (
     _.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
   )
 
+  override def activeContractsWithVariants(
+      request: GetActiveContractsRequest
+  ): Future[Vector[CreatedEvent]] = activeContractResponsesWithVariants(request).map(
+    _.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
+  )
+
   override def activeContractResponses(
       request: GetActiveContractsRequest
   ): Future[Vector[GetActiveContractsResponse]] = new StreamConsumer[GetActiveContractsResponse](
     services.state.getActiveContracts(request, _)
   ).all()
+
+  private def getActiveContractsPage(
+      request: GetActiveContractsRequest,
+      size: Int,
+      token: Option[ByteString] = None,
+      acc: Vector[GetActiveContractsResponse] = Vector.empty,
+  ): Future[Vector[GetActiveContractsResponse]] =
+    services.state
+      .getActiveContractsPage(
+        GetActiveContractsPageRequest(
+          activeAtOffset = Some(request.activeAtOffset),
+          eventFormat = request.eventFormat,
+          maxPageSize = Some(size),
+          pageToken = token,
+        )
+      )
+      .flatMap { response =>
+        if (token.nonEmpty && response.activeContracts.isEmpty) {
+          Future.failed(new RuntimeException("Received empty page with non-empty token"))
+        } else {
+          Future.successful(response)
+        }
+      }
+      .flatMap { response =>
+        response.nextPageToken match {
+          case Some(_) =>
+            getActiveContractsPage(
+              request,
+              size,
+              response.nextPageToken,
+              acc ++ response.activeContracts,
+            )
+          case None =>
+            Future.successful(acc ++ response.activeContracts)
+        }
+      }
+
+  def activeContractResponsesWithVariants(
+      request: GetActiveContractsRequest
+  ): Future[Vector[GetActiveContractsResponse]] = {
+    val variants: Seq[(String, Future[Vector[GetActiveContractsResponse]])] = Seq(
+      "simple stream " -> new StreamConsumer[GetActiveContractsResponse](
+        services.state.getActiveContracts(request, _)
+      ).all().map(_.map(_.copy(streamContinuationToken = ByteString.empty()))),
+      "interrupt and continue stream" -> {
+        for {
+          original <- new StreamConsumer[GetActiveContractsResponse](
+            services.state.getActiveContracts(request, _)
+          ).all()
+          firstPart = original.take(original.size / 2)
+          continuationToken = firstPart.lastOption.map(_.streamContinuationToken)
+          secondPart <- new StreamConsumer[GetActiveContractsResponse](
+            services.state.getActiveContracts(
+              request.copy(streamContinuationToken = continuationToken),
+              _,
+            )
+          ).all()
+        } yield (firstPart ++ secondPart).map(_.copy(streamContinuationToken = ByteString.empty()))
+      },
+      "with page size 1" -> getActiveContractsPage(request, 1),
+      "with page size 2" -> getActiveContractsPage(request, 2),
+      "with page size 10" -> getActiveContractsPage(request, 10),
+    )
+    evaluateVariants(variants)
+  }
+
+  override def activeContractsPage(
+      request: GetActiveContractsPageRequest
+  ): Future[GetActiveContractsPageResponse] =
+    services.state
+      .getActiveContractsPage(request)
 
   override def activeContractsRequest(
       parties: Option[Seq[Party]],
@@ -613,6 +689,13 @@ final class SingleParticipantTestContext private[participant] (
       eventFormat = Some(eventFormat(verbose, parties, templateIds, interfaceFilters)),
       streamContinuationToken = None,
     )
+
+  override def activeContractsWithVariants(
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long] = None,
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]] =
+    activeContractsByTemplateIdWithVariants(Seq.empty, parties, activeAtOffsetO, verbose)
 
   override def activeContracts(
       parties: Option[Seq[Party]],
@@ -633,6 +716,27 @@ final class SingleParticipantTestContext private[participant] (
         case Some(activeAt) => Future.successful(activeAt)
       }
       acs <- activeContracts(
+        activeContractsRequest(
+          parties,
+          activeAtOffset,
+          templateIds,
+          verbose = verbose,
+        )
+      )
+    } yield acs
+
+  override def activeContractsByTemplateIdWithVariants(
+      templateIds: Seq[Identifier],
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long],
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]] =
+    for {
+      activeAtOffset <- activeAtOffsetO match {
+        case None => currentEnd()
+        case Some(activeAt) => Future.successful(activeAt)
+      }
+      acs <- activeContractsWithVariants(
         activeContractsRequest(
           parties,
           activeAtOffset,
@@ -830,21 +934,23 @@ final class SingleParticipantTestContext private[participant] (
         .map(_.reverse),
     )
 
-    for {
-      results <- variants
-        .map { case (name, variant) =>
-          (
-            name,
-            variant.recoverWith(ex =>
-              Future.failed(new SingleParticipantTestContext.VariantFailedException(name, ex))
-            ),
-          )
-        }
-        .traverse { case (name, taggedResult) => taggedResult.map((name, _)) }
+    evaluateVariants(variants)
+  }
 
+  private def evaluateVariants[Res](
+      variants: Seq[(String, Future[Vector[Res]])]
+  ): Future[Vector[Res]] =
+    for {
+      results <- MonadUtil.sequentialTraverse(variants.map { case (name, variant) =>
+        (
+          name,
+          variant.recoverWith(ex =>
+            Future.failed(new SingleParticipantTestContext.VariantFailedException(name, ex))
+          ),
+        )
+      }) { case (name, taggedResult) => taggedResult.map((name, _)) }
       matchingResult <- checkIfResultsMatch(results)
     } yield matchingResult
-  }
 
   private def checkIfResultsMatch[T](results: Seq[(String, T)]): Future[T] = results match {
     case Seq() => Future.failed(new IllegalArgumentException("Empty result seq"))

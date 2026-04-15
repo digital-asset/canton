@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.auth.{AuthInterceptor, AuthService, ClaimSet, GrpcAuthInterceptor}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.ledger.api.auth.interceptor.UserBasedClaimResolver
@@ -105,7 +104,6 @@ class UserBasedAuthInterceptorSpec
       .thenReturn(failedMetadataDecode)
     new GrpcAuthInterceptor(
       authInterceptor,
-      NoOpTelemetry,
       loggerFactory,
       ApiLoggingConfig(),
       executionContext,

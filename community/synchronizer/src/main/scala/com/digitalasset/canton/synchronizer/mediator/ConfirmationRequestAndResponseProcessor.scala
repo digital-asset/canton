@@ -7,6 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.semigroup.*
+import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -36,6 +37,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
@@ -739,7 +741,35 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         )
         logger.debug(show"Phase 5: Responses for request=${responses.requestId.unwrap}: $responses")
 
+        val mediatorGroupRecipients = recipients.allRecipients.collect {
+          case r: MediatorGroupRecipient =>
+            r
+        }
+
+        def isInGroup(
+            snapshot: SynchronizerSnapshotSyncCryptoApi
+        ): OptionT[FutureUnlessShutdown, Boolean] =
+          for {
+            mediatorGroups <- snapshot.ipsSnapshot
+              .mediatorGroupsOfAll(mediatorGroupRecipients.toSeq.map(_.group))
+              .toOption
+
+          } yield mediatorGroups.exists(_.all contains mediatorId)
+
         (for {
+          _ <-
+            if (psid.protocolVersion >= ProtocolVersion.v35 && mediatorGroupRecipients.sizeIs > 1) {
+              val error = MediatorError.MalformedMessage
+                .Reject(
+                  s"Request ${responses.requestId}, sender ${responses.sender}: More than one mediator group in the recipients: $mediatorGroupRecipients. Discarding..."
+                )
+
+              error.report()
+
+              val grpcError = ErrorCode.asGrpcError(error)
+              OptionT.liftF(FutureUnlessShutdown.failed(grpcError))
+            } else OptionT.some[FutureUnlessShutdown](())
+
           snapshot <- OptionT.liftF(crypto.awaitSnapshot(responses.requestId.unwrap))
           _ <- signedResponses
             .verifySignature(snapshot, responses.sender)
@@ -772,30 +802,54 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               OptionT.none[FutureUnlessShutdown, Unit]
             }
           _ <- {
-            // To ensure that a mediator group address is resolved in the same way as for the request
-            // we require that the topology timestamp on the response submission request is set to the
-            // request's sequencing time. The sequencer communicates this timestamp to the client
-            // via the timestamp of signing key.
-            if (topologyTimestamp.contains(responses.requestId.unwrap))
-              OptionT.some[FutureUnlessShutdown](())
-            else {
-              MediatorError.MalformedMessage
-                .Reject(
-                  s"Request ${responses.requestId}, sender ${responses.sender}: Discarding confirmation response because the topology timestamp is not set to the request id [$topologyTimestamp]"
-                )
-                .report()
-              OptionT.none[FutureUnlessShutdown, Unit]
+
+            if (psid.protocolVersion >= ProtocolVersion.v35) {
+              // Starting from v35, we reject messages with topology timestamp set
+              if (topologyTimestamp.isEmpty)
+                OptionT.some[FutureUnlessShutdown](())
+              else {
+                MediatorError.MalformedMessage
+                  .Reject(
+                    s"Request ${responses.requestId}, sender ${responses.sender}: Discarding confirmation response because the topology timestamp is non-empty."
+                  )
+                  .report()
+                OptionT.none[FutureUnlessShutdown, Unit]
+              }
+            } else {
+              // To ensure that a mediator group address is resolved in the same way as for the request
+              // we require that the topology timestamp on the response submission request is set to the
+              // request's sequencing time. The sequencer communicates this timestamp to the client
+              // via the timestamp of signing key.
+              if (topologyTimestamp.contains(responses.requestId.unwrap))
+                OptionT.some[FutureUnlessShutdown](())
+              else {
+                MediatorError.MalformedMessage
+                  .Reject(
+                    s"Request ${responses.requestId}, sender ${responses.sender}: Discarding confirmation response because the topology timestamp is not set to the request id [$topologyTimestamp]"
+                  )
+                  .report()
+                OptionT.none[FutureUnlessShutdown, Unit]
+              }
             }
           }
 
           responseAggregation <- mediatorState.fetch(responses.requestId).orElse {
+            val logErrorOnUnknownRequestIdF =
+              if (psid.protocolVersion >= ProtocolVersion.v35) isInGroup(snapshot)
+              else OptionT.some[FutureUnlessShutdown](true)
+
             // This can happen as part of an attack.
             val cause =
               s"Received a confirmation response at $ts by ${responses.sender} with an unknown request id ${responses.requestId}. Discarding response..."
-            val error = MediatorError.InvalidMessage.Reject(cause)
-            error.log()
 
-            OptionT.none[FutureUnlessShutdown, ResponseAggregator]
+            logErrorOnUnknownRequestIdF.flatMap { logErrorOnUnknownRequestId =>
+              if (logErrorOnUnknownRequestId) {
+                val error = MediatorError.InvalidMessage.Reject(cause)
+                error.log()
+              } else logger.info(cause)
+
+              OptionT.none[FutureUnlessShutdown, ResponseAggregator]
+            }
           }
 
           _ <- {

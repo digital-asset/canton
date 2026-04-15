@@ -58,5 +58,7 @@ object MockedNodeParameters {
       ReportingLevel.Warn
     )
     override def dispatchQueueBackpressureLimit: NonNegativeInt = ???
+
+    override def sanitizePublicErrorMessages: Boolean = ???
   }
 }

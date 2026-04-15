@@ -36,7 +36,7 @@ class LedgerEffectAbsolutizer(absolutizer: ContractIdAbsolutizer) {
       createdInSubviewArchivedInCore <- vpd.createdInSubviewArchivedInCore.toSeq
         .traverse(absolutizer.absolutizeContractId)
         .map(_.toSet)
-      resolvedKeys <- vpd.keyMaintainers.toSeq.traverse { case (gKey, resolution) =>
+      resolvedKeys <- vpd.keyResolution.toSeq.traverse { case (gKey, resolution) =>
         for {
           absolutizedKey <- gKey.key.traverseCid(absolutizer.absolutizeContractId)
           absolutizedResolution <- absolutizeKeyResolution(resolution.unversioned)

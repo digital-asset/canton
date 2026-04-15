@@ -63,6 +63,10 @@ trait UserManagementStorageBackend extends ResourceVersionOps {
       isDeactivated: Boolean,
   )(connection: Connection): Boolean
 
+  def updateUserPrimaryPartyAuthentication(
+      internalId: Int,
+      primaryPartyAuthentication: Boolean,
+  )(connection: Connection): Boolean
 }
 
 object UserManagementStorageBackend {
@@ -71,6 +75,7 @@ object UserManagementStorageBackend {
       primaryPartyO: Option[Ref.Party],
       identityProviderId: Option[IdentityProviderId.Id],
       isDeactivated: Boolean,
+      primaryPartyAuthentication: Boolean,
       resourceVersion: Long,
       createdAt: Long,
   )

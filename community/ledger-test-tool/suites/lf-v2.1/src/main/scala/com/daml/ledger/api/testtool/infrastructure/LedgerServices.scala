@@ -142,6 +142,8 @@ import com.daml.ledger.api.v2.package_service.{
 }
 import com.daml.ledger.api.v2.state_service.StateServiceGrpc.StateService
 import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsPageRequest,
+  GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
   GetConnectedSynchronizersRequest,
@@ -541,6 +543,12 @@ private final class LedgerServicesJson(
         eventFormat = req.eventFormat,
         streamContinuationToken = req.streamContinuationToken,
       )
+
+    override def getActiveContractsPage(
+        request: GetActiveContractsPageRequest
+    ): Future[GetActiveContractsPageResponse] =
+      clientCall(JsStateService.activeContractsPageEndpoint, request)
+        .flatMap(protocolConverters.GetActiveContractsPageResponse.fromJson)
 
     override def getConnectedSynchronizers(
         request: GetConnectedSynchronizersRequest

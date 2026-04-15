@@ -6,6 +6,8 @@ package com.digitalasset.canton.tracing
 import io.grpc.*
 import io.grpc.Context as GrpcContext
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
+import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
+import io.opentelemetry.api.trace.{Span, Tracer}
 
 import scala.util.{Try, Using}
 
@@ -52,6 +54,9 @@ object TraceContextGrpc {
   def clientInterceptor(wrappedInterceptor: Option[ClientInterceptor] = None): ClientInterceptor =
     new TraceContextClientInterceptor(wrappedInterceptor)
   def serverInterceptor: ServerInterceptor = new TraceContextServerInterceptor
+
+  def reportingServerInterceptor(tracer: Tracer): ServerInterceptor =
+    new TraceContextReportingServerInterceptor(tracer)
 
   private class TraceContextClientInterceptor(wrappedInterceptor: Option[ClientInterceptor])
       extends ClientInterceptor {
@@ -105,6 +110,66 @@ object TraceContextGrpc {
         .current()
         .withValue(TraceContextKey, traceContext)
       Contexts.interceptCall(context, call, headers, next)
+    }
+  }
+
+  private class TraceContextReportingServerInterceptor(tracer: Tracer) extends ServerInterceptor {
+    override def interceptCall[ReqT, RespT](
+        call: ServerCall[ReqT, RespT],
+        headers: Metadata,
+        next: ServerCallHandler[ReqT, RespT],
+    ): ServerCall.Listener[ReqT] = {
+
+      val traceContextFromWire = W3CTraceContext.fromGrpcMetadata(headers)
+      val parentTraceContext =
+        if (traceContextFromWire.traceId.isEmpty)
+          TraceContext.withNewTraceContext("grpc-server")(identity)
+        else
+          traceContextFromWire
+
+      val span = tracer
+        .spanBuilder(call.getMethodDescriptor.getFullMethodName)
+        .setParent(parentTraceContext.context)
+        .startSpan()
+      val traceContext = TraceContext(span.storeInContext(parentTraceContext.context))
+
+      val context = GrpcContext
+        .current()
+        .withValue(TraceContextKey, traceContext)
+
+      val nextServerCallListener = Contexts.interceptCall(context, call, headers, next)
+      new ServerCallListener(nextServerCallListener, span)
+    }
+
+    /** Intercepts events sent by the client.
+      */
+    class ServerCallListener[ReqT, RespT](
+        delegate: ServerCall.Listener[ReqT],
+        span: Span,
+    ) extends SimpleForwardingServerCallListener[ReqT](delegate) {
+
+      /** Called when the server receives the request. */
+      override def onMessage(message: ReqT): Unit =
+        delegate.onMessage(message)
+
+      /** Called when the client completed all message sending (except for cancellation). */
+      override def onHalfClose(): Unit =
+        delegate.onHalfClose()
+
+      /** Called when the client cancels the call. */
+      override def onCancel(): Unit = {
+        delegate.onCancel()
+        span.end()
+      }
+
+      /** Called when the server considers the call completed. */
+      override def onComplete(): Unit = {
+        delegate.onComplete()
+        span.end()
+      }
+
+      override def onReady(): Unit =
+        delegate.onReady()
     }
   }
 }

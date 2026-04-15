@@ -21,7 +21,7 @@ message PartyReplicationTargetParticipantMessage {
   message Initialize {
     option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
     // The ACS contract ordinal (0-based) to send as part of the first SendAcsUpTo instruction.
-    uint32 initial_contract_ordinal_inclusive = 1;
+    uint64 initial_contract_ordinal_inclusive = 1;
   }
 
   // SendAcsUpTo instructs the source participant to send ordered ACS contracts up to a specified
@@ -33,7 +33,7 @@ message PartyReplicationTargetParticipantMessage {
     // watermark specifying up to which contract ordinal inclusively the source participant is expected
     // to send ACS contracts.
     // Required
-    uint32 max_contract_ordinal_inclusive = 1;
+    uint64 max_contract_ordinal_inclusive = 1;
   }
 
   oneof instruction {
@@ -109,9 +109,9 @@ message PartyReplicationStatus {
 
   // Progress of ACS replication.
   message AcsReplicationProgress {
-    // Non negative number of ACS contracts sent by the source or persisted by the target participant.
+    // Non negative running total (odometer)  of ACS contracts sent by the source or persisted by the target participant.
     // required
-    uint32 processed_contract_count = 1;
+    uint64 processed_contract_count = 1;
     // The next counter to use for persistence on the target participant
     // required, not used and always -1 on the source participant
     uint64 next_persistence_counter = 2;
@@ -122,12 +122,21 @@ message PartyReplicationStatus {
 
   // Progress of ACS indexing the Ledger Api.
   message AcsIndexingProgress {
-    // Non negative number of ACS contracts indexed.
+    // Non negative running total (odometer) of contract activation changes indexed so far.
     // required
-    uint32 indexed_contract_count = 1;
+    uint64 indexed_contract_activation_change_count = 1;
     // The next counter to use for indexing.
     // required
     uint64 next_indexing_counter = 2;
+    // The most recent 'indexed_contract_activation_change_count' at which indexing has processed
+    // all or "most of the" changes known thus far. This watermark serves as a signal to initiate
+    // the transition to the subsequent stage.
+    // Because an uninterrupted flow of concurrent transactions constantly produces new contract
+    // activation changes to index, indexing all contract activations is a moving target. Therefore,
+    // requiring all (rather than most) changes to be indexed before moving on to the next
+    // stage could keep party replication stuck indefinitely in the indexing stage.
+    // optional: not set if indexing has not previously managed to process all or most of the changes.
+    optional uint64 indexing_almost_done_watermark = 3;
   }
 
   // Error message when disconnected or operator intervention needed.

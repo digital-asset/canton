@@ -8,7 +8,6 @@ import com.daml.metrics.api.{MetricInfo, MetricQualification, MetricsContext}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
 import com.daml.testing.utils.{PekkoBeforeAndAfterAll, TestResourceContext}
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
 import com.digitalasset.canton.health.HealthChecks.ComponentName
@@ -112,7 +111,7 @@ final class RateLimitingInterceptorChecksSpec
       .mark(config.maxApiServicesQueueSize.toLong + 1)(MetricsContext.Empty) // Over limit
 
     val healthService =
-      new GrpcHealthService(healthChecks, telemetry = NoOpTelemetry, loggerFactory = loggerFactory)(
+      new GrpcHealthService(healthChecks, loggerFactory = loggerFactory)(
         executionSequencerFactory,
         materializer,
         executionContext,

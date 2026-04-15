@@ -7,18 +7,11 @@ import scala.util.matching.Regex
 
 /**  This script depends on `gh` (github cli) and awk
   *
-  *  Intentionally not using the .ci/nix-exec script because some commands in this script do not work properly in a pure
-  *  nix environment (i.e. nix-shell using the `--pure` flag). Use [[nixify]]
-  *
   *  Current limitations of the TODO checker:
   *    - For `.rst` files, TODO blocks are considered to be the range from each instance of `todo::` to the next blank
   *      line. This is different to the actual TODO block in the `.rst` file---for example, a `rst` TODO block may contain
   *      blank lines followed by more content of the block.
   */
-
-def nixify(command: String): String = {
-  s"""nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "$command""""
-}
 
 // check if we should run at all
 val disableCheckerFile = "disabled-todo-checker"
@@ -45,7 +38,7 @@ ensureNoTodosInSqlFiles()
 // The following checks rely on information retrieved from CircleCI and GitHub on the branch
 if (runningInCI) {
   val branch = sys.env.getOrElse("CIRCLE_BRANCH", "").strip()
-  val baseBranch = prNumO.map { prNum => nixify(s"gh pr view $prNum --json baseRefName --jq .baseRefName").!!.strip() }
+  val baseBranch = prNumO.map { prNum => s"gh pr view $prNum --json baseRefName --jq .baseRefName".!!.strip() }
   val releaseLineStr = "release-line"
   val onReleaseLine = baseBranch.exists(_.contains(releaseLineStr)) || branch.contains(releaseLineStr)
   val debugInfo = s"[debug info: branch '$branch', base branch '$baseBranch']"
@@ -73,10 +66,10 @@ if (runningInCI) {
   // if we are not on main, rebase to main to avoid race condition with todos already closed on main
   if (branch != "main") {
     println("rebasing to main to avoid flagging already closed issues")
-    nixify("git config user.name canton").!!.strip()
-    nixify("git config user.email canton@digitalasset.com").!!.strip()
-    nixify("git fetch origin main").!!.strip()
-    nixify("git merge -X theirs origin/main -m Merged --commit").!!.strip()
+    "git config user.name canton".!!.strip()
+    "git config user.email canton@digitalasset.com".!!.strip()
+    "git fetch origin main".!!.strip()
+    "git merge -X theirs origin/main -m Merged --commit".!!.strip()
   }
 }
 
@@ -242,7 +235,7 @@ def writeToFile(content: String, filename: String): Unit = {
 
 val fixedIssuesCurrentPR: Set[Int] = {
   prNumO.fold(Set.empty[Int])({ prNum =>
-    val prInfo = nixify(s"gh pr view $prNum --json body --jq .body").!!
+    val prInfo = s"gh pr view $prNum --json body --jq .body".!!
     val issueCloseKeywords = "((fixes)|(closes))"
     val fixedIssueRegexStr = "(?i)" + issueCloseKeywords + "(\\s+)(#)([0-9]+)"
     val fixedIssueRegex = fixedIssueRegexStr.r
@@ -260,7 +253,7 @@ if (!sys.env.contains("GITHUB_TOKEN")) {
   )
 }
 
-val openIssues: Set[Int] = nixify("gh issue list --limit 2500 --json number --jq '.[].number'").!!.split("\n")
+val openIssues: Set[Int] = "gh issue list --limit 2500 --json number --jq '.[].number'".!!.split("\n")
   .map(_.toInt)
   .toSet
 
@@ -318,7 +311,7 @@ object ErrorCollector extends ProcessLogger {
 
 val grepCommands = todoPatterns.map(grepForPattern)
 val grepLines = grepCommands.flatMap({ command =>
-  nixify(command.mkString(" ")).lazyLines_!(ErrorCollector)
+  command.mkString(" ").lazyLines_!(ErrorCollector)
 })
 
 def checkGreppingRstFilesWorks(awkGrep: String): Unit = {
@@ -326,9 +319,9 @@ def checkGreppingRstFilesWorks(awkGrep: String): Unit = {
   require(awkGrep.! == 0, s"Grepping for todos in RST files failed; executed command: $awkGrep")
 }
 
-val awkGrep = nixify(s"grep --include='*.rst' -rl '.. todo::' docs-open")
+val awkGrep = s"grep --include='*.rst' -rl '.. todo::' docs-open"
 checkGreppingRstFilesWorks(awkGrep)
-val awkRun = nixify("xargs awk -f .circleci/todo-script/rst_script.awk")
+val awkRun = "xargs awk -f .circleci/todo-script/rst_script.awk"
 val awkCommand = awkGrep #| awkRun
 val awkLines = awkCommand.lazyLines_!(ErrorCollector)
 
@@ -411,7 +404,7 @@ Check that sql files outside in /stable/ don't contain any TODO.
 The reason is that comments are part of Flyway checksum, so we can never remove them.
 */
 def ensureNoTodosInSqlFiles(): Unit = {
-  val todosInSqlFiles = nixify("grep -rn 'TODO(' --include='*.sql' || true").!!.split("\n").toList
+  val todosInSqlFiles = ("grep -rn 'TODO(' --include='*.sql'" #|| "true").!!.split("\n").toList
     .filter(_.contains("/stable/"))
     .filterNot(_.contains("/target/"))
     .filterNot(_.contains("TODO(#282923)")) // we need to live with this one

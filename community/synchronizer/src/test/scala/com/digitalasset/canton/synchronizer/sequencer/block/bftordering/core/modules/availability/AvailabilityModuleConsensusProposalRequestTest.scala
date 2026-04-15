@@ -715,13 +715,10 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
           )
           availability.receive(Availability.DelayedProposalResponse)
-          availability.getActiveMembership
+          val membership = availability.getActiveMembership
           val reviewedProgress =
             BatchReadyForOrderingNode0Vote._2
-              .changeMembership(
-                availability.getActiveMembership
-                  .copy(orderingTopology = OrderingTopologyNodes0To6)
-              )
+              .changeMembership(membership.copy(orderingTopology = OrderingTopologyNodes0To6))
               .toEither
               .leftOrFail("Batch should not be complete in new topology")
           disseminationProtocolState.disseminationInProgressView should contain only (ABatchId -> reviewedProgress
@@ -735,7 +732,9 @@ class AvailabilityModuleConsensusProposalRequestTest
           val selfSendMessages = actorContext.runPipedMessages()
           selfSendMessages should contain only
             Availability.LocalDissemination.LocalBatchesStoredSigned(
-              Seq(LocalBatchStoredSigned(Traced(ABatchId), ABatch, signature = None))
+              Seq(
+                LocalBatchStoredSigned(Traced(ABatchId), ABatch, membership, signature = None)
+              )
             )
         }
       }
@@ -832,7 +831,14 @@ class AvailabilityModuleConsensusProposalRequestTest
             val selfMessages = ctx.runPipedMessages()
             selfMessages should contain only Availability.LocalDissemination
               .LocalBatchesStoredSigned(
-                Seq(LocalBatchStoredSigned(Traced(AnotherBatchId), ABatch, signature = None))
+                Seq(
+                  LocalBatchStoredSigned(
+                    Traced(AnotherBatchId),
+                    ABatch,
+                    MembershipNodes0To3,
+                    signature = None,
+                  )
+                )
               )
           }
       }
@@ -978,7 +984,14 @@ class AvailabilityModuleConsensusProposalRequestTest
           val selfMessages = ctx.runPipedMessages()
           selfMessages should contain only Availability.LocalDissemination
             .LocalBatchesStoredSigned(
-              Seq(LocalBatchStoredSigned(Traced(AnotherBatchId), ABatch, signature = None))
+              Seq(
+                LocalBatchStoredSigned(
+                  Traced(AnotherBatchId),
+                  ABatch,
+                  newMembership,
+                  signature = None,
+                )
+              )
             )
         }
     }
@@ -1367,6 +1380,64 @@ class AvailabilityModuleConsensusProposalRequestTest
           )),
           count = 2,
         )
+      }
+    }
+
+  "it receives multiple Consensus.CreateProposal (from local consensus), " +
+    "then Dissemination.LocalBatchStoredSigned (from self) and " +
+    "the active membership is different from the signing one" should {
+      "update the acks and progress" in {
+        val disseminationProtocolState = new DisseminationProtocolState()
+        implicit val context
+            : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext
+        val availability =
+          createAndStartAvailability[ProgrammableUnitTestEnv](
+            disseminationProtocolState = disseminationProtocolState,
+            consensus = fakeIgnoringModule,
+          )
+        val membership = availability.getActiveMembership
+        val newMembership = Membership.forTesting(
+          Node0,
+          OrderingTopologyNode0.copy(
+            nodesTopologyInfo =
+              OrderingTopologyNode0.nodesTopologyInfo.map { case (nodeId, nodeInfo) =>
+                // Change the key of node0 and node6 so that the PoA is only left with 1 valid ack < f+1 = 3
+                //  and it will be re-signed and disseminated by node0
+                nodeId ->
+                  nodeInfo.copy(keyIds =
+                    Set(BftKeyId(anotherNoSignature.authorizingLongTermKey.toProtoPrimitive))
+                  )
+              }
+          ),
+        )
+        availability.receive(
+          Availability.Consensus
+            .CreateProposal(
+              BlockNumber.First,
+              EpochNumber.First,
+              newMembership,
+              failingCryptoProvider,
+            )
+        )
+        availability.receive(
+          Availability.LocalDissemination.LocalBatchesStoredSigned(
+            Seq(
+              LocalBatchStoredSigned(
+                Traced(ABatchId),
+                ABatch,
+                membership,
+                signature = Some(Signature.noSignature),
+              )
+            )
+          )
+        )
+
+        disseminationProtocolState.disseminationProgress should contain only (ABatchId ->
+          ADisseminationProgressNode0WithNode0Vote
+            .changeMembership(newMembership)
+            .toEither
+            .leftOrFail("Progress was not updated with new membership"))
       }
     }
 }

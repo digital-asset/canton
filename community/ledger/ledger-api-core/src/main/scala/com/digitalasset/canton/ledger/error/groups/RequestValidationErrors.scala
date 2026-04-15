@@ -427,6 +427,28 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   }
 
   @Explanation(
+    """This error is emitted when a submitted ledger API command contains a page token which cannot be verified.
+      |When an ACS page request is made with a page token, the token must be taken from a valid
+      |GetActiveContractsPageResponse and used with the same EventFormat settings, with the same Canton participant
+      |running the same Canton version. These tokens are not intended to be stored and used much later under different circumstances."""
+  )
+  @Resolution("Inspect the reason given and correct your application.")
+  object InvalidPageToken
+      extends ErrorCode(
+        id = "INVALID_PAGE_TOKEN",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(message: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The submitted command contains an invalid page token. Tokens used in ACS requests must be taken " +
+              "from a valid GetActiveContractsPageResponse and used with the same EventFormat settings, with the same Canton " +
+              s"participant running the same Canton version. $message"
+        )
+  }
+
+  @Explanation(
     "This error is emitted when a submitted ledger API command specifies an invalid deduplication period."
   )
   @Resolution(

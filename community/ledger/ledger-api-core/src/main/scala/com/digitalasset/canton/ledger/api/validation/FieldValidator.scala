@@ -298,6 +298,18 @@ object FieldValidator {
       case Right(_) => Right(annotations)
     }
 
+  def validatePageSize(limit: Int, defaultPageSize: Int, value: Option[Int])(implicit
+      errorLogger: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Int] =
+    value match {
+      case Some(pageSize) if pageSize > 0 && pageSize <= limit => Right(pageSize)
+      case Some(pageSize) if pageSize <= 0 =>
+        Left(invalidArgument(s"Requested page size must be positive, but got $pageSize"))
+      case Some(pageSize) =>
+        Left(invalidArgument(s"Requested page size must not exceed $limit, but got $pageSize"))
+      case None => Right(defaultPageSize)
+    }
+
   def validateOptional[T, U](t: Option[T])(
       validation: T => Either[StatusRuntimeException, U]
   ): Either[StatusRuntimeException, Option[U]] =

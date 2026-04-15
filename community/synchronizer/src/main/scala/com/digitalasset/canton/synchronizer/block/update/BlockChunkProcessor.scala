@@ -141,8 +141,9 @@ final class BlockChunkProcessor(
         reversedOutcomes,
       ) = validationResult
 
-      finalInFlightAggregationsWithAggregationExpiry =
-        expireInFlightAggregations(finalInFlightAggregations, lastTsBeforeValidation)
+      finalInFlightAggregationsWithAggregationExpiry = finalInFlightAggregations.cleanExpired(
+        lastTsBeforeValidation
+      )
 
       acksValidationResult <- acksValidationResultF
       (acksByMember, invalidAcks) = acksValidationResult
@@ -179,14 +180,6 @@ final class BlockChunkProcessor(
         )
     } yield (newState, chunkUpdate)
   }
-
-  private def expireInFlightAggregations(
-      finalInFlightAggregations: InFlightAggregations,
-      timestamp: CantonTimestamp,
-  ): InFlightAggregations =
-    finalInFlightAggregations.filterNot { case (_, inFlightAggregation) =>
-      inFlightAggregation.expired(timestamp)
-    }
 
   private def logChunkDetails(
       state: State,
@@ -299,9 +292,8 @@ final class BlockChunkProcessor(
           )
       }
     } yield {
-      val unexpiredInFlightAggregations = expireInFlightAggregations(
-        state.inFlightAggregations,
-        tickSequencingTimestamp,
+      val unexpiredInFlightAggregations = state.inFlightAggregations.cleanExpired(
+        tickSequencingTimestamp
       )
       val newState =
         state.copy(

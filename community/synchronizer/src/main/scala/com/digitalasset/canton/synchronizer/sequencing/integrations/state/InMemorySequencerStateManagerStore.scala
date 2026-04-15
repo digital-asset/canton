@@ -10,12 +10,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.AggregationId
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.{
   FreshInFlightAggregation,
   InFlightAggregation,
   InFlightAggregationUpdate,
   InFlightAggregationUpdates,
-  InFlightAggregations,
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -36,11 +36,11 @@ class InMemorySequencerStateManagerStore(
       maxSequencingTimeUpperBound: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[InFlightAggregations] = {
     val snapshot = state.get()
-    val inFlightAggregations = snapshot.inFlightAggregations
+    val inFlightAggregations = snapshot.inFlightAggregations.byId
       .mapFilter(
         _.project(timestamp).filter(_.maxSequencingTimestamp <= maxSequencingTimeUpperBound)
       )
-    FutureUnlessShutdown.pure(inFlightAggregations)
+    FutureUnlessShutdown.pure(InFlightAggregations.fromMap(inFlightAggregations))
   }
 
   private case class MemberIndex(
@@ -56,7 +56,7 @@ class InMemorySequencerStateManagerStore(
         indices = Map.empty,
         pruningLowerBound = None,
         maybeOnboardingTopologyTimestamp = None,
-        inFlightAggregations = Map.empty,
+        inFlightAggregations = InFlightAggregations.empty,
       )
   }
 
@@ -72,12 +72,10 @@ class InMemorySequencerStateManagerStore(
       this.copy(inFlightAggregations = updates.foldLeft(inFlightAggregations) {
         case (aggregations, (aggregationId, update)) =>
           aggregations.updatedWith(aggregationId) { previousO =>
-            Some(
-              tryApplyUpdate(
-                aggregationId,
-                previousO,
-                update,
-              )
+            tryApplyUpdate(
+              aggregationId,
+              previousO,
+              update,
             )
           }
       })
@@ -119,9 +117,7 @@ class InMemorySequencerStateManagerStore(
     }
 
     def pruneExpiredInFlightAggregations(upToInclusive: CantonTimestamp): State =
-      this.copy(inFlightAggregations = this.inFlightAggregations.filterNot {
-        case (_, aggregation) => aggregation.expired(upToInclusive)
-      })
+      this.copy(inFlightAggregations = this.inFlightAggregations.cleanExpired(upToInclusive))
   }
 
   override def addInFlightAggregationUpdates(updates: InFlightAggregationUpdates)(implicit

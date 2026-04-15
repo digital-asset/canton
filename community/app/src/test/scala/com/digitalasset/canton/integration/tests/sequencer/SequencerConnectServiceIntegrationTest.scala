@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.sequencer
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient
+import com.digitalasset.canton.common.sequencer.SequencerConnectClient.Error.Transport
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
 import com.digitalasset.canton.common.sequencer.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -101,21 +102,25 @@ trait SequencerConnectServiceIntegrationTest
       grpcSequencerConnectClient
         .handshake(successfulRequest, dontWarnOnDeprecatedPV = true)
         .futureValueUS
-        .value shouldBe HandshakeResponse.Success(testedProtocolVersion)
+        .value shouldBe HandshakeResponse(testedProtocolVersion)
 
       grpcSequencerConnectClient
         .handshake(successfulRequestWithMinimumVersion, dontWarnOnDeprecatedPV = true)
         .futureValueUS
-        .value shouldBe HandshakeResponse.Success(testedProtocolVersion)
+        .value shouldBe HandshakeResponse(testedProtocolVersion)
 
       inside(
         grpcSequencerConnectClient
           .handshake(failingRequest, dontWarnOnDeprecatedPV = true)
-          .futureValueUS
           .value
-      ) { case HandshakeResponse.Failure(serverVersion, reason) =>
-        serverVersion shouldBe testedProtocolVersion
-        reason should include(unsupportedPV.toString)
+          .futureValueUS
+          .left
+          .value
+      ) { case Transport(msg) =>
+        msg should startWith(
+          s"""Request failed for sequencer1.
+             |  GrpcClientError: INVALID_ARGUMENT/The protocol version required by the server ($testedProtocolVersion) is not among the supported protocol versions by the client: $unsupportedPV.""".stripMargin
+        )
       }
     }
 
@@ -301,11 +306,15 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
         .registerOnboardingTopologyTransactions(mediator1.id, identityTxs)
         .value
         .futureValueUS
+        .left
+        .value
 
       // Check that it is a Left containing the gRPC error string
-      inside(result) { case Left(error) =>
-        error.toString should include("FAILED_PRECONDITION")
-        error.toString should include("This endpoint is only for participants")
+      inside(result) { case Transport(error) =>
+        error should include("INVALID_ARGUMENT")
+        error should include(
+          "Only participants should use this endpoint, but found member of type MediatorId in the gRPC context."
+        )
       }
     }
 
@@ -349,9 +358,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       inside(result) { case Left(error) =>
         val errorStr = error.toString
         errorStr should include("FAILED_PRECONDITION")
-        errorStr should include(
-          s"Participant ${participant1.id} is either active on the synchronizer or has previously been offboarded"
-        )
+        errorStr should include(s"Unable to register onboarding topology transactions")
       }
     }
 

@@ -6,8 +6,8 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v31;
 
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
-import "com/digitalasset/canton/protocol/v30/common_stable.proto";
 import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v31/common_stable.proto";
 import "scalapb/scalapb.proto";
 
 // Messages sent by a participant as part of the transaction protocol
@@ -69,7 +69,7 @@ message ViewParticipantData {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   message KeyResolutionWithMaintainers {
-    v30.GlobalKey key = 1;
+    v31.GlobalKey key = 1;
     repeated string maintainers = 2;
     repeated string contract_ids = 3;
   }

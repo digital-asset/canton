@@ -48,7 +48,11 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
                   templateId,
                   LfPackageName.assertFromString("package-name"),
                   Value.ValueUnit,
-                  crypto.Hash.hashPrivateKey("dummy-key-hash"),
+                  crypto.Hash.assertHashContractKey(
+                    templateId,
+                    LfPackageName.assertFromString("package-name"),
+                    Value.ValueUnit,
+                  ),
                 )
                 .value,
               Set(alice),

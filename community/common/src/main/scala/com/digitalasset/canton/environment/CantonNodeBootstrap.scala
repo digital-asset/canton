@@ -14,7 +14,6 @@ import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
 import com.daml.nonempty.NonEmpty
-import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
 import com.digitalasset.canton.auth.{CantonAdminTokenDispenser, GrpcAuthInterceptorFactory}
 import com.digitalasset.canton.concurrent.{
@@ -531,7 +530,6 @@ abstract class CantonNodeBootstrapImpl[
     ): Either[String, CantonMutableHandlerRegistry] = {
       // The admin-API services
       logger.info(s"Starting admin-api services on $adminApiConfig")
-      val openTelemetry = new DefaultOpenTelemetry(tracerProvider.openTelemetry)
       val builder = CantonServerBuilder
         .forConfig(
           config = adminApiConfig,
@@ -544,7 +542,6 @@ abstract class CantonNodeBootstrapImpl[
             GrpcAuthInterceptorFactory.createInterceptor(
               bootstrapStageCallback.loggerFactory,
               arguments.parameterConfig.loggingConfig.api,
-              openTelemetry,
               adminTokenDispenser,
               adminApiConfig.authServices,
               adminApiConfig.jwtTimestampLeeway,

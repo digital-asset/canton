@@ -85,9 +85,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
     maxOutputBatchedBufferSize: Int,
     maxTailerBatchSize: Int,
     postProcessingParallelism: Int,
-    achsPopulationParallelism: Int,
-    achsRemovalParallelism: Int,
-    achsAggregationThreshold: Long,
+    achsConfig: Option[AchsConfig],
     metrics: LedgerApiServerMetrics,
     inMemoryStateUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
     inMemoryState: InMemoryState,
@@ -117,12 +115,13 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
       initialAchsWork: AchsWorkDistance,
       commit: Commit,
       clock: Clock,
-      achsConfigO: Option[AchsConfig],
       repairMode: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Handle, Future[Done] => FutureQueue[(Long, Update)]) = {
     import MetricsContext.Implicits.empty
+    // disable ACHS in repair mode, initialization of the parallel indexer should be responsible to maintain the ACHS after repair
+    val achsConfigEffective = Option.when(!repairMode)(achsConfig).flatten
     val aggregatedLedgerEndForRepair
         : AtomicReference[Option[(LedgerEnd, Map[SynchronizerId, SynchronizerIndex])]] =
       // the LedgerEnd necessarily will be updated as successful repair has at least a CommitRepair Update, which carries the LedgerEnd forward
@@ -317,19 +316,19 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
         batch
       }
       .via(
-        achsConfigO match {
-          case Some(_) =>
+        achsConfigEffective match {
+          case Some(achsCfg) =>
             AchsMaintenancePipe(
               parameterStorageBackend = parameterStorageBackend,
               eventStorageBackend = eventStorageBackend,
               dbDispatcher = dbDispatcher,
-              inMemoryState = inMemoryState,
+              achsStateCache = inMemoryState.achsStateCache,
               toAchsWorkDistance = (batch: Batch[?]) =>
                 AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
               initialWork = initialAchsWork,
-              populationParallelism = achsPopulationParallelism,
-              removalParallelism = achsRemovalParallelism,
-              aggregationThreshold = achsAggregationThreshold,
+              populationParallelism = achsCfg.populationParallelism.unwrap,
+              removalParallelism = achsCfg.removalParallelism.unwrap,
+              aggregationThreshold = achsCfg.aggregationThreshold,
               metrics = metrics,
               executionContext = executionContext,
               logger = logger,

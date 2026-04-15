@@ -15,11 +15,9 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
-import org.slf4j.event.Level
 
 import java.time.Duration
 
@@ -165,19 +163,7 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
       if (useRepairCommands) {
         participant2.repair.import_acs(daId, aliceAcs.canonicalPath)
       } else {
-        // TODO(#29427) - Possibly adapt depending on having revisited the logging in parties.import_party_acs
-        loggerFactory.assertEventuallyLogsSeq(
-          SuppressionRule.LevelAndAbove(Level.WARN)
-        )(
-          participant2.parties.import_party_acs(daId, Some(alice), aliceAcs.canonicalPath),
-          logEntries => {
-            logEntries should have size 1
-            logEntries.head.level shouldBe Level.WARN
-            logEntries.head.message should include(
-              "Found an already effective party-to-participant mapping"
-            )
-          },
-        )
+        participant2.parties.import_party_acs(daId, Some(alice), aliceAcs.canonicalPath)
       }
 
       sequencer2.start()

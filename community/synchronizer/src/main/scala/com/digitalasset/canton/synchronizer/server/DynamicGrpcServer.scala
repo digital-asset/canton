@@ -75,7 +75,7 @@ class DynamicGrpcServer(
 
     serverBuilder
       .addService(grpcHealthManager.manager.getHealthService.bindService())
-      .addService(ProtoReflectionServiceV1.newInstance(), withLogging = false)
+      .addService(ProtoReflectionServiceV1.newInstance().bindService(), withLogging = false)
       .discard[CantonServerBuilder]
 
     (toCloseableServer(serverBuilder.build.start(), logger, "PublicServer"), registry)

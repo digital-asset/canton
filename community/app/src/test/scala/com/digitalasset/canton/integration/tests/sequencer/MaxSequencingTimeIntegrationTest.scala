@@ -43,7 +43,7 @@ final class MaxSequencingTimeIntegrationTest
       .addConfigTransform(ConfigTransforms.useStaticTime)
       .addConfigTransform(
         ConfigTransforms.updateSequencerConfig("sequencer1")(
-          _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeInclusive)
+          _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeExclusive)
             .replace(Some(maxSequencingTime))
         )
       )

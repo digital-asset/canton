@@ -53,7 +53,7 @@ class OrderingTopologyTest extends AsyncWordSpec with BaseTest {
           (otherIds.take(6), 7, 3, 5),
         )
       ) { (nodes, size, weakQuorum, strongQuorum) =>
-        val topology = OrderingTopology.forTesting(nodes + myId)
+        val topology = OrderingTopology.forTesting(nodes + myId)(testedProtocolVersion)
         topology.nodes.size shouldBe size
 
         topology.weakQuorum shouldBe weakQuorum

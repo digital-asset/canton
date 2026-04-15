@@ -11,7 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
-import com.digitalasset.canton.config.DbConfig
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
   NonNegativeNumeric,
@@ -30,10 +30,10 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UseH2,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
@@ -87,8 +87,6 @@ trait TrafficControlTest
     with TestPredicateFiltersFixtureAnyWordSpec
     with HasProgrammableSequencer
     with TrafficBalanceSupport {
-
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   private val baseEventCost = 500L
   private val trafficControlParameters = TrafficControlParameters(
@@ -404,17 +402,32 @@ trait TrafficControlTest
     participant1.runningNode.value.getNode.value.sync
       .lookupSynchronizerTimeTracker(daId)
       .value
-      .fetchTimeProof()
-      .futureValueUS
+      .awaitTick(clock.now)
+      .value
+      .futureValue
       .discard
     val trafficAfterCommand = getTrafficForMember(participant1).value
     (trafficBeforeCommand.baseTrafficRemainder.value - trafficAfterCommand.baseTrafficRemainder.value) shouldBe baseEventCost
   }
 
+  private def advanceSynchronizerTime(duration: Duration)(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    val clock = env.environment.simClock.value
+    clock.advance(duration)
+    val now = clock.now
+    participant1.runningNode.value.getNode.value.sync
+      .lookupSynchronizerTimeTracker(daId)
+      .value
+      .awaitTick(now)
+      .value
+      .futureValue
+      .discard
+  }
+
   "succeed to run a big transaction with enough credit" in { implicit env =>
     import env.*
-
-    val clock = env.environment.simClock.value
 
     val alice = participant1.parties.testing.find("Alice")
     val pkg = participant1.packages.find_by_module("Test").headOption.map(_.packageId).value
@@ -423,7 +436,7 @@ trait TrafficControlTest
     val trafficBeforeCommand = participant1.traffic_control.traffic_state(daId)
 
     // Fill in base rate
-    clock.advance(Duration.ofSeconds(1))
+    advanceSynchronizerTime(Duration.ofSeconds(1))
 
     // Now it should succeed
     participant1.ledger_api.commands.submit(
@@ -440,7 +453,7 @@ trait TrafficControlTest
     trafficAfterCommand.extraTrafficPurchased.value shouldBe topUpAmount
 
     // Make sure base rate is full
-    clock.advance(Duration.ofSeconds(1))
+    advanceSynchronizerTime(Duration.ofSeconds(1))
 
     // Run it again to compare the 2 traffic consumptions
     val exerciseCommandRerun = getExerciseCommand(alice, pkg)
@@ -448,7 +461,7 @@ trait TrafficControlTest
     val trafficBeforeRerun = participant1.traffic_control.traffic_state(daId)
 
     // Fill in base rate
-    clock.advance(Duration.ofSeconds(1))
+    advanceSynchronizerTime(Duration.ofSeconds(1))
 
     participant1.ledger_api.commands.submit(
       Seq(alice),
@@ -675,12 +688,16 @@ trait TrafficControlTest
   "crashed sequencer should catch up after being restarted" in { implicit env =>
     import env.*
 
-    sequencer2.stop()
-
-    participant1.health.ping(participant2.id)
-
-    sequencer2.start()
-    sequencer2.health.wait_for_running()
+    clue("stopping sequencer2") {
+      sequencer2.stop()
+    }
+    clue("restarting sequencer2") {
+      sequencer2.start()
+      sequencer2.health.wait_for_running()
+    }
+    clue("trying ping after restarting sequencer2") {
+      participant1.health.ping(participant2.id)
+    }
 
     eventually() {
       // Both sequencers should have the same traffic status
@@ -985,26 +1002,26 @@ trait TrafficControlTest
     )
 }
 
-class TrafficControlTestH2 extends TrafficControlTest {
-  registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
-}
+class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
+  private val useBftSequencer = new UseBftSequencer(
+    loggerFactory,
+    dynamicallyOnboardedSequencerNames = Seq(InstanceName.tryCreate("sequencer2")),
+  )
+  override protected val bftSequencerPlugin = Some(useBftSequencer)
 
-class TrafficControlTestPostgres extends TrafficControlTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(useBftSequencer)
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-// TODO(#16789) Re-enable test once dynamic onboarding is supported for BFT Orderer
-class TrafficControlTestBftOrderingPostgres
-//  extends TrafficControlTest {
-//  registerPlugin(new UsePostgres(loggerFactory))
-//  registerPlugin(new UseBftOrderingBlockSequencer(loggerFactory))
-//}
+class TrafficControlTestBftOrderingH2 extends TrafficControlTest {
+  private val useBftSequencer = new UseBftSequencer(
+    loggerFactory,
+    dynamicallyOnboardedSequencerNames = Seq(InstanceName.tryCreate("sequencer2")),
+  )
+  override protected val bftSequencerPlugin = Some(useBftSequencer)
 
-// TODO(#16789) Re-enable test once dynamic onboarding is supported for BFT Orderer
-class TrafficControlTestBftOrderingH2
-//  extends TrafficControlTest {
-//  registerPlugin(new UseH2(loggerFactory))
-//  registerPlugin(new UseBftOrderingBlockSequencer(loggerFactory))
-//}
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(useBftSequencer)
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+}

@@ -37,7 +37,7 @@ object LfTransactionBuilder {
     defaultTemplateId,
     defaultPackageName,
     Value.ValueUnit,
-    crypto.Hash.hashPrivateKey("default-global-key"),
+    crypto.Hash.assertHashContractKey(defaultTemplateId, defaultPackageName, Value.ValueUnit),
   )
 
   def allocateNodeId[M[_]](implicit monadInstance: Monad[M]): StateT[M, NodeIdState, LfNodeId] =
@@ -80,7 +80,7 @@ object LfTransactionBuilder {
         case c: LfNodeCreate => c.coinst.template.packageId
         case e: LfNodeExercises => e.templateId.packageId
         case f: LfNodeFetch => f.templateId.packageId
-        case l: LfNodeLookupByKey => l.templateId.packageId
+        case l: LfNodeQueryByKey => l.templateId.packageId
       }.toSet
   }
 

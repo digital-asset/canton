@@ -27,6 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class BootstrapDetectorTest extends AnyWordSpec with BftSequencerBaseTest {
@@ -111,7 +112,7 @@ object BootstrapDetectorTest extends TestEssentials {
   private val myId = BftNodeId("self")
   private val otherId = BftNodeId("other")
   private val aBootstrapEpoch = Bootstrap.bootstrapEpoch(TestBootstrapTopologyActivationTime)
-  private val aMembershipWith2Nodes =
+  private def aMembershipWith2Nodes(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, Set(otherId))
   private val aSequencerSnapshot = SequencerSnapshotAdditionalInfo(
     // Minimal data required for the test

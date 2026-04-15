@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnl
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope}
 import com.digitalasset.canton.synchronizer.block.UninitializedBlockHeight
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.topology.Member
@@ -515,7 +516,7 @@ class InMemorySequencerStore(
         UninitializedBlockHeight,
         previousEventTimestampsWithFallback,
         internalStatus(timestamp),
-        Map.empty,
+        InFlightAggregations.empty,
         None,
         protocolVersion,
         Seq.empty,

@@ -86,6 +86,7 @@ final class MediatorRuntime(
       () => mediator.getCurrentWatermark,
       ts => traceContext => mediator.awaitWatermark(ts)(traceContext),
       batchingConfig.maxItemsInBatch,
+      mediator.lsuSuccessorAfterUpgradeTime,
       loggerFactory,
     ),
     ec,

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.OptionT
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -21,8 +20,10 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
+import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -98,22 +99,12 @@ final class ParticipantTopologyTerminateProcessingTest
     )
       .thenReturn(Outcome(Right(())))
 
-    val pendingOnboardingClearanceStoreMock = mock[PendingOnboardingClearanceStore]
-    when(
-      pendingOnboardingClearanceStoreMock.delete(
-        any[SynchronizerId],
-        any[String],
-        any[NonEmptyString],
-      )(any[TraceContext])
-    ).thenReturn(FutureUnlessShutdown.unit)
-
-    when(
-      pendingOnboardingClearanceStoreMock.get(
-        any[SynchronizerId],
-        any[String],
-        any[NonEmptyString],
-      )(any[TraceContext])
-    ).thenReturn(OptionT(FutureUnlessShutdown.pure(Option.empty)))
+    val pendingOnboardingClearanceStoreMock = spy(
+      new InMemoryPendingOperationStore[OnboardingClearanceOperation, SynchronizerId](
+        OnboardingClearanceOperation,
+        loggerFactory,
+      )
+    )
 
     val proc = new ParticipantTopologyTerminateProcessing(
       recordOrderPublisher,
@@ -122,7 +113,7 @@ final class ParticipantTopologyTerminateProcessingTest
       DefaultTestIdentities.participant1,
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
-      pendingHandshakesWithSuccessorsStore = mock[PendingHandshakesWithSuccessorsStore],
+      pendingLsuOperationsStore = mock[PendingLsuOperation.Store],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
       retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
@@ -156,6 +147,17 @@ final class ParticipantTopologyTerminateProcessingTest
     )
   )
 
+  private lazy val party1_p1_onboarding_p2_active = mkAdd(
+    PartyToParticipant.tryCreate(
+      party1,
+      PositiveInt.one,
+      Seq(
+        HostingParticipant(participant1, Submission, onboarding = true),
+        HostingParticipant(participant2, Submission, onboarding = false),
+      ),
+    )
+  )
+
   private lazy val party1participant1_added = mkAdd(
     PartyToParticipant.tryCreate(
       party1,
@@ -174,6 +176,17 @@ final class ParticipantTopologyTerminateProcessingTest
       ),
     )
   )
+
+  private lazy val party1participant2 = mkAdd(
+    PartyToParticipant.tryCreate(
+      party1,
+      PositiveInt.one,
+      Seq(
+        HostingParticipant(participant2, Submission)
+      ),
+    )
+  )
+
   private lazy val party1participant1_2_threshold2 = mkAdd(
     PartyToParticipant.tryCreate(
       party1,
@@ -745,6 +758,64 @@ final class ParticipantTopologyTerminateProcessingTest
           any[String],
           any[NonEmptyString],
         )(any[TraceContext])
+        verify(pendingOnboardingStore, never).delete(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+        succeed
+      }
+    }
+
+    "clear pending operations when a local party's onboarding is revoked while remaining hosted elsewhere" in {
+      val (proc, store, _, _, pendingOnboardingStore) = mk()
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+
+      for {
+        // Initial State: Party is on both participants P1 (local, onboarding) and P2 (remote, active)
+        _ <- add(store, cts0, List(party1_p1_onboarding_p2_active))
+
+        // (Implicitly) revoke the onboarding party on P1 by replacing the mapping with P2 only
+        _ <- add(store, cts1, List(party1participant2))
+
+        _ <- proc.terminate(
+          sc1,
+          SequencedTime(cts1),
+          EffectiveTime(cts1),
+        )
+      } yield {
+        if (testedProtocolVersion >= ProtocolVersion.v35) {
+          // Because the local participant (P1) no longer should host the (still onboarding) party, we must clean up any pending onboarding clearances
+          verify(pendingOnboardingStore, times(1)).delete(
+            any[SynchronizerId],
+            any[String],
+            any[NonEmptyString],
+          )(any[TraceContext])
+        }
+        succeed
+      }
+    }
+
+    "not interact with clearance stores when a remote party is revoked while local remains onboarding" in {
+      val (proc, store, _, _, pendingOnboardingStore) = mk()
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+
+      for {
+        // Initial State: Party is on both participants P1 (local, onboarding) and P2 (remote, active)
+        _ <- add(store, cts0, List(party1_p1_onboarding_p2_active))
+
+        // Revoke party on P2 while still onboarding the party P1
+        _ <- add(store, cts1, List(party1participant1_ob))
+
+        _ <- proc.terminate(
+          sc1,
+          SequencedTime(cts1),
+          EffectiveTime(cts1),
+        )
+      } yield {
+        // Because the party is still onboarding on the local participant (P1), we do not touch the local onboaridng clearance store
         verify(pendingOnboardingStore, never).delete(
           any[SynchronizerId],
           any[String],

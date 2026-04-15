@@ -300,7 +300,7 @@ class PreprocessorSpec
         inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds shouldBe Seq(contractId)
           keys shouldBe Seq(globalKey1, globalKey2)
-          resume() shouldBe ResultDone.Unit
+          resume() shouldBe Result.Unit
         }
       }
 
@@ -321,7 +321,7 @@ class PreprocessorSpec
         inside(resultAllUndisclosed) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds shouldBe Seq.empty
           keys shouldBe Seq(globalKey1, globalKey2)
-          resume() shouldBe ResultDone.Unit
+          resume() shouldBe Result.Unit
         }
       }
 
@@ -394,7 +394,7 @@ class PreprocessorSpec
               ),
             )
           )
-          resume() shouldBe ResultDone.Unit
+          resume() shouldBe Result.Unit
         }
 
       }

@@ -93,8 +93,8 @@ final case class TlsFixture(
           desiredPort = Port.Dynamic,
           maxInboundMessageSize = ServerConfig.defaultMaxInboundMessageSize.unwrap,
           maxInboundMetadataSize = ServerConfig.defaultMaxInboundMetadataSize.unwrap,
-          maxConcurrentStreamsPerConnection =
-            ServerConfig.defaultMaxConcurrentStreamsPerConnection.unwrap,
+          maxConcurrentCallsPerConnection =
+            ServerConfig.defaultMaxConcurrentCallsPerConnection.unwrap,
           address = None,
           tlsConfiguration = serverTlsConfiguration,
           servicesExecutor = servicesExecutor,

@@ -30,7 +30,6 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
 import com.digitalasset.canton.config.CantonRequireTypes.String185
@@ -91,7 +90,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.PositiveTopologyTransaction
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.Status.Code.ALREADY_EXISTS
@@ -117,7 +116,6 @@ private[apiserver] final class ApiPartyManagementService private (
     syncService: state.PartySyncService,
     managementServiceTimeout: FiniteDuration,
     submissionIdGenerator: CreateSubmissionId,
-    telemetry: Telemetry,
     partyAllocationTracker: PartyAllocation.Tracker,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -141,8 +139,7 @@ private[apiserver] final class ApiPartyManagementService private (
   override def getParticipantId(
       request: GetParticipantIdRequest
   ): Future[GetParticipantIdResponse] = {
-    implicit val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     logger.info("Getting Participant ID.")
     partyManagementService
@@ -151,12 +148,16 @@ private[apiserver] final class ApiPartyManagementService private (
   }
 
   override def getParties(request: GetPartiesRequest): Future[GetPartiesResponse] =
-    withEnrichedLoggingContext(telemetry)(
+    withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.partyStrings(request.parties)
-    ) { implicit loggingContext =>
+    ) { implicit loggingContextWithTrace =>
       implicit val errorLoggingContext: ErrorLoggingContext =
-        ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
-      logger.info(s"Getting parties, ${loggingContext.serializeFiltered("parties")}.")
+        ErrorLoggingContext(
+          logger,
+          loggingContextWithTrace.toPropertiesMap,
+          loggingContextWithTrace.traceContext,
+        )
+      logger.info(s"Getting parties, ${loggingContextWithTrace.serializeFiltered("parties")}.")
       withValidation {
         for {
           identityProviderId <- optionalIdentityProviderId(
@@ -196,8 +197,9 @@ private[apiserver] final class ApiPartyManagementService private (
   override def listKnownParties(
       request: ListKnownPartiesRequest
   ): Future[ListKnownPartiesResponse] = {
-    implicit val loggingContext =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext)(this.loggingContext)
+
     val ListKnownPartiesRequest(pageToken, pageSize, identityProviderId, filterString) = request
     logger.info("Listing known parties.")
     withValidation(
@@ -277,15 +279,19 @@ private[apiserver] final class ApiPartyManagementService private (
     Ref.Party.assertFromString(s"party-${UUID.randomUUID().toString}")
   }
 
-  override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] =
-    withEnrichedLoggingContext(telemetry)(
+  override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] = {
+    withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
       logging.partyString(request.partyIdHint)
-    ) { implicit loggingContext =>
+    ) { implicit loggingContextWithTrace =>
       logger.info(
-        s"Allocating party, ${loggingContext.serializeFiltered("submissionId", "parties")}."
+        s"Allocating party, ${loggingContextWithTrace.serializeFiltered("submissionId", "parties")}."
       )
       implicit val errorLoggingContext: ErrorLoggingContext =
-        ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
+        ErrorLoggingContext(
+          logger,
+          loggingContextWithTrace.toPropertiesMap,
+          loggingContextWithTrace.traceContext,
+        )
       // Retrieving the authenticated user context from the thread-local context
       val authenticatedUserContextF: Future[AuthenticatedUserContext] =
         resolveAuthenticatedUserContext
@@ -326,7 +332,7 @@ private[apiserver] final class ApiPartyManagementService private (
       } { case (partyId, annotations, identityProviderId, synchronizerIdO, userId) =>
         val trackerKey = submissionIdGenerator(partyId.toLf, AuthorizationLevel.Submission)
         withEnrichedLoggingContext(logging.submissionId(trackerKey.submissionId)) {
-          implicit loggingContext =>
+          implicit loggingContextWithTrace =>
             pendingPartyAllocations.withUser(userId) { outstandingCalls =>
               for {
                 _ <- identityProviderExistsOrError(identityProviderId)
@@ -355,7 +361,7 @@ private[apiserver] final class ApiPartyManagementService private (
                       _ <- checkSubmissionResult(result)
                     } yield ()
                   }
-                  .transform(alreadyExistsError(trackerKey.submissionId, loggingContext))
+                  .transform(alreadyExistsError(trackerKey.submissionId, loggingContextWithTrace))
                 existingPartyRecord <- partyRecordStore.getPartyRecordO(
                   allocated.partyDetails.party
                 )
@@ -381,11 +387,12 @@ private[apiserver] final class ApiPartyManagementService private (
         }
       }
     }
+  }
 
   private def updateUserInfoIfUserSpecified(
       party: Ref.Party,
       user: Option[User],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[Unit] =
     user.fold(Future.successful(())) { u =>
       userManagementStore
         .grantRights(
@@ -407,7 +414,7 @@ private[apiserver] final class ApiPartyManagementService private (
       party: Ref.Party,
       identityProviderId: IdentityProviderId,
       annotations: Map[String, String],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[PartyRecord] =
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[PartyRecord] =
     if (existingPartyRecord.exists(_.nonEmpty)) {
       partyRecordStore
         .updatePartyRecord(
@@ -442,15 +449,15 @@ private[apiserver] final class ApiPartyManagementService private (
 
   private def alreadyExistsError[R](
       submissionId: Ref.SubmissionId,
-      loggingContext: LoggingContextWithTrace,
+      loggingContextWithTrace: LoggingContextWithTrace,
   )(r: Try[R]) = r match {
     case Failure(e: StatusRuntimeException) if e.getStatus.getCode == ALREADY_EXISTS =>
       Failure(
         ValidationErrors.invalidArgument(e.getStatus.getDescription)(
           ErrorLoggingContext.withExplicitCorrelationId(
             logger,
-            loggingContext.toPropertiesMap,
-            loggingContext.traceContext,
+            loggingContextWithTrace.toPropertiesMap,
+            loggingContextWithTrace.traceContext,
             submissionId,
           )
         )
@@ -461,10 +468,10 @@ private[apiserver] final class ApiPartyManagementService private (
   override def updatePartyDetails(
       request: UpdatePartyDetailsRequest
   ): Future[UpdatePartyDetailsResponse] = {
-    implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext)(this.loggingContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext(logger, loggingContext)
+      ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
         partyDetails <- requirePresence(
@@ -511,7 +518,7 @@ private[apiserver] final class ApiPartyManagementService private (
       for {
         _ <- identityProviderExistsOrError(partyRecord.identityProviderId)
         _ = logger.info(
-          s"Updating party: ${request.getPartyDetails.party}, ${loggingContext.serializeFiltered("submissionId")}."
+          s"Updating party: ${request.getPartyDetails.party}, ${loggingContextWithTrace.serializeFiltered("submissionId")}."
         )
         partyDetailsUpdate: PartyDetailsUpdate <- handleUpdatePathResult(
           party = partyRecord.party,
@@ -583,7 +590,7 @@ private[apiserver] final class ApiPartyManagementService private (
   override def updatePartyIdentityProviderId(
       request: UpdatePartyIdentityProviderIdRequest
   ): Future[UpdatePartyIdentityProviderIdResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext)
 
     logger.info("Updating party identity provider.")
     implicit val errorLoggingContext: ErrorLoggingContext =
@@ -637,7 +644,7 @@ private[apiserver] final class ApiPartyManagementService private (
       identityProviderId: IdentityProviderId,
       party: Ref.Party,
   )(implicit
-      loggingContext: LoggingContextWithTrace,
+      loggingContextWithTrace: LoggingContextWithTrace,
       errorLoggingContext: ErrorLoggingContext,
   ): Future[Unit] =
     partyRecordStore.getPartyRecordO(party).flatMap {
@@ -734,7 +741,7 @@ private[apiserver] final class ApiPartyManagementService private (
   private def getUserIfUserSpecified(
       userId: Option[Ref.UserId],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[UserInfo]] =
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[Option[UserInfo]] =
     userId.fold[Future[Option[UserInfo]]](Future.successful(None))(
       userManagementStore
         .getUserInfo(_, identityProviderId)
@@ -745,7 +752,7 @@ private[apiserver] final class ApiPartyManagementService private (
       userRights: Option[Set[UserRight]],
       outstandingCalls: Int,
       authenticatedUserContextF: Future[AuthenticatedUserContext],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[Unit] =
     userRights match {
       case None => Future.unit
       case Some(rights) =>
@@ -769,7 +776,7 @@ private[apiserver] final class ApiPartyManagementService private (
   private def identityProviderExistsOrError(
       id: IdentityProviderId
   )(implicit
-      loggingContext: LoggingContextWithTrace,
+      loggingContextWithTrace: LoggingContextWithTrace,
       errorLoggingContext: ErrorLoggingContext,
   ): Future[Unit] =
     identityProviderExists(id)
@@ -833,9 +840,14 @@ private[apiserver] final class ApiPartyManagementService private (
   override def allocateExternalParty(
       request: AllocateExternalPartyRequest
   ): Future[AllocateExternalPartyResponse] = {
-    implicit val loggingContext = LoggingContextWithTrace(telemetry)(this.loggingContext)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext)(this.loggingContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
+      ErrorLoggingContext(
+        logger,
+        loggingContextWithTrace.toPropertiesMap,
+        loggingContextWithTrace.traceContext,
+      )
     import com.digitalasset.canton.config.NonNegativeFiniteDuration
     // Retrieving the authenticated user context from the thread-local context
     val authenticatedUserContextF: Future[AuthenticatedUserContext] =
@@ -915,8 +927,8 @@ private[apiserver] final class ApiPartyManagementService private (
             if (externalPartyOnboardingDetails.isConfirming) AuthorizationLevel.Confirmation
             else Observation,
         )
-      withEnrichedLoggingContext(telemetry)(logging.submissionId(trackerKey.submissionId)) {
-        implicit loggingContext =>
+      withEnrichedLoggingContext(logging.submissionId(trackerKey.submissionId)) {
+        implicit loggingContextWithTrace =>
           pendingPartyAllocations.withUser(userId) { outstandingCalls =>
             def allocateFn = for {
               result <- syncService.allocateParty(
@@ -956,7 +968,7 @@ private[apiserver] final class ApiPartyManagementService private (
                      .failOnShutdownTo(
                        CommonErrors.ServiceNotRunning.Reject("PartyManagementService").asGrpcError
                      )
-                 }).transform(alreadyExistsError(trackerKey.submissionId, loggingContext))
+                 }).transform(alreadyExistsError(trackerKey.submissionId, loggingContextWithTrace))
               existingPartyRecord <- partyRecordStore.getPartyRecordO(
                 allocated
               )
@@ -972,7 +984,7 @@ private[apiserver] final class ApiPartyManagementService private (
               )
             } yield AllocateExternalPartyResponse(allocated)
           }
-      }
+      }(loggingContextWithTrace)
     }
   }
 
@@ -981,7 +993,7 @@ private[apiserver] final class ApiPartyManagementService private (
   ): Future[GenerateExternalPartyTopologyResponse] = {
     import io.scalaland.chimney.dsl.*
     implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext(logger, LoggingContextWithTrace(telemetry))
+      ErrorLoggingContext(logger, LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext))
     val GenerateExternalPartyTopologyRequest(
       synchronizerIdP,
       partyHint,
@@ -1174,7 +1186,6 @@ private[apiserver] object ApiPartyManagementService {
       writeBackend: state.PartySyncService,
       managementServiceTimeout: FiniteDuration,
       submissionIdGenerator: CreateSubmissionId,
-      telemetry: Telemetry,
       partyAllocationTracker: PartyAllocation.Tracker,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -1191,13 +1202,12 @@ private[apiserver] object ApiPartyManagementService {
       writeBackend,
       managementServiceTimeout,
       submissionIdGenerator,
-      telemetry,
       partyAllocationTracker,
       loggerFactory,
     )
 
   def decodePartyFromPageToken(pageToken: String)(implicit
-      loggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Option[Ref.Party]] =
     if (pageToken.isEmpty) {
       Right(None)

@@ -67,6 +67,9 @@ trait BlockOrderer extends AutoCloseable {
     *   - An event in the output can not necessarily be parsed to
     *     [[com.digitalasset.canton.synchronizer.block.LedgerBlockEvent]]. If they can be parsed,
     *     the embedded signatures are not necessarily valid.
+    *   - The events in the block may still be reordered, re-timestamped and extended by the
+    *     post-processing pipeline of the synchronizer. Therefore, the BlockOrderer should not rely
+    *     on the order of the events being preserved.
     */
   def subscribe()(implicit
       traceContext: TraceContext

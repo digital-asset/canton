@@ -83,14 +83,16 @@ trait HashBuilder {
     addWithoutLengthPrefixWithContext(DeterministicEncoding.encodeInt(a), s"$a (int)")
 
   /** Adds all elements in the map in a deterministic order defined by the ordering on the key of
-    * the map
+    * the map. The map size is prefixed to prevent hash collisions when the boundary between
+    * consecutive maps or between map entries and subsequent data is ambiguous.
     */
   def addMap[K, V](m: Map[K, V])(
-      keyAdder: K => HashBuilder
-  )(valueAdder: V => HashBuilder)(implicit ord: Ordering[K]): this.type = {
+      keyAdder: (HashBuilder, K) => HashBuilder
+  )(valueAdder: (HashBuilder, V) => HashBuilder)(implicit ord: Ordering[K]): this.type = {
+    addInt(m.size)
     m.toSeq.sortBy(_._1).foreach { case (k, v) =>
-      keyAdder(k).discard
-      valueAdder(v).discard
+      keyAdder(this, k).discard
+      valueAdder(this, v).discard
     }
     this
   }

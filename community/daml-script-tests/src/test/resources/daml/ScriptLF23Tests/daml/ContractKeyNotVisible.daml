@@ -1,9 +1,6 @@
 -- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
--- @ERROR range=20:1-20:8; Couldn't see contract with key 'Bob'
--- @ERROR range=63:1-63:15; Attempt to fetch, lookup or exercise a key associated with a contract
--- @ERROR range=80:1-80:12; Attempt to fetch, lookup or exercise a key associated with a contract
 module ContractKeyNotVisible where
 
 import Daml.Script

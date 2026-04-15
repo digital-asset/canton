@@ -252,8 +252,11 @@ final class StateTransferBehavior[E <: Env[E]](
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
         callback(
-          epochState.epoch.info.number,
-          activeTopologyInfo.currentMembership.orderingTopology.nodes,
+          Consensus.Admin.GetOrderingTopologyResponse(
+            epochState.epoch.info.number,
+            activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
+          )
         )
 
       case Consensus.ConsensusMessage.AsyncException(e) =>
@@ -375,6 +378,7 @@ final class StateTransferBehavior[E <: Env[E]](
     dependencies.availability.asyncSend(
       Availability.Consensus.UpdateTopologyDuringStateTransfer(
         newEpochTopology.membership,
+        newEpochTopology.epochNumber,
         // TODO(#25220) If the onboarding/starting epoch (`e_start`) is always immediately before the one where
         //  the node is active in the topology, the below distinction could go away.
         DelegationCryptoProvider(

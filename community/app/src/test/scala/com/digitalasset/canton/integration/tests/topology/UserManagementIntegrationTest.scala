@@ -67,6 +67,7 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
         isDeactivated = false,
         annotations = Map(),
         identityProviderId = "",
+        primaryPartyAuthentication = false,
       )
       participant1.ledger_api.users.rights.list(extraAdmin) shouldBe UserRights(
         actAs = Set.empty,
@@ -99,6 +100,7 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
         isDeactivated = true,
         annotations = Map("k" -> "v"),
         identityProviderId = "",
+        primaryPartyAuthentication = false,
       )
       participant1.ledger_api.users.rights.list("admin1") shouldBe UserRights(
         actAs = Set(alice),
@@ -128,6 +130,7 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
         isDeactivated = false,
         annotations = Map("k" -> "v"),
         identityProviderId = "",
+        primaryPartyAuthentication = false,
       )
     }
 
@@ -138,6 +141,7 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
         primaryParty = Some(alice),
         isDeactivated = false,
         annotations = Map("k1" -> "v1", "k2" -> "v2", "k3" -> "v3"),
+        primaryPartyAuthentication = false,
       )
       val updatedUser = participant1.ledger_api.users.update(
         id = createdUser.id,
@@ -156,6 +160,7 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
         isDeactivated = false,
         annotations = Map("k1" -> "v1", "k2" -> "v2a", "k4" -> "v4"),
         identityProviderId = "",
+        primaryPartyAuthentication = false,
       )
     }
 

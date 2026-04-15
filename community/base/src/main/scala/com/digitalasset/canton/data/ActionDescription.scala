@@ -513,7 +513,7 @@ object ActionDescription {
 
     private val serializedKey =
       GlobalKeySerialization
-        .toProto(key)
+        .toProtoV30(key)
         .valueOr(err => throw InvalidActionDescription(s"Failed to serialize key: $err"))
 
     override def byKey: Boolean = true

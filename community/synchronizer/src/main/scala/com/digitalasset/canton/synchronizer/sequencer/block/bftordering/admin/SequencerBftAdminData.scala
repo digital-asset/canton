@@ -25,10 +25,12 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   TlsClientCertificate as ProtoTlsClientCertificate,
   TlsPeerEndpoint as ProtoTlsPeerEndpoint,
 }
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.topology.SequencerId
 
 import scala.util.{Failure, Success, Try}
@@ -358,24 +360,34 @@ object SequencerBftAdminData {
       }
   }
 
-  final case class OrderingTopology(currentEpoch: Long, sequencerIds: Seq[SequencerId]) {
+  final case class OrderingTopology(
+      currentEpoch: Long,
+      sequencerIds: Seq[SequencerId],
+      sequencingParameters: SequencingParameters,
+  ) {
 
     def toProto: GetOrderingTopologyResponse =
-      GetOrderingTopologyResponse(currentEpoch, sequencerIds.map(SequencerNodeId.toBftNodeId))
+      GetOrderingTopologyResponse(
+        currentEpoch,
+        sequencerIds.map(SequencerNodeId.toBftNodeId),
+        Option(sequencingParameters.toProto),
+      )
   }
 
   object OrderingTopology {
 
-    def fromProto(response: GetOrderingTopologyResponse): Either[String, OrderingTopology] =
-      response.sequencerIds
-        .map { sequencerIdString =>
-          for {
-            sequencerId <- SequencerId
-              .fromProtoPrimitive(sequencerIdString, "sequencerId")
-              .leftMap(_.toString)
-          } yield sequencerId
-        }
-        .sequence
-        .map(OrderingTopology(response.currentEpoch, _))
+    def fromProto(response: GetOrderingTopologyResponse): Either[String, OrderingTopology] = for {
+      sequencers <- response.sequencerIds.map { sequencerIdString =>
+        for {
+          sequencerId <- SequencerId
+            .fromProtoPrimitive(sequencerIdString, "sequencerId")
+            .leftMap(_.toString)
+        } yield sequencerId
+      }.sequence
+      parameters <- ProtoConverter
+        .required("dynamicSequencingParametersPayload", response.dynamicSequencingParametersPayload)
+        .flatMap(SequencingParameters.fromProto)
+        .leftMap(_.toString)
+    } yield OrderingTopology(response.currentEpoch, sequencers, parameters)
   }
 }

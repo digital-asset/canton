@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf
 package language
 
-import buildinfo.BuildInfo
 import com.digitalasset.daml.lf.language.LanguageVersion.Major.*
 import com.digitalasset.daml.lf.language.LanguageVersion.Minor.*
 

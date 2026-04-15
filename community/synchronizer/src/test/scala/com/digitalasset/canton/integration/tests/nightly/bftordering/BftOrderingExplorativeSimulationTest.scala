@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.nightly.bftordering
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.PartitionSymmetry.{
@@ -16,9 +17,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import org.scalatest.Assertion
 
 import scala.collection.immutable.TreeMap
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration
+import scala.concurrent.duration.{DurationInt, DurationLong, FiniteDuration}
 import scala.util.Random
 
 class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
@@ -28,7 +31,16 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   private val randomSourceToCreateSettings = new Random()
 
   private val durationOfFirstPhaseWithFaults = 5.minute
-  private val durationOfSecondPhaseWithoutFaults = 30.seconds
+
+  override def allowedWarnings: Seq[LogEntry => Assertion] = Seq(
+    // We might get messages from off boarded nodes, don't count these as errors.
+    { logEntry =>
+      logEntry.message should include(
+        "but it cannot be verified in the currently known dissemination topology"
+      )
+      logEntry.loggerName should include("AvailabilityModule")
+    }
+  )
 
   private val zeroProbability: Probability = Probability(0)
   private def generateProb(low: Double, high: Double): Probability = Probability(
@@ -62,7 +74,11 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   private val shortTime: PowerDistribution = PowerDistribution(0.milliseconds, 100.milliseconds)
   private val longTime: PowerDistribution = PowerDistribution(1.second, 5.seconds)
 
-  private def generateStage: SimulationTestStageSettings =
+  private def generateStage(epochLength: EpochLength): SimulationTestStageSettings = {
+    val numberOfNodesToOnboard = randomWeightedOneOf(
+      10 -> 0,
+      3 -> 1,
+    )
     SimulationTestStageSettings(
       simulationSettings = SimulationSettings(
         LocalSettings(
@@ -71,9 +87,9 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
             zeroProbability,
             generateProb(0.0, 0.5),
           ),
-          crashRestartGracePeriod = randomEquallyWeightedOneOf(
-            shortTime,
-            longTime,
+          crashRestartGracePeriod = randomWeightedOneOf(
+            1 -> shortTime,
+            2 -> longTime,
           ),
         ),
         NetworkSettings(
@@ -96,27 +112,47 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         FutureSettings(
           randomSeed = randomSourceToCreateSettings.nextLong()
         ),
-        durationOfFirstPhaseWithFaults,
-        durationOfSecondPhaseWithoutFaults,
+        phaseDurations = PhaseDurations(
+          faulty = durationOfFirstPhaseWithFaults,
+          recovery =
+            if (numberOfNodesToOnboard > 0)
+              (epochLength / 2) seconds
+            else {
+              0 seconds
+            },
+        ),
       ),
       TopologySettings(
-        randomSourceToCreateSettings.nextLong()
+        randomSourceToCreateSettings.nextLong(),
+        nodeOnboardingDelays = (0 until numberOfNodesToOnboard).map(_ =>
+          FiniteDuration.apply(
+            randomSourceToCreateSettings.nextLong(
+              (0.8 * durationOfFirstPhaseWithFaults.toNanos).toLong
+            ),
+            duration.NANOSECONDS,
+          )
+        ),
       ),
     )
+  }
 
-  override def generateSettings: SimulationTestSettings = SimulationTestSettings(
-    numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5),
-    epochLength = EpochLength(
+  override def generateSettings: SimulationTestSettings = {
+    val epochLength = EpochLength(
       randomWeightedOneOf[Long](
         10 -> 16L,
-        5 -> 256L,
-        2 -> randomSourceToCreateSettings.between(1L, 256L),
+        5 -> 128L,
+        1 -> 1L,
+        2 -> randomSourceToCreateSettings.between(2L, 128L),
       )
-    ),
-    stages = NonEmpty(
-      Seq,
-      generateStage,
-      generateStage,
-    ),
-  )
+    )
+    SimulationTestSettings(
+      numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5),
+      epochLength = epochLength,
+      stages = NonEmpty(
+        Seq,
+        generateStage(epochLength),
+        generateStage(epochLength),
+      ),
+    )
+  }
 }

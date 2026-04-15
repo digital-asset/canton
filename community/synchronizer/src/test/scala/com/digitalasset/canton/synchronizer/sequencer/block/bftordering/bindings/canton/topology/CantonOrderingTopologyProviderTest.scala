@@ -31,6 +31,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -41,6 +42,7 @@ class CantonOrderingTopologyProviderTest
     with HasExecutionContext {
 
   import CantonOrderingTopologyProviderTest.*
+  implicit val pv: ProtocolVersion = testedProtocolVersion
 
   "Getting the ordering topology" should {
     "return the correct ordering topology" in {

@@ -22,6 +22,13 @@ service StateService {
   // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
   rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse);
 
+  // Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
+  // Once all pages are fetched by repeated calls to ``GetActiveContractsPage``,
+  // the client SHOULD begin retrieving updates from the update service,
+  // starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
+  // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
+  rpc GetActiveContractsPage(GetActiveContractsPageRequest) returns (GetActiveContractsPageResponse);
+
   // Get the list of connected synchronizers at the time of the query.
   rpc GetConnectedSynchronizers(GetConnectedSynchronizersRequest) returns (GetConnectedSynchronizersResponse);
 
@@ -75,6 +82,43 @@ message GetActiveContractsRequest {
   optional bytes stream_continuation_token = 5;
 }
 
+message GetActiveContractsPageRequest {
+  // The offset at which the snapshot of the active contracts will be computed.
+  // Must be no greater than the current ledger end offset.
+  // Must be greater than or equal to the last pruning offset.
+  // Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+  // If zero, the empty set will be returned.
+  // If not defined, the current ledger end will be used and it will be populated in the response.
+  //
+  // Optional
+  optional int64 active_at_offset = 1;
+
+  // Format of the contract_entries in the result. In case of CreatedEvent the presentation will be of
+  // TRANSACTION_SHAPE_ACS_DELTA.
+  //
+  // Required
+  EventFormat event_format = 2;
+
+  // The result page will contain at most max_page_size entries of the respective active contract snapshot.
+  // The server might reject max_page_size breaching the server-specified limit.
+  // Optional, if not defined, the default will be determined by the server.
+  //
+  // Optional
+  optional int32 max_page_size = 3;
+
+  // To get the next page of the active contracts snapshot, the ``page_token`` should be set to the
+  // ``next_page_token`` of the last ``GetActiveContractsPageResponse``.
+  // The page token only works if subsequent requests:
+  //
+  // - are executed on the same participant,
+  // - use the same active_at_offset and event_format,
+  // - and the participant's store was not pruned to after the active_at_offset.
+  //
+  // If not specified, the first page of the active contracts snapshot will be returned.
+  //
+  // Optional: can be empty
+  optional bytes page_token = 4;
+}
 message GetActiveContractsResponse {
   // The workflow ID used in command submission which corresponds to the contract_entry. Only set if
   // the ``workflow_id`` for the command was set.
@@ -115,6 +159,24 @@ message GetActiveContractsResponse {
   //
   // Optional: can be empty
   bytes stream_continuation_token = 5;
+}
+
+message GetActiveContractsPageResponse {
+  // The collection of active contracts for this page response.
+  //
+  // Required: must be non-empty
+  repeated GetActiveContractsResponse active_contracts = 1;
+
+  // The active_at_offset which was specified in the request, or the calculated active_at_offset from the actual
+  // ledger end from at the evaluation of the request.
+  //
+  // Required
+  int64 active_at_offset = 2;
+
+  // If not present this is the last page. If present, this token must be used to get the next page.
+  //
+  // Optional: can be empty
+  optional bytes next_page_token = 3;
 }
 
 message ActiveContract {

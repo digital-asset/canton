@@ -10,7 +10,6 @@ import com.daml.ledger.api.v2.admin.participant_pruning_service.{
 }
 import com.daml.metrics.Tracked
 import com.daml.metrics.api.MetricsContext
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -40,6 +39,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.Aborted
 import com.digitalasset.canton.platform.apiserver.ApiException
 import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.protobuf.StatusProto
@@ -52,7 +52,6 @@ final class ApiParticipantPruningService private (
     readBackend: IndexParticipantPruningService with LedgerEndService,
     syncService: SyncService,
     metrics: LedgerApiServerMetrics,
-    telemetry: Telemetry,
     safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -66,7 +65,8 @@ final class ApiParticipantPruningService private (
   override def close(): Unit = ()
 
   override def prune(request: PruneRequest): Future[PruneResponse] = {
-    val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     val submissionIdOrErr = Ref.SubmissionId
       .fromString(
@@ -233,7 +233,6 @@ object ApiParticipantPruningService {
       readBackend: IndexParticipantPruningService with LedgerEndService with IndexUpdateService,
       syncService: SyncService,
       metrics: LedgerApiServerMetrics,
-      telemetry: Telemetry,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -243,7 +242,6 @@ object ApiParticipantPruningService {
       readBackend,
       syncService,
       metrics,
-      telemetry,
       safeToPruneCommitmentState,
       loggerFactory,
     )

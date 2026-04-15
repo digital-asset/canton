@@ -149,16 +149,23 @@ object CryptoKeyValidation {
       rawKeyBytes <- CryptoKeyFormat.extractPublicKeyFromX509Spki(
         ByteString.copyFrom(edPublicKey.getEncoded)
       )
-      _ <- Either
+      // validatePublicKeyFull returns false for invalid keys (does NOT throw),
+      // so we must check the boolean return value explicitly.
+      isValid <- Either
         .catchOnly[GeneralSecurityException] {
           validatePublicKeyFull(rawKeyBytes, 0)
         }
-        .map(_ => ())
         .leftMap(err =>
           KeyParseAndValidateError(
             s"Ed25519 public key validation failed: ${ThrowableUtil.messageWithStacktrace(err)}"
           )
         )
+      _ <- EitherUtil.condUnit(
+        isValid,
+        KeyParseAndValidateError(
+          "Ed25519 public key validation failed: key does not represent a valid point on the Curve25519"
+        ),
+      )
     } yield ()
 
   /** Validates the private key by making sure the private scalar lies within the valid range for

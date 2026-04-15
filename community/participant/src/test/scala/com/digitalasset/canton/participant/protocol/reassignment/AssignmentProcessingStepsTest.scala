@@ -202,7 +202,9 @@ final class AssignmentProcessingStepsTest
     val persistentState = new SyncPersistentState(logical, physical, loggerFactory)
 
     (for {
-      _ <- persistentState.parameterStore.setParameters(defaultStaticSynchronizerParameters)
+      _ <- persistentState.connectivityStatusStore.setParameters(
+        defaultStaticSynchronizerParameters
+      )
     } yield {
       val state = new SyncEphemeralState(
         participant,

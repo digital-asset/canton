@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.admin.party
 
+import cats.Eval
 import cats.data.EitherT
-import cats.{Eval, Monad}
+import cats.implicits.toTraverseOps
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
@@ -25,7 +25,6 @@ import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.C
 import com.digitalasset.canton.participant.store.{ContractStore, PartyReplicationIndexingStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, UpdateId}
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{
   EitherTUtil,
@@ -33,7 +32,7 @@ import com.digitalasset.canton.util.{
   MonadUtil,
   ReassignmentTag,
 }
-import com.digitalasset.canton.{ReassignmentCounter, RepairCounter}
+import com.digitalasset.canton.{ReassignmentCounter, RepairCounter, checked}
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
@@ -50,96 +49,129 @@ trait GeneratesUniqueUpdateIds {
 /** Target participant ACS indexing functionality shared between the OnPR sequencer channel target
   * processor and the file-based ACS importer.
   *
-  * @param partyId
-  *   The party that is being replicated.
-  * @param psid
-  *   physical synchronizer id
-  * @param indexingStore
-  *   indexing store with contract activation changes for subsequent Ledger API indexing.
-  * @param recordOrderPublisher
-  *   record order publisher for publishing indexer events
-  * @param pureCrypto
-  *   used to compute unique indexer event update ids
   * @param pauseSynchronizerIndexingDuringPartyReplication
   *   whether to pause indexing during party replication (deprecated mode)
   */
 class PartyReplicationIndexingWorkflow(
-    partyId: PartyId,
-    psid: PhysicalSynchronizerId,
-    indexingStore: PartyReplicationIndexingStore,
     contractStore: Eval[ContractStore],
-    recordOrderPublisher: RecordOrderPublisher,
-    protected val pureCrypto: CryptoPureApi,
     pauseSynchronizerIndexingDuringPartyReplication: Boolean,
     batchingConfig: BatchingConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends GeneratesUniqueUpdateIds
-    with NamedLogging {
+    extends NamedLogging {
 
-  /** Pass all the imported ACS contract batches from the indexing store to the indexer. Unpause
-    * indexing if previously paused.
+  /** Pass the next batch of contract activation changes available in the indexing store to the
+    * indexer. Unpause indexing if previously paused.
+    *
+    * @param params
+    *   party replication parameters, e.g. with partyId and synchronizerId
+    * @param indexingProgress
+    *   indexing progress at the beginning of this call
+    * @param connectedSynchronizer
+    *   connected synchronizer that the party replication target participant needs for access to the
+    *   indexing store, record order publisher, and pure crypto
+    * @return
+    *   indexing progress at the end of this call
     */
-  def indexAllContractBatches()(implicit
+  def indexNextContractActivationChangeBatch(
+      params: PartyReplicationStatus.ReplicationParams,
+      indexingProgress: PartyReplicationStatus.AcsIndexingProgress,
+      indexingStore: PartyReplicationIndexingStore,
+      recordOrderPublisher: RecordOrderPublisher,
+      pureCrypto: CryptoPureApi,
+  )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val initialOnPRBatchCounter = NonNegativeLong.zero
+  ): EitherT[FutureUnlessShutdown, String, PartyReplicationStatus.AcsIndexingProgress] = {
+    val onprBatchCounter = indexingProgress.nextIndexingCounter
+
+    logger.debug(
+      s"Indexing request ${params.requestId} party ${params.partyId} batch $onprBatchCounter"
+    )
+
+    val generatesUniqueUpdateIds = new GeneratesUniqueUpdateIds {
+      override def uniqueUpdateId(
+          onprBatchCounter: NonNegativeLong,
+          batch: Seq[(TimeOfChange, LfContractId, ChangeType, ReassignmentCounter)],
+      ): UpdateId = {
+        // Add the onpr batch counter to the hash to arrive at unique per-OPR updateIds.
+        val hash = batch
+          .foldLeft {
+            pureCrypto
+              .build(HashPurpose.OnlinePartyReplicationId)
+              .addString(params.partyId.toProtoPrimitive)
+              .addLong(onprBatchCounter.unwrap)
+          } {
+            // TODO(#26468): Use validation packages
+            case (builder, (_toc, contractId, _change, reassignmentCounter)) =>
+              builder
+                .addLong(reassignmentCounter.v)
+                .addString(contractId.coid)
+          }
+          .finish()
+        UpdateId(hash)
+      }
+    }
 
     for {
-      _ <- EitherT(Monad[FutureUnlessShutdown].tailRecM(initialOnPRBatchCounter) { nextCtr =>
-        (for {
-          nextBatchO <- EitherT.right[String](
-            indexingStore
-              .consumeNextActivationChangesBatch(
-                partyId,
-                nextCtr,
-                indexingBatchSize,
-              )(this)
+      nextBatchO <- EitherT.right[String](
+        indexingStore
+          .consumeNextActivationChangesBatch(
+            params.partyId,
+            onprBatchCounter,
+            indexingBatchSize,
+          )(generatesUniqueUpdateIds)
+      )
+      numContractsIndexedO <- nextBatchO.traverse {
+        case ContractActivationChangeBatch(updateId, contractActivationChanges) =>
+          indexContractActivationChangeBatch(
+            contractActivationChanges,
+            onprBatchCounter,
+            updateId,
+            params,
+            recordOrderPublisher,
+            indexingStore,
           )
+      }
 
-          _ <- nextBatchO.fold(EitherTUtil.unitUS[String]) {
-            case ContractActivationChangeBatch(updateId, contractActivationChanges) =>
-              indexContractBatch(contractActivationChanges, nextCtr, updateId)
-          }
-        } yield Either.cond(nextBatchO.isEmpty, (), nextCtr.increment.toNonNegative))
-          .fold[Either[NonNegativeLong, Either[String, Unit]]](
-            err => Right(Left(err)),
-            _.map(Right[String, Unit]),
-          )
-      })
+      updatedProgress = numContractsIndexedO.fold(
+        indexingProgress.copy(
+          // If we managed to drain all changes to be indexed, remember the change count
+          // at which we last drained.
+          indexingAlmostDoneWatermarkO = Some(indexingProgress.indexedContractActivationChangeCount)
+        )
+      )(numContractsIndexed =>
+        indexingProgress.copy(
+          indexedContractActivationChangeCount =
+            indexingProgress.indexedContractActivationChangeCount +
+              checked(NonNegativeLong.tryCreate(numContractsIndexed.unwrap.toLong)),
+          nextIndexingCounter = onprBatchCounter.increment.toNonNegative,
+        )
+      )
 
-      _ <-
-        if (pauseSynchronizerIndexingDuringPartyReplication)
-          EitherT.right[String](
-            FutureUnlessShutdown.lift(recordOrderPublisher.publishBufferedEvents())
-          )
-        else EitherTUtil.unitUS[String]
-
-      // Delete the items from the party replication indexing store since all contract
-      // activation changes have been indexed.
-      _ <- EitherT.right[String](indexingStore.purgeContractActivationChanges(partyId))
-    } yield ()
+      // If indexing was paused, unpause indexing, when we first drain the changes to index.
+      _ <- EitherTUtil.ifThenET(
+        numContractsIndexedO.isEmpty && pauseSynchronizerIndexingDuringPartyReplication
+      )(
+        EitherT.right[String](
+          FutureUnlessShutdown.lift(recordOrderPublisher.publishBufferedEvents())
+        )
+      )
+    } yield updatedProgress
   }
 
   /** Helper to index a contract batch looking up the contracts to index in the contract store and
     * passing the indexer update event to the record order publisher.
     */
-  private def indexContractBatch(
+  private def indexContractActivationChangeBatch(
       contractActivationChanges: NonEmpty[Map[LfContractId, (ChangeType, ReassignmentCounter)]],
       onprIndexingCounter: NonNegativeLong,
       updateId: UpdateId,
+      params: PartyReplicationStatus.ReplicationParams,
+      recordOrderPublisher: RecordOrderPublisher,
+      indexingStore: PartyReplicationIndexingStore,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    // Artificially space out indexing of the ACS to limit indexing impact on concurrent
-    // Daml transactions, until indexing with back-off is driven by the PartyReplicator.
-    // Do so only when not pausing the indexer to avoid slowing down existing tests and
-    // because when pausing the indexer, the indexer is fully dedicated to OnPR during
-    // ACS import on the specific synchronizer.
-    if (!pauseSynchronizerIndexingDuringPartyReplication) {
-      Threading.sleep(200)
-    }
-
+  ): EitherT[FutureUnlessShutdown, String, PositiveInt] =
     for {
       activeContracts <- MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(
         contractActivationChanges.forgetNE.toSeq
@@ -180,12 +212,16 @@ class PartyReplicationIndexingWorkflow(
               onprIndexingCounter,
               updateId,
               activeContractsNE,
+              params,
+              indexingStore,
             )
           )
         )
       )
-    } yield ()
-  }
+    } yield {
+      // Returning positive int as activeContractsNE is non-empty
+      checked(PositiveInt.tryCreate(activeContractsNE.size))
+    }
 
   /** Determines the indexer event corresponding to the imported active contracts
     * @param onprIndexingCounter
@@ -201,6 +237,8 @@ class PartyReplicationIndexingWorkflow(
       onprIndexingCounter: NonNegativeLong,
       updateId: UpdateId,
       activeContracts: NonEmpty[Seq[ContractToIndex]],
+      params: PartyReplicationStatus.ReplicationParams,
+      indexingStore: PartyReplicationIndexingStore,
   )(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Update.OnPRReassignmentAccepted = {
@@ -211,12 +249,12 @@ class PartyReplicationIndexingWorkflow(
     }
 
     val artificialReassignmentInfo = ReassignmentInfo(
-      sourceSynchronizer = ReassignmentTag.Source(psid.logical),
-      targetSynchronizer = ReassignmentTag.Target(psid.logical),
+      sourceSynchronizer = ReassignmentTag.Source(params.synchronizerId),
+      targetSynchronizer = ReassignmentTag.Target(params.synchronizerId),
       submitter = None,
       reassignmentId = ReassignmentId(
-        ReassignmentTag.Source(psid.logical),
-        ReassignmentTag.Target(psid.logical),
+        ReassignmentTag.Source(params.synchronizerId),
+        ReassignmentTag.Target(params.synchronizerId),
         timestamp, // artificial unassign has same timestamp as the assign
         contractIdCounters,
       ),
@@ -253,7 +291,7 @@ class PartyReplicationIndexingWorkflow(
         recordTime = timestamp,
         // TODO(#30678): Replace OnPR repair counter with an indexer-generated OnPR counter
         repairCounter = RepairCounter.apply(onprIndexingCounter.unwrap),
-        synchronizerId = psid.logical,
+        synchronizerId = params.synchronizerId,
         acsChangeFactory = acsChangeFactory,
       )
       .tap(update =>
@@ -267,32 +305,10 @@ class PartyReplicationIndexingWorkflow(
         )
       )
   }
-
-  override def uniqueUpdateId(
-      onprBatchCounter: NonNegativeLong,
-      batch: Seq[(TimeOfChange, LfContractId, ChangeType, ReassignmentCounter)],
-  ): UpdateId = {
-    // Add the onpr batch counter to the hash to arrive at unique per-OPR updateIds.
-    val hash = batch
-      .foldLeft {
-        pureCrypto
-          .build(HashPurpose.OnlinePartyReplicationId)
-          .addString(partyId.toProtoPrimitive)
-          .addLong(onprBatchCounter.unwrap)
-      } {
-        // TODO(#26468): Use validation packages
-        case (builder, (_toc, contractId, _change, reassignmentCounter)) =>
-          builder
-            .addLong(reassignmentCounter.v)
-            .addString(contractId.coid)
-      }
-      .finish()
-    UpdateId(hash)
-  }
 }
 
 object PartyReplicationIndexingWorkflow {
   type ContractToIndex = (ContractReassignment, Long)
 
-  private lazy val indexingBatchSize = PositiveInt.tryCreate(20)
+  private lazy val indexingBatchSize = PositiveInt.tryCreate(200)
 }

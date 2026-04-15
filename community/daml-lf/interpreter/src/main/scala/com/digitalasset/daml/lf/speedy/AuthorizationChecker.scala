@@ -4,37 +4,43 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.data.Ref.Location
+import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, Party, TypeConId}
 import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.ledger.FailedAuthorization
-import com.digitalasset.daml.lf.transaction.Node
 
 private[lf] abstract class AuthorizationChecker {
 
   private[lf] def authorizeCreate(
       optLocation: Option[Location],
-      create: Node.Create,
+      templateId: TypeConId,
+      signatories: Set[Party],
+      maintainers: Option[Set[Party]],
   )(
       auth: Authorize
   ): List[FailedAuthorization]
 
   private[lf] def authorizeFetch(
       optLocation: Option[Location],
-      fetch: Node.Fetch,
+      templateId: TypeConId,
+      stakeholders: Set[Party],
   )(
       auth: Authorize
   ): List[FailedAuthorization]
 
   private[lf] def authorizeLookupByKey(
       optLocation: Option[Location],
-      lbk: Node.LookupByKey,
+      templateId: TypeConId,
+      maintainers: Set[Party],
   )(
       auth: Authorize
   ): List[FailedAuthorization]
 
   private[lf] def authorizeExercise(
       optLocation: Option[Location],
-      ex: Node.Exercise,
+      templateId: TypeConId,
+      choiceId: ChoiceName,
+      actingParties: Set[Party],
+      choiceAuthorizers: Option[Set[Party]],
   )(
       auth: Authorize
   ): List[FailedAuthorization]
@@ -56,33 +62,34 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
 
   override private[lf] def authorizeCreate(
       optLocation: Option[Location],
-      create: Node.Create,
+      templateId: TypeConId,
+      signatories: Set[Party],
+      maintainers: Option[Set[Party]],
   )(
       auth: Authorize
   ): List[FailedAuthorization] = {
     authorize(
-      passIf = create.signatories subsetOf auth.authParties,
+      passIf = signatories subsetOf auth.authParties,
       failWith = FailedAuthorization.CreateMissingAuthorization(
-        templateId = create.templateId,
+        templateId = templateId,
         optLocation = optLocation,
         authorizingParties = auth.authParties,
-        requiredParties = create.signatories,
+        requiredParties = signatories,
       ),
     ) ++
       authorize(
-        passIf = create.signatories.nonEmpty,
-        failWith = FailedAuthorization.NoSignatories(create.templateId, optLocation),
+        passIf = signatories.nonEmpty,
+        failWith = FailedAuthorization.NoSignatories(templateId, optLocation),
       ) ++
-      (create.keyOpt match {
+      (maintainers match {
         case None => List()
-        case Some(key) =>
-          val maintainers = key.maintainers
+        case Some(maintainers) =>
           authorize(
-            passIf = maintainers subsetOf create.signatories,
+            passIf = maintainers subsetOf signatories,
             failWith = FailedAuthorization.MaintainersNotSubsetOfSignatories(
-              templateId = create.templateId,
+              templateId = templateId,
               optLocation = optLocation,
-              signatories = create.signatories,
+              signatories = signatories,
               maintainers = maintainers,
             ),
           )
@@ -91,16 +98,17 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
 
   override private[lf] def authorizeFetch(
       optLocation: Option[Location],
-      fetch: Node.Fetch,
+      templateId: TypeConId,
+      stakeholders: Set[Party],
   )(
       auth: Authorize
   ): List[FailedAuthorization] = {
     authorize(
-      passIf = fetch.stakeholders.intersect(auth.authParties).nonEmpty,
+      passIf = stakeholders.intersect(auth.authParties).nonEmpty,
       failWith = FailedAuthorization.FetchMissingAuthorization(
-        templateId = fetch.templateId,
+        templateId = templateId,
         optLocation = optLocation,
-        stakeholders = fetch.stakeholders,
+        stakeholders = stakeholders,
         authorizingParties = auth.authParties,
       ),
     )
@@ -108,16 +116,17 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
 
   override private[lf] def authorizeLookupByKey(
       optLocation: Option[Location],
-      lbk: Node.LookupByKey,
+      templateId: TypeConId,
+      maintainers: Set[Party],
   )(
       auth: Authorize
   ): List[FailedAuthorization] = {
     authorize(
-      passIf = lbk.key.maintainers subsetOf auth.authParties,
+      passIf = maintainers subsetOf auth.authParties,
       failWith = FailedAuthorization.LookupByKeyMissingAuthorization(
-        lbk.templateId,
+        templateId,
         optLocation,
-        lbk.key.maintainers,
+        maintainers,
         auth.authParties,
       ),
     )
@@ -125,30 +134,33 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
 
   override private[lf] def authorizeExercise(
       optLocation: Option[Location],
-      ex: Node.Exercise,
+      templateId: TypeConId,
+      choiceId: ChoiceName,
+      actingParties: Set[Party],
+      choiceAuthorizers: Option[Set[Party]],
   )(
       auth: Authorize
   ): List[FailedAuthorization] = {
     authorize(
-      passIf = ex.actingParties.nonEmpty,
-      failWith = FailedAuthorization.NoControllers(ex.templateId, ex.choiceId, optLocation),
+      passIf = actingParties.nonEmpty,
+      failWith = FailedAuthorization.NoControllers(templateId, choiceId, optLocation),
     ) ++
       authorize(
-        passIf = ex.choiceAuthorizers match {
+        passIf = choiceAuthorizers match {
           case None => true
           case Some(explicitAuthorizers) => explicitAuthorizers.nonEmpty
         },
-        failWith = FailedAuthorization.NoAuthorizers(ex.templateId, ex.choiceId, optLocation),
+        failWith = FailedAuthorization.NoAuthorizers(templateId, choiceId, optLocation),
       ) ++
       authorize(
-        passIf = (ex.actingParties union ex.choiceAuthorizers
+        passIf = (actingParties union choiceAuthorizers
           .getOrElse(Set.empty)) subsetOf auth.authParties,
         failWith = FailedAuthorization.ExerciseMissingAuthorization(
-          templateId = ex.templateId,
-          choiceId = ex.choiceId,
+          templateId = templateId,
+          choiceId = choiceId,
           optLocation = optLocation,
           authorizingParties = auth.authParties,
-          requiredParties = ex.actingParties union ex.choiceAuthorizers.getOrElse(Set.empty),
+          requiredParties = actingParties union choiceAuthorizers.getOrElse(Set.empty),
         ),
       )
   }
@@ -157,20 +169,36 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
 
 /** Dummy authorization checker that does not check anything. Should only be used for testing. */
 private[lf] object NoopAuthorizationChecker extends AuthorizationChecker {
-  override private[lf] def authorizeCreate(optLocation: Option[Location], create: Node.Create)(
+  override private[lf] def authorizeCreate(
+      optLocation: Option[Location],
+      templateId: TypeConId,
+      signatories: Set[Party],
+      maintainers: Option[Set[Party]],
+  )(
       auth: Authorize
   ): List[FailedAuthorization] = Nil
 
-  override private[lf] def authorizeFetch(optLocation: Option[Location], fetch: Node.Fetch)(
+  override private[lf] def authorizeFetch(
+      optLocation: Option[Location],
+      templateId: TypeConId,
+      stakeholders: Set[Party],
+  )(
       auth: Authorize
   ): List[FailedAuthorization] = Nil
 
   override private[lf] def authorizeLookupByKey(
       optLocation: Option[Location],
-      lbk: Node.LookupByKey,
+      templateId: TypeConId,
+      maintainers: Set[Party],
   )(auth: Authorize): List[FailedAuthorization] = Nil
 
-  override private[lf] def authorizeExercise(optLocation: Option[Location], ex: Node.Exercise)(
+  override private[lf] def authorizeExercise(
+      optLocation: Option[Location],
+      templateId: TypeConId,
+      choiceId: ChoiceName,
+      actingParties: Set[Party],
+      choiceAuthorizers: Option[Set[Party]],
+  )(
       auth: Authorize
   ): List[FailedAuthorization] = Nil
 }

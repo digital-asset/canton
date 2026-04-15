@@ -48,6 +48,7 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       shard,
       numShards,
       exclude = excludedTests,
+      useJson = false,
     )(env)
 }
 
@@ -276,9 +277,58 @@ trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConforman
   }
 }
 
+@NuckTest
 class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSuppressedLogs {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+}
+
+trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase {
+  override def lfVersion = UseLedgerApiTestTool.LfVersion.V23
+
+  override def connectedSynchronizersCount = 1
+
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P3_S1M1
+      .withSetup(setupLedgerApiConformanceEnvironment)
+
+  "Ledger Api Test Tool" can {
+    "pass keys tests for 2.3 lf version" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      implicit env =>
+        ledgerApiTestToolPlugin.runSuites(
+          suites =
+            "ContractKeysCommandDeduplicationIT,ContractKeysContractIdIT,ContractKeysDeeplyNestedValueIT," +
+              "ContractKeysDivulgenceIT,ContractKeysExplicitDisclosureIT,ContractKeysMultiPartySubmissionIT," +
+              "ContractKeysWronglyTypedContractIdIT,ContractKeysIT,RaceConditionIT,PrefetchContractKeysIT",
+          exclude = Seq(
+            // tests with divulged/disclosed contracts fail on Canton as does scoping by maintainer unless we're on a UCK synchronizer (see below)
+            "ContractKeysIT:CKFetchOrLookup",
+            "ContractKeysIT:CKMaintainerScoped",
+            "ContractKeysIT:CKNoFetchUndisclosed",
+            // tests with unique contract key assumption fail as does RWArchiveVsFailedLookupByKey (finding a lookup failure after contract creation)
+            "RaceConditionIT:RWArchiveVsFailedLookupByKey",
+            "RaceConditionIT:WWArchiveVsNonTransientCreate",
+            "RaceConditionIT:WWDoubleNonTransientCreate",
+            "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
+            // Exclude the "prepare endpoint" versions of contract key prefetching because
+            // the external hashing algorithm for interactive submission only supports LF=2.1
+            // When contract keys are not an LF dev feature anymore those can be enabled
+            "PrefetchContractKeysIT:CSprefetchContractKeysPrepareEndpointBasic",
+            "PrefetchContractKeysIT:CSprefetchContractKeysPrepareWronglyTyped",
+            "PrefetchContractKeysIT:CSprefetchContractPrepareKeysMany",
+          ),
+          concurrency = 4,
+        )
+    }
+  }
+}
+
+@RollbackTest
+class LedgerApiKeysConformanceTest_Postgres extends LedgerApiKeysConformanceTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+  // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with
+  // ABORTED: SEQUENCER_BACKPRESSURE(2,54fe840c): The sequencer is overloaded.
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
 }
 
 trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConformanceBase {
@@ -295,11 +345,7 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
     "pass experimental tests for 2.dev lf version" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       implicit env =>
         ledgerApiTestToolPlugin.runSuites(
-          suites =
-            "ContractKeysCommandDeduplicationIT,ContractKeysContractIdIT,ContractKeysDeeplyNestedValueIT," +
-              "ContractKeysDivulgenceIT,ContractKeysExplicitDisclosureIT,ContractKeysMultiPartySubmissionIT," +
-              "ContractKeysWronglyTypedContractIdIT,ContractKeysIT,RaceConditionIT,ExceptionsIT,ExceptionRaceConditionIT," +
-              "EventsDescendantsIT,PrefetchContractKeysIT",
+          suites = "ExceptionsIT,ExceptionRaceConditionIT,EventsDescendantsIT",
           exclude = Seq(
             // TODO(#16065)
             "ExceptionRaceConditionIT:RWRollbackCreateVsNonTransientCreate",
@@ -307,22 +353,7 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
             "ExceptionsIT:ExRollbackDuplicateKeyArchived",
             "ExceptionsIT:ExRollbackDuplicateKeyCreated",
             "ExceptionsIT:ExRollbackExerciseCreateLookup",
-            // tests with divulged/disclosed contracts fail on Canton as does scoping by maintainer unless we're on a UCK synchronizer (see below)
-            "ContractKeysIT:CKFetchOrLookup",
-            "ContractKeysIT:CKMaintainerScoped",
-            "ContractKeysIT:CKNoFetchUndisclosed",
-            // tests with unique contract key assumption fail as does RWArchiveVsFailedLookupByKey (finding a lookup failure after contract creation)
-            "RaceConditionIT:RWArchiveVsFailedLookupByKey",
-            "RaceConditionIT:WWArchiveVsNonTransientCreate",
-            "RaceConditionIT:WWDoubleNonTransientCreate",
-            "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
-            // Exclude the "prepare endpoint" versions of contract key prefetching because
-            // the external hashing algorithm for interactive submission only supports LF=2.1
-            // When contract keys are not an LF dev feature anymore those can be enabled
-            "PrefetchContractKeysIT:CSprefetchContractKeysPrepareEndpointBasic",
-            "PrefetchContractKeysIT:CSprefetchContractKeysPrepareWronglyTyped",
-            "PrefetchContractKeysIT:CSprefetchContractPrepareKeysMany",
-            // TODO(#30398): Exclude tests that roll back effects on dev for now, should assert failure instead.
+            // TODO(#31855): Exclude tests that roll back effects on dev for now, should assert failure instead.
             "EventsDescendantsIT:DescendantsRollbackCreate",
             "EventsDescendantsIT:DescendantsRollbackExercise",
             "ExceptionsIT:ExRollbackActiveExerciseConsuming",
@@ -333,9 +364,6 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
             "ExceptionsIT:ExRollbackProjectionNormalization",
             "ExceptionsIT:ExRollbackProjectionNesting",
             "ExceptionsIT:ExRollbackCreate",
-            // TODO(#30398): Exclude tests that fail because of the temporary inconsistency between the CSM used by
-            //    the engine, and the CSM used during view decomposition.
-            "ContractKeysIT:CKLocalLookupByKeyVisibility",
           ),
           concurrency = 4,
         )

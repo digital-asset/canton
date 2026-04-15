@@ -70,6 +70,7 @@ trait CreatesUsers {
         isDeactivated = false,
         metadata = Some(ObjectMeta.defaultInstance),
         identityProviderId = "",
+        primaryPartyAuthentication = false,
       )
       rights = readAsParties.map(p =>
         proto.Right(proto.Right.Kind.CanReadAs(proto.Right.CanReadAs(p)))

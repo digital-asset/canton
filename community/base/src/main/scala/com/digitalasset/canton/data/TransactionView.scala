@@ -27,7 +27,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, NamedLoggingLazyVal, RoseTree}
 import com.digitalasset.canton.version.*
-import com.digitalasset.canton.{LfVersioned, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -174,25 +174,17 @@ final case class TransactionView private (
     subviews = Some(subviews.toProtoV30),
   )
 
-  /** The global key inputs that the
-    * [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine]] computes while
-    * interpreting the root action of the view, enriched with the maintainers of the key and the
-    * [[com.digitalasset.canton.protocol.LfLanguageVersion]] to be used for serializing the key.
+  /** The key maintainers associated with each global key, the resolved contracts are always empty.
+    *
+    * Use to support protocol behaviour from [[com.digitalasset.canton.version.ProtocolVersion.v35]]
     *
     * @throws java.lang.IllegalStateException
-    *   if the [[ViewParticipantData]] of this view or any subview is blinded
+    *   if the [[ViewParticipantData]] of this view is blinded
     */
-  def keyMaintainers(implicit
-      loggingContext: NamedLoggingContext
-  ): Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] =
-    _globalKeyInputs.get
+  def keyMaintainers(): Map[LfGlobalKey, Set[LfPartyId]] =
+    viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.maintainers)
 
-  def legacyGlobalKeyInputs(implicit
-      loggingContext: NamedLoggingContext
-  ): Map[LfGlobalKey, LfVersioned[LegacyKeyResolutionWithMaintainers]] =
-    _globalKeyInputs.get.fmap(_.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen))
-
-  private[this] val _globalKeyInputs
+  private[data] val _legacyGlobalKeyInputs
       : NamedLoggingLazyVal[Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
     NamedLoggingLazyVal[Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] {
       implicit loggingContext =>
@@ -202,12 +194,24 @@ final case class TransactionView private (
           s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
         )
 
-        subviews.unblindedElements.foldLeft(viewParticipantData.keyMaintainers) { (acc, subview) =>
-          val subviewGki = subview.keyMaintainers
-          // TODO(#31527): SPM review this use
+        subviews.unblindedElements.foldLeft(viewParticipantData.keyResolution) { (acc, subview) =>
+          val subviewGki = subview._legacyGlobalKeyInputs.get
           MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
         }
     }
+
+  /** Legacy view global keys mapping
+    *
+    * Used to support protocol behaviour until
+    * [[com.digitalasset.canton.version.ProtocolVersion.v34]]
+    *
+    * @throws java.lang.IllegalStateException
+    *   if the [[ViewParticipantData]] of this view or any subview is blinded
+    */
+  def legacyGlobalKeyInputs(implicit
+      loggingContext: NamedLoggingContext
+  ): Map[LfGlobalKey, LfVersioned[LegacyKeyResolutionWithMaintainers]] =
+    _legacyGlobalKeyInputs.get.fmap(_.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen))
 
   /** The input contracts of the view (including subviews).
     *

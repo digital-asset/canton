@@ -733,7 +733,7 @@ object SequenceWritesFlow {
       BatchN[WithKillSwitch[Write]](
         writerConfig.eventWriteBatchMaxSize,
         maxBatchCount =
-          // only blocksequencers can write events parallel, because the sequencing had already happened at this point
+          // only block sequencers can write events parallel, because the sequencing had already happened at this point
           if (blockSequencerMode) writerConfig.eventWriteMaxConcurrency
           // in line with mapAsync(1) in non blocksequencer mode
           else 1,

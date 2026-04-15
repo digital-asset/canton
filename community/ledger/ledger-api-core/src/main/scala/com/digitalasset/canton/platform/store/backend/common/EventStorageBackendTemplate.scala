@@ -619,63 +619,39 @@ abstract class EventStorageBackendTemplate(
         preparedStatement.setLong(2, offset.unwrap)
       }
 
+      def pruneActivate(tableName: String): Unit =
+        pruneWithLogging(s"Pruning $tableName table") {
+          SQL"""
+          DELETE from #$tableName
+          WHERE EXISTS (
+            SELECT 1
+            FROM temp_candidate_deactivated
+            WHERE #$tableName.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
+          )"""
+        }
+
       // activate
-      pruneWithLogging("Pruning lapi_events_activate_contract table") {
-        SQL"""
-        DELETE from lapi_events_activate_contract
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_events_activate_contract.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
-        )"""
-      }
-      pruneWithLogging("Pruning lapi_filter_activate_stakeholder table") {
-        SQL"""
-        DELETE from lapi_filter_activate_stakeholder
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_filter_activate_stakeholder.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
-        )"""
-      }
-      pruneWithLogging("Pruning lapi_filter_activate_witness table") {
-        SQL"""
-        DELETE from lapi_filter_activate_witness
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_filter_activate_witness.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
-        )"""
-      }
+      pruneActivate("lapi_events_activate_contract")
+      pruneActivate("lapi_filter_activate_stakeholder")
+      pruneActivate("lapi_filter_activate_witness")
+      // achs
+      pruneActivate("lapi_filter_achs_stakeholder")
+
+      def pruneDeactivate(tableName: String): Unit =
+        pruneWithLogging(s"Pruning $tableName table") {
+          SQL"""
+          DELETE from #$tableName
+          WHERE EXISTS (
+            SELECT 1
+            FROM temp_candidate_deactivated
+            WHERE #$tableName.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
+          )"""
+        }
 
       // deactivate
-      pruneWithLogging("Pruning lapi_events_deactivate_contract table") {
-        SQL"""
-        DELETE from lapi_events_deactivate_contract
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_events_deactivate_contract.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
-        )"""
-      }
-      pruneWithLogging("Pruning lapi_filter_deactivate_stakeholder table") {
-        SQL"""
-        DELETE from lapi_filter_deactivate_stakeholder
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_filter_deactivate_stakeholder.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
-        )"""
-      }
-      pruneWithLogging("Pruning lapi_filter_deactivate_witness table") {
-        SQL"""
-        DELETE from lapi_filter_deactivate_witness
-        WHERE EXISTS (
-          SELECT 1
-          FROM temp_candidate_deactivated
-          WHERE lapi_filter_deactivate_witness.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
-        )"""
-      }
+      pruneDeactivate("lapi_events_deactivate_contract")
+      pruneDeactivate("lapi_filter_deactivate_stakeholder")
+      pruneDeactivate("lapi_filter_deactivate_witness")
 
       logger.info("Dropping temporary table for storing pruning candidates")
       SQL"""
@@ -786,7 +762,7 @@ abstract class EventStorageBackendTemplate(
         """
       .asVectorOf(long("event_sequential_id"))(connection)
 
-  def addActivationsToACHS(
+  def addActivationsToAchs(
       params: AchsAddActivationsParams
   )(connection: Connection): Unit =
     SQL"""
@@ -805,7 +781,7 @@ abstract class EventStorageBackendTemplate(
         )
     """.execute()(connection).discard
 
-  def removeDeactivatedFromACHS(
+  def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit =
     SQL"""

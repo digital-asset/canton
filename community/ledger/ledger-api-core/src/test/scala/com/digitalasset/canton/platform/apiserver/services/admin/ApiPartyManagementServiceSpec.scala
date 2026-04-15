@@ -16,8 +16,6 @@ import com.daml.ledger.api.v2.crypto.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.daml.ledger.api.v2.{crypto, crypto as lapicrypto}
 import com.daml.nonempty.NonEmpty
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.base.error.utils.ErrorDetails.RetryInfoDetail
@@ -56,7 +54,6 @@ import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagem
   blindAndConvertToProto,
 }
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
-import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.{InFlight, StreamTracker}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
@@ -81,15 +78,13 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
 }
-import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
-import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.tracing.{Spanning, TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
-import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.scalaland.chimney.dsl.*
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
@@ -113,6 +108,7 @@ class ApiPartyManagementServiceSpec
     with PekkoBeforeAndAfterAll
     with ErrorsAssertions
     with BaseTest
+    with Spanning
     with BeforeAndAfterEach
     with HasExecutorService {
 
@@ -150,7 +146,6 @@ class ApiPartyManagementServiceSpec
     TestPartySyncService(testTelemetrySetup.tracer),
     oneHour,
     createSubmissionId,
-    NoOpTelemetry,
     mock[PartyAllocation.Tracker],
     loggerFactory = loggerFactory,
   )
@@ -774,59 +769,6 @@ class ApiPartyManagementServiceSpec
       }
     }
 
-    "propagate trace context" in {
-      val (
-        mockIdentityProviderExists,
-        mockIndexPartyManagementService,
-        mockUserManagementStore,
-        mockPartyRecordStore,
-      ) = mockedServices()
-      val partyAllocationTracker = makePartyAllocationTracker(loggerFactory)
-      val apiService = ApiPartyManagementService.createApiService(
-        mockIndexPartyManagementService,
-        mockUserManagementStore,
-        mockIdentityProviderExists,
-        partiesPageSize,
-        NonNegativeInt.tryCreate(0),
-        mockPartyRecordStore,
-        TestPartySyncService(testTelemetrySetup.tracer),
-        oneHour,
-        createSubmissionId,
-        new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
-        partyAllocationTracker,
-        loggerFactory = loggerFactory,
-      )
-
-      loggerFactory.suppress(
-        ApiPartyManagementServiceSuppressionRule
-      ) {
-
-        val span = testTelemetrySetup.anEmptySpan()
-        val scope = span.makeCurrent()
-
-        // Kick the interaction off
-        val future = apiService
-          .allocateParty(AllocatePartyRequest("aParty", None, "", "", ""))
-          .thereafter { _ =>
-            scope.close()
-            span.end()
-          }
-
-        // Allow the tracker to complete
-        partyAllocationTracker.onStreamItem(
-          PartyAllocation.Completed(
-            aPartyAllocationTracker,
-            IndexerPartyDetails(aParty, isLocal = true),
-          )
-        )
-
-        // Wait for tracker to complete
-        future.futureValue
-
-        testTelemetrySetup.reportedSpanAttributes should contain(anUserIdSpanAttribute)
-      }
-    }
-
     "close while allocating party" in {
       val (
         mockIdentityProviderExists,
@@ -845,7 +787,6 @@ class ApiPartyManagementServiceSpec
         TestPartySyncService(testTelemetrySetup.tracer),
         oneHour,
         createSubmissionId,
-        NoOpTelemetry,
         partyAllocationTracker,
         loggerFactory = loggerFactory,
       )
@@ -1234,7 +1175,9 @@ object ApiPartyManagementServiceSpec {
 
   val oneHour = FiniteDuration(1, java.util.concurrent.TimeUnit.HOURS)
 
-  private final case class TestPartySyncService(tracer: Tracer) extends state.PartySyncService {
+  private final case class TestPartySyncService(tracer: Tracer)
+      extends state.PartySyncService
+      with Spanning {
     override def allocateParty(
         partyId: PartyId,
         submissionId: Ref.SubmissionId,
@@ -1242,14 +1185,8 @@ object ApiPartyManagementServiceSpec {
         externalPartyOnboardingDetails: Option[ExternalPartyOnboardingDetails],
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[state.SubmissionResult] = {
-      val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
-      telemetryContext.setAttribute(
-        anUserIdSpanAttribute._1,
-        anUserIdSpanAttribute._2,
-      )
+    ): FutureUnlessShutdown[state.SubmissionResult] =
       FutureUnlessShutdown.pure(state.SubmissionResult.Acknowledged)
-    }
 
     override def physicalSynchronizerIdForSynchronizerId(
         synchronizerId: SynchronizerId

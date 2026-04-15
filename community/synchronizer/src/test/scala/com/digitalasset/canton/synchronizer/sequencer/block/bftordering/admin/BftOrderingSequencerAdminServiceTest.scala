@@ -25,10 +25,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BftNodeId,
-  EpochNumber,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
   Mempool,
@@ -175,8 +173,11 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
       val p2PNetworkOutAdminSpy =
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
-      val resultPromise = Promise[(EpochNumber, Set[BftNodeId])]()
-      resultPromise.success(EpochNumber.First -> Set.empty)
+      val resultPromise = Promise[Consensus.Admin.GetOrderingTopologyResponse]()
+      resultPromise.success(
+        Consensus.Admin
+          .GetOrderingTopologyResponse(EpochNumber.First, Set.empty, SequencingParameters.Default)
+      )
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
@@ -189,7 +190,8 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         .getOrderingTopology(GetOrderingTopologyRequest())
         .map { response =>
           verify(consensusAdminSpy).asyncSend(
-            Consensus.Admin.GetOrderingTopology(any[(EpochNumber, Set[BftNodeId]) => Unit])
+            Consensus.Admin
+              .GetOrderingTopology(any[Consensus.Admin.GetOrderingTopologyResponse => Unit])
           )(any[TraceContext], any[MetricsContext])
           verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
           response.sequencerIds shouldBe empty

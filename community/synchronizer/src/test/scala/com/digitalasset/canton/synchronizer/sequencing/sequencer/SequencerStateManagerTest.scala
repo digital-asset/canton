@@ -22,7 +22,10 @@ import com.digitalasset.canton.synchronizer.HasTopologyTransactionTestFactory
 import com.digitalasset.canton.synchronizer.block.*
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.memory.InMemorySequencerBlockStore
-import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl
+import com.digitalasset.canton.synchronizer.block.update.{
+  BlockUpdateGeneratorImpl,
+  InFlightAggregations,
+}
 import com.digitalasset.canton.synchronizer.metrics.{SequencerMetrics, SequencerTestMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -195,7 +198,7 @@ class SequencerStateManagerTest
             UninitializedBlockHeight,
             Map.empty,
             SequencerPruningStatus(CantonTimestamp.Epoch, ts1, Set.empty),
-            Map.empty,
+            InFlightAggregations.empty,
             None,
             testedProtocolVersion,
             Seq.empty,
@@ -337,7 +340,6 @@ class SequencerStateManagerTest
       topologyClient,
       defaultStaticSynchronizerParameters,
       topologyTransactionFactory.syncCryptoClient.crypto,
-      BatchingConfig().parallelism,
       CachingConfigs.defaultPublicKeyConversionCache,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
@@ -374,7 +376,7 @@ class SequencerStateManagerTest
       producePostOrderingTopologyTicks = false,
       SequencerTestMetrics,
       BatchingConfig(),
-      loggerFactory,
+      consistencyChecks = true,
       memberValidator = new SequencerMemberValidator {
         override def isMemberRegisteredAt(member: Member, time: CantonTimestamp)(implicit
             tc: TraceContext
@@ -384,6 +386,7 @@ class SequencerStateManagerTest
             tc: TraceContext
         ): FutureUnlessShutdown[Map[Member, Boolean]] = ???
       },
+      loggerFactory,
     )(closeContext, NoReportingTracerProvider.tracer)
 
     def signedAcknowledgement(

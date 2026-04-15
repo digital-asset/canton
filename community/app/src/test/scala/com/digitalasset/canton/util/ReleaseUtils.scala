@@ -157,8 +157,7 @@ object ReleaseUtils {
       release: ReleaseVersion
   )(implicit elc: ErrorLoggingContext): String = {
     import scala.sys.process.*
-
-    val cantonDir = s"tmp/canton-community-$release/bin/canton"
+    val cantonDir = s"tmp/canton-enterprise-$release/bin/canton"
     if (Files.exists(Paths.get(cantonDir))) {
       elc.info(s"Release $release already downloaded.")
       cantonDir

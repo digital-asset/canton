@@ -1,0 +1,30 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module FailedFetch where
+
+import Daml.Script
+
+template T
+  with
+    p: Party
+  where
+    signatory p
+
+template Helper
+  with
+    p: Party
+  where
+    signatory p
+    choice Fetch : T
+      with
+        id : ContractId T
+      controller p
+      do fetch @T id
+
+fetchNonStakeholder = script do
+  alice <- allocateParty "Alice-FailedFetch:fetchNonStakeholder"
+  bob <- allocateParty "Bob-FailedFetch:fetchNonStakeholder"
+  secret <- submit alice (createCmd (T alice))
+  submit bob (createAndExerciseCmd (Helper bob) (Fetch secret))
+  return ()

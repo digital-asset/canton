@@ -23,7 +23,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   MemberRecipientOrBroadcast,
   SequencersOfSynchronizer,
 }
-import com.digitalasset.canton.synchronizer.block.BlockEvents.TickTopology
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
 import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
@@ -40,11 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.time.{
   LsuSequencingBounds,
 }
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
-import com.digitalasset.canton.synchronizer.sequencer.{
-  AnnouncedLsu,
-  InFlightAggregations,
-  SubmissionOutcome,
-}
+import com.digitalasset.canton.synchronizer.sequencer.{AnnouncedLsu, SubmissionOutcome}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
@@ -112,7 +107,7 @@ object BlockUpdateGenerator {
   final case class MaybeTopologyTickChunk(
       blockHeight: Long,
       baseBlockSequencingTime: CantonTimestamp,
-      tickTopology: Option[TickTopology],
+      tickTopologyAtLeastAt: Option[CantonTimestamp],
   ) extends BlockChunk
   final case class EndOfBlock(blockHeight: Long) extends BlockChunk
 }
@@ -128,8 +123,9 @@ class BlockUpdateGeneratorImpl(
     producePostOrderingTopologyTicks: Boolean,
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
-    protected val loggerFactory: NamedLoggerFactory,
+    consistencyChecks: Boolean,
     memberValidator: SequencerMemberValidator,
+    protected val loggerFactory: NamedLoggerFactory,
 )(implicit val closeContext: CloseContext, tracer: Tracer)
     extends BlockUpdateGenerator
     with NamedLogging
@@ -139,6 +135,9 @@ class BlockUpdateGeneratorImpl(
 
   private val epsilon = synchronizerSyncCryptoApi.staticSynchronizerParameters.topologyChangeDelay
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
+  private val reorderer =
+    if (protocolVersion <= ProtocolVersion.v34) BlockReorderer.NoOp
+    else new BlockReorderer.Impl(consistencyChecks, loggerFactory)
 
   private val blockChunkProcessor =
     new BlockChunkProcessor(
@@ -203,7 +202,6 @@ class BlockUpdateGeneratorImpl(
 
       val ledgerBlockEvents = block.events.mapFilter { tracedEvent =>
         withSpan("BlockUpdateGenerator.extractBlockEvents") { implicit traceContext => _ =>
-          logger.trace("Extracting event from raw block")
           // TODO(i29003): Defer decompression to addSnapshotsAndValidateSubmissions
           val maxBytesToDecompress = MaxBytesToDecompress.HardcodedDefault
           LedgerBlockEvent.fromRawBlockEvent(protocolVersion, maxBytesToDecompress)(
@@ -234,14 +232,11 @@ class BlockUpdateGeneratorImpl(
         BlockEvents(
           block.blockHeight,
           CantonTimestamp.assertFromLong(block.baseSequencingTimeMicrosFromEpoch),
-          ledgerBlockEvents,
-          tickTopology = block.tickTopologyAtMicrosFromEpoch.map { case (micros, broadcast) =>
-            TickTopology(
-              CantonTimestamp.assertFromLong(micros),
-              (if (broadcast) Left(AllMembersOfSynchronizer)
-               else Right(SequencersOfSynchronizer)),
-            )
-          },
+          // Reorder block events according to BlockReorderer priority before constructing BlockEvents.
+          // (starting with pv35)
+          reorderer.reordered(ledgerBlockEvents)(blockTraceContext),
+          tickTopologyAtLeastAt =
+            block.tickTopologyAtMicrosFromEpoch.map(CantonTimestamp.assertFromLong),
         )
       )(blockTraceContext)
     }(tracedBlock.traceContext, tracer)
@@ -308,7 +303,7 @@ class BlockUpdateGeneratorImpl(
     val tick = MaybeTopologyTickChunk(
       blockHeight,
       blockEvents.baseBlockSequencingTime,
-      blockEvents.tickTopology,
+      blockEvents.tickTopologyAtLeastAt,
     )
 
     // We must start a new chunk whenever the chunk processing advances lastSequencerEventTimestamp,
@@ -358,7 +353,7 @@ class BlockUpdateGeneratorImpl(
         FutureUnlessShutdown.pure(newState -> update)
       case NextChunk(height, index, chunksEvents) =>
         blockChunkProcessor.processDataChunk(state, height, index, chunksEvents)
-      case MaybeTopologyTickChunk(blockHeight, baseBlockSequencingTime, tickTopology) =>
+      case MaybeTopologyTickChunk(blockHeight, baseBlockSequencingTime, tickTopologyAtLeastAt) =>
         lazy val createTick = state.latestPendingTopologyTransactionTimestamp.exists { ts =>
           // If the latest topology transaction becomes effective between the end of the previous block and the end of
           // the current block, we will broadcast a tick at the end of the current block so all sequencer clients can
@@ -415,15 +410,20 @@ class BlockUpdateGeneratorImpl(
                 //  could deadlock.
                 tickAtLeastAt = state.lastChunkTs
                   .max(baseBlockSequencingTime)
-                  .max(tickTopology.map(_.atLeastAt).getOrElse(CantonTimestamp.MinValue)),
+                  .max(tickTopologyAtLeastAt.getOrElse(CantonTimestamp.MinValue)),
                 groupRecipient = Left(AllMembersOfSynchronizer),
               )
             } else {
-              tickTopology match {
+              tickTopologyAtLeastAt match {
                 // The pre-protocol version 35 topology ticks is also still supported and
                 // only the BFT sequencer can request to inject these topology ticks
-                case Some(TickTopology(tickAtLeastAt, groupRecipient)) =>
-                  blockChunkProcessor.emitTick(state, blockHeight, tickAtLeastAt, groupRecipient)
+                case Some(tickTopologyAtLeastAt) =>
+                  blockChunkProcessor.emitTick(
+                    state,
+                    blockHeight,
+                    tickTopologyAtLeastAt,
+                    Right(SequencersOfSynchronizer),
+                  )
                 case None =>
                   FutureUnlessShutdown.pure((state, ChunkUpdate.noop))
               }

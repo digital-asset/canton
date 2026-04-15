@@ -40,9 +40,17 @@ object ValidationErrors {
       .Reject(fieldName = fieldName, message = message)
       .asGrpcError
 
-  def invalidToken(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =
+  def invalidContinuationToken(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): StatusRuntimeException =
     RequestValidationErrors.InvalidContinuationToken
       .Reject()
       .asGrpcError
 
+  def invalidPageToken(
+      message: String
+  )(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =
+    RequestValidationErrors.InvalidPageToken
+      .Reject(message)
+      .asGrpcError
 }

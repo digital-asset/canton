@@ -6,7 +6,9 @@ syntax = "proto3";
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30;
 
 import "google/protobuf/duration.proto";
+import "scalapb/scalapb.proto";
 
 message DynamicSequencingParametersPayload {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
   google.protobuf.Duration pbft_view_change_timeout = 1;
 }

@@ -187,6 +187,34 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     remaining shouldBe AchsWorkDistance(populate = 5L, remove = 3L)
   }
 
+  it should "produce work ranges with populationEnd = 0 when removal-only starting fresh" in {
+    val state = AchsState(
+      validAt = 0L,
+      lastPointers = AchsLastPointers(lastRemoved = 0L, lastPopulated = 0L),
+    )
+    val work = AchsWorkDistance(populate = 0L, remove = 35L)
+    val (newState, remaining, ranges) = AchsMaintenancePipe.drain(
+      aggregationThreshold = 10L,
+      state = state,
+      remaining = work,
+      acc = Vector.empty,
+    )
+    ranges shouldBe Vector(
+      workRange(popStart = 0L, popEnd = 0L, remStart = 0L, remEnd = 10L),
+      workRange(popStart = 0L, popEnd = 0L, remStart = 10L, remEnd = 20L),
+      workRange(popStart = 0L, popEnd = 0L, remStart = 20L, remEnd = 30L),
+    )
+    // all populationEnd values should be zero
+    ranges.foreach { wr =>
+      wr.activationsPopulation.endInclusive shouldBe 0L
+    }
+    newState shouldBe AchsState(
+      validAt = 0L,
+      lastPointers = AchsLastPointers(lastRemoved = 30L, lastPopulated = 0L),
+    )
+    remaining shouldBe AchsWorkDistance(populate = 0L, remove = 5L)
+  }
+
   behavior of "bumpAchsValidAt"
 
   private def storeAchsValidAt(achsStateRef: AtomicReference[AchsState])(
@@ -462,6 +490,28 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       popEnd = 70L,
       remStart = 80L,
       remEnd = 80L,
+    )
+
+    AchsMaintenancePipe
+      .removeDeactivatedFromAchs(
+        removeDeactivatedF =
+          params => (_: LoggingContextWithTrace) => Future.successful(dbRef.set(params)),
+        executionContext = executionContext,
+        logger = loggerFactory.getTracedLogger(this.getClass),
+      )(inputWorkRange)
+      .futureValue shouldBe inputWorkRange
+
+    dbRef.get() shouldBe zeroRemoveParams
+  }
+
+  it should "skip removal when nothing has been populated into ACHS (populationEnd <= 0)" in {
+    val dbRef = new AtomicReference[AchsRemoveDeactivatedParams](zeroRemoveParams)
+
+    val inputWorkRange = workRange(
+      popStart = 0L,
+      popEnd = 0L,
+      remStart = 0L,
+      remEnd = 10L,
     )
 
     AchsMaintenancePipe

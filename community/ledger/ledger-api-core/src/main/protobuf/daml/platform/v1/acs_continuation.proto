@@ -7,8 +7,8 @@ package daml.platform.v1;
 
 option java_package = "com.daml.platform.v1";
 
-message AcsContinuationTokenPointer {
-  // the sequential_id of event reported along with this token
+message AcsContinuationPointerPayload {
+  // the sequential_id of the event this pointer is pointing to
   int64 sequential_id = 1;
   // if the corresponding response is generated from incomplete reassignments, this offset
   // helps to filter the incomplete reassignments for continuation
@@ -17,7 +17,7 @@ message AcsContinuationTokenPointer {
 
 message AcsContinuationTokenPayload {
   // the pointer where the stream should continue from
-  AcsContinuationTokenPointer pointer = 1;
+  AcsContinuationPointerPayload pointer = 1;
   // checksum to validate the token
   bytes checksum = 2;
 }

@@ -146,16 +146,71 @@ object LanguageVersion extends LanguageFeaturesGenerated {
 
   }
 
-  object Minor {
-    def assertFromString(s: String): Minor = data.assertRight(fromString(s))
+  sealed abstract class MinorParseFailure extends Product with Serializable {
+    def message: String
+    override def toString: String = message
+  }
 
-    def fromString(str: String): Either[String, Minor] =
-      (allLfVersions ++ allLegacyLfVersions)
-        .map(_.minor)
+  object MinorParseFailure {
+    // Staging-specific failiure (revision not found but other revisions for the same staging version exist)
+    final case class UnknownRevision(
+        stagingMinor: Int,
+        requestedRevision: Int,
+        validRevisions: Seq[Int],
+    ) extends MinorParseFailure {
+      override def message: String = {
+        val base =
+          s"unknown revision, tried to parse $stagingMinor-rc$requestedRevision, valid revisions are ${validRevisions
+              .map(r => s"$stagingMinor-rc$r")}"
+        if (requestedRevision > validRevisions.max)
+          base + ". Trying to parse a revision newer than known by the decoder. Likely cause: decoding a DAR produced by a compiler newer than the decoder"
+        else if (requestedRevision < validRevisions.min)
+          base + ". Trying to parse a revision older than known by the decoder. Likely cause: decoding a DAR produced by a compiler older than the decoder"
+        else
+          base
+      }
+    }
+
+    // MinorNotFound is the default/fallthrough case
+    final case class MinorNotFound(input: String) extends MinorParseFailure {
+      override def message: String =
+        s"$input is not supported, supported minors: ${(allLfVersions ++ allLegacyLfVersions).map(_.minor)}"
+    }
+  }
+
+  private val stagingPattern = """(\d+)-rc(\d+)""".r
+
+  object Minor {
+    def fromString(str: String): Either[MinorParseFailure, Minor] = {
+      val allMinors = (allLfVersions ++ allLegacyLfVersions).map(_.minor)
+      allMinors
         .find(_.pretty == str)
-        .toRight(
-          s"$str is not supported, supported minors: ${(allLfVersions ++ allLegacyLfVersions).map(_.minor)}"
-        )
+        .toRight(())
+        .left
+        .flatMap { _ =>
+          // heuristics for detecting parse failures go here. Since parsing already failed, any logic here cannot
+          // increase the number of supported versions, but can only provide better error messages for unsupported
+          // versions.
+          str match {
+            case stagingPattern(nStr, mStr) =>
+              val n = nStr.toInt
+              val m = mStr.toInt
+              val validRevisions = allMinors.collect {
+                case Minor.Staging(version, revision) if version == n => revision
+              }
+              if (validRevisions.nonEmpty)
+                Left(MinorParseFailure.UnknownRevision(n, m, validRevisions))
+              else
+                Left(MinorParseFailure.MinorNotFound(str))
+            case _ =>
+              Left(MinorParseFailure.MinorNotFound(str))
+          }
+        }
+    }
+
+    @throws[IllegalArgumentException]
+    def assertParsingSuccessful(result: Either[MinorParseFailure, Minor]): Minor =
+      result.fold(f => throw new IllegalArgumentException(f.message), identity)
 
     final case class Stable(version: Int) extends Minor {
       override def pretty: String = version.toString

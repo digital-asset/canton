@@ -59,6 +59,18 @@ object ParticipantOffsetValidator {
         .asGrpcError,
     )
 
+  def validateOptionalNonNegative(offsetO: Option[Long], fieldName: String)(implicit
+      errorLogger: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Option[Offset]] =
+    offsetO match {
+      case Some(offset) =>
+        validateNonNegative(
+          offset,
+          fieldName,
+        )
+      case None => Right(None)
+    }
+
   def offsetIsBeforeEnd(
       offsetType: String,
       offset: Option[Offset],

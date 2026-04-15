@@ -97,7 +97,7 @@ final case class ResultInterruption[A](continue: () => Result[A], abort: () => O
   */
 final case class ResultDone[A](result: A) extends Result[A]
 object ResultDone {
-  val Unit: ResultDone[Unit] = new ResultDone(())
+  private[engine] val Unit: ResultDone[Unit] = new ResultDone(())
 }
 
 /** Indicates that the command (re)interpretation has failed.
@@ -203,7 +203,7 @@ final case class ResultPrefetch[A](
 
 object Result {
 
-  val unit: ResultDone[Unit] = ResultDone(())
+  val Unit: ResultDone[Unit] = ResultDone.Unit
 
   // fails with ResultError if the package is not found
   private[lf] def needPackage[A](
@@ -308,7 +308,7 @@ object Result {
 
   def assert(assertion: Boolean)(err: Error): Result[Unit] =
     if (assertion)
-      ResultDone.Unit
+      Result.Unit
     else
       ResultError(err)
 

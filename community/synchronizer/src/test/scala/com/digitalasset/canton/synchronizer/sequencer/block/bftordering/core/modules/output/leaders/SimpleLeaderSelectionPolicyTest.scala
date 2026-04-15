@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.util.Random
@@ -17,6 +18,8 @@ import scala.util.Random
 class SimpleLeaderSelectionPolicyTest extends AsyncWordSpec with BaseTest {
 
   import SimpleLeaderSelectionPolicyTest.*
+
+  implicit val pv: ProtocolVersion = testedProtocolVersion
 
   "SimpleLeaderSelectionPolicy" should {
     "return sorted leaders" in {

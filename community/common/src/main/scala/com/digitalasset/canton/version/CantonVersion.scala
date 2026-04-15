@@ -98,6 +98,8 @@ final case class ReleaseVersion(
 ) extends CantonVersion {
   def majorMinor: (Int, Int) = (major, minor)
 
+  def majorMinorPatch: (Int, Int, Int) = (major, minor, patch)
+
   def majorMinorMatches(other: ReleaseVersion): Boolean =
     major == other.major && minor == other.minor
 

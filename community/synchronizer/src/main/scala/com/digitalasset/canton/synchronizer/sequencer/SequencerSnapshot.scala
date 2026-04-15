@@ -14,8 +14,8 @@ import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRu
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus.implicitPrettyString
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.*
@@ -70,7 +70,7 @@ final case class SequencerSnapshot(
       latestTimestamp = lastTs.toProtoPrimitive,
       lastBlockHeight = latestBlockHeight.toLong,
       status = Some(status.toProtoV30),
-      inFlightAggregations = inFlightAggregations.toSeq.map(serializeInFlightAggregation),
+      inFlightAggregations = inFlightAggregations.byId.toSeq.map(serializeInFlightAggregation),
       additional =
         additional.map(a => v30.ImplementationSpecificInfo(a.implementationName, a.info)),
       trafficPurchased = trafficPurchased.map(_.toProtoV30),
@@ -92,7 +92,7 @@ final case class SequencerSnapshot(
     param("latestBlockHeight", _.latestBlockHeight),
     param("previousTimestamps", _.previousTimestamps),
     param("status", _.status),
-    param("inFlightAggregations", _.inFlightAggregations),
+    param("inFlightAggregations", _.inFlightAggregations.byId),
     param("additional", _.additional),
     param("trafficPurchased", _.trafficPurchased),
     param("trafficConsumed", _.trafficConsumed),
@@ -227,7 +227,7 @@ object SequencerSnapshot extends VersioningCompanion[SequencerSnapshot] {
       request.lastBlockHeight,
       previousTimestamps,
       status,
-      inFlightAggregations,
+      InFlightAggregations.fromMap(inFlightAggregations),
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
       trafficPurchased = trafficPurchased,
       trafficConsumed = trafficConsumed,

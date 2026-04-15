@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
@@ -211,11 +212,12 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
 }
 
 object StateTransferMessageValidatorTest {
-  private val aMembershipWithOnlyOtherNode =
+  private def aMembershipWithOnlyOtherNode(implicit pv: ProtocolVersion) =
     Membership(
       myId,
-      OrderingTopology.forTesting(Set(otherId), SequencingParameters.Default),
+      OrderingTopology.forTesting(Set(otherId), Option(SequencingParameters.Default)),
       Seq(otherId),
     )
-  private val aMembershipWith2Nodes = Membership.forTesting(myId, Set(otherId))
+  private def aMembershipWith2Nodes(implicit pv: ProtocolVersion) =
+    Membership.forTesting(myId, Set(otherId))
 }

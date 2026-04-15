@@ -29,7 +29,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   FreshInFlightAggregation,
   InFlightAggregation,
   InFlightAggregationUpdate,
-  InFlightAggregations,
   SubmissionOutcome,
 }
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -38,7 +37,65 @@ import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 
+import scala.collection.immutable.TreeSet
 import scala.concurrent.ExecutionContext
+
+/** The current in-flight aggregations
+  *
+  * We store the in-flight aggregations in a map but we maintain an expiry index in a treeset so we
+  * don't need to filter through the whole map to fish out the expired entries.
+  */
+final case class InFlightAggregations(
+    byId: Map[AggregationId, InFlightAggregation],
+    expiryIndex: TreeSet[(CantonTimestamp, AggregationId)],
+) {
+
+  def contains(id: AggregationId): Boolean = byId.contains(id)
+
+  def updatedWith(id: AggregationId)(
+      remappingFunction: Option[InFlightAggregation] => InFlightAggregation
+  ): InFlightAggregations =
+    byId.get(id) match {
+      case Some(value) =>
+        copy(byId.updated(id, remappingFunction(Some(value))))
+      case None =>
+        val agg = remappingFunction(None)
+        copy(byId + (id -> agg), expiryIndex + (agg.maxSequencingTimestamp -> id))
+    }
+
+  def updated(id: AggregationId, agg: InFlightAggregation): InFlightAggregations =
+    updatedWith(id)(_ => agg)
+
+  /** Drops all expired aggregations without scanning entire list */
+  def cleanExpired(now: CantonTimestamp): InFlightAggregations = {
+    val expired = expiryIndex.view.takeWhile { case (ts, _) => ts <= now }.iterator
+    if (expired.isEmpty) this
+    else {
+      val expiredIds = expired.map(_._2)
+      val newExpiryIndex = expiryIndex.dropWhile { case (ts, _) => ts <= now }
+      val newById = byId -- expiredIds
+      InFlightAggregations(
+        byId = newById,
+        expiryIndex = newExpiryIndex,
+      )
+    }
+  }
+
+}
+
+object InFlightAggregations {
+  implicit val expiryOrdering: Ordering[(CantonTimestamp, AggregationId)] =
+    Ordering.by { case (ts, id) => (ts, id.id) }
+  def empty: InFlightAggregations =
+    InFlightAggregations(Map.empty, TreeSet.empty[(CantonTimestamp, AggregationId)])
+  def fromMap(map: Map[AggregationId, InFlightAggregation]): InFlightAggregations =
+    InFlightAggregations(
+      map,
+      // build the tree set from the map. be careful to use an iterator
+      // as otherwise, we'd be overriding keys in the output map, dropping values ...
+      TreeSet.from(map.iterator.map { case (id, agg) => (agg.maxSequencingTimestamp, id) }),
+    )
+}
 
 /** Helper class containing all the methods around aggregations */
 class InFlightAggregationHandler(
@@ -218,7 +275,7 @@ class InFlightAggregationHandler(
   ] =
     aggregationInfo
       .traverse { case (aggregationId, aggregationRule) =>
-        val inFlightAggregation = inFlightAggregations.get(aggregationId)
+        val inFlightAggregation = inFlightAggregations.byId.get(aggregationId)
         EitherT
           .fromEither[FutureUnlessShutdown](
             submissionRequest.batch.toClosedUncompressedBatchResult

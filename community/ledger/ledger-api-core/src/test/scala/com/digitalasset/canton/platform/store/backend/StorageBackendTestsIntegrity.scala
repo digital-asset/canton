@@ -80,13 +80,13 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     executeSql(ingest(updates, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
         )
     )
     executeSql(
       backend.event
-        .addActivationsToACHS(
+        .addActivationsToAchs(
           AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
         )
     )
@@ -915,6 +915,66 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
 
     failure.getMessage should include(
       "some events in deactivate have not been pruned, offsets (first 10 shown) [2]"
+    )
+  }
+
+  it should "report leftover ACHS filter entries after pruning" in {
+    val updates = Vector(
+      // activation that will be deactivated within the pruning range
+      dtosCreate(
+        event_offset = 1,
+        event_sequential_id = 1L,
+      )(),
+      // activation that will NOT be deactivated (should survive in ACHS)
+      dtosCreate(
+        event_offset = 2,
+        event_sequential_id = 2L,
+      )(),
+      // deactivation of seq id 1, within the pruning range
+      dtosConsumingExercise(
+        event_offset = 3,
+        event_sequential_id = 3L,
+        deactivated_event_sequential_id = Some(1L),
+      ),
+      // after pruning range
+      dtosCreate(
+        event_offset = 10,
+        event_sequential_id = 4L,
+      )(),
+    ).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(updates, _))
+    executeSql(updateLedgerEnd(offset(10), 4L))
+    // Populate ACHS: both seq ids 1 and 2 are added (activeAt=2 means deactivation at seq id 3 is not yet visible)
+    executeSql(
+      backend.event.addActivationsToAchs(
+        AchsAddActivationsParams(startExclusive = 0, endInclusive = 2, activeAt = 2)
+      )
+    )
+    // Simulate pruning: remove the activation and deactivation events that would have been pruned,
+    // but deliberately leave the ACHS entry for seq id 1 behind (simulating a bug where ACHS pruning was skipped).
+    executeSql { connection =>
+      SQL"DELETE FROM lapi_events_activate_contract WHERE event_sequential_id = 1".execute()(
+        connection
+      )
+      SQL"DELETE FROM lapi_filter_activate_stakeholder WHERE event_sequential_id = 1".execute()(
+        connection
+      )
+      SQL"DELETE FROM lapi_events_deactivate_contract WHERE event_sequential_id = 3".execute()(
+        connection
+      )
+    }
+    // Set pruning offset past the deactivation
+    executeSql(backend.parameter.updatePrunedUptoInclusive(offset(3)))
+
+    // The integrity check should detect that ACHS still contains seq id 1, which references a pruned activation
+    val failure = intercept[RuntimeException](
+      executeSql(backend.integrity.verifyIntegrity(inMemoryCantonStore = true))
+    )
+
+    failure.getMessage should include(
+      "lapi_filter_achs_stakeholder contains entries not present in lapi_filter_activate_stakeholder"
     )
   }
 

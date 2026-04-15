@@ -50,7 +50,7 @@ class InMemorySequencerBlockStore(
     updateBlockHeight(initial.latestBlock)
     for {
       _ <- stateManagerStore.addInFlightAggregationUpdates(
-        initial.inFlightAggregations.fmap(_.asUpdate)
+        initial.inFlightAggregations.byId.fmap(_.asUpdate)
       )
     } yield {
       ()

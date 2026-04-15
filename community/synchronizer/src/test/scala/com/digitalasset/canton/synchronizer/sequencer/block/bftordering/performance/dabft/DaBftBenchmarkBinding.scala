@@ -3,8 +3,13 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.dabft
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmark.shutdownExecutorService
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBinding.TxConsumer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.{
@@ -19,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.sta
   SendRequest,
   StandaloneBftOrderingServiceGrpc,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.google.protobuf.ByteString
 import io.grpc.inprocess.InProcessChannelBuilder
@@ -27,35 +33,58 @@ import io.grpc.{ManagedChannel, ManagedChannelBuilder}
 
 import java.util.concurrent.*
 import scala.concurrent.ExecutionContext
-import scala.jdk.CollectionConverters.CollectionHasAsScala
+import scala.jdk.CollectionConverters.*
 import scala.language.existentials
 import scala.util.chaining.*
 import scala.util.{Failure, Success}
 
-object DaBftBindingFactory extends BftBindingFactory {
+class DaBftBindingFactory(override val loggerFactory: NamedLoggerFactory)
+    extends BftBindingFactory {
   override type T = DaBftBinding
 
-  override def create(config: BftBenchmarkConfig): DaBftBinding = {
+  override def create(
+      transactionSizesAndWeights: NonEmpty[Seq[BftBenchmarkConfig.TransactionSizeAndWeight]]
+  ): DaBftBinding = {
+
     // We could generate enough random payloads in advance, but we may OOM, e.g. with 500k TPS:
     //
     //  1m run + 1m margin = 120s, Max total writes = 500k TPS * 120s = 60_000_000 < 2_147_483_647
     //  20KB * 60mil ~= 20GB * 60
     //
     // Alternatively, we could generate batches as we go but, since DABFT doesn't
-    // compress, we just use the same payload every time.
-    val payloadOutput = ByteString.newOutput(config.transactionBytes)
-    for (_ <- 0 until config.transactionBytes)
-      payloadOutput.write('0')
-    new DaBftBinding(payloadOutput.toByteString)
+    // compress, we just optimize and use pre-built payloads.
+
+    val payloadsAndWeights =
+      transactionSizesAndWeights.map {
+        case BftBenchmarkConfig.TransactionSizeAndWeight(size, weight) =>
+          ByteString.copyFromUtf8("0".repeat(size.unwrap)) -> weight
+      }
+    new DaBftBinding(payloadsAndWeights, loggerFactory)
   }
 }
 
-final class DaBftBinding(payload: ByteString) extends BftBinding {
+final class DaBftBinding(
+    payloadsAndWeights: NonEmpty[Seq[(ByteString, PositiveInt)]],
+    override val loggerFactory: NamedLoggerFactory,
+) extends BftBinding
+    with NamedLogging {
+
+  implicit private val traceContext: TraceContext = TraceContext.empty
 
   private val MaxReadGrpcBytes = 32 * 1024 * 1024
 
-  private val log = ContextualizedLogger.get(getClass)
-  implicit private val loggingContext: LoggingContext = LoggingContext.empty
+  private val MaxRandom = payloadsAndWeights.map { case (_, weight) => weight.unwrap }.sum
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private val navigablePayloadsWithSizesByCumulativeWeights = {
+    val navigableMap = new java.util.TreeMap[Int, (ByteString, Int)]()
+    var cumulativeWeight = 0
+    payloadsAndWeights.foreach { case (payload, weight) =>
+      cumulativeWeight += weight.unwrap
+      navigableMap.put(cumulativeWeight, payload -> payload.size())
+    }
+    navigableMap
+  }
 
   private val writeChannels =
     new ConcurrentHashMap[
@@ -68,12 +97,28 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
       ?
     ], (ManagedChannel, StreamObserver[ReadOrderedResponse])]
 
-  private val scalaFutureExecutor = Executors.newWorkStealingPool()
+  private val scalaFutureExecutor =
+    Threading.newExecutionContext(
+      "da-bft-binding-scala-future",
+      noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
+    )
   private val scalaFutureExecutionContext =
     ExecutionContext.fromExecutor(scalaFutureExecutor)
 
-  private val readExecutor = Executors.newCachedThreadPool()
-  private val writeExecutor = Executors.newCachedThreadPool()
+  private val threadFactory =
+    new ThreadFactory {
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r)
+        thread.setContextClassLoader(getClass.getClassLoader)
+        thread.setUncaughtExceptionHandler((t: Thread, e: Throwable) =>
+          logger.error(s"Uncaught exception in thread ${t.getName}", e)
+        )
+        thread
+      }
+    }
+  private val readExecutor = Executors.newCachedThreadPool(threadFactory)
+  private val writeExecutor = Executors.newCachedThreadPool(threadFactory)
 
   override def write(
       node: BftBenchmarkConfig.WriteNode[?],
@@ -82,10 +127,22 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
     val result = new CompletableFuture[Unit]()
     val (stub, lock) = stubAndLockFor(node)
 
+    logger.debug(s"Scheduling a write of txId $txId to node $node")
+
     writeExecutor.submit(new Runnable {
       override def run(): Unit = {
 
+        val payloadSelector = ThreadLocalRandom.current().nextInt(1, MaxRandom + 1)
+
+        logger.debug(s"Selecting payload for writing txId $txId to node $node")
+
+        val (payload, payloadSize) =
+          navigablePayloadsWithSizesByCumulativeWeights
+            .ceilingEntry(payloadSelector)
+            .getValue
         val request = SendRequest(txId, payload)
+
+        logger.debug(s"Writing txId $txId to node $node (payload size $payloadSize bytes)")
 
         lock
           .exclusive {
@@ -95,17 +152,25 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
           .transform {
             case Success(response) =>
               response.rejectionReason.fold {
-                log.debug(s"Wrote txId $txId to node $node")
+                logger.debug(s"Wrote txId $txId to node $node (payload size $payloadSize bytes)")
                 result.complete(()).discard
               } { reason =>
                 val exception =
-                  new RuntimeException(s"Request $txId was rejected by node $node: $reason")
-                log.error(s"Rejected writing to node $node", exception)
+                  new RuntimeException(
+                    s"Request $txId (payload size $payloadSize bytes) was rejected by node $node: $reason"
+                  )
+                logger.error(
+                  s"Rejected writing txId $txId to node $node (payload size $payloadSize bytes)",
+                  exception,
+                )
                 result.completeExceptionally(exception).discard
               }
               Success(())
             case Failure(exception) =>
-              log.error(s"Error writing to node $node", exception)
+              logger.error(
+                s"Error writing txId $txId to node $node (payload size $payloadSize bytes)",
+                exception,
+              )
               result.completeExceptionally(exception).discard
               Success(())
           }(scalaFutureExecutionContext)
@@ -139,7 +204,7 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
           val reader: StreamObserver[ReadOrderedResponse] =
             new StreamObserver[ReadOrderedResponse] {
               override def onNext(response: ReadOrderedResponse): Unit = {
-                log.debug(s"Read batch of ${response.block.size} requests")
+                logger.debug(s"Read batch of ${response.block.size} requests")
                 response.block.foreach { o =>
                   readExecutor
                     .submit(new Runnable {
@@ -148,10 +213,10 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
                         try {
                           val txId = o.tag
                           result.complete(txId).discard
-                          log.debug(s"Read back UUID $txId")
+                          logger.debug(s"Read back UUID $txId")
                         } catch {
                           case t: Throwable =>
-                            log.error("Error while parsing request", t)
+                            logger.error("Error while parsing request", t)
                         }
                         txConsumer(result)
                       }
@@ -161,7 +226,7 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
               }
 
               override def onError(t: Throwable): Unit = {
-                log.error("Error from server", t)
+                logger.error("Error from server", t)
                 complete()
               }
 
@@ -169,7 +234,7 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
                 complete()
 
               def complete(): Unit = {
-                log.info(s"Write stream for node $node being completed")
+                logger.info(s"Write stream for node $node being completed")
                 closeGrpcReadChannel(node)
                 readChannels.remove(node).discard
               }
@@ -212,7 +277,7 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
       .pipe { case (_, stub, lock) => (stub, lock) }
 
   override def close(): Unit = {
-    writeChannels.values().asScala.map(_._1).foreach(closeGrpcChannel)
+    writeChannels.values().asScala.map { case (channel, _, _) => channel }.foreach(closeGrpcChannel)
     shutdownExecutorService(writeExecutor)
 
     closeGrpcStreamsAndChannels(readChannels)
@@ -239,7 +304,7 @@ final class DaBftBinding(payload: ByteString) extends BftBinding {
   private def closeGrpcReadChannel[N <: BftBenchmarkConfig.Node](
       node: BftBenchmarkConfig.Node
   ): Unit =
-    Option(readChannels.get(node)).map(_._1).foreach(closeGrpcChannel)
+    Option(readChannels.get(node)).map { case (channel, _) => channel }.foreach(closeGrpcChannel)
 
   private def closeGrpcChannel[N <: BftBenchmarkConfig.Node](channel: ManagedChannel): Unit =
     channel.shutdown().awaitTermination(20, TimeUnit.SECONDS).discard

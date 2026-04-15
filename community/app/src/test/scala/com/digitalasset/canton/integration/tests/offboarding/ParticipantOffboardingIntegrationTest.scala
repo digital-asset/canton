@@ -98,8 +98,8 @@ class ParticipantOffboardingIntegrationTest
       import env.*
 
       clue("offboard participant2") {
-        // user-manual-entry-begin: OffboardParticipant
         // Unauthorize the participant on the synchronizer by removing its permissions
+        // user-manual-entry-begin: OffboardParticipant
         synchronizerOwners.foreach { synchronizerOwner =>
           synchronizerOwner.topology.participant_synchronizer_permissions
             .list(synchronizerId, filterUid = participant2.filterString)
@@ -109,6 +109,7 @@ class ParticipantOffboardingIntegrationTest
                 .propose(synchronizerId, participant2.id, permission = permission, change = Remove)
             )
         }
+        // user-manual-entry-end: OffboardParticipant
 
         eventually() {
           forAll(synchronizerOwners) { synchronizerOwner =>
@@ -119,8 +120,9 @@ class ParticipantOffboardingIntegrationTest
 
         // Disable the participant on all the sequencers to remove any sequencer data associated with it
         //  and allow sequencer pruning
+        // user-manual-entry-begin: DisableParticipant
         sequencers.all.foreach(_.repair.disable_member(participant2))
-        // user-manual-entry-end: OffboardParticipant
+        // user-manual-entry-end: DisableParticipant
       }
 
       clue("check that pings that don't involve the off-boarded participant still work") {

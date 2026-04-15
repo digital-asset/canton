@@ -70,7 +70,6 @@ private[lf] object IdeLedgerRunner {
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
-        disclosures: Vector[FatContractInstance],
     ): Either[Error, Vector[FatContractInstance]]
     def currentTime: Time.Timestamp
     def commit(
@@ -132,44 +131,27 @@ private[lf] object IdeLedgerRunner {
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
-        disclosures: Vector[FatContractInstance],
     ): Either[Error, Vector[FatContractInstance]] =
-      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs, disclosures))
+      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs))
 
     private def lookupKeyUnsafe(
         gk: GlobalKey,
         actAs: Set[Party],
         readAs: Set[Party],
-        disclosures: Vector[FatContractInstance],
     ): Vector[FatContractInstance] = {
-
-      val effectiveAt = ledger.currentTime
-      val readers = actAs union readAs
-
-      val acoids =
-        ledger.ledgerData.activeKeys.getOrElse(gk, Vector.empty) diff disclosures.map(_.contractId)
+      val acoids = ledger.ledgerData.activeKeys.getOrElse(gk, Vector.empty)
       acoids.collect(Function.unlift { acoid =>
         ledger.lookupGlobalContract(
           actAs,
           readAs,
-          effectiveAt = effectiveAt,
+          effectiveAt = ledger.currentTime,
           acoid,
         ) match {
-          case IdeLedger.LookupOk(contract) =>
-            if (readers.intersect(contract.stakeholders).nonEmpty)
-              Some(contract)
-            else
-              throw Error.ContractKeyNotVisible(acoid, gk, actAs, readAs, contract.stakeholders)
+          case IdeLedger.LookupOk(contract) => Some(contract)
           case IdeLedger.LookupContractNotFound(_) => None
           case IdeLedger.LookupContractNotEffective(_, _, _) => None
           case IdeLedger.LookupContractNotActive(_, _, _) => None
-          case IdeLedger.LookupContractNotVisible(
-                coid,
-                tid @ _,
-                observers @ _,
-                stakeholders,
-              ) =>
-            throw Error.ContractKeyNotVisible(coid, gk, actAs, readAs, stakeholders)
+          case IdeLedger.LookupContractNotVisible(_, _, _, _) => None
         }
       })
     }
@@ -404,16 +386,10 @@ private[lf] object IdeLedgerRunner {
                   val disclosedInsts =
                     disclosuresByKey.getOrElse(gkey, Vector.empty)
                   for {
-                    globalInsts <- ledger
-                      .lookupKey(
-                        gkey,
-                        committers,
-                        readAs,
-                        disclosedInsts,
-                      )
+                    globalInsts <- ledger.lookupKey(gkey, committers, readAs)
                       .left
                       .map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
-                  } yield disclosedInsts ++ globalInsts // Engine dedups for us (Paul thinks) TODO: verify
+                  } yield disclosedInsts ++ globalInsts.diff(disclosedInsts)
                 case NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) => Right(rest)
                 case NeedKeyProgression.InProgress(token) =>
                   throw new IllegalStateException(

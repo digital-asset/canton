@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PConnectionState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PConnectionState.P2PEndpointIdAssociationResult
@@ -22,7 +23,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Na
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AtomicUtil
-import io.grpc.stub.StreamObserver
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
@@ -91,7 +91,9 @@ final class P2PGrpcConnectionState(
   override def getNetworkRef(bftNodeId: BftNodeId): Option[P2PNetworkRef[BftOrderingMessage]] =
     stateRef.get().bftNodeIdToNetworkRef.get(bftNodeId).map(_.networkRef)
 
-  def getSender(p2pAddressId: P2PAddress.Id): Option[StreamObserver[BftOrderingMessage]] = {
+  def getSender(
+      p2pAddressId: P2PAddress.Id
+  ): Option[PeerSender] = {
     val state = stateRef.get()
     import state.*
     p2pAddressId match {
@@ -157,14 +159,14 @@ final class P2PGrpcConnectionState(
     */
   def addSenderIfMissing(
       bftNodeId: BftNodeId,
-      peerSender: StreamObserver[BftOrderingMessage],
+      peerSender: PeerSender,
   )(implicit traceContext: TraceContext): Boolean = {
     val (prevState, newState, result) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.addSenderIfMissing(bftNodeId, peerSender))
         .logAndExtract(
           logger,
-          prefix = s"Adding peer sender ${objId(peerSender)} for BFT node ID $bftNodeId: ",
+          prefix = s"Adding peer sender $peerSender for BFT node ID $bftNodeId: ",
         )
     logger.debug(s"P2P connection state before `addSenderIfMissing`: $prevState")
     logger.debug(s"P2P connection state after `addSenderIfMissing`: $newState")
@@ -210,7 +212,7 @@ final class P2PGrpcConnectionState(
       p2pAddressId: P2PAddress.Id,
       clearNetworkRefAssociations: Boolean,
       closeNetworkRef: Boolean,
-  )(implicit traceContext: TraceContext): Option[StreamObserver[BftOrderingMessage]] = {
+  )(implicit traceContext: TraceContext): Option[PeerSender] = {
     require(
       clearNetworkRefAssociations || !closeNetworkRef,
       "Cannot close network ref without clearing associations first",
@@ -246,12 +248,12 @@ final class P2PGrpcConnectionState(
   }
 
   def unassociateSenderAndReturnEndpointIds(
-      peerSender: StreamObserver[BftOrderingMessage]
+      peerSender: PeerSender
   )(implicit traceContext: TraceContext): Seq[P2PEndpoint.Id] = {
     val (prevState, newState, result) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.unassociateSenderAndReturnEndpointIds(peerSender))
-        .logAndExtract(logger, prefix = s"Unassociating sender ${objId(peerSender)}: ")
+        .logAndExtract(logger, prefix = s"Unassociating sender $peerSender: ")
     logger.debug(s"P2P connection state before `unassociateSenderAndReturnEndpointIds`: $prevState")
     logger.debug(s"P2P connection state after `unassociateSenderAndReturnEndpointIds`: $newState")
     result
@@ -282,8 +284,8 @@ object P2PGrpcConnectionState {
 
   private final case class State(
       // Node IDs and senders are in a 1:1 relationship, so we use a bidirectional mapping.
-      bftNodeIdToPeerSender: Map[BftNodeId, StreamObserver[BftOrderingMessage]] = Map.empty,
-      peerSenderToBftNodeId: Map[StreamObserver[BftOrderingMessage], BftNodeId] = Map.empty,
+      bftNodeIdToPeerSender: Map[BftNodeId, PeerSender] = Map.empty,
+      peerSenderToBftNodeId: Map[PeerSender, BftNodeId] = Map.empty,
 
       // Multiple endpoints may be associated to the same BFT node ID.
       p2pEndpointIdToBftNodeId: Map[P2PEndpoint.Id, BftNodeId] = Map.empty,
@@ -304,7 +306,7 @@ object P2PGrpcConnectionState {
         param(
           "bftNodeIdToPeerSender",
           _.bftNodeIdToPeerSender.map { case (bftNodeId, sender) =>
-            bftNodeId.doubleQuoted -> objId(sender)
+            bftNodeId.doubleQuoted -> sender.toString.unquoted
           },
         ),
         param(
@@ -402,18 +404,18 @@ object P2PGrpcConnectionState {
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     def addSenderIfMissing(
         bftNodeId: BftNodeId,
-        peerSender: StreamObserver[BftOrderingMessage],
+        peerSender: PeerSender,
     ): (State, ResultWithLogs[(State, State, Boolean)]) = {
       var updatedState = this
       var annotation = ""
       val result =
         if (!bftNodeIdToPeerSender.contains(bftNodeId)) {
-          annotation = s"Associating peer sender $bftNodeId <-> ${objId(peerSender)}"
+          annotation = s"Associating peer sender $bftNodeId <-> $peerSender"
           updatedState = biAssociateBftNodeIdWithPeerSender(bftNodeId, peerSender)
           true
         } else {
           annotation =
-            s"Not associating peer sender $bftNodeId <-> ${objId(peerSender)} because one for this node already exists"
+            s"Not associating peer sender $bftNodeId <-> $peerSender because one for this node already exists"
           false
         }
       updatedState -> ResultWithLogs(
@@ -432,7 +434,7 @@ object P2PGrpcConnectionState {
           (
               State,
               State,
-              Option[StreamObserver[BftOrderingMessage]],
+              Option[PeerSender],
               Option[P2PNetworkRef[BftOrderingMessage]],
           )
         ],
@@ -474,7 +476,7 @@ object P2PGrpcConnectionState {
                       (
                         this,
                         this,
-                        Option.empty[StreamObserver[BftOrderingMessage]],
+                        Option.empty[PeerSender],
                         Option.empty[P2PNetworkRef[BftOrderingMessage]],
                       ),
                       Level.DEBUG -> (() =>
@@ -515,7 +517,7 @@ object P2PGrpcConnectionState {
       }
 
     def unassociateSenderAndReturnEndpointIds(
-        peerSender: StreamObserver[BftOrderingMessage]
+        peerSender: PeerSender
     ): (State, ResultWithLogs[(State, State, Seq[P2PEndpoint.Id])]) =
       peerSenderToBftNodeId
         .get(peerSender)
@@ -523,7 +525,7 @@ object P2PGrpcConnectionState {
           this -> ResultWithLogs(
             (this, this, Seq.empty[P2PEndpoint.Id]),
             Level.DEBUG -> (() =>
-              s"Not removing peer sender ${objId(peerSender)} because it does not exist yet (or possibly removed as duplicate)"
+              s"Not removing peer sender $peerSender because it does not exist yet (or possibly removed as duplicate)"
             ),
           )
         } { bftNodeId =>
@@ -540,7 +542,7 @@ object P2PGrpcConnectionState {
                 case (endpointId, nodeId) if nodeId == bftNodeId => endpointId
               }.toSeq,
             ),
-            Level.DEBUG -> (() => s"Removed peer sender $bftNodeId <-> ${objId(peerSender)}"),
+            Level.DEBUG -> (() => s"Removed peer sender $bftNodeId <-> $peerSender"),
           )
         }
 
@@ -669,7 +671,7 @@ object P2PGrpcConnectionState {
 
     private def biAssociateBftNodeIdWithPeerSender(
         bftNodeId: BftNodeId,
-        peerSender: StreamObserver[BftOrderingMessage],
+        peerSender: PeerSender,
     ): State =
       copy(
         bftNodeIdToPeerSender = bftNodeIdToPeerSender.updated(bftNodeId, peerSender),
@@ -678,7 +680,7 @@ object P2PGrpcConnectionState {
 
     private def unassociateAndReturnPeerSender(
         bftNodeId: BftNodeId
-    ): ResultWithLogs[(State, State, Option[StreamObserver[BftOrderingMessage]])] =
+    ): ResultWithLogs[(State, State, Option[PeerSender])] =
       bftNodeIdToPeerSender
         .get(bftNodeId)
         .fold {
@@ -686,7 +688,7 @@ object P2PGrpcConnectionState {
             (
               this,
               this,
-              Option.empty[StreamObserver[BftOrderingMessage]],
+              Option.empty[PeerSender],
             ),
             Level.DEBUG -> (() =>
               s"Not removing connection state for $bftNodeId " +
@@ -701,7 +703,7 @@ object P2PGrpcConnectionState {
             )
           ResultWithLogs(
             (this, updatedState, Some(peerSender)),
-            Level.DEBUG -> (() => s"Removed  peer sender $bftNodeId <-> ${objId(peerSender)}"),
+            Level.DEBUG -> (() => s"Removed  peer sender $bftNodeId <-> $peerSender"),
           )
         }
 

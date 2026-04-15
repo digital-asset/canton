@@ -22,7 +22,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
 }
 import com.daml.ledger.api.v2.package_reference.PackageReference
 import com.daml.metrics.Timed
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
@@ -44,7 +43,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcFUSExtended
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.OptionUtil
 import io.grpc.ServerServiceDefinition
 import io.scalaland.chimney.auto.*
@@ -62,7 +61,6 @@ class ApiInteractiveSubmissionService(
     submissionIdGenerator: SubmissionIdGenerator,
     tracker: CommandProgressTracker,
     metrics: LedgerApiServerMetrics,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends InteractiveSubmissionServiceGrpc
@@ -76,7 +74,6 @@ class ApiInteractiveSubmissionService(
       request.userId,
       request.commandId,
       request.actAs,
-      telemetry,
     )
     prepareWithTraceContext(Traced(request)).asGrpcResponse
   }
@@ -121,7 +118,6 @@ class ApiInteractiveSubmissionService(
       request.userId,
       submitterInfo.map(_.commandId),
       submitterInfo.map(_.actAs).toList.flatten,
-      telemetry,
     )
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
@@ -160,7 +156,7 @@ class ApiInteractiveSubmissionService(
       request: GetPreferredPackageVersionRequest
   ): Future[GetPreferredPackageVersionResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     implicit val traceContext: TraceContext = loggingContextWithTrace.traceContext
 
@@ -190,7 +186,7 @@ class ApiInteractiveSubmissionService(
       request: GetPreferredPackagesRequest
   ): Future[GetPreferredPackagesResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     implicit val traceContext: TraceContext = loggingContextWithTrace.traceContext
 
@@ -210,7 +206,7 @@ class ApiInteractiveSubmissionService(
       request: GetPreferredPackagesRequest
   ): Future[Either[String, (Seq[PackageReference], String)]] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     implicit val traceContext: TraceContext = loggingContextWithTrace.traceContext
 
@@ -255,7 +251,6 @@ class ApiInteractiveSubmissionService(
       request.userId,
       submitterInfo.map(_.commandId),
       submitterInfo.map(_.actAs).toList.flatten,
-      telemetry,
     )
 
     implicit val loggingContextWithTrace: LoggingContextWithTrace =

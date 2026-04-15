@@ -15,7 +15,6 @@ import com.daml.ledger.api.v2.reassignment_commands.ReassignmentCommands
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.api.v2.transaction_filter.{Filters, TransactionFormat, UpdateFormat}
 import com.daml.ledger.api.v2.update_service.{GetUpdateByIdRequest, GetUpdateResponse}
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.config
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -300,7 +299,6 @@ private[apiserver] object CommandServiceImpl {
       updateServices: UpdateServices,
       timeProvider: TimeProvider,
       maxDeduplicationDuration: config.NonNegativeFiniteDuration,
-      telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
@@ -320,7 +318,6 @@ private[apiserver] object CommandServiceImpl {
       currentUtcTime = () => Instant.now,
       maxDeduplicationDuration = maxDeduplicationDuration.asJava,
       generateSubmissionId = SubmissionIdGenerator.Random,
-      telemetry = telemetry,
       loggerFactory = loggerFactory,
     )
 

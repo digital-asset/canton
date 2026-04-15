@@ -113,6 +113,13 @@ message User {
   //
   // Optional
   string identity_provider_id = 5;
+
+  // If set to true, the user may authenticate against the Ledger API by signing
+  // a Party JWT using the primary party's signing key.
+  // Modifiable
+  //
+  // Optional
+  bool primary_party_authentication = 6;
 }
 
 // A right granted to a user.

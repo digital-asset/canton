@@ -184,7 +184,9 @@ object ExampleTransactionFactory {
         templateId,
         packageName,
         value,
-        com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey(value.toString),
+        // This hash is wrong for PV35, but it doesn't matter if it's only used in serialization/deserialization tests.
+        // We need it to be that way however for `fromProtoV30` and `toProtoV30` to be consistent.
+        com.digitalasset.daml.lf.crypto.Hash.assertHashContractKey(templateId, packageName, value),
       ),
     )
 
@@ -293,14 +295,15 @@ object ExampleTransactionFactory {
       exerciseResult = exerciseResult,
     ).copy(children = ImmArray.empty)
 
-  def lookupByKeyNode(
+  def queryByKeyNode(
       key: LfGlobalKey,
       maintainers: Set[LfPartyId] = Set.empty,
-      resolution: Option[LfContractId] = None,
-  ): LfNodeLookupByKey =
-    LfNodeLookupByKey(
+      resolution: Vector[LfContractId] = Vector.empty,
+  ): LfNodeQueryByKey =
+    LfNodeQueryByKey(
       templateId = key.templateId,
       packageName = key.packageName,
+      exhaustive = false,
       key = LfGlobalKeyWithMaintainers(key, maintainers),
       result = resolution,
       version = serializationVersion,
@@ -1033,7 +1036,7 @@ class ExampleTransactionFactory(
 
   case object EmptyTransaction extends ExampleTransaction {
 
-    override def keyResolver: LfKeyResolver = Map.empty
+    override def keyResolver: LfGlobalKeyMapping = Map.empty
 
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
@@ -1054,7 +1057,7 @@ class ExampleTransactionFactory(
     override def reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =
@@ -1196,8 +1199,8 @@ class ExampleTransactionFactory(
     def metadata: TransactionMetadata =
       mkMetadata(nodeSeed.fold(Map.empty[LfNodeId, LfHash])(seed => Map(nodeId -> seed)))
 
-    override def keyResolver: LfKeyResolver =
-      node.gkeyOpt.fold(Map.empty: LfKeyResolver)(k =>
+    override def keyResolver: LfGlobalKeyMapping =
+      node.gkeyOpt.fold(Map.empty: LfGlobalKeyMapping)(k =>
         Map(k -> LfTransactionUtil.contractIds(node))
       )
 
@@ -1238,7 +1241,7 @@ class ExampleTransactionFactory(
     override lazy val reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =
@@ -1667,7 +1670,7 @@ class ExampleTransactionFactory(
     override def versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(examples.map(_.nodeId.index), examples.map(_.lfNode)*)
 
-    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+    override def keyResolver: LfGlobalKeyMapping = Map.empty // No keys involved here
 
     override def rootViewDecompositions: Seq[NewView] =
       examples.flatMap(_.rootViewDecompositions)
@@ -1698,7 +1701,7 @@ class ExampleTransactionFactory(
     override def reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] = {
@@ -1893,7 +1896,7 @@ class ExampleTransactionFactory(
       )
     )
 
-    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+    override def keyResolver: LfGlobalKeyMapping = Map.empty // No keys involved here
 
     override lazy val rootViewDecompositions: Seq[NewView] = {
       val v0 = awaitCreateNewView(
@@ -2098,7 +2101,7 @@ class ExampleTransactionFactory(
     override lazy val reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =
@@ -2356,7 +2359,7 @@ class ExampleTransactionFactory(
       )
     )
 
-    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+    override def keyResolver: LfGlobalKeyMapping = Map.empty // No keys involved here
 
     override lazy val rootViewDecompositions: Seq[NewView] = {
       val v0 = awaitCreateNewView(
@@ -2603,7 +2606,7 @@ class ExampleTransactionFactory(
     override lazy val reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =
@@ -2914,7 +2917,7 @@ class ExampleTransactionFactory(
       )
     )
 
-    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+    override def keyResolver: LfGlobalKeyMapping = Map.empty // No keys involved here
 
     override lazy val rootViewDecompositions: Seq[NewView] = {
       val v0 = awaitCreateNewView(
@@ -3247,7 +3250,7 @@ class ExampleTransactionFactory(
     override lazy val reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =
@@ -3534,7 +3537,7 @@ class ExampleTransactionFactory(
       )
     )
 
-    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+    override def keyResolver: LfGlobalKeyMapping = Map.empty // No keys involved here
 
     override def rootViewDecompositions: Seq[TransactionViewDecomposition.NewView] = {
       val v0 = awaitCreateNewView(
@@ -3676,7 +3679,7 @@ class ExampleTransactionFactory(
     override def reinterpretedSubtransactions: Seq[
       (
           FullTransactionViewTree,
-          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          (LfVersionedTransaction, TransactionMetadata, LfGlobalKeyMapping),
           Witnesses,
       )
     ] =

@@ -137,7 +137,6 @@ class BlockSequencerTest
       topologyClient,
       defaultStaticSynchronizerParameters,
       topologyTransactionFactory.syncCryptoClient.crypto,
-      BatchingConfig().parallelism,
       CachingConfigs.defaultPublicKeyConversionCache,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
@@ -170,6 +169,7 @@ class BlockSequencerTest
         ),
         loggerFactory,
       )
+
     private val blockSequencer =
       new BlockSequencer(
         blockOrderer = fakeBlockOrderer,
@@ -198,6 +198,7 @@ class BlockSequencerTest
         ),
         metrics = SequencerMetrics.noop(this.getClass.getName),
         batchingConfig = BatchingConfig(),
+        consistencyChecks = true,
         loggerFactory = loggerFactory,
         exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,

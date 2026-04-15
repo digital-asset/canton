@@ -114,8 +114,9 @@ class JsonUserApiTest
             Uri.Path("/v2/users"),
             user_management_service
               .CreateUserRequest(
-                user =
-                  Some(user_management_service.User(randomUserInIdp, "", false, None, "idp-1")),
+                user = Some(
+                  user_management_service.User(randomUserInIdp, "", false, None, "idp-1", false)
+                ),
                 rights = Nil,
               )
               .asJson,
@@ -170,7 +171,7 @@ class JsonUserApiTest
           Uri.Path("/v2/users"),
           user_management_service
             .CreateUserRequest(
-              user = Some(user_management_service.User(randomUser, "", false, None, "")),
+              user = Some(user_management_service.User(randomUser, "", false, None, "", false)),
               rights = Nil,
             )
             .asJson,

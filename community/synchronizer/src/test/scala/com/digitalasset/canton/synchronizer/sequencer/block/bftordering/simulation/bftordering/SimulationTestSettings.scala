@@ -28,6 +28,7 @@ final case class TopologySettings(
     becomingOnlineAfterOnboardingDelay: FiniteDuration =
       TopologySettings.DefaultBecomingOnlineAfterOnboardingDelay,
     retryBecomingOnlineInterval: FiniteDuration = 1.second,
+    retryAddEndpointInterval: FiniteDuration = 5.seconds,
     nodesToOffboard: Seq[P2PEndpoint] = Seq.empty,
     offboardDistribution: PowerDistribution = defaultOffboardDistribution,
     crashAfterOnboardDistribution: Option[PowerDistribution] = None,

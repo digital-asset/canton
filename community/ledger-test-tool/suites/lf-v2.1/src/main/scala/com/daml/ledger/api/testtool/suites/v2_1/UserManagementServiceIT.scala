@@ -89,6 +89,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = idpId1,
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -158,6 +159,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -208,6 +210,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -265,6 +268,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -279,6 +283,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = idpIdNonDefault,
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -343,6 +348,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -357,6 +363,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = idpId1,
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -497,6 +504,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
           identityProviderId = "",
           isDeactivated = false,
           metadata = None,
+          primaryPartyAuthentication = false,
         ),
         List.empty,
         RequestValidationErrors.InvalidField,
@@ -509,6 +517,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
           identityProviderId = "",
           isDeactivated = false,
           metadata = None,
+          primaryPartyAuthentication = false,
         ),
         List.empty,
         RequestValidationErrors.InvalidArgument,
@@ -522,6 +531,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
           identityProviderId = "",
           isDeactivated = false,
           metadata = None,
+          primaryPartyAuthentication = false,
         ),
         List(r),
         RequestValidationErrors.InvalidArgument,
@@ -592,6 +602,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
             identityProviderId = "",
             isDeactivated = false,
             metadata = None,
+            primaryPartyAuthentication = false,
           )
         ),
         rights = Seq.empty,
@@ -636,6 +647,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
             identityProviderId = "",
             isDeactivated = false,
             metadata = None,
+            primaryPartyAuthentication = false,
           )
         ),
         rights = Seq.empty,
@@ -683,6 +695,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
             identityProviderId = "",
             isDeactivated = false,
             metadata = None,
+            primaryPartyAuthentication = false,
           )
         ),
         rights = Seq.empty,
@@ -738,6 +751,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           rights = userRights,
@@ -785,6 +799,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
             primaryParty = "",
             identityProviderId = "",
             isDeactivated = false,
+            primaryPartyAuthentication = false,
           )
         ),
       )
@@ -804,6 +819,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       metadata = Some(ObjectMeta.defaultInstance),
       identityProviderId = "",
       isDeactivated = false,
+      primaryPartyAuthentication = false,
     )
     val user2 = User(
       id = userId2,
@@ -811,6 +827,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       metadata = Some(ObjectMeta.defaultInstance),
       identityProviderId = "",
       isDeactivated = false,
+      primaryPartyAuthentication = false,
     )
     for {
       res1 <- ledger.createUser(
@@ -834,6 +851,35 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
   }
 
   userManagementTest(
+    "TestPrimaryPartyAuthenticationCreateUser",
+    "Exercise CreateUser rpc with primaryPartyAuthentication",
+  ) { implicit ec => implicit ledger => _ =>
+    val userId1 = ledger.nextUserId()
+    val userId2 = ledger.nextUserId()
+    val user1 = newUser(
+      id = userId1,
+      primaryParty = "party1",
+      primaryPartyAuthentication = false,
+    )
+    val user2 = newUser(
+      id = userId2,
+      primaryParty = "party2",
+      primaryPartyAuthentication = true,
+    )
+    for {
+      createRes1 <- ledger.createUser(CreateUserRequest(Some(user1), Nil))
+      createRes2 <- ledger.createUser(CreateUserRequest(Some(user2), Nil))
+      getRes1 <- ledger.userManagement.getUser(GetUserRequest(userId1, ""))
+      getRes2 <- ledger.userManagement.getUser(GetUserRequest(userId2, ""))
+    } yield {
+      assertEquals(unsetResourceVersion(createRes1), CreateUserResponse(Some(user1)))
+      assertEquals(unsetResourceVersion(createRes2), CreateUserResponse(Some(user2)))
+      assertEquals(unsetResourceVersion(getRes1), GetUserResponse(Some(user1)))
+      assertEquals(unsetResourceVersion(getRes2), GetUserResponse(Some(user2)))
+    }
+  }
+
+  userManagementTest(
     shortIdentifier = "TestInvalidResourceVersionInCreateUser",
     description = "Exercise CreateUser rpc using resource version",
   ) { implicit ec => implicit ledger => _ =>
@@ -849,6 +895,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       ),
       identityProviderId = "",
       isDeactivated = false,
+      primaryPartyAuthentication = false,
     )
     for {
       res <- ledger
@@ -901,6 +948,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     for {
       _ <- ledger.createUser(
@@ -989,6 +1037,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1003,6 +1052,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1017,6 +1067,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1031,6 +1082,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1055,6 +1107,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Seq.empty,
@@ -1145,6 +1198,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1159,6 +1213,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
               identityProviderId = "",
               isDeactivated = false,
               metadata = None,
+              primaryPartyAuthentication = false,
             )
           ),
           Nil,
@@ -1197,6 +1252,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
           isDeactivated = false,
           metadata = None,
           identityProviderId = "",
+          primaryPartyAuthentication = false,
         )
       )
     for {
@@ -1228,6 +1284,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     for {
       _ <- ledger.createUser(CreateUserRequest(Some(user), Nil))
@@ -1254,6 +1311,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     for {
       _ <- ledger.createUser(CreateUserRequest(Some(user), Nil))
@@ -1274,6 +1332,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     val suffix = UUID.randomUUID().toString
     for {
@@ -1321,6 +1380,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     val suffix = UUID.randomUUID().toString
     val party = s"acting-party-1-$suffix"
@@ -1353,6 +1413,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     val partyHint = ledger.nextPartyId()
     val allocationHelper = ExternalPartyAllocationHelper(ledger)
@@ -1400,6 +1461,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       identityProviderId = "",
       isDeactivated = false,
       metadata = None,
+      primaryPartyAuthentication = false,
     )
     val suffix = UUID.randomUUID().toString
     for {
@@ -1449,6 +1511,7 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       metadata = Some(ObjectMeta.defaultInstance),
       identityProviderId = "",
       isDeactivated = false,
+      primaryPartyAuthentication = false,
     )
     val suffix = UUID.randomUUID().toString
     for {

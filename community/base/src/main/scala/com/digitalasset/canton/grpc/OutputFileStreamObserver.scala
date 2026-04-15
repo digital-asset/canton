@@ -35,12 +35,12 @@ class OutputFileStreamObserver[T](
     }
 
   override def onError(t: Throwable): Unit = {
-    requestComplete.tryFailure(t).discard
     os.close()
+    requestComplete.tryFailure(t).discard
   }
 
   override def onCompleted(): Unit = {
-    requestComplete.trySuccess(()).discard
     os.close()
+    requestComplete.trySuccess(()).discard
   }
 }

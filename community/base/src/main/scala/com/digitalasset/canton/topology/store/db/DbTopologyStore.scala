@@ -337,25 +337,77 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
             s"cannot transfer topology from a topology store of type ${store.getClass} to $this"
           )
       }
-      mappingTypeInClause = DbStorage.toInClause(
-        "transaction_type",
-        TopologyMapping.Code.lsuMappingsExcludedFromUpgrade,
+
+      // Resume point: max source id whose row is already present in the target.
+      // Each chunk is written atomically and chunks are processed sequentially in
+      // ascending source-id order, so on crash recovery we can safely restart from
+      // the last id present in the target — every smaller eligible id is guaranteed
+      // to have been copied.
+      resumeFromId <- storage.query(
+        sql"""select coalesce(max(src.id), -1)
+            from common_topology_transactions src
+            join common_topology_transactions tgt
+              on tgt.store_id = $storeIndex
+             and tgt.valid_from = src.valid_from
+             and tgt.batch_idx = src.batch_idx
+           where src.store_id = ${sourceDbStore.storeIndex}""".as[Long].head,
+        functionFullName,
       )
 
-      // The filters here must be kept in sync with the filters in
-      // - GrpcTopologyManagerReadService.logicalUpgradeState
-      // - InMemoryTopologyStore.copyFromPredecessorSynchronizerStore
-      insert = sql"""
-               insert into common_topology_transactions (store_id, sequenced, valid_from, batch_idx, valid_until, transaction_type, namespace, identifier,
-                  mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, representative_protocol_version, hash_of_signatures)
-               select $storeIndex as store_id, sequenced, valid_from, batch_idx, valid_until, transaction_type, namespace,
-                  identifier, mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, representative_protocol_version, hash_of_signatures
-               from common_topology_transactions
-               where store_id = ${sourceDbStore.storeIndex} and (is_proposal = false or valid_until is null) and rejection_reason is null and not """ ++ mappingTypeInClause ++ sql" order by id" ++
-        sql" ON CONFLICT DO NOTHING" // idempotency-"conflict" based on common_topology_transactions unique constraint
-      numInserted <- storage.update(insert.asUpdate, functionFullName)
+      _ = if (resumeFromId >= 0)
+        logger.info(
+          s"Resuming topology transfer from $sourcePsid to $targetPsid after source id $resumeFromId"
+        )
+
+      numInserted <- copyFromPredecessorBatched(
+        sourceDbStore,
+        batchSize = batchingConfig.maxTopologyWriteBatchSize.value,
+        lastId = resumeFromId,
+        totalInserted = 0,
+      )
     } yield {
       logger.info(s"Transferred $numInserted topology transactions from $sourcePsid to $targetPsid")
+    }
+  }
+
+  private def copyFromPredecessorBatched(
+      sourceDbStore: DbTopologyStore[SynchronizerStore],
+      batchSize: Int,
+      lastId: Long,
+      totalInserted: Int,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {
+
+    val mappingTypeInClause = DbStorage.toInClause(
+      "transaction_type",
+      TopologyMapping.Code.lsuMappingsExcludedFromUpgrade,
+    )
+
+    // The filters here must be kept in sync with the filters in
+    // - GrpcTopologyManagerReadService.logicalUpgradeState
+    // - InMemoryTopologyStore.copyFromPredecessorSynchronizerStore
+    val filters =
+      sql"store_id = ${sourceDbStore.storeIndex} and (is_proposal = false or valid_until is null) and rejection_reason is null and not " ++ mappingTypeInClause
+
+    val selectMaxId =
+      sql"select max(id) from (select id from common_topology_transactions where id > $lastId and " ++
+        filters ++ sql" order by id " ++ storage.limitSql(batchSize) ++ sql") as next_window"
+
+    storage.query(selectMaxId.as[Option[Long]].head, functionFullName).flatMap {
+      case None => FutureUnlessShutdown.pure(totalInserted)
+      case Some(maxId) =>
+        val insert =
+          sql"""
+              insert into common_topology_transactions (store_id, sequenced, valid_from, batch_idx, valid_until, transaction_type, namespace, identifier,
+                   mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, representative_protocol_version, hash_of_signatures)
+                select $storeIndex as store_id, sequenced, valid_from, batch_idx, valid_until, transaction_type, namespace,
+                   identifier, mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, representative_protocol_version, hash_of_signatures
+                from common_topology_transactions
+               where id > $lastId and id <= $maxId and """ ++ filters ++ sql" order by id" ++
+            sql" ON CONFLICT DO NOTHING" // idempotency-"conflict" based on common_topology_transactions unique constraint
+
+        storage.update(insert.asUpdate, functionFullName).flatMap { numInserted =>
+          copyFromPredecessorBatched(sourceDbStore, batchSize, maxId, totalInserted + numInserted)
+        }
     }
   }
 

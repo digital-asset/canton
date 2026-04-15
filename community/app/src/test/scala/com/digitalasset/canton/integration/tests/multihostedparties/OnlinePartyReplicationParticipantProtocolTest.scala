@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import cats.Monad
+import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{BatchingConfig, ConsoleCommandTimeout}
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -24,8 +26,10 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationIndexingWorkflow,
+  PartyReplicationStatus,
+}
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
 import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationSourceParticipantProcessor,
@@ -43,6 +47,7 @@ import com.digitalasset.canton.{RepairCounter, config}
 
 import scala.annotation.nowarn
 import scala.concurrent.Future
+import scala.concurrent.duration.*
 import scala.util.chaining.scalaUtilChainingOps
 
 /** Objectives:
@@ -203,20 +208,21 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       def noOpProgressAndCompletionCallback[T]: T => Unit = _ => ()
       def noOpProgressAndCompletionCallback2[T, U]: (T, U) => Unit = (_, _) => ()
       val inMemoryStorageForTesting = new MemoryStorage(loggerFactory, timeouts)
+      val replicationParams = PartyReplicationStatus.ReplicationParams(
+        requestId,
+        alice,
+        daId,
+        sourceParticipant.id,
+        targetParticipant.id,
+        serial = PositiveInt.one,
+        ParticipantPermission.Observation,
+      )
       val initialStatus = PartyReplicationStatus(
-        PartyReplicationStatus.ReplicationParams(
-          requestId,
-          alice,
-          daId,
-          sourceParticipant.id,
-          targetParticipant.id,
-          PositiveInt.one,
-          ParticipantPermission.Observation,
-        ),
+        replicationParams,
         testedProtocolVersion,
         replicationO = Some(
           PartyReplicationStatus.PersistentProgress(
-            processedContractCount = NonNegativeInt.zero,
+            processedContractCount = NonNegativeLong.zero,
             nextPersistenceCounter = RepairCounter.Genesis,
             fullyProcessedAcs = false,
           )
@@ -262,8 +268,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         noOpProgressAndCompletionCallback2,
         targetParticipant.underlying.value.sync.participantNodePersistentState,
         connectedSynchronizer,
-        AlphaOnlinePartyReplicationConfig(pauseSynchronizerIndexingDuringPartyReplication = true),
-        BatchingConfig(),
         futureSupervisor,
         exitOnFatalFailures = false,
         timeouts,
@@ -273,6 +277,12 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
             // wait for a handful of contracts
             canTargetParticipantProceed || _.processedContractCount.unwrap < handfulOfContractsCountToProcessBeforePausing
           ),
+      )
+      val targetParticipantIndexingWorkflow = new PartyReplicationIndexingWorkflow(
+        targetParticipant.underlying.value.sync.participantNodePersistentState.map(_.contractStore),
+        pauseSynchronizerIndexingDuringPartyReplication = true,
+        BatchingConfig(),
+        loggerFactory,
       )
 
       val sessionKeyOwner = true
@@ -354,6 +364,48 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       canTargetParticipantProceed = true
       targetProcessor.progressPartyReplication()
 
+      eventually(timeUntilSuccess = 1.minute) {
+        sourceProcessor.hasChannelCompleted shouldBe true
+        targetProcessor.hasChannelCompleted shouldBe true
+      }
+
+      logger.info("Sequencer channel based party replication processing completed on SP and TP")
+
+      // Since this tests the party replication sequencer-channel protocol at a "lower level"
+      // directly instantiating source and target participant protocol processors rather than
+      // via the PartyReplicator, explicitly index the replicated ACS so that the changes
+      // become visible via the Ledger API. Indexing is only started after ACS replication has
+      // completed above.
+      logger.info("Index contract activation changes on TP")
+      val indexingStore =
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+          .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
+      val recordOrderPublisher = connectedSynchronizer.ephemeral.recordOrderPublisher
+      val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+      Monad[FutureUnlessShutdown]
+        .tailRecM(
+          initialStatus.setIndexing().indexingO.getOrElse(fail("indexing just created"))
+        )(
+          targetParticipantIndexingWorkflow
+            .indexNextContractActivationChangeBatch(
+              replicationParams,
+              _,
+              indexingStore,
+              recordOrderPublisher,
+              pureCrypto,
+            )
+            .fold(
+              // Stop recursion if we get an error which will fail the test
+              err => Right(Left(err)),
+              updatedProgress =>
+                // Or stop if we are done indexing
+                Either
+                  .cond(updatedProgress.isIndexingCurrentlyAlmostDone, Right(()), updatedProgress),
+            )
+        )
+        .futureValueUS
+        .valueOr[Unit](err => s"Indexing failed: $err")
+
       clue(s"Creating contract $lastContractIndex")(
         createCycleContract(
           sourceParticipant,
@@ -362,13 +414,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           optTimeout = Some(ConsoleCommandTimeout.defaultLedgerCommandsTimeout),
         )
       )
-
-      eventually() {
-        sourceProcessor.hasChannelCompleted shouldBe true
-        targetProcessor.hasChannelCompleted shouldBe true
-      }
-
-      logger.info("Channel completed on SP and TP")
 
       logger.info("Check that the contracts are now visible on TP via the Ledger API")
       val sourceContractIds = sourceParticipant.ledger_api.state.acs

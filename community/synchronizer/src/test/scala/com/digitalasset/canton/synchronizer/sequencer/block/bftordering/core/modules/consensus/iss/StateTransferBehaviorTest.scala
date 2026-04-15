@@ -289,11 +289,12 @@ class StateTransferBehaviorTest
           )
 
           val becomes = context.extractBecomes()
+          val aTopologyInfoWithPV = aTopologyInfo
           inside(becomes) {
             case Seq(
                   consensusModule @ IssConsensusModule(
                     None, // snapshotAdditionalInfo
-                    `aTopologyInfo`,
+                    `aTopologyInfoWithPV`,
                     futurePbftMessageQueue,
                     Some(Seq()), // queuedConsensusMessages
                   )
@@ -349,6 +350,7 @@ class StateTransferBehaviorTest
       verify(availabilityMock, times(1)).asyncSend(
         Availability.Consensus.UpdateTopologyDuringStateTransfer[ProgrammableUnitTestEnv](
           aMembership,
+          newEpochNumber,
           DelegationCryptoProvider(aFakeCryptoProviderInstance, aFakeCryptoProviderInstance),
         )
       )
@@ -423,14 +425,20 @@ class StateTransferBehaviorTest
       val (context, stateTransferBehavior) = createStateTransferBehavior()
       implicit val ctx: ContextType = context
 
-      val callbackCell = new SingleUseCell[(EpochNumber, Set[BftNodeId])]
-      def callback(epochNumber: EpochNumber, nodes: Set[BftNodeId]): Unit =
-        callbackCell.putIfAbsent(epochNumber -> nodes)
+      val callbackCell = new SingleUseCell[Consensus.Admin.GetOrderingTopologyResponse]
+      def callback(response: Consensus.Admin.GetOrderingTopologyResponse): Unit =
+        callbackCell.putIfAbsent(response)
 
       stateTransferBehavior.receive(Consensus.Admin.GetOrderingTopology(callback))
 
       callbackCell.get shouldBe
-        Some(Bootstrap.BootstrapEpochNumber -> aMembership.orderingTopology.nodes)
+        Some(
+          Consensus.Admin.GetOrderingTopologyResponse(
+            Bootstrap.BootstrapEpochNumber,
+            aMembership.orderingTopology.nodes,
+            aMembership.orderingTopology.sequencingParameters,
+          )
+        )
     }
   }
 
@@ -604,27 +612,28 @@ object StateTransferBehaviorTest {
     TopologyActivationTime(CantonTimestamp.Epoch),
   )
   private val otherId: BftNodeId = BftNodeId("other")
-  private def aMembership =
+  private def aMembership(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, otherNodes = Set(otherId), epochLength = TestEpochLength)
-  private val anEpoch = EpochState.Epoch(
+  private def anEpoch(implicit pv: ProtocolVersion) = EpochState.Epoch(
     anEpochInfo,
     currentMembership = aMembership,
     previousMembership = aMembership,
   )
   private val anEpochStoreEpoch = EpochStore.Epoch(anEpochInfo, Seq.empty)
 
-  private val anOrderingTopology = aMembership.orderingTopology
+  private def anOrderingTopology(implicit pv: ProtocolVersion) = aMembership.orderingTopology
   private val aFakeCryptoProviderInstance: CryptoProvider[ProgrammableUnitTestEnv] =
     failingCryptoProvider
-  private val aTopologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
-    myId,
-    anOrderingTopology,
-    aFakeCryptoProviderInstance,
-    aMembership.leaders,
-    previousTopology = anOrderingTopology, // Not relevant
-    aFakeCryptoProviderInstance,
-    aMembership.leaders,
-  )
+  private def aTopologyInfo(implicit pv: ProtocolVersion) =
+    OrderingTopologyInfo[ProgrammableUnitTestEnv](
+      myId,
+      anOrderingTopology,
+      aFakeCryptoProviderInstance,
+      aMembership.leaders,
+      previousTopology = anOrderingTopology, // Not relevant
+      aFakeCryptoProviderInstance,
+      aMembership.leaders,
+    )
 
   private def aCommitCert(implicit synchronizerProtocolVersion: ProtocolVersion) =
     CommitCertificate(

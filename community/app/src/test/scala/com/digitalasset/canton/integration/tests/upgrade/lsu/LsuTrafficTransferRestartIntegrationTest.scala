@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,7 +11,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
@@ -184,12 +183,13 @@ abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Tra
           What can happen is the following:
           - p2 is stopped after it responds to the ping but before the clean synchronizer index marks the ping response as clean
           - Upon restart, it processes the ping again and responds again.
-          - Because the restart is past upgrade time, the confirmation requests is dropped by the sequencer,
-            which leads to a timed out warning in the logs.
+          - Because the restart is past upgrade time, the confirmation response is rejected by the sequencer.
          */
         (
-          LogEntryOptionality.Optional,
-          _.warningMessage should (include("Response message for request") and include("timed out")),
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should (include(
+            s"Submission request was refused because the sequencer can no longer accept transactions on ${fixture.currentPsid}"
+          )),
         ),
         (
           LogEntryOptionality.OptionalMany,
@@ -200,23 +200,12 @@ abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Tra
   }
 }
 
-final class LsuReferenceTrafficTransferRestartIntegrationTest
+final class LsuBftOrderingTrafficTransferRestartTest
     extends LsuTrafficTransferRestartIntegrationTest {
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
     )
   )
 }
-
-// TODO(#16789) Re-enable test once dynamic onboarding (traffic control) is supported for DA BFT
-//final class LsuBftOrderingTrafficTransferRestartTest
-//  extends LsuTrafficTransferRestartIntegrationTest {
-//    registerPlugin(
-//      new UseBftSequencer(
-//        loggerFactory,
-//        MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
-//      )
-//    )
-//}

@@ -90,8 +90,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectionListener,
 }
-import com.digitalasset.canton.participant.synchronizer.*
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
+import com.digitalasset.canton.participant.synchronizer.{PendingLsuOperation, *}
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
@@ -183,12 +182,12 @@ class CantonSyncService(
     with HasCloseContext
     with InternalIndexServiceProviderImpl {
 
-  private val pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore =
+  private val pendingLsuOperationsStore: PendingLsuOperation.Store =
     PendingOperationStore(
       syncPersistentStateManager.storage,
       timeouts,
       loggerFactory,
-      PendingHandshakeWithLsuSuccessor,
+      PendingLsuOperation,
       PhysicalSynchronizerId.fromString,
     )
 
@@ -210,7 +209,7 @@ class CantonSyncService(
     resourceManagementService,
     parameters,
     connectedSynchronizerFactory,
-    pendingHandshakesWithSuccessorsStore,
+    pendingLsuOperationsStore,
     metrics,
     sequencerInfoLoader,
     isActive,
@@ -459,7 +458,7 @@ class CantonSyncService(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       _estimatedInterpretationCost: Long,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -564,7 +563,7 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       explicitlyDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -1140,6 +1139,7 @@ class CantonSyncService(
   def finishLSUs()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    // psid -> successor for all successors that are a LsuTarget
     val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
       synchronizerConnectionConfigStore
         .getAll()
@@ -1174,23 +1174,22 @@ class CantonSyncService(
     }
   }
 
-  /** All pending handshakes with LSU successors are attempted. They are done in parallel and we
-    * don't wait on the result.
+  /** All pending LSU operations (handshake and/or topology copy) are resumed. They are done in
+    * parallel and we don't wait on the result.
     */
-  def attemptPendingHandshakesSuccessors()(implicit traceContext: TraceContext): Unit = {
-    val resF: FutureUnlessShutdown[Unit] = pendingHandshakesWithSuccessorsStore
-      .getAll(PendingHandshakeWithLsuSuccessor.operationName)
-      .map(_.foreach { pendingHandshake =>
+  def attemptPendingLsuOperations()(implicit traceContext: TraceContext): Unit = {
+    val resF: FutureUnlessShutdown[Unit] = pendingLsuOperationsStore
+      .getAll(PendingLsuOperation.operationName)
+      .map(_.foreach { pending =>
         EitherTUtil.doNotAwaitUS(
-          performPureHandshake(pendingHandshake.operation.successorPsid),
-          message =
-            s"Failed to perform the synchronizer handshake with ${pendingHandshake.operation.successorPsid}",
+          connectionsManager.resumePendingLsuOperation(pending.operation.successorPsid),
+          message = s"Failed to resume pending LSU operation for ${pending.operation.successorPsid}",
         )
       })
 
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
       future = resF,
-      failureMessage = "Failed to perform handshakes",
+      failureMessage = "Failed to resume pending LSU operations",
     )
   }
 
@@ -1284,7 +1283,7 @@ class CantonSyncService(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    connectionsManager.performPureHandshake(psid)
+    connectionsManager.performPureHandshake(psid).map(_ => ())
 
   /** Disconnect the given synchronizer from the sync service. */
   def disconnectSynchronizer(
@@ -1722,7 +1721,7 @@ class CantonSyncService(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit

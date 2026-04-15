@@ -99,7 +99,7 @@ object HttpServiceUserFixture {
           .map(Right.Kind.CanReadAs.apply)
           .map(Right.apply)
       val createUserRequest =
-        CreateUserRequest(Some(User(username, "", false, None, "")), rights).asJson
+        CreateUserRequest(Some(User(username, "", false, None, "", false)), rights).asJson
       postRequest(
         uri.withPath(Uri.Path("/v2/users")),
         createUserRequest,

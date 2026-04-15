@@ -3,10 +3,16 @@
 
 package com.digitalasset.canton.platform.multisynchronizer
 
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.api.{AcsContinuationToken, CumulativeFilter, EventFormat}
+import com.digitalasset.canton.ledger.api.{
+  AcsContinuationToken,
+  AcsRangeInfo,
+  CumulativeFilter,
+  EventFormat,
+}
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   ReassignmentInfo,
@@ -26,11 +32,11 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.Node
 import com.digitalasset.daml.lf.value.Value
+import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.collection.mutable
-import scala.concurrent.Future
 
 class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
   behavior of "MultiSynchronizer contract lookup"
@@ -102,9 +108,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       )
     )
 
-  it should "support continuation of ACS stream with incomplete reassignments" in {
-    val party = Ref.Party.assertFromString("party1")
-
+  def setupEvents(party: Party) = {
     val (createC1, contracts1) = mkTransaction(createContract(party))
     val (createC2, contracts2) = mkTransaction(createContract(party))
     val incompleteUnassignC1 =
@@ -145,6 +149,11 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       createC8 -> contracts8, // std activation
       incompleteAssignC9 -> contracts9, // incomplete assign
     )
+  }
+
+  it should "support continuation of ACS stream with incomplete reassignments" in {
+    val party = Ref.Party.assertFromString("party1")
+    setupEvents(party)
 
     val eventFormat = EventFormat(
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
@@ -155,22 +164,49 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     val allContracts = getAcsF(eventFormat, None).futureValue
     allContracts should have length (4 + 4 + 3 * 4)
 
-    val continuationTokens = allContracts.map(c =>
-      AcsContinuationToken
-        .decodeAndValidate(
-          AcsContinuationToken.emptyChecksum,
-          Some(c.streamContinuationToken),
-        )
-        .getOrElse(sys.error("Cannot decode continuation token"))
-        .getOrElse(sys.error("Missing continuation token"))
-    )
+    val continuationPointers = allContracts.map(_.streamContinuationToken)
     for {
-      i <- continuationTokens.indices
+      i <- continuationPointers.indices
     } yield {
-      val continuation = getAcsF(eventFormat, Some(continuationTokens(i))).futureValue
+      val continuation = getAcsF(eventFormat, Some(continuationPointers(i))).futureValue
       (allContracts.take(i + 1) ++ continuation) should equal(allContracts)
     }
   }
+
+  it should "support ACS pagination with incomplete reassignments" in {
+    val party = Ref.Party.assertFromString("party1")
+    setupEvents(party)
+
+    val eventFormat = EventFormat(
+      filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
+      filtersForAnyParty = None,
+      verbose = false,
+    )
+
+    val allContracts = getAcsF(eventFormat, None).futureValue
+    allContracts should have length (4 + 4 + 3 * 4 + 10 /*from the previous test*/ )
+
+    def getAllPages(pageSize: Int) = Vector.unfold(None: Option[ByteString]) { continuationToken =>
+      getAcsF(eventFormat, continuationToken, Some(pageSize))
+        .map(page =>
+          if (page.isEmpty) None
+          else Some(page -> page.lastOption.map(_.streamContinuationToken))
+        )
+        .futureValue
+    }
+
+    val pagesWithSize1 = getAllPages(1)
+    pagesWithSize1 should contain theSameElementsInOrderAs createSlices(1, allContracts)
+    val pagesWithSize3 = getAllPages(3)
+    pagesWithSize3 should contain theSameElementsInOrderAs createSlices(3, allContracts)
+    val pagesWithSize100 = getAllPages(100)
+    pagesWithSize100 should contain theSameElementsInOrderAs createSlices(100, allContracts)
+  }
+
+  private def createSlices(pageSize: Int, list: Vector[GetActiveContractsResponse]) =
+    Vector.tabulate((list.size + pageSize - 1) / pageSize) { i =>
+      list.slice(i * pageSize, (i + 1) * pageSize)
+    }
 
   private def createContract(party: Ref.Party) = ExampleContractFactory.build(
     stakeholders = Set(party),
@@ -192,19 +228,30 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
 
   private def getAcsF(
       eventFormat: EventFormat,
-      continuationToken: Option[AcsContinuationToken],
-  ): Future[Vector[GetActiveContractsResponse]] =
-    for {
-      ledgerEnd <- index.currentLedgerEnd()
-      contracts <- index
-        .getActiveContracts(
-          eventFormat,
-          ledgerEnd,
-          continuationToken,
-          AcsContinuationToken.emptyChecksum,
-        )
-        .runWith(Sink.collection)
-    } yield contracts.toVector
+      continuationToken: Option[ByteString],
+      limit: Option[Int] = None,
+  ) =
+    continuationToken.traverse(token =>
+      AcsContinuationToken.decodeAndValidate(AcsContinuationToken.emptyChecksum, token)
+    ) match {
+      case Left(error) =>
+        fail(s"Failed to decode continuation token: ${error.getStatus.getDescription}")
+      case Right(continuationPointer) =>
+        for {
+          ledgerEnd <- index.currentLedgerEnd()
+          responses <- index
+            .getActiveContracts(
+              eventFormat,
+              ledgerEnd,
+              AcsRangeInfo(
+                continuationPointer = continuationPointer,
+                requestChecksum = AcsContinuationToken.emptyChecksum,
+                limit = limit.map(_.toLong),
+              ),
+            )
+            .runWith(Sink.collection)
+        } yield responses.toVector
+    }
 
   private def recordTime() = CantonTimestamp(Time.Timestamp.now())
 

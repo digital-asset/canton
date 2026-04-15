@@ -210,11 +210,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
 
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
   override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++
-    Set(
-      "HealthServiceIT", // Service not available in JSON,
-      "PartyManagementServiceIT", // updatePartyIdentityProviderIs is not available in JSON API
-      "UserManagementServiceIT", // Results in PERMISSION_DENIED (wrong _.userManagement.supported)
-    )
+    ExcludedTests.jsonApiExcludedSuites.toSet
 
   protected def testCaseName = "pass the Ledger API conformance tests"
 }

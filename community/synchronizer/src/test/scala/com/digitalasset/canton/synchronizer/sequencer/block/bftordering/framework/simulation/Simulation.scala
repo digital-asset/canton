@@ -80,10 +80,10 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     agenda.addOne(command, at, ScheduledCommand.DefaultPriority)
   }
 
-  agenda.addOne(MakeSystemHealthy, simSettings.durationOfFirstPhaseWithFaults)
+  agenda.addOne(MakeSystemHealthy, simSettings.phaseDurations.faulty)
   // Schedule liveness checks starting from "phase 2" up to the end of the simulation
   LazyList
-    .iterate(simSettings.durationOfFirstPhaseWithFaults + simSettings.livenessCheckInterval)(
+    .iterate(simSettings.phaseDurations.faulty + simSettings.phaseDurations.recovery)(
       _ + simSettings.livenessCheckInterval
     )
     .takeWhile(_ < simSettings.totalSimulationTime)
@@ -273,7 +273,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
   private def addEndpoint(endpoint: P2PEndpoint, to: BftNodeId)(implicit
       traceContext: TraceContext
   ): Unit = {
-    logger.debug(s"immediately executing addEndpoint for $to -> $endpoint")
+    logger.debug(s"immediately executing addEndpoint for $to -> $endpoint (at ${clock.now})")
     executeEvent(
       to,
       ModuleAddress.NetworkOut,
@@ -281,8 +281,11 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
         P2PNetworkOut.Admin.AddEndpoint(
           endpoint,
           added =>
-            if (!added)
-              throw new IllegalStateException(s"Endpoint $endpoint has not been added to $to"),
+            if (!added) {
+              throw new IllegalStateException(s"Endpoint $endpoint has not been added to $to")
+            } else {
+              onboardingManager.connectionAdded(endpoint, to)
+            },
         ),
         TraceContext.empty,
         MetricsContext.Empty,
@@ -409,8 +412,9 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           topology.activeNodes.foreach { node =>
             restartNode(node)
           }
-          verifier.resumeCheckingLiveness(clock.now)
+          logger.info("Healing system done")(TraceContext.empty)
         case ResumeLivenessChecks =>
+          logger.info(s"Check liveness ${whatToDo.at}")(TraceContext.empty)
           verifier.resumeCheckingLiveness(clock.now)
         case Quit(reason) =>
           logger.debug(s"Stopping simulation because: $reason")(TraceContext.empty)

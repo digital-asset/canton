@@ -28,6 +28,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
@@ -959,6 +960,37 @@ class ProtocolConverters(
             streamContinuationToken = v.streamContinuationToken,
           )
         )
+  }
+
+  object GetActiveContractsPageResponse
+      extends ProtocolConverter[
+        lapi.state_service.GetActiveContractsPageResponse,
+        JsGetActiveContractsPageResponse,
+      ] {
+    def toJson(v: lapi.state_service.GetActiveContractsPageResponse)(implicit
+        traceContext: TraceContext
+    ): Future[JsGetActiveContractsPageResponse] =
+      for {
+        activeContracts <- MonadUtil.sequentialTraverse(v.activeContracts)(
+          GetActiveContractsResponse.toJson
+        )
+      } yield v
+        .into[JsGetActiveContractsPageResponse]
+        .withFieldConst(_.activeContracts, activeContracts)
+        .transform
+
+    def fromJson(
+        v: JsGetActiveContractsPageResponse
+    )(implicit
+        traceContext: TraceContext
+    ): Future[lapi.state_service.GetActiveContractsPageResponse] =
+      for {
+        activeContracts <- v.activeContracts.map(GetActiveContractsResponse.fromJson).sequence
+      } yield lapi.state_service.GetActiveContractsPageResponse(
+        activeContracts = activeContracts,
+        activeAtOffset = v.activeAtOffset,
+        nextPageToken = v.nextPageToken,
+      )
   }
 
   object ReassignmentEvent

@@ -38,7 +38,7 @@ class InMemoryState(
     val ledgerEndCache: MutableLedgerEndCache,
     val contractStateCaches: ContractStateCaches,
     val offsetCheckpointCache: OffsetCheckpointCache,
-    val achsStateCache: AchsStateCache, // TODO(#30241) take care of the initialization of the ACHS state cache
+    val achsStateCache: AchsStateCache,
     val inMemoryFanoutBuffer: InMemoryFanoutBuffer,
     val stringInterningView: StringInterningView,
     val dispatcherState: DispatcherState,
@@ -86,7 +86,6 @@ class InMemoryState(
         _ = dispatcherState.startDispatcher(ledgerEndO.map(_.lastOffset))
       } yield ()
 
-    // TODO(#30241) verify the initialization of the ACHS state cache and test it
     def inMemoryStateIsUptodate: Boolean =
       ledgerEndCache() == ledgerEndO &&
         dispatcherState.getDispatcher.getHead() == ledgerEndO.map(_.lastOffset) &&

@@ -18,6 +18,8 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.admin.data.ContractImportMode.{Accept, Validation}
 import com.digitalasset.canton.participant.admin.data.RepairContract
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
@@ -54,7 +56,7 @@ import scala.language.implicitConversions
   * testing.pcs_search to test the outcomes (not always visible via the ledger api in the case of
   * move).
   */
-sealed trait RepairServiceIntegrationTest
+trait RepairServiceIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
@@ -146,7 +148,20 @@ sealed trait RepairServiceIntegrationTest
     try {
       code
     } finally {
-      participant1.synchronizers.disconnect(synchronizerAlias)
+      // TODO(i31818): Improve Sequencer client behavior wrt shutdown races. (note: such suppressions exists for other integration tests as well)
+      // During disconnect processing could emit RequestFailed(No connection available)
+      loggerFactory.assertLogsUnorderedOptional(
+        participant1.synchronizers.disconnect(synchronizerAlias),
+        (
+          LogEntryOptionality.OptionalMany,
+          (entry: LogEntry) => {
+            entry.loggerName should include("TransactionProcessor")
+            entry.warningMessage should include(
+              "RequestFailed(No connection available)"
+            )
+          },
+        ),
+      )
     }
   }
 

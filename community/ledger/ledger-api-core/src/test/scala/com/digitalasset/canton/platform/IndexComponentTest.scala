@@ -241,6 +241,8 @@ trait IndexComponentTest
 
   protected def index: IndexService = testServices.index
 
+  protected def dbSupport: DbSupport = testServices.dbSupport
+
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
   @scala.annotation.unused
@@ -263,8 +265,10 @@ trait IndexComponentTest
   implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
   private def indexResourceOwner(
-      config: IndexerConfig
-  ): ResourceOwner[(IndexService, FutureQueue[Update], LedgerApiContractStoreImpl)] =
+      config: IndexerConfig,
+      serviceConfig: IndexServiceConfig,
+      repairMode: Boolean,
+  ): ResourceOwner[(IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport)] =
     for {
       dbStorage <- ResourceOwner
         .forCloseable(() =>
@@ -301,7 +305,7 @@ trait IndexComponentTest
       (inMemoryState, updaterFlow) <- LedgerApiServerInternals.createInMemoryStateAndUpdater(
         participantId = participantId,
         commandProgressTracker = CommandProgressTracker.NoOp,
-        indexServiceConfig = IndexServiceConfig(),
+        indexServiceConfig = serviceConfig,
         maxCommandsInFlight = 1, // not used
         metrics = LedgerApiServerMetrics.ForTesting,
         executionContext = ec,
@@ -332,16 +336,17 @@ trait IndexComponentTest
         executionContext = ec,
         tracer = NoReportingTracerProvider.tracer,
         loggerFactory = loggerFactory,
-        dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(config),
+        dataSourceProperties =
+          IndexerConfig.createDataSourcePropertiesForTesting(config, loggerFactory),
         highAvailability = HaConfig(),
-        indexServiceDbDispatcher = None,
+        indexServiceDbDispatcher = Some(dbSupport.dbDispatcher),
         clock = clock,
         reassignmentOffsetPersistence = NoOpReassignmentOffsetPersistence,
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
       ).initialized()
-      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(false)(_ => ()))
+      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(repairMode)(_ => ()))
       indexer <- ResourceOwner.forReleasable(() =>
         new IndexingFutureQueue(indexerFutureQueueConsumer)
       ) { indexer =>
@@ -363,7 +368,7 @@ trait IndexComponentTest
       )
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
-        config = indexServiceConfig,
+        config = serviceConfig,
         participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
         metrics = LedgerApiServerMetrics.ForTesting,
         inMemoryState = inMemoryState,
@@ -390,13 +395,15 @@ trait IndexComponentTest
         participantContractStore = participantContractStore,
         pruningOffsetService = pruningOffsetService,
       )
-    } yield (indexService, indexer, participantContractStore)
+    } yield (indexService, indexer, participantContractStore, dbSupport)
 
   private def acquireServices(
-      config: IndexerConfig
+      config: IndexerConfig,
+      serviceConfig: IndexServiceConfig,
+      repairMode: Boolean,
   )(implicit resourceContext: ResourceContext): Unit = {
-    val indexResource = indexResourceOwner(config).acquire()
-    val (index, indexer, participantContractStore) =
+    val indexResource = indexResourceOwner(config, serviceConfig, repairMode).acquire()
+    val (index, indexer, participantContractStore, dbSupport) =
       indexResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
 
     testServicesRef.set(
@@ -405,6 +412,7 @@ trait IndexComponentTest
         index = index,
         indexer = indexer,
         participantContractStore = participantContractStore,
+        dbSupport = dbSupport,
       )
     )
   }
@@ -412,17 +420,21 @@ trait IndexComponentTest
   /** Restarts the indexer and all related services by releasing and re-acquiring all resources.
     * Optionally accepts a new IndexerConfig to change the configuration on restart.
     */
-  protected def restartIndexer(config: IndexerConfig = indexerConfig): Unit = {
+  protected def restartIndexer(
+      config: IndexerConfig = indexerConfig,
+      serviceConfig: IndexServiceConfig = indexServiceConfig,
+      repairMode: Boolean = false,
+  ): Unit = {
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     testServices.indexResource.release().futureValue
-    acquireServices(config)
+    acquireServices(config, serviceConfig, repairMode)
   }
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
-    acquireServices(indexerConfig)
+    acquireServices(config = indexerConfig, serviceConfig = indexServiceConfig, repairMode = false)
   }
 
   override def afterAll(): Unit = {
@@ -560,6 +572,13 @@ trait IndexComponentTest
       ledgerEndAfterTopology should be > ledgerEndBeforeTopology
       ledgerEndAfterTopology.value
     }
+  }
+
+  protected def repairCreates(recordTime: () => CantonTimestamp, payloadLength: Int)(
+      size: Int
+  ): (Update.RepairTransactionAccepted, Vector[ContractInstance]) = {
+    val (sequenced, contracts) = creates(recordTime, payloadLength)(size)
+    repairTransaction(sequenced) -> contracts
   }
 
   protected def archives(
@@ -746,6 +765,19 @@ trait IndexComponentTest
       ledgerEndAfter.value
     }
   }
+  protected def repairTransaction(
+      sequenced: Update.SequencedTransactionAccepted
+  ): Update.RepairTransactionAccepted =
+    Update.RepairTransactionAccepted(
+      transactionMeta = sequenced.transactionMeta,
+      transactionInfo = sequenced.transactionInfo,
+      updateId = sequenced.updateId,
+      synchronizerId = sequenced.synchronizerId,
+      repairCounter = RepairCounter.Genesis,
+      recordTime = sequenced.recordTime,
+      contractInfos = sequenced.contractInfos,
+    )
+
 }
 
 object IndexComponentTest {
@@ -757,5 +789,6 @@ object IndexComponentTest {
       index: IndexService,
       indexer: FutureQueue[Update],
       participantContractStore: LedgerApiContractStoreImpl,
+      dbSupport: DbSupport,
   )
 }

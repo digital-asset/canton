@@ -140,6 +140,7 @@ class DriverBlockSequencerFactory[C](
       nodeParameters.loggingConfig.api.printer,
       metrics,
       nodeParameters.batchingConfig,
+      consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,

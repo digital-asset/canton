@@ -36,6 +36,9 @@ CODEOWNERS @DACH-NY/canton-change-owners
 # External KMS Driver API in Scala
 /community/kms-driver-api @DACH-NY/canton-change-owners @soren-da
 
+# Crypto changes need to be explicitly reviewed
+/community/base/src/main/scala/com/digitalasset/canton/crypto @soren-da @JoaoSa-da @andreaslochbihler-da
+
 # Changes to SHA256 checksum files must be flagged
 *.sha256          @DACH-NY/canton-change-owners
 *.pg_dump         @DACH-NY/canton-change-owners

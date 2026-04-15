@@ -271,7 +271,7 @@ object WellFormedTransaction {
         case (nodeId, nf: LfNodeFetch, _) =>
           addReference(nodeId)(nf.coid)
           checkRollbackVisibility(nodeId)(nf.coid)
-        case (nodeId, lookup: LfNodeLookupByKey, _) =>
+        case (nodeId, lookup: LfNodeQueryByKey, _) =>
           lookup.result.traverse_ { cid =>
             addReference(nodeId)(cid)
             checkRollbackVisibility(nodeId)(cid)
@@ -422,7 +422,7 @@ object WellFormedTransaction {
             .void
         )
       case (_, _: LfNodeFetch) => Checked.result(())
-      case (_, _: LfNodeLookupByKey) => Checked.result(())
+      case (_, _: LfNodeQueryByKey) => Checked.result(())
       case (_, _: LfNodeRollback) => Checked.result(())
     }
 

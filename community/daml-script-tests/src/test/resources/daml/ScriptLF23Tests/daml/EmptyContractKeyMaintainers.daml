@@ -1,12 +1,7 @@
 -- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
--- @ERROR range=46:1-46:22; Attempt to create a contract key with an empty set of maintainers
 -- @TO DO queryByKey loses errors, ideally below is: Attempt to fetch, lookup or exercise a contract key with an empty set of maintainers
--- @ERROR range=50:1-50:18; Couldn't see contract with key 'Alice'
--- @ERROR range=54:1-54:19; Attempt to create a contract key with an empty set of maintainers
--- @ERROR range=58:1-58:18; Attempt to fetch, lookup or exercise a contract key with an empty set of maintainers
--- @ERROR range=62:1-62:19; Attempt to fetch, lookup or exercise a contract key with an empty set of maintainers
 module EmptyContractKeyMaintainers where
 
 import Daml.Script

@@ -9,7 +9,10 @@ import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestCo
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, TestConstraints}
 import com.daml.ledger.api.v2.event.Event.Event.Created
 import com.daml.ledger.api.v2.event.{CreatedEvent, Event}
-import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsPageRequest,
+  GetActiveContractsRequest,
+}
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.{
   CumulativeFilter,
@@ -34,6 +37,7 @@ import com.daml.ledger.test.java.model.test.{
 }
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
+import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
@@ -145,12 +149,12 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
     for {
       offsetAtTestStart <- ledger.currentEnd()
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
-      activeContracts <- ledger.activeContractsByTemplateId(
+      activeContracts <- ledger.activeContractsByTemplateIdWithVariants(
         Seq(Dummy.TEMPLATE_ID),
         Some(Seq(party)),
       )
       activeContractsPartyWildcard <- ledger
-        .activeContractsByTemplateId(Seq(Dummy.TEMPLATE_ID), None)
+        .activeContractsByTemplateIdWithVariants(Seq(Dummy.TEMPLATE_ID), None)
         .map(_.filter(_.offset > offsetAtTestStart))
       _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield {
@@ -187,9 +191,9 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
-      contractsBeforeExercise <- ledger.activeContracts(Some(Seq(party)))
+      contractsBeforeExercise <- ledger.activeContractsWithVariants(Some(Seq(party)))
       _ <- ledger.exercise(party, dummy.exerciseDummyChoice1())
-      contractsAfterExercise <- ledger.activeContracts(Some(Seq(party)))
+      contractsAfterExercise <- ledger.activeContractsWithVariants(Some(Seq(party)))
       _ <- ledger.exercise(party, dummyWithParam.exerciseArchive())
       _ <- ledger.exercise(party, dummyFactory.exerciseArchive())
     } yield {
@@ -227,7 +231,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
     for {
       dummy <- ledger.create(party, new Dummy(party))
       offset <- ledger.currentEnd()
-      onlyDummy <- ledger.activeContracts(
+      onlyDummy <- ledger.activeContractsWithVariants(
         ledger.activeContractsRequest(Some(Seq(party)), offset)
       )
       dummyWithParam <- ledger.create(party, new DummyWithParam(party))
@@ -278,12 +282,12 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
         .activeContractsRequest(Some(Seq(party)), end)
         .update(_.eventFormat.verbose := true)
       nonVerboseRequest = verboseRequest.update(_.eventFormat.verbose := false)
-      verboseEvents <- ledger.activeContracts(verboseRequest)
-      nonVerboseEvents <- ledger.activeContracts(nonVerboseRequest)
-      verboseEventsPartyWildcard <- ledger.activeContracts(
+      verboseEvents <- ledger.activeContractsWithVariants(verboseRequest)
+      nonVerboseEvents <- ledger.activeContractsWithVariants(nonVerboseRequest)
+      verboseEventsPartyWildcard <- ledger.activeContractsWithVariants(
         ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := true)
       )
-      nonVerboseEventsPartyWildcard <- ledger.activeContracts(
+      nonVerboseEventsPartyWildcard <- ledger.activeContractsWithVariants(
         ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := false)
       )
       _ <- ledger.exercise(party, dummy.exerciseArchive())
@@ -326,22 +330,22 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       offsetAtTestStart <- ledger.currentEnd()
       dummyAlice <- createDummyContracts(alice, ledger)
       dummyBob <- createDummyContracts(bob, ledger)
-      allContractsForAlice <- ledger.activeContracts(Some(Seq(alice)))
-      allContractsForBob <- ledger.activeContracts(Some(Seq(bob)))
-      allContractsForAliceAndBob <- ledger.activeContracts(Some(Seq(alice, bob)))
+      allContractsForAlice <- ledger.activeContractsWithVariants(Some(Seq(alice)))
+      allContractsForBob <- ledger.activeContractsWithVariants(Some(Seq(bob)))
+      allContractsForAliceAndBob <- ledger.activeContractsWithVariants(Some(Seq(alice, bob)))
       allContractsPartyWildcard <- ledger
-        .activeContracts(None)
+        .activeContractsWithVariants(None)
         .map(_.filter(_.offset > offsetAtTestStart))
-      dummyContractsForAlice <- ledger.activeContractsByTemplateId(
+      dummyContractsForAlice <- ledger.activeContractsByTemplateIdWithVariants(
         Seq(Dummy.TEMPLATE_ID),
         Some(Seq(alice)),
       )
-      dummyContractsForAliceAndBob <- ledger.activeContractsByTemplateId(
+      dummyContractsForAliceAndBob <- ledger.activeContractsByTemplateIdWithVariants(
         Seq(Dummy.TEMPLATE_ID),
         Some(Seq(alice, bob)),
       )
       dummyContractsPartyWildcard <- ledger
-        .activeContractsByTemplateId(
+        .activeContractsByTemplateIdWithVariants(
           templateIds = Seq(Dummy.TEMPLATE_ID),
           parties = None,
         )
@@ -509,10 +513,10 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
         bob,
         witnesses.exerciseWitnessesCreateNewWitnesses(),
       )
-      bobContracts <- ledger.activeContracts(Some(Seq(bob)))
-      aliceContracts <- ledger.activeContracts(Some(Seq(alice)))
+      bobContracts <- ledger.activeContractsWithVariants(Some(Seq(bob)))
+      aliceContracts <- ledger.activeContractsWithVariants(Some(Seq(alice)))
       partyWildcardContracts <- ledger
-        .activeContracts(None)
+        .activeContractsWithVariants(None)
         .map(_.filter(_.offset > offsetAtTestStart))
       _ <- ledger.exercise(alice, witnesses.exerciseArchive())
       _ <- ledger.exercise(bob, newWitnesses.exerciseArchive())
@@ -541,8 +545,8 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       divulgence1 <- ledger.create(alice, new Divulgence1(alice))
       divulgence2 <- ledger.create(bob, new Divulgence2(bob, alice))
       _ <- ledger.exercise(alice, divulgence2.exerciseDivulgence2Fetch(divulgence1))
-      bobContracts <- ledger.activeContracts(Some(Seq(bob)))
-      aliceContracts <- ledger.activeContracts(Some(Seq(alice)))
+      bobContracts <- ledger.activeContractsWithVariants(Some(Seq(bob)))
+      aliceContracts <- ledger.activeContractsWithVariants(Some(Seq(alice)))
       _ <- ledger.exercise(alice, divulgence1.exerciseArchive())
       _ <- ledger.exercise(bob, divulgence2.exerciseArchive())
     } yield {
@@ -815,7 +819,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
             case Some(templates) => Some(filtersForTemplates(templates))
           }
           createdEvents <- ledger
-            .activeContracts(
+            .activeContractsWithVariants(
               GetActiveContractsRequest(
                 eventFormat = Some(
                   EventFormat(
@@ -1145,6 +1149,209 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield ()
   })
+
+  test(
+    "ACSMultipleContracts",
+    "The ActiveContractService should return all newly created contracts",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    val numContracts = 50
+    for {
+      contracts <- Future.sequence(
+        (1 to numContracts).map(_ => ledger.create(party, new Dummy(party)))
+      )
+      activeContracts <- ledger.activeContractsWithVariants(Some(Seq(party)))
+      // archive the created contracts to not interfere with other tests
+      _ <- Future.sequence(contracts.map(c => ledger.exercise(party, c.exerciseArchive())))
+    } yield {
+      assert(
+        activeContracts.sizeIs == numContracts,
+        s"Expected to receive $numContracts active contracts, but received ${activeContracts.size}.",
+      )
+    }
+  })
+
+  test(
+    "AcsPagination",
+    "The ActiveContractService should provide correctly paginated result",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    val eventFormat = ledger.eventFormat(verbose = true, Some(Seq(party)))
+    for {
+      withEmptyLedger <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = None,
+            maxPageSize = Some(2),
+            pageToken = None,
+          )
+        )
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      allActiveContracts <- ledger.activeContracts(Some(Seq(party)))
+      firstActiveContractsPage <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = None,
+            maxPageSize = Some(2),
+            pageToken = None,
+          )
+        )
+      secondActiveContractsPage <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = None,
+            maxPageSize = Some(2),
+            pageToken = firstActiveContractsPage.nextPageToken,
+          )
+        )
+      singleActiveContractsPage <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = None,
+            maxPageSize = Some(3),
+            pageToken = None,
+          )
+        )
+      end <- ledger.currentEnd()
+      firstActiveContractsPageWithActiveAt <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = Some(end),
+            maxPageSize = Some(2),
+            pageToken = None,
+          )
+        )
+      secondActiveContractsPageWithActiveAt <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(eventFormat),
+            activeAtOffset = Some(end),
+            maxPageSize = Some(2),
+            pageToken = firstActiveContractsPageWithActiveAt.nextPageToken,
+          )
+        )
+
+      // archive the contracts to not be active on the next tests
+      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
+    } yield {
+      assert(
+        withEmptyLedger.activeContracts.isEmpty,
+        s"Expected no active contracts on an empty ledger, but received ${withEmptyLedger.activeContracts.size}.",
+      )
+
+      assert(
+        allActiveContracts.sizeIs == 3,
+        s"Expected 3 contracts, but received ${allActiveContracts.size}.",
+      )
+
+      assert(
+        firstActiveContractsPage.activeContracts.sizeIs == 2,
+        s"Expected 2 contracts on the first page, but received ${firstActiveContractsPage.activeContracts.size}.",
+      )
+      assert(
+        firstActiveContractsPage.activeContracts
+          .flatMap(_.contractEntry.activeContract)
+          .flatMap(_.createdEvent)
+          .map(_.contractId) == Seq(dummy.contractId, dummyWithParam.contractId),
+        "First page contract id mismatch.",
+      )
+      assert(
+        firstActiveContractsPage.activeContracts.forall(_.streamContinuationToken.isEmpty),
+        "Expected empty stream continuation token for the first page",
+      )
+
+      assert(
+        secondActiveContractsPage.activeContracts.sizeIs == 1,
+        s"Expected 1 contract on the second page, but received ${secondActiveContractsPage.activeContracts.size}.",
+      )
+      assert(
+        secondActiveContractsPage.activeContracts
+          .flatMap(_.contractEntry.activeContract)
+          .flatMap(_.createdEvent)
+          .map(_.contractId) == Seq(dummyFactory.contractId),
+        "Second page contract id mismatch.",
+      )
+      assert(
+        secondActiveContractsPage.activeContracts.forall(_.streamContinuationToken.isEmpty),
+        "Expected empty stream continuation token for the second page",
+      )
+      assert(
+        secondActiveContractsPage.nextPageToken.isEmpty,
+        "Expected no next page token for the second page",
+      )
+
+      assert(
+        singleActiveContractsPage.activeContracts.sizeIs == 3,
+        s"Expected 3 contracts on the single page, but received ${singleActiveContractsPage.activeContracts.size}.",
+      )
+      assert(
+        singleActiveContractsPage.nextPageToken.isEmpty,
+        "Expected no next page token for single page request",
+      )
+
+      assert(
+        firstActiveContractsPageWithActiveAt.activeContracts.sizeIs == 2,
+        s"Expected 2 contracts on the first page with activeAt, but received ${firstActiveContractsPageWithActiveAt.activeContracts.size}.",
+      )
+      assert(
+        secondActiveContractsPageWithActiveAt.activeContracts.sizeIs == 1,
+        s"Expected 1 contract on the first page with activeAt, but received ${secondActiveContractsPageWithActiveAt.activeContracts.size}.",
+      )
+      assert(
+        (firstActiveContractsPageWithActiveAt.activeContracts ++ secondActiveContractsPageWithActiveAt.activeContracts)
+          .flatMap(_.contractEntry.activeContract)
+          .flatMap(_.createdEvent)
+          .map(_.contractId) == Seq(
+          dummy.contractId,
+          dummyWithParam.contractId,
+          dummyFactory.contractId,
+        ),
+        "Contracts with active at do not match.",
+      )
+    }
+  })
+
+  test(
+    "AcsInvalidPageToken",
+    "Fail if incorrect page token is used",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      end <- ledger.currentEnd()
+      activeContractsWithoutContinuation <- ledger
+        .activeContractResponses(
+          ledger.activeContractsRequest(
+            parties = Some(Seq(party)),
+            activeAtOffset = end,
+          )
+        )
+      invalidToken = ByteString.copyFrom(new Array[Byte](55))
+      _ <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(
+              ledger.eventFormat(verbose = true, Some(Seq(party)))
+            ),
+            activeAtOffset = None,
+            maxPageSize = Some(2),
+            pageToken = Some(invalidToken),
+          )
+        )
+        .mustFailWith(
+          "invalid page token",
+          RequestValidationErrors.InvalidField,
+        )
+      // archive the contracts to not be active on the next tests
+      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
+    } yield ()
+  })
+
   private def createDummyContracts(party: Party, ledger: ParticipantTestContext)(implicit
       ec: ExecutionContext
   ): Future[

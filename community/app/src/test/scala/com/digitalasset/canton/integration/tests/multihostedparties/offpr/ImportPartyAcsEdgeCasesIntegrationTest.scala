@@ -8,7 +8,10 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.logging.SuppressionRule.NoSuppression
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.AcsImportMissingOnboardingMapping
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.store.PendingOperationStore
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import org.slf4j.event.Level
 
@@ -42,19 +45,17 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
     val ledgerEndP1 = source.ledger_api.state.end()
 
-    // Use the repair ACS export to bypass the topology check buit into the party ACS export endpoint
+    // Use the repair ACS export to bypass the topology check built into the party ACS export endpoint
     source.repair.export_acs(
       parties = Set(alice),
       ledgerOffset = ledgerEndP1,
       exportFilePath = acsSnapshotPath,
     )
 
-    // Ensure the party ACS import aborts if the topology store lacks the PTP onboarding mapping.
+    // Ensure the party ACS import aborts if the topology store lacks the PTP onboarding mapping
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
-      _.errorMessage should include(
-        s"Refuse to import ACS for party ${alice.partyId}: No topology transaction found onboarding this party on participant ${target.id}."
-      ),
+      _.shouldBeCantonErrorCode(AcsImportMissingOnboardingMapping.Error(alice).code),
     )
   }
 
@@ -92,17 +93,15 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
   /** Simulates an operator failing to follow the strict offline replication guide resulting in an
     * effective party-to-participant mapping topology transaction known to the target participant.
     *
-    * The expectation is that the target participant only receives that transaction after having
-    * imported the party's ACS and (re)connected to the synchronizer.
+    * The expectation is that the target participant only receives the effective transaction after
+    * having imported the party's ACS and (re)connected to the synchronizer.
     *
     * Asserts:
-    *   1. The ACS import still succeeds.
-    *   1. The system correctly identifies that the transaction is already effective and logs the
-    *      expected warning.
+    *   1. The ACS import still succeeds
     *   1. The pending onboarding clearance operation is still successfully recorded and can be
     *      cleared.
     */
-  "ACS import succeeds and logs a warning if the onboarding topology transaction is already effective" in {
+  "ACS import succeeds even if the onboarding topology transaction is already effective" in {
     implicit env =>
       import env.*
       val clock = env.environment.simClock.value
@@ -137,20 +136,7 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
       target.synchronizers.disconnect_all()
 
-      runIfPv34(
-        loggerFactory.assertEventuallyLogsSeq(NoSuppression)(
-          target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
-          logs => logs shouldBe empty,
-        ),
-        otherwise = {
-          loggerFactory.assertLogs(
-            target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
-            _.warningMessage should include(
-              s"Found an already effective party-to-participant mapping with the onboarding flag set for ${alice.partyId} on synchronizer ${daId.logical}"
-            ),
-          )
-        },
-      )
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
       reconnectAndEnsureOnboardingClearance(
         clock,
@@ -168,9 +154,9 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
   *   - 1 active IOU contract between Alice and Bob
   *   - Participant3 (target) is empty, and the target participant for replicating Alice
   *
-  * Test: Manual recovery if the node crashes during the ACS import process. Specifically, this
-  * tests the scenario where the ACS import completes successfully, but the node crashes before the
-  * pending onboarding clearance operation is written to the database.
+  * Test: Manual recovery if the target node crashes during the ACS import process. Specifically,
+  * this tests the scenario where the ACS import completes successfully, but the node crashes before
+  * the pending onboarding clearance operation is written to the database.
   */
 final class OfflinePartyReplicationCrashRecoveryIntegrationTest
     extends OfflinePartyReplicationIntegrationTestBase {
@@ -202,9 +188,23 @@ final class OfflinePartyReplicationCrashRecoveryIntegrationTest
         exportFilePath = acsSnapshotPath,
       )
 
-      // Simulate a crash. using repair ACS import endpoint which imports the contracts
-      // but bypasses the insertion of the pending OnboardingClearanceOperation.
+      // Simulate a crash using the repair ACS import endpoint which imports the contracts
+      // but bypasses the insertion of the pending onboarding clearance operation.
       target.repair.import_acs(daId, acsSnapshotPath)
+
+      // Assert that indeed no pending onboarding clearance operation record exists
+      PendingOperationStore(
+        target.underlying.value.storage,
+        timeouts,
+        loggerFactory,
+        OnboardingClearanceOperation,
+        SynchronizerId.fromString,
+      )(executionContext)
+        .getAll(
+          operationName = OnboardingClearanceOperation.operationName,
+          synchronizerId = Some(daId),
+        )
+        .futureValueUS shouldBe empty
 
       // Test: "Retry" the party ACS import endpoint post-crash:
       // It should idempotently import contracts again and persist the missing pending operation.
@@ -222,7 +222,7 @@ final class OfflinePartyReplicationCrashRecoveryIntegrationTest
   *   - Participant3 (target) is empty, and the target participant for replicating Alice
   *
   * Test: Asserts that the party ACS import endpoint is strictly idempotent. It verifies that
-  * invoking the import command multiple times with the same ACS snapshot safely bypasses duplicate
+  * invoking the import command multiple times with the same ACS snapshot safely avoids duplicate
   * contract insertions and duplicate pending operation insertions without corrupting node state or
   * throwing errors.
   */
@@ -242,6 +242,8 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
 
   "ACS import is idempotent and can be invoked multiple times without errors" in { implicit env =>
     import env.*
+    import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.*
+
     val clock = env.environment.simClock.value
 
     val beforeActivationOffset = targetAuthorizesHosting(alice, daId, disconnectTarget = true)
@@ -280,6 +282,14 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
     target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     reconnectAndEnsureOnboardingClearance(clock, alice, daName)
-    assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 2)
+
+    // Assert that there is no indexer event duplication
+    target.acsDeltas(alice) should have size 2
+
+    assertAcsAndContinuedOperation(
+      target,
+      expectedNumActiveContracts = 2,
+      numOfContractCreations = 3,
+    )
   }
 }

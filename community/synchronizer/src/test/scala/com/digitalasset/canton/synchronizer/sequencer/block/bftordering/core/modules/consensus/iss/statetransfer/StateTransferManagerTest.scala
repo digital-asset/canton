@@ -62,6 +62,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeModuleExpectingSilence,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Random
@@ -535,23 +536,28 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 object StateTransferManagerTest {
   private type ContextType = ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]]
 
-  private val aMembership =
+  private def aMembership(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(1))
-  private val aMembershipBeforeOnboarding =
+  private def aMembershipBeforeOnboarding(implicit pv: ProtocolVersion) =
     Membership(
       myId,
       OrderingTopology
-        .forTesting(Set(otherId), SequencingParameters.Default, epochLength = EpochLength(1)),
+        .forTesting(
+          Set(otherId),
+          Option(SequencingParameters.Default),
+          epochLength = EpochLength(1),
+        ),
       Seq(otherId),
     )
-  private val aTopologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
-    myId,
-    aMembership.orderingTopology,
-    ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-    aMembership.leaders,
-    previousTopology = aMembership.orderingTopology,
-    previousCryptoProvider = failingCryptoProvider,
-    aMembership.leaders,
-  )
+  private def aTopologyInfo(implicit pv: ProtocolVersion) =
+    OrderingTopologyInfo[ProgrammableUnitTestEnv](
+      myId,
+      aMembership.orderingTopology,
+      ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+      aMembership.leaders,
+      previousTopology = aMembership.orderingTopology,
+      previousCryptoProvider = failingCryptoProvider,
+      aMembership.leaders,
+    )
   private val aBootstrapEpoch = bootstrapEpoch(TestBootstrapTopologyActivationTime)
 }

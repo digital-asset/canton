@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.block.data.BlockInfo
 import com.digitalasset.canton.synchronizer.sequencer.{
   InFlightAggregationUpdates,
-  InFlightAggregations,
   SubmissionOutcome,
 }
 import com.digitalasset.canton.topology.Member
@@ -68,5 +67,8 @@ final case class ChunkUpdate(
 ) extends OrderedBlockUpdate
 
 object ChunkUpdate {
-  val noop = ChunkUpdate(lastSequencerEventTimestamp = None, inFlightAggregations = Map.empty)
+  val noop = ChunkUpdate(
+    lastSequencerEventTimestamp = None,
+    inFlightAggregations = InFlightAggregations.empty,
+  )
 }

@@ -162,7 +162,7 @@ private[engine] final class Preprocessor(
       case (pkgId, context) :: rest =>
         loadPackage(pkgId, context).flatMap(_ => pullPackages(rest))
       case Nil =>
-        ResultDone.Unit
+        Result.Unit
     }
 
   private[this] def pullTypePackages(typ: Ast.Type)(implicit traceContext: TraceContext): Result[Unit] =
@@ -219,7 +219,7 @@ private[engine] final class Preprocessor(
         }
         m <- acc
         _ <- m.get(pkgName) match {
-          case None => Result.unit
+          case None => Result.Unit
           case Some(pkgId0) =>
             ResultError(
               Error.Preprocessing.Internal(
@@ -338,8 +338,8 @@ private[engine] final class Preprocessor(
       (keysToPrefetch, contractIdsToPrefetch)
     }.flatMap { case (keysToPrefetch, contractIdsToPrefetch) =>
       if (keysToPrefetch.nonEmpty || contractIdsToPrefetch.nonEmpty)
-        ResultPrefetch(contractIdsToPrefetch.toSeq, keysToPrefetch, () => ResultDone.Unit)
-      else ResultDone.Unit
+        ResultPrefetch(contractIdsToPrefetch.toSeq, keysToPrefetch, () => Result.Unit)
+      else Result.Unit
     }
   }
 

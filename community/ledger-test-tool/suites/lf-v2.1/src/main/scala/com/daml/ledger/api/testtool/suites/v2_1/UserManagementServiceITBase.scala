@@ -47,6 +47,7 @@ abstract class UserManagementServiceITBase extends LedgerTestSuite {
         )
       ),
       identityProviderId = "",
+      primaryPartyAuthentication = false,
     )
     for {
       create <- ledger.userManagement.createUser(CreateUserRequest(Some(newUser), Nil))
@@ -60,12 +61,14 @@ abstract class UserManagementServiceITBase extends LedgerTestSuite {
       isDeactivated: Boolean = false,
       primaryParty: String = "",
       annotations: Map[String, String] = Map.empty,
+      primaryPartyAuthentication: Boolean = false,
   ): User = User(
     id = id,
     isDeactivated = isDeactivated,
     primaryParty = primaryParty,
     metadata = Some(ObjectMeta(resourceVersion = "", annotations = annotations)),
     identityProviderId = "",
+    primaryPartyAuthentication = primaryPartyAuthentication,
   )
 
   def updateRequest(
@@ -74,6 +77,7 @@ abstract class UserManagementServiceITBase extends LedgerTestSuite {
       primaryParty: String = "",
       resourceVersion: String = "",
       annotations: Map[String, String] = Map.empty,
+      primaryPartyAuthentication: Boolean = false,
       updatePaths: Seq[String],
   ): UpdateUserRequest =
     UpdateUserRequest(
@@ -84,6 +88,7 @@ abstract class UserManagementServiceITBase extends LedgerTestSuite {
           primaryParty = primaryParty,
           metadata = Some(ObjectMeta(resourceVersion = resourceVersion, annotations = annotations)),
           identityProviderId = "",
+          primaryPartyAuthentication = primaryPartyAuthentication,
         )
       ),
       updateMask = Some(
@@ -102,6 +107,9 @@ abstract class UserManagementServiceITBase extends LedgerTestSuite {
 
   def extractAnnotations(updateResp: CreateUserResponse): Map[String, String] =
     updateResp.user.value.metadata.value.annotations
+
+  def extractPrimaryPartyAuthentication(updateResp: UpdateUserResponse): Boolean =
+    updateResp.getUser.primaryPartyAuthentication
 
   def unsetResourceVersion(u: User): User = u.update(_.metadata.resourceVersion := "")
   def unsetResourceVersion(u: CreateUserResponse): CreateUserResponse =

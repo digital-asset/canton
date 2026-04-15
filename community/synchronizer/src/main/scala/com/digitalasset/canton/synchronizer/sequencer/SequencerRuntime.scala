@@ -291,6 +291,7 @@ class SequencerRuntime(
             syncCrypto,
             clock,
             lsuSequencingBounds,
+            localNodeParameters.sanitizePublicErrorMessages,
             loggerFactory,
           )(ec),
           executionContext,

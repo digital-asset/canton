@@ -110,6 +110,7 @@ final class UpdateUserSelfDeactivationAuthIT extends ServiceCallAuthTests with E
                   isDeactivated = true,
                   metadata = None,
                   identityProviderId = "",
+                  primaryPartyAuthentication = false,
                 )
               ),
               updateMask = Some(FieldMask(paths = scala.Seq("is_deactivated"))),

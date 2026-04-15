@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 }
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.bootstrap.{
@@ -64,6 +65,16 @@ trait SequencerOnboardingTombstoneTest
     implicit env =>
       import env.*
 
+      // TODO(i31817): It is suspicious why the steps in this tests take so long that the long running command can timeout.
+      // TODO(i31817): Verify the steps are correct and/or improve performance.
+      // set confirmation response timeout to 4 minutes so it is not flaking if the default 30 seconds is breached by the onboarding
+      sequencer1.topology.synchronizer_parameters.propose_update(
+        daId,
+        _.update(
+          confirmationResponseTimeout = NonNegativeFiniteDuration.ofMinutes(4)
+        ),
+      )
+
       clue("participant1 connects to sequencer1") {
         participant1.synchronizers.connect_local_bft(Seq(sequencer1), synchronizerAlias = daName)
       }
@@ -114,6 +125,7 @@ trait SequencerOnboardingTombstoneTest
     }
   }
 
+  // TODO(#31863): remove this and related tests along with the sequencer tombstones logic once we discontinue protocol version 34
   "Switch participant1 to sequencer2 and observe synchronizer disconnect due to tombstone" in {
     implicit env =>
       import env.*
@@ -239,11 +251,21 @@ trait SequencerOnboardingTombstoneTest
         sequencer1.sequencerConnection.withAlias(SequencerAlias.tryCreate("seq1x")),
       )
 
-      clue("participant1 connects to sequencer1") {
-        participant1.synchronizers.reconnect_all(ignoreFailures = false)
-      }
+      loggerFactory.assertLogsUnorderedOptional(
+        {
 
-      participant1.health.ping(participant1.id)
+          clue("participant1 connects to sequencer1") {
+
+            participant1.synchronizers.reconnect_all(ignoreFailures = false)
+          }
+
+          participant1.health.ping(participant1.id)
+        },
+        // this may be emitted if the participant reconnects and replays the messages
+        // and then sends the same response again to the sequencer but after max sequencing time
+        // so we need to ignore the timeout message as otherwise the test will flake
+        (LogEntryOptionality.Optional, _.warningMessage should include("timed out at")),
+      )
   }
 
   "Finally switch participant1 back to sequencer2 to consume events past tombstone" in {

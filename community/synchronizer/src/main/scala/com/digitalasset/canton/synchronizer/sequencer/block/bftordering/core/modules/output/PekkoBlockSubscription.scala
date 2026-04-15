@@ -48,7 +48,7 @@ import org.apache.pekko.stream.{
   StreamSubscriptionTimeoutTerminationMode,
 }
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.immutable.Queue
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
@@ -70,7 +70,7 @@ class PekkoBlockSubscription[E <: Env[E]](
 
   private val stateRef = new AtomicReference[State](State())
 
-  private lazy val (pekkoQueue, pekkoSource) = {
+  private lazy val (pekkoQueueSource, pekkoSource) = {
     val attributes =
       streamSubscriptionTimeout(
         0.milli, // this value won't be used
@@ -124,9 +124,9 @@ class PekkoBlockSubscription[E <: Env[E]](
       s"Received block $height from output module, enqueueing it to sequencer core"
     )
 
-    // don't add new messages to queue if we are closing the queue, or we get a StreamDetached exception
-    // We merely synchronize the call to the queue, but don't wait until the queue actually has space
-    // to avoid long delays upon closing.
+    // Don't enqueue if we are closing, or we get a StreamDetached exception
+    //  We merely synchronize the enqueueing call, but don't wait for it to complete
+    //  in order to avoid delaying shutdown.
     synchronizeWithClosingSync("DABFT enqueue block to sequencer core")(
       advance(newTracedBlockO = Some(Traced(block)))
     ).discard
@@ -134,18 +134,18 @@ class PekkoBlockSubscription[E <: Env[E]](
 
   override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
-    SyncCloseable("dabft-output-queue.complete", pekkoQueue.complete()) +: Option
+    SyncCloseable("dabft-output-queue.complete", pekkoQueueSource.complete()) +: Option
       .when(subscriptionStarted)(
         AsyncCloseable(
           "dabft-output-queue.watchCompletion",
-          pekkoQueue.watchCompletion(),
+          pekkoQueueSource.watchCompletion(),
           timeouts.closing,
         )
       )
       .toList
   }
 
-  // Advances the enqueueing state and returns an optional callback that starts the next enqueueing task
+  // Advances the enqueueing state and starts the next enqueueing task
   private def advance(
       newTracedBlockO: Option[Traced[BlockFormat.Block]] = None,
       taskComplete: Boolean = false,
@@ -154,6 +154,7 @@ class PekkoBlockSubscription[E <: Env[E]](
     //  registering untriggerable futures with the execution context when CAS fails due contention,
     //  which may constitute a memory leak.
     val promise = PromiseUnlessShutdown.unsupervised[Unit]()
+    val enqueuedInPekkoQueueSource = new AtomicBoolean(false)
     AtomicUtil
       .updateAndGetComputed(stateRef) { case State(blocksToEnqueue, taskO) =>
         // noinspection ConvertibleToMethodValue
@@ -170,12 +171,20 @@ class PekkoBlockSubscription[E <: Env[E]](
           State(
             restOfBlocksToEnqueue,
             tracedBlockToEnqueueO.map(tracedBlockToEnqueue =>
-              // The promise's continuation future, i.e. the insertion into the Pekko queue source,
-              //  is registered and triggered multiple times for the same block height when CAS fails
-              //  due to contention, but it's fine to insert a block out-of-order and/or multiple
-              //  times in the Pekko queue because inserting into the Peano queue afterward
-              //  (see body of `statefulMapConcat` on the Pekko queue) is an idempotent operation.
-              promise.futureUS.flatMap(_ => pekkoEnqueue(tracedBlockToEnqueue))
+              // When CAS fails due to contention, the promise's continuation future is registered and triggered
+              //  multiple times for the same block height; the `enqueuedInPekkoQueueSource` atomic flag ensures
+              //  that only one of those continuations will actually trigger the enqueueing of the block
+              //  to the Pekko queue, while the others will be no-ops.
+              //  While repeated inserts, even if not in order, would be OK logically because Peano queue
+              //  insertions downstream are idempotent, we must avoid concurrent enqueue calls into to the
+              //  Pekko queue source, which would fail due to either the max insertion concurrency (set to 1)
+              //  or due to internal synchronization of the Pekko queue source.
+              promise.futureUS.flatMap { _ =>
+                if (enqueuedInPekkoQueueSource.compareAndSet(false, true))
+                  pekkoEnqueue(tracedBlockToEnqueue)
+                else
+                  FutureUnlessShutdown.pure(QueueOfferResult.Enqueued)
+              }
             ),
           ) -> Some(() => promise.outcome_(()))
         } else {
@@ -202,7 +211,7 @@ class PekkoBlockSubscription[E <: Env[E]](
           operationName = "DABFT enqueue block to sequencer core",
         )
         .unlessShutdown(
-          FutureUnlessShutdown.outcomeF(pekkoQueue.offer(tracedBlockToEnqueue)),
+          FutureUnlessShutdown.outcomeF(pekkoQueueSource.offer(tracedBlockToEnqueue)),
           RetryPolicy,
         )
         .thereafter { result =>
@@ -215,7 +224,9 @@ class PekkoBlockSubscription[E <: Env[E]](
                   logger.debug(s"Successfully enqueued block $height to the sequencer core")
 
                 case QueueOfferResult.Dropped =>
-                  logger.error(s"Internal error: block $height was dropped by the Pekko queue")
+                  logger.error(
+                    s"Internal error: block $height was dropped by the Pekko queue source"
+                  )
 
                 case QueueOfferResult.QueueClosed =>
                   logger.info(
@@ -253,7 +264,7 @@ object PekkoBlockSubscription {
   private val PekkoQueueSourceBufferSize = 5000
 
   /** The state of the subscription, which consists of the blocks that are waiting to be enqueued to
-    * the sequencer core via the Pekko queue/source, and the current enqueueing task, if it exists.
+    * the sequencer core via the Pekko queue source, and the current enqueueing task, if it exists.
     */
   private final case class State(
       blocksToEnqueue: Queue[Traced[BlockFormat.Block]] = Queue.empty,

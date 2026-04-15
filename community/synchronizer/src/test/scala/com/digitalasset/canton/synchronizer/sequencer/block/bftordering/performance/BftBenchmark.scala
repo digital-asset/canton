@@ -5,12 +5,15 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.perform
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmark.{
   Separator,
   TxStatus,
   UuidLength,
   shutdownExecutorService,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmarkConfig.TransactionSizeAndWeight
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftMetrics.{
   failedWriteMeters,
   pendingReads,
@@ -45,28 +48,46 @@ final class BftBenchmark(
 
   private val readNodeIndices =
     config.nodes.zipWithIndex
-      .filter(_._1.isInstanceOf[BftBenchmarkConfig.ReadNode[?]])
-      .map(_._2)
+      .filter { case (node, _) => node.isInstanceOf[BftBenchmarkConfig.ReadNode[?]] }
+      .map { case (_, index) => index }
       .toSet
 
-  private val ValueBytes: Int =
-    config.transactionBytes - UuidLength - Separator.length
+  private val AdjustedTransactionSizesAndWeights: NonEmpty[Seq[TransactionSizeAndWeight]] =
+    NonEmpty
+      .from[Seq[TransactionSizeAndWeight]](config.transactionSizesAndWeights.map {
+        case BftBenchmarkConfig.TransactionSizeAndWeight(size, weight) =>
+          BftBenchmarkConfig.TransactionSizeAndWeight(
+            NonNegativeInt
+              .create(size.unwrap - UuidLength - Separator.length)
+              .getOrElse(
+                throw new IllegalArgumentException(
+                  s"Transaction size must be at least ${UuidLength + Separator.length} bytes to accommodate the transaction ID and separator. Invalid size: ${size.unwrap}"
+                )
+              ),
+            weight,
+          )
+      })
+      .getOrElse(
+        throw new IllegalArgumentException(
+          "At least one transaction size and weight must be provided"
+        )
+      )
 
-  log.info(
-    s"Payload values will be $ValueBytes bytes long (${config.transactionBytes} - UUID's length)"
-  )
+  log.info(s"Payloads will be $AdjustedTransactionSizesAndWeights")
 
-  private val readNodes = config.nodes.flatMap {
-    case node: BftBenchmarkConfig.ReadNode[?] => Some(node)
-    case _ => None
-  }
+  private val readNodes =
+    config.nodes.flatMap {
+      case node: BftBenchmarkConfig.ReadNode[?] => Some(node)
+      case _ => None
+    }
 
-  private val writeNodes = config.nodes.flatMap {
-    case node: BftBenchmarkConfig.WriteNode[?] => Some(node)
-    case _ => None
-  }
+  private val writeNodes =
+    config.nodes.flatMap {
+      case node: BftBenchmarkConfig.WriteNode[?] => Some(node)
+      case _ => None
+    }
 
-  private val bftBinding = bftBindingFactory.create(config)
+  private val bftBinding = bftBindingFactory.create(AdjustedTransactionSizesAndWeights)
 
   def run(): JFuture[Unit] = {
     val txsToBeRead = new ConcurrentHashMap[String, TxStatus]()

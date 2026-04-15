@@ -24,11 +24,14 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.RetryPolicy
+import com.digitalasset.canton.networking.grpc.GrpcError.GrpcClientError
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelParams}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
+import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionError.TransportError
 import com.digitalasset.canton.sequencing.client.pool.Connection.{ConnectionConfig, ConnectionState}
+import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnection.*
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionStub.SequencerConnectionStubError
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
-import com.digitalasset.canton.sequencing.protocol.HandshakeResponse
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -40,15 +43,6 @@ import org.apache.pekko.stream.Materializer
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContextExecutor
 import scala.util.Failure
-
-import InternalSequencerConnection.{
-  ConnectionAttributes,
-  SequencerConnectionError,
-  SequencerConnectionHealth,
-  SequencerConnectionInternalError,
-  SequencerConnectionState,
-}
-import SequencerConnectionStub.SequencerConnectionStubError
 
 /** Sequencer connection specialized for gRPC transport.
   */
@@ -250,6 +244,12 @@ class GrpcInternalSequencerConnection private[sequencing] (
         fatal(s"Validation failure: $message")
 
       case SequencerConnectionInternalError.StubError(
+            SequencerConnectionStubError.ConnectionError(TransportError(err: GrpcClientError))
+          ) =>
+        logger.warn(s"Grpc client error: $err")
+        fatal(s"Grpc client error: $err")
+
+      case SequencerConnectionInternalError.StubError(
             SequencerConnectionStubError.DeserializationError(message)
           ) =>
         logger.info(s"Deserialization error: $message")
@@ -313,17 +313,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
         )
         .leftMap(SequencerConnectionInternalError.StubError.apply)
 
-      handshakePV <- EitherT
-        .fromEither[FutureUnlessShutdown](handshakeResponse match {
-          case success: HandshakeResponse.Success =>
-            Right(success.serverProtocolVersion)
-          case failure: HandshakeResponse.Failure =>
-            Left(
-              SequencerConnectionInternalError.ValidationError(
-                s"Failed handshake: ${failure.reason}"
-              )
-            )
-        })
+      handshakePV = handshakeResponse.serverProtocolVersion
       _ = logger.debug(s"Handshake successful with PV $handshakePV")
 
       // TODO(#23902): Might be good to have the crypto handshake part of connection validation as well

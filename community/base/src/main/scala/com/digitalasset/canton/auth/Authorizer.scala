@@ -6,10 +6,9 @@ package com.digitalasset.canton.auth
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.LfLedgerString
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.TelemetryTracing
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import scalapb.lenses.Lens
@@ -27,10 +26,8 @@ final class Authorizer(
     participantId: String,
     ongoingAuthorizationFactory: OngoingAuthorizationFactory = NoOpOngoingAuthorizationFactory(),
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
-    protected val telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging
-    with TelemetryTracing {
+) extends NamedLogging {
 
   /** Validates all properties of claims that do not depend on the request, such as expiration time
     * or ledger ID.
@@ -119,7 +116,8 @@ final class Authorizer(
 
   private def authorizationErrorAsGrpc[T](
       errOrV: Either[AuthorizationError, T]
-  ): Either[StatusRuntimeException, T] =
+  ): Either[StatusRuntimeException, T] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     errOrV.fold(
       {
         case AuthorizationError.InvalidField(fieldName, reason) =>
@@ -150,6 +148,7 @@ final class Authorizer(
       },
       Right(_),
     )
+  }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def assertServerCall[A](observer: StreamObserver[A]): ServerCallStreamObserver[A] =
@@ -167,7 +166,8 @@ final class Authorizer(
     * Prefer to use the more specialized methods of [[Authorizer]] instead of this method to avoid
     * skipping required authorization checks.
     */
-  private def authenticatedClaimsFromContext(): Try[ClaimSet.Claims] =
+  private def authenticatedClaimsFromContext(): Try[ClaimSet.Claims] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     AuthInterceptor
       .extractClaimSetFromContext()
       .flatMap {
@@ -190,6 +190,7 @@ final class Authorizer(
           )
         case claims: ClaimSet.Claims => Success(claims)
       }
+  }
 
   private def defaultToAuthenticatedUser(
       claims: ClaimSet.Claims,

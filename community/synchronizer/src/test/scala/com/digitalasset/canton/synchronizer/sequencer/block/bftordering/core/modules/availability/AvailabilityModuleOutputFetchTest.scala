@@ -584,7 +584,7 @@ class AvailabilityModuleOutputFetchTest
                   Node0,
                 ),
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, addedToStore = true),
               ),
               (
                 Availability.RemoteOutputFetch.RemoteBatchDataFetched.create(
@@ -633,14 +633,19 @@ class AvailabilityModuleOutputFetchTest
                 Availability.LocalDissemination
                   .LocalBatchesStoredSigned(
                     Seq(
-                      LocalBatchStoredSigned(Traced(ABatchId), ABatch, Some(Signature.noSignature))
+                      LocalBatchStoredSigned(
+                        Traced(ABatchId),
+                        ABatch,
+                        MembershipNode0,
+                        Some(Signature.noSignature),
+                      )
                     )
                   ),
                 "availability-sign-local-batchId",
               ),
               (
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, addedToStore = true),
                 Availability.LocalDissemination
                   .RemoteBatchStoredSigned(ABatchId, Node0, Signature.noSignature),
                 "availability-sign-remote-batchId",
@@ -672,7 +677,7 @@ class AvailabilityModuleOutputFetchTest
               Table[Msg](
                 "message",
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, addedToStore = true),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
@@ -724,7 +729,7 @@ class AvailabilityModuleOutputFetchTest
               Table[Msg](
                 "message",
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, addedToStore = true),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>

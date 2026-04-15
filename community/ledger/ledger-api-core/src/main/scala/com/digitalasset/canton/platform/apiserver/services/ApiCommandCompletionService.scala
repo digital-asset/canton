@@ -10,7 +10,6 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamResponse,
 }
 import com.daml.logging.entries.LoggingEntries
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator
@@ -24,6 +23,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
@@ -31,7 +31,6 @@ import org.apache.pekko.stream.scaladsl.Source
 final class ApiCommandCompletionService(
     completionsService: IndexCompletionsService,
     metrics: LedgerApiServerMetrics,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     esf: ExecutionSequencerFactory,
@@ -44,9 +43,10 @@ final class ApiCommandCompletionService(
       request: CompletionStreamRequest,
       responseObserver: StreamObserver[CompletionStreamResponse],
   ): Unit = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     registerStream(responseObserver) {
-      implicit val errorLoggingContext = ErrorLoggingContext(
+      implicit val errorLoggingContext: ErrorLoggingContext = ErrorLoggingContext(
         logger,
         loggingContextWithTrace.toPropertiesMap,
         loggingContextWithTrace.traceContext,

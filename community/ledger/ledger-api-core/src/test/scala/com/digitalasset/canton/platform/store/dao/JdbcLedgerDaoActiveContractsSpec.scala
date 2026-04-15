@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.digitalasset.canton.ledger.api.AcsContinuationToken
+import com.digitalasset.canton.ledger.api.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.{
@@ -50,8 +50,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       activeContractsAfter <- activeContractsOf(
@@ -62,8 +61,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -89,8 +87,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       (_, _) <- store(singleCreate)
@@ -107,8 +104,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -144,8 +140,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateProjections =
                 Map(Some(party1) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection())),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -187,8 +182,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -237,8 +231,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateId2Full.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -288,8 +281,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -335,8 +327,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = false
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -384,8 +375,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -433,8 +423,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(otherTemplateId5Full.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -490,8 +479,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       resultUnknownParty <- activeContractsOf(
@@ -510,8 +498,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       resultUnknownTemplate <- activeContractsOf(
@@ -534,8 +521,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       resultUnknownTemplatePartyWildcard <- activeContractsOf(
@@ -560,8 +546,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 ),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       resultUnknownPartyAndTemplate <- activeContractsOf(
@@ -584,8 +569,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       resultUnknownsOnly <- activeContractsOf(
@@ -606,8 +590,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {
@@ -633,8 +616,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
           eventProjectionProperties = EventProjectionProperties(
             verbose = true
           )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-          continuationToken = None,
-          checksum = AcsContinuationToken.emptyChecksum,
+          rangeInfo = AcsRangeInfo.empty,
         )
         .runWith(Sink.seq)
 
@@ -656,8 +638,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
       activeContractsAfter <- activeContractsOf(
@@ -668,8 +649,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
-            continuationToken = None,
-            checksum = AcsContinuationToken.emptyChecksum,
+            rangeInfo = AcsRangeInfo.empty,
           )
       )
     } yield {

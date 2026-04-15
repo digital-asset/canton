@@ -61,7 +61,7 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         participant2.synchronizers.connect(sequencer2, daName),
         _.errorMessage should include(
-          s"Onboarding is possible only from $upgradeTime but current time is"
+          s"Onboarding is possible only after $upgradeTime. Aborting..."
         ),
       )
 

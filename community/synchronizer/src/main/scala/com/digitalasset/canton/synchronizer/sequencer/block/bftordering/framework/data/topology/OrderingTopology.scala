@@ -15,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import OrderingTopology.{
@@ -106,12 +107,12 @@ object OrderingTopology {
   @VisibleForTesting
   private[bftordering] def forTesting(
       nodes: Set[BftNodeId],
-      sequencingParameters: SequencingParameters = SequencingParameters.Default,
+      sequencingParameters: Option[SequencingParameters] = None,
       activationTime: TopologyActivationTime = TestBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges: Option[Boolean] = Some(false),
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
       epochLength: EpochLength = DefaultEpochLength,
-  ): OrderingTopology =
+  )(implicit synchronizerProtocolVersion: ProtocolVersion): OrderingTopology =
     OrderingTopology(
       nodes.view.map { node =>
         node -> nodesTopologyInfos.getOrElse(
@@ -122,7 +123,7 @@ object OrderingTopology {
         )
       }.toMap,
       epochLength,
-      sequencingParameters,
+      sequencingParameters.getOrElse(SequencingParameters.Default),
       // TODO(i10428) Move this method under BftSequencerBaseTest so we can reuse defaultMaxBytesToDecompress
       MaxBytesToDecompress.MaxValueUnsafe,
       activationTime,

@@ -63,6 +63,18 @@ trait SessionSigningKeysLifecycleIntegrationTest
         ),
       )
 
+      // ensure that all participants have observed the updated synchronizer parameters
+      // before starting to record the use of session signing keys
+      eventually() {
+        participants.local.foreach { participant =>
+          val syncParameters = participant.topology.synchronizer_parameters.latest(daId)
+
+          syncParameters.confirmationResponseTimeout shouldBe shortDuration
+          syncParameters.mediatorReactionTimeout shouldBe shortDuration
+          syncParameters.ledgerTimeRecordTimeTolerance shouldBe sessionSigningKeysConfig.cutOffDuration
+        }
+      }
+
       // record initial metrics to establish a baseline, as a fallback to the long-term key
       // may have occurred during bootstrap.
       val participantKmsMetrics = Seq(participant1, participant2).map(

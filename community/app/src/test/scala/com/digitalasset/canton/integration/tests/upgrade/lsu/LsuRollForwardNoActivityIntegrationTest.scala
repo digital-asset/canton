@@ -4,7 +4,8 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import cats.syntax.option.*
-import com.digitalasset.canton.HasExecutionContext
+import com.daml.metrics.api.MetricQualification
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -16,9 +17,13 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
+  Fixture,
+  getLsuSequencingTestMetricValues,
+}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuSequencingBoundsOverride,
   SequencerNodeConfig,
@@ -26,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{HasExecutionContext, UniquePortGenerator}
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
 
@@ -33,11 +39,11 @@ import java.time.Duration
 import scala.annotation.nowarn
 
 /** The goal is to test the following scenario:
-  *   - Synchronizer S1 has sequencers sequencer1 and sequencer2
-  *   - LSU to synchronizer S2 with sequencers3 and sequencer4 is done
+  *   - Synchronizer S1 has sequencers sequencer1
+  *   - LSU to synchronizer S2 with sequencers2
   *   - Some activity happens (Daml and topology transactions)
   *   - The synchronizer is considered broken
-  *   - Roll forward to S3 with sequencer5 and sequencer6 is done
+  *   - Roll forward to S3 with sequencer3
   *
   * This test is similar to [[LsuRollForwardIntegrationTest]] except there is no activity on the
   * broken synchronizer. As such, we export topology and traffic from S1.
@@ -67,11 +73,13 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
     throw new IllegalAccessException("Use fixtures instead")
 
   private lazy val upgradeTime1: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+  private lazy val upgradeTime2: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(60)
 
   private lazy val lsuSequencingBoundsOverride =
     LsuSequencingBoundsOverride(
+      // LSU sequencing time is allowed from upgrade time 1
       lowerBoundSequencingTimeExclusive = upgradeTime1,
-      upgradeTime = upgradeTime1,
+      upgradeTime = upgradeTime2,
     )
 
   override protected lazy val upgradeTime: CantonTimestamp = throw new IllegalAccessException(
@@ -88,6 +96,10 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
+      ConfigTransforms.updateSequencerConfig("sequencer2")(
+        _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeExclusive)
+          .replace(Some(upgradeTime2))
+      ),
       ConfigTransforms.updateSequencerConfig("sequencer3")(setLsuSequencingBoundsOverride),
     ) ++ ConfigTransforms.enableAlphaVersionSupport
   }
@@ -109,6 +121,15 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
         new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(
+        _.focus(_.monitoring.metrics)
+          .replace(
+            MetricsConfig(
+              qualifiers = Seq[MetricQualification](MetricQualification.Debug),
+              reporters = Seq(MetricsReporterConfig.Prometheus(port = UniquePortGenerator.next)),
+            )
+          )
+      )
       .withSetup { implicit env =>
         import env.*
 
@@ -188,6 +209,29 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
       fixture2.newSynchronizerNodes.all.start()
 
       migrateSynchronizerNodes(fixture2, ignorePsidCheck = true)
+    }
+
+    "LSU sequencing test can be performed on the new synchronizer" in { implicit env =>
+      import env.*
+
+      /*
+      We cannot rely on the standard waitForTargetTimeOnSequencer: since traffic is not set, then
+      sending time proofs will fail.
+       */
+      eventually() {
+        val ts = sequencer3.underlying.value.sequencer.sequencer.sequencingTime.futureValueUS.value
+        ts should be >= upgradeTime1
+      }
+
+      eventually() {
+        environment.simClock.value.advance(Duration.ofMillis(10))
+        sequencer3.setup.test_lsu_sequencing(NonNegativeInt.zero)
+        val m = getLsuSequencingTestMetricValues(mediator3)
+        m.get(sequencer1.id).value should be > 0L
+      }
+    }
+
+    "Traffic can bet set on the new synchronizer" in { _ =>
       transferTraffic(Some(fixture2))
     }
 
@@ -210,6 +254,7 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
     "activity on the new recovery synchronizer and sanity checks" in { implicit env =>
       import env.*
 
+      environment.simClock.value.advanceTo(upgradeTime2.immediateSuccessor)
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
       val aliceIou = participant1.ledger_api.javaapi.state.acs.await(Iou.COMPANION)(alice)

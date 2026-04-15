@@ -34,6 +34,7 @@ trait OffboardsMediatorNode {
       .getOrElse(fail("No sequencer state found"))
       .item
 
+    // user-manual-entry-begin: OffboardMediator
     // propose the SequencerSynchronizerState that removes the sequencer
     synchronizerOwnersNE
       .foreach(
@@ -44,6 +45,7 @@ trait OffboardsMediatorNode {
           group = medState1.group,
         )
       )
+    // user-manual-entry-end: OffboardMediator
 
     BaseTest.eventually() {
       sequencerOnSynchronizer.topology.mediators

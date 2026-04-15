@@ -38,6 +38,7 @@ trait UserManagementAuth {
           isDeactivated = false,
           metadata = None,
           identityProviderId = identityProviderId,
+          primaryPartyAuthentication = false,
         )
       ),
       rights = rights,

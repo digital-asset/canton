@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.implicits.toFunctorOps
+import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.GenTransactionTree
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -82,7 +82,7 @@ final class LegacyTransactionTreeFactoryTest
             transactionUuid = factory.transactionUuid,
             topologySnapshot = snapshot,
             contractOfId = contractInstanceOfId,
-            keyResolver = keyResolver.fmap(_.toList.toVector),
+            legacyKeyResolver = keyResolver.fmap(_.toList.toVector),
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
           )

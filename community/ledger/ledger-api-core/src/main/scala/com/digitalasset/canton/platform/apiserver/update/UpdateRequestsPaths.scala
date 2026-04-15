@@ -13,6 +13,7 @@ protected[update] object UpdateRequestsPaths {
     val primaryParty: List[String] = List(FieldNames.User.primaryParty)
     val isDeactivated: List[String] = List(FieldNames.User.isDeactivated)
     val identityProviderId: List[String] = List(FieldNames.User.identityProviderId)
+    val primaryPartyAuthentication: List[String] = List(FieldNames.User.primaryPartyAuthentication)
     val fullUpdateTrie: UpdatePathsTrie = UpdatePathsTrie
       .fromPaths(
         Seq(
@@ -22,6 +23,7 @@ protected[update] object UpdateRequestsPaths {
           annotations,
           resourceVersion,
           identityProviderId,
+          primaryPartyAuthentication,
         )
       )
       .getOrElse(sys.error("Failed to create full update user tree. This should never happen"))

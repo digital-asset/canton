@@ -375,7 +375,12 @@ private[speedy] case class PartialTransaction(
       nodes = nodes.updated(nid, createNode),
       actionNodeSeeds = actionNodeSeeds :+ actionNodeSeed,
     )
-    authorizationChecker.authorizeCreate(optLocation, createNode)(auth) match {
+    authorizationChecker.authorizeCreate(
+      optLocation,
+      createNode.templateId,
+      createNode.signatories,
+      createNode.keyOpt.map(_.maintainers),
+    )(auth) match {
       case fa :: _ =>
         Left((ptx, IErr.FailedAuthorization(nid, fa)))
       case Nil =>
@@ -423,12 +428,15 @@ private[speedy] case class PartialTransaction(
         "Fetch",
         // evaluation order tests require visitFetch proceeds authorizeFetch
         contractState.visitFetch(
+          contract.templateId,
           coid,
           contract.gkeyOpt,
           byKey,
         ),
       )
-      authorizationChecker.authorizeFetch(optLocation, node)(auth) match {
+      authorizationChecker.authorizeFetch(optLocation, node.templateId, node.stakeholders)(
+        auth
+      ) match {
         case fa :: _ =>
           Left(IErr.FailedAuthorization(nid, fa))
         case Nil =>
@@ -436,15 +444,27 @@ private[speedy] case class PartialTransaction(
       }
     }
 
+  def authorizeQueryByKey(
+      optLocation: Option[Location],
+      key: CachedKey,
+  ): Either[IErr, Unit] = {
+    val auth = Authorize(context.info.authorizers)
+    authorizationChecker.authorizeLookupByKey(optLocation, key.templateId, key.maintainers)(
+      auth
+    ) match {
+      case fa :: _ =>
+        Left(IErr.FailedAuthorization(NodeId(nextNodeIdx), fa))
+      case Nil =>
+        Right(())
+    }
+  }
+
   def insertQueryByKey(
       optLocation: Option[Location],
       key: CachedKey,
       result: KeyMapping,
       keyVersion: SerializationVersion,
-  ): Either[IErr, PartialTransaction] = {
-
-    val auth = Authorize(context.info.authorizers)
-    val nid = NodeId(nextNodeIdx)
+  ): PartialTransaction = {
     val node = Node.QueryByKey(
       packageName = key.globalKey.packageName,
       templateId = key.templateId,
@@ -460,16 +480,10 @@ private[speedy] case class PartialTransaction(
         "Lookup",
         contractState.visitQueryByKey(key.globalKey, result.queue, result.exhaustive),
       )
-    authorizationChecker.authorizeLookupByKey(optLocation, node)(auth) match {
-      case fa :: _ =>
-        Left(IErr.FailedAuthorization(nid, fa))
-      case Nil =>
-        Right(insertLeafNode(node, keyVersion, optLocation, newContractState))
-    }
+    insertLeafNode(node, keyVersion, optLocation, newContractState)
   }
 
-  /** Open an exercises context.
-    * Must be closed by a `endExercises` or an `abortExercise`.
+  /** Open an exercises context. Must be closed by a `endExercises` or an `abortExercise`.
     */
   def beginExercises(
       packageName: PackageName,
@@ -518,13 +532,20 @@ private[speedy] case class PartialTransaction(
         "Exercise",
         contractState.visitExercise(
           nid,
+          contract.templateId,
           targetId,
           contract.gkeyOpt,
           byKey,
           consuming,
         ),
       )
-      authorizationChecker.authorizeExercise(optLocation, makeExNode(ec))(auth) match {
+      authorizationChecker.authorizeExercise(
+        optLocation,
+        templateId,
+        choiceId,
+        actingParties,
+        choiceAuthorizers,
+      )(auth) match {
         case fa :: _ =>
           Left(IErr.FailedAuthorization(nid, fa))
         case Nil =>

@@ -13,7 +13,6 @@ import com.daml.ledger.api.v2.command_service.{
 }
 import com.daml.ledger.api.v2.commands.{Command, CreateCommand}
 import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.MockMessages.*
 import com.digitalasset.canton.ledger.api.services.CommandService
@@ -41,8 +40,6 @@ class ApiCommandServiceSpec
 
   import ApiCommandServiceSpec.*
 
-  private val telemetry = NoOpTelemetry
-
   "ApiCommandService" should {
     "generate a submission ID if it's empty" in {
       val submissionCounter = new AtomicInteger
@@ -57,7 +54,6 @@ class ApiCommandServiceSpec
           Ref.SubmissionId.assertFromString(
             s"$submissionIdPrefix${submissionCounter.incrementAndGet()}"
           ),
-        telemetry = telemetry,
         loggerFactory = loggerFactory,
       )
 
@@ -122,7 +118,6 @@ class ApiCommandServiceSpec
         currentUtcTime = () => Instant.EPOCH,
         maxDeduplicationDuration = Duration.ZERO,
         generateSubmissionId = () => Ref.SubmissionId.assertFromString(s"submissionId"),
-        telemetry = telemetry,
         loggerFactory = loggerFactory,
       )
 

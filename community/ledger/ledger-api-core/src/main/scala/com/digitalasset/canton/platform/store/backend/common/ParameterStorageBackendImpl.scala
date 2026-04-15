@@ -390,8 +390,13 @@ private[backend] class ParameterStorageBackendImpl(
   }
   def clearACHSState(connection: Connection): Unit =
     discard(
-      SQL"delete from lapi_achs_state".execute()(connection)
+      SQL"truncate table lapi_achs_state".execute()(connection)
     )
+
+  def clearAchsData(connection: Connection): Unit = {
+    clearACHSState(connection)
+    discard(SQL"truncate table lapi_filter_achs_stakeholder".execute()(connection))
+  }
 
   private def batchSql(
       sqlWithNamedParams: String,

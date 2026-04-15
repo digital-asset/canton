@@ -15,8 +15,7 @@ import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.AcsContinuationToken
-import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -114,8 +113,7 @@ private[dao] final class UpdateReader(
       activeAt: Option[Offset],
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-      continuationToken: Option[AcsContinuationToken],
-      checksum: Checksum,
+      rangeInfo: AcsRangeInfo,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
@@ -128,8 +126,7 @@ private[dao] final class UpdateReader(
               filteringConstraints = filter,
               activeAt = offset -> maxSeqId,
               eventProjectionProperties = eventProjectionProperties,
-              continuationToken = continuationToken,
-              checksum = checksum,
+              rangeInfo = rangeInfo,
             )
           )
         Source

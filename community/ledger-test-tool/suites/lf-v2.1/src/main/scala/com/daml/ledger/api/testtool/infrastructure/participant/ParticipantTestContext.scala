@@ -56,7 +56,12 @@ import com.daml.ledger.api.v2.package_service.{
   ListVettedPackagesResponse,
   PackageStatus,
 }
-import com.daml.ledger.api.v2.state_service.{GetActiveContractsRequest, GetActiveContractsResponse}
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsPageRequest,
+  GetActiveContractsPageResponse,
+  GetActiveContractsRequest,
+  GetActiveContractsResponse,
+}
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, TransactionFormat}
@@ -233,6 +238,12 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def activeContracts(
       request: GetActiveContractsRequest
   ): Future[Vector[CreatedEvent]]
+  def activeContractsWithVariants(
+      request: GetActiveContractsRequest
+  ): Future[Vector[CreatedEvent]]
+  def activeContractsPage(
+      request: GetActiveContractsPageRequest
+  ): Future[GetActiveContractsPageResponse]
   def activeContractsIds(
       request: GetActiveContractsRequest
   ): Future[Vector[ContractId[Any]]] =
@@ -252,10 +263,21 @@ trait ParticipantTestContext extends UserManagementTestContext {
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
   ): Future[Vector[CreatedEvent]]
+  def activeContractsWithVariants(
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long] = None,
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]]
   def activeContractResponses(
       request: GetActiveContractsRequest
   ): Future[Vector[GetActiveContractsResponse]]
   def activeContractsByTemplateId(
+      templateIds: Seq[Identifier],
+      parties: Option[Seq[Party]],
+      activeAtOffsetO: Option[Long] = None,
+      verbose: Boolean = true,
+  ): Future[Vector[CreatedEvent]]
+  def activeContractsByTemplateIdWithVariants(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,

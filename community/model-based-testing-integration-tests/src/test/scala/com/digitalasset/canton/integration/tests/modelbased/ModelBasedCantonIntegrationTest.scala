@@ -25,7 +25,12 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 
 import scala.concurrent.duration.DurationInt
 
-final class ModelBasedCantonIntegrationTest
+// TODO(#31951): once fixed, make ModelBasedCantonIntegrationTest non-abstract and reset the timeout to 60 minutes
+final class ModelBasedCantonIntegrationTestRun1 extends ModelBasedCantonIntegrationTest
+final class ModelBasedCantonIntegrationTestRun2 extends ModelBasedCantonIntegrationTest
+final class ModelBasedCantonIntegrationTestRun3 extends ModelBasedCantonIntegrationTest
+
+abstract class ModelBasedCantonIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with PropertyCheckerResultAssertions {
@@ -36,6 +41,14 @@ final class ModelBasedCantonIntegrationTest
     EnvironmentDefinition.P3_S1M1
       .withSetup { implicit env =>
         import env.*
+        sequencer1.topology.synchronizer_parameters
+          .propose_update(
+            daId,
+            _.update(
+              confirmationResponseTimeout = 1.minute,
+              mediatorReactionTimeout = 1.minute,
+            ),
+          )
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
       }
 
@@ -47,10 +60,8 @@ final class ModelBasedCantonIntegrationTest
     new ConcreteGenerators(
       languageVersion = LanguageVersion.v2_3,
       readOnlyRollbacks = true,
-      // TODO(#30398): change to NUCK once NUCK is supported by the protocol
-      keyMode = KeyMode.UniqueContractKeys,
-      // TODO(#30398): change to true once NUCK is supported by the protocol
-      generateQueryByKey = false,
+      keyMode = KeyMode.NonUniqueContractKeys,
+      generateQueryByKey = true,
     )
 
   "The canton interpreter" should {
@@ -74,7 +85,9 @@ final class ModelBasedCantonIntegrationTest
             shrink = Shrinker.shrinkScenario,
             property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
               runAndCompare(cantonInterpreter, scenario, cancelled),
-            timeout = 50.minutes,
+            // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
+            // be on the safe side.
+            timeout = 20.minutes,
             // We evaluate as many samples as possible within the allotted time.
             maxSamples = Int.MaxValue,
             // scenarios of size 50 take long to generate so we generate them in parallel

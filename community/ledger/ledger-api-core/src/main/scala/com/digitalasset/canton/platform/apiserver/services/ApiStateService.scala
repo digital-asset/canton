@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
+import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.logging.entries.LoggingEntries
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
@@ -15,7 +15,12 @@ import com.digitalasset.canton.ledger.api.validation.{
   FormatValidator,
   ParticipantOffsetValidator,
 }
-import com.digitalasset.canton.ledger.api.{AcsContinuationToken, ValidationLogger}
+import com.digitalasset.canton.ledger.api.{
+  AcsContinuationToken,
+  AcsPageToken,
+  AcsRangeInfo,
+  ValidationLogger,
+}
 import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.ledger.participant.state.index.{
   IndexActiveContractsService as ACSBackend,
@@ -30,13 +35,15 @@ import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.shutdownAsGrpcError
+import com.digitalasset.canton.platform.config.StateServiceConfig
 import com.digitalasset.canton.topology.transaction.ParticipantPermission as TopologyParticipantPermission
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.google.protobuf.ByteString
 import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -46,7 +53,7 @@ final class ApiStateService(
     updateService: IndexUpdateService,
     metrics: LedgerApiServerMetrics,
     participantId: LedgerParticipantId,
-    telemetry: Telemetry,
+    config: StateServiceConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     mat: Materializer,
@@ -62,16 +69,15 @@ final class ApiStateService(
       responseObserver: StreamObserver[GetActiveContractsResponse],
   ): Unit = {
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     registerStream(responseObserver) {
 
       val result = for {
         eventFormatProto <- requirePresence(request.eventFormat, "event_format")
         eventFormat <- FormatValidator.validate(eventFormatProto)
         checksum = AcsContinuationToken.calcChecksum(request, participantId)
-        continuationToken <- AcsContinuationToken.decodeAndValidate(
-          checksum,
-          request.streamContinuationToken,
+        continuationPointer <- request.streamContinuationToken.traverse(
+          AcsContinuationToken.decodeAndValidate(checksum, _)
         )
 
         activeAt <- ParticipantOffsetValidator.validateNonNegative(
@@ -79,7 +85,7 @@ final class ApiStateService(
           "active_at_offset",
         )
       } yield {
-        withEnrichedLoggingContext(telemetry)(
+        withEnrichedLoggingContext(
           logging.eventFormat(eventFormat)
         ) { implicit loggingContext =>
           logger.info(
@@ -89,8 +95,11 @@ final class ApiStateService(
             .getActiveContracts(
               eventFormat = eventFormat,
               activeAt = activeAt,
-              continuationToken = continuationToken,
-              checksum = checksum,
+              rangeInfo = AcsRangeInfo(
+                continuationPointer = continuationPointer,
+                requestChecksum = checksum,
+                limit = None,
+              ),
             )
         }
       }
@@ -110,11 +119,83 @@ final class ApiStateService(
     }
   }
 
+  override def getActiveContractsPage(
+      request: GetActiveContractsPageRequest
+  ): Future[GetActiveContractsPageResponse] = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    (for {
+      eventFormatProto <- requirePresence(request.eventFormat, "event_format")
+      eventFormat <- FormatValidator.validate(eventFormatProto)
+      maxPageSize <- FieldValidator.validatePageSize(
+        limit = config.maxAcsPageSize.unwrap,
+        defaultPageSize = config.defaultAcsPageSize.unwrap,
+        request.maxPageSize,
+      )
+      requestChecksum = AcsPageToken.calcRequestChecksum(request)
+      participantChecksum = AcsPageToken.calcParticipantChecksum(participantId)
+      nextPageOpt <- request.pageToken.traverse(
+        AcsPageToken.decodeAndValidate(requestChecksum, participantChecksum, _)
+      )
+      requestActiveAt <- ParticipantOffsetValidator.validateOptionalNonNegative(
+        request.activeAtOffset,
+        "active_at_offset",
+      )
+      consolidatedActiveAt = nextPageOpt.map(_._1).orElse(requestActiveAt)
+    } yield {
+      val pointer = nextPageOpt.map(_._2)
+      for {
+        activeAtOffset <- consolidatedActiveAt match {
+          case Some(offset) => Future(Some(offset))
+          case None => updateService.currentLedgerEnd()
+        }
+        activeContractsWithPointer <- acsService
+          .getActiveContracts(
+            eventFormat,
+            activeAtOffset,
+            rangeInfo = AcsRangeInfo(
+              continuationPointer = pointer,
+              requestChecksum = AcsContinuationToken.emptyChecksum,
+              limit = Some(maxPageSize + 1L),
+            ),
+          )
+          .runWith(
+            Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]]
+          )
+      } yield {
+        val responses = activeContractsWithPointer.take(maxPageSize)
+        val moreItems = activeContractsWithPointer.sizeIs > maxPageSize
+        val continuationPointerForTheNextElem =
+          if (moreItems) {
+            // returning the pointer to the first element of the next page
+            activeContractsWithPointer.lastOption.map(_.streamContinuationToken)
+          } else {
+            None
+          }
+        val activeAt = activeAtOffset.fold(0L)(_.unwrap)
+        val nextPageToken = continuationPointerForTheNextElem.map(pointer =>
+          AcsPageToken.encode(request, pointer, activeAt, participantId)
+        )
+
+        GetActiveContractsPageResponse(
+          activeContracts = responses.map(_.copy(streamContinuationToken = ByteString.empty())),
+          activeAtOffset = activeAt,
+          nextPageToken = nextPageToken,
+        )
+      }
+    })
+      .fold(
+        t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
+        identity,
+      )
+      .thereafter(logger.logErrorsOnCall[GetActiveContractsPageResponse])
+  }
+
   override def getConnectedSynchronizers(
       request: GetConnectedSynchronizersRequest
   ): Future[GetConnectedSynchronizersResponse] = {
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     val result = (for {
       partyO <- FieldValidator
         .optionalString(request.party)(FieldValidator.requirePartyField(_, "party"))
@@ -165,8 +246,8 @@ final class ApiStateService(
   }
 
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] = {
-    implicit val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     updateService
       .currentLedgerEnd()
       .map(offset =>
@@ -180,7 +261,8 @@ final class ApiStateService(
   override def getLatestPrunedOffsets(
       request: GetLatestPrunedOffsetsRequest
   ): Future[GetLatestPrunedOffsetsResponse] = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     updateService
       .latestPrunedOffset()

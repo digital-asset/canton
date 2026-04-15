@@ -14,7 +14,7 @@ import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationTargetParticipantMessage,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
@@ -118,8 +118,10 @@ final class SerializationDeserializationTest
           version,
         )
         test(ConfirmationResultMessage, version)
-        test(PendingHandshakeWithLsuSuccessor, version)
-        test(OnboardingClearanceOperation, version)
+        test(PendingLsuOperation, version)
+        if (version >= ProtocolVersion.v35) {
+          test(OnboardingClearanceOperation, version)
+        }
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)
@@ -244,6 +246,7 @@ final class SerializationDeserializationTest
       "com.digitalasset.canton.participant.admin.data.ActiveContract$",
 
       // TODO(#26601) Remove these exceptions
+      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters$",
       "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistLeaderSelectionPolicyState$",
       "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch$",
       "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability$RemoteDissemination$RemoteBatch$",

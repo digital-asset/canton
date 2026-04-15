@@ -1371,6 +1371,12 @@ fileComments:
               Modifiable
 
               Optional
+            primary_party_authentication: |-
+              If set to true, the user may authenticate against the Ledger API by signing
+              a Party JWT using the primary party's signing key.
+              Modifiable
+
+              Optional
             id: |-
               The user identifier, which must be a non-empty string of at most 128
               characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:()".
@@ -4009,6 +4015,59 @@ fileComments:
               Set if a party was used in the request, otherwise unspecified.
 
               Optional
+      GetActiveContractsPageRequest:
+        message:
+          comments: null
+          fieldComments:
+            active_at_offset: |-
+              The offset at which the snapshot of the active contracts will be computed.
+              Must be no greater than the current ledger end offset.
+              Must be greater than or equal to the last pruning offset.
+              Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+              If zero, the empty set will be returned.
+              If not defined, the current ledger end will be used and it will be populated in the response.
+
+              Optional
+            event_format: |-
+              Format of the contract_entries in the result. In case of CreatedEvent the presentation will be of
+              TRANSACTION_SHAPE_ACS_DELTA.
+
+              Required
+            max_page_size: |-
+              The result page will contain at most max_page_size entries of the respective active contract snapshot.
+              The server might reject max_page_size breaching the server-specified limit.
+              Optional, if not defined, the default will be determined by the server.
+
+              Optional
+            page_token: |-
+              To get the next page of the active contracts snapshot, the ``page_token`` should be set to the
+              ``next_page_token`` of the last ``GetActiveContractsPageResponse``.
+              The page token only works if subsequent requests:
+
+              - are executed on the same participant,
+              - use the same active_at_offset and event_format,
+              - and the participant's store was not pruned to after the active_at_offset.
+
+              If not specified, the first page of the active contracts snapshot will be returned.
+
+              Optional: can be empty
+      GetActiveContractsPageResponse:
+        message:
+          comments: null
+          fieldComments:
+            active_contracts: |-
+              The collection of active contracts for this page response.
+
+              Required: must be non-empty
+            active_at_offset: |-
+              The active_at_offset which was specified in the request, or the calculated active_at_offset from the actual
+              ledger end from at the evaluation of the request.
+
+              Required
+            next_page_token: |-
+              If not present this is the last page. If present, this token must be used to get the next page.
+
+              Optional: can be empty
       GetActiveContractsRequest:
         message:
           comments: |-
@@ -4159,6 +4218,8 @@ fileComments:
             unassigned_event: Required
     oneOfs:
       ActiveContract: {}
+      GetActiveContractsPageRequest: {}
+      GetActiveContractsPageResponse: {}
       GetActiveContractsRequest: {}
       GetActiveContractsResponse:
         contract_entry:
@@ -4202,6 +4263,13 @@ fileComments:
           Once the stream of GetActiveContractsResponses completes,
           the client SHOULD begin streaming updates from the update service,
           starting at the GetActiveContractsRequest.active_at_offset specified in this request.
+          Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
+      - name: GetActiveContractsPage
+        comments: |-
+          Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
+          Once all pages are fetched by repeated calls to ``GetActiveContractsPage``,
+          the client SHOULD begin retrieving updates from the update service,
+          starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
           Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
       - name: GetConnectedSynchronizers
         comments: Get the list of connected synchronizers at the time of the query.

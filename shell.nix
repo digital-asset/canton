@@ -40,6 +40,7 @@ pkgs.mkShell {
     postgresql_17
     (python3.withPackages (pkgs: [ pkgs.datadog pkgs.sphinx pkgs.sphinx-rtd-theme pkgs.sphinx-togglebutton pkgs.sphinx-copybutton pkgs.sphinx-tabs pkgs.sphinxcontrib-mermaid pkgs.pip pkgs.setuptools pkgs.cryptography pkgs.grpcio-tools pkgs.protobuf pkgs.pandas pkgs.dash pkgs.plotly pkgs.roman ]))
     ripgrep
+    openssh
     toxiproxy
     unzip
     (sbt.override { inherit jre; })

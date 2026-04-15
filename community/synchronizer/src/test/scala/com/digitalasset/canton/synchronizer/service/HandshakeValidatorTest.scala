@@ -5,6 +5,8 @@ package com.digitalasset.canton.synchronizer.service
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.synchronizer.service.HandshakeValidator
+import io.grpc.Status
+import io.grpc.Status.Code
 import org.scalatest.wordspec.AsyncWordSpec
 
 class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
@@ -37,14 +39,18 @@ class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
         .value shouldBe ()
 
       // failure: no common pv
-      HandshakeValidator
+      val status = HandshakeValidator
         .clientIsCompatible(
           serverVersion = testedProtocolVersion,
           Seq(unknownProtocolVersion),
           minClientVersionP = None,
         )
         .left
-        .value shouldBe a[String]
+        .value
+
+      status.getDescription shouldBe s"The protocol version required by the server ($testedProtocolVersion) is not among the supported protocol versions by the client: 42000. "
+      status.getCode shouldBe Status.INVALID_ARGUMENT.getCode
+      status.getCause shouldBe null
     }
 
     "take minimum protocol version into account" in {
@@ -52,14 +58,18 @@ class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
         val tested = testedProtocolVersion.v
 
         // testedProtocolVersion is lower than minimum protocol version
-        HandshakeValidator
+        val status = HandshakeValidator
           .clientIsCompatible(
             serverVersion = testedProtocolVersion,
             Seq(tested),
             minClientVersionP = Some(42),
           )
           .left
-          .value shouldBe a[String]
+          .value
+
+        status.getDescription shouldBe "The version required by the synchronizer (34) is lower than the minimum version configured by the participant (42).  "
+        status.getCode shouldBe Code.INVALID_ARGUMENT
+        status.getCause shouldBe null
       } else succeed
     }
   }

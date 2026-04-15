@@ -53,19 +53,20 @@ import scala.concurrent.duration.{FiniteDuration, *}
   * @param verifyPublicApiWithLongTermKeys
   *   The crypto public API used to directly verify messages or validate a signature delegation with
   *   a long-term key.
-  * @param verificationParallelismLimit
-  *   The maximum number of concurrent verifications allowed.
   */
 class SyncCryptoVerifier(
     synchronizerId: SynchronizerId,
     staticSynchronizerParameters: StaticSynchronizerParameters,
     verifyPublicApiWithLongTermKeys: SynchronizerCryptoPureApi,
-    verificationParallelismLimit: PositiveInt,
     publicKeyConversionCacheConfig: CacheConfig,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with AutoCloseable {
+
+  // The maximum number of concurrent signature verifications allowed.
+  private val signatureVerificationParallelism =
+    verifyPublicApiWithLongTermKeys.signatureVerificationParallelism
 
   /** The software-based crypto public API that is used to verify signatures with a session signing
     * key (generated in software). Except for the supported signing schemes, all other schemes are
@@ -76,16 +77,17 @@ class SyncCryptoVerifier(
     val pureCryptoForSessionKeys = new JcePureCrypto(
       defaultSymmetricKeyScheme = Aes128Gcm, // not used
       signingAlgorithmSpecs =
-        CryptoScheme(Ed25519, NonEmpty.mk(Set, Ed25519)), // not used, as this crypto
+        CryptoScheme.tryCreate(Ed25519, NonEmpty.mk(Set, Ed25519)), // not used, as this crypto
       // interface is only for signature verification, and the scheme is derived directly from the signature.
       encryptionAlgorithmSpecs =
-        CryptoScheme(RsaOaepSha256, NonEmpty.mk(Set, RsaOaepSha256)), // not used
+        CryptoScheme.tryCreate(RsaOaepSha256, NonEmpty.mk(Set, RsaOaepSha256)), // not used
       defaultHashAlgorithm = Sha256, // not used
       defaultPbkdfScheme = PbkdfScheme.Argon2idMode1, // not used
       publicKeyConversionCacheConfig = publicKeyConversionCacheConfig,
       // passing None here is fine because this JcePureCrypto is only used for verifying signatures
       // with a public signing key, and the private key conversion cache is never used.
       privateKeyConversionCacheTtl = None,
+      signatureVerificationParallelism = signatureVerificationParallelism,
       loggerFactory = loggerFactory,
     )
 
@@ -421,16 +423,17 @@ class SyncCryptoVerifier(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
-    MonadUtil.parTraverseWithLimit_(verificationParallelismLimit)(signatures.forgetNE)(signature =>
-      verifySignatureInternal(
-        topologySnapshot,
-        None,
-        hash,
-        signature,
-        Seq(signer),
-        signer.toString,
-        usage,
-      )
+    MonadUtil.parTraverseWithLimit_(signatureVerificationParallelism)(signatures.forgetNE)(
+      signature =>
+        verifySignatureInternal(
+          topologySnapshot,
+          None,
+          hash,
+          signature,
+          Seq(signer),
+          signer.toString,
+          usage,
+        )
     )
 
   /** Only verifies key usage, not the actual signature */
@@ -482,12 +485,17 @@ class SyncCryptoVerifier(
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
     for {
       validKeysWithMembers <- loadSigningKeysForMembers(signers, topologySnapshot, usage)
-      keyMember = validKeysWithMembers.flatMap { case (member, keyMap) =>
-        keyMap.keys.map(fingerprint => fingerprint -> member)
-      }
+      // Build a map from fingerprint to the set of members that own that key.
+      // Using groupMap instead of flatMap+toMap avoids silently dropping entries when
+      // two different members share the same key fingerprint.
+      keyMembers: Map[Fingerprint, Seq[Member]] = validKeysWithMembers.toSeq
+        .flatMap { case (member, keyMap) =>
+          keyMap.keys.map(fingerprint => fingerprint -> member)
+        }
+        .groupMap(_._1)(_._2)
       validKeys = validKeysWithMembers.values.flatMap(_.toSeq).toMap
       validated <- EitherT.right(
-        MonadUtil.parTraverseWithLimit(verificationParallelismLimit)(signatures.forgetNE) {
+        MonadUtil.parTraverseWithLimit(signatureVerificationParallelism)(signatures.forgetNE) {
           signature =>
             verifySignatureInternal(
               topologySnapshot,
@@ -499,7 +507,31 @@ class SyncCryptoVerifier(
               usage,
             ).fold(
               _.invalid,
-              _ => keyMember(signature.authorizingLongTermKey).valid[SignatureCheckError],
+              _ => {
+                if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v35) {
+                  val fp = signature.authorizingLongTermKey
+                  keyMembers.get(fp) match {
+                    case Some(Seq(singleMember)) =>
+                      singleMember.valid[SignatureCheckError]
+                    case Some(members) =>
+                      // The key fingerprint is shared by multiple members in the group.
+                      // We cannot reliably attribute the signature to a specific member,
+                      // so we reject it to prevent threshold bypass via misattribution.
+                      SignatureWithWrongKey(
+                        s"Key $fp is shared by multiple group members " +
+                          s"(${members.mkString(", ")}); cannot attribute signature unambiguously"
+                      ).invalid
+                    case None =>
+                      // Should not happen since verifySignatureInternal already validated the key,
+                      // but handle defensively.
+                      SignatureWithWrongKey(
+                        s"Key $fp used to sign is not associated with any member in $groupName"
+                      ).invalid
+                  }
+                } else {
+                  keyMembers(signature.authorizingLongTermKey).valid[SignatureCheckError]
+                }
+              },
             )
         }
       )
@@ -537,7 +569,6 @@ object SyncCryptoVerifier {
       synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       pureCrypto: SynchronizerCryptoPureApi,
-      verificationParallelismLimit: PositiveInt,
       publicKeyConversionCacheConfig: CacheConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext) =
@@ -545,7 +576,6 @@ object SyncCryptoVerifier {
       synchronizerId,
       staticSynchronizerParameters,
       pureCrypto,
-      verificationParallelismLimit,
       publicKeyConversionCacheConfig: CacheConfig,
       loggerFactory,
     )

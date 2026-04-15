@@ -188,8 +188,8 @@ object ProtocolVersion {
     }
 
   /** Same as above when parsing a raw version value */
-  def parseUnchecked(rawVersion: Int): Either[String, ProtocolVersion] =
-    Right(ProtocolVersion(rawVersion))
+  def parseUnchecked(rawVersion: Int): ProtocolVersion =
+    ProtocolVersion(rawVersion)
 
   /** Creates a [[ProtocolVersion]] from the given raw version value and ensures that it is a
     * supported version.

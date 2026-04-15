@@ -28,7 +28,7 @@ class ConcurrentCompiledPackagesTest extends AnyWordSpec with Matchers with Insi
     "load valid package" in {
 
       new ConcurrentCompiledPackages(Compiler.Config.Dev)
-        .addPackage(parserParameters.defaultPackageId, pkg) shouldBe ResultDone(())
+        .addPackage(parserParameters.defaultPackageId, pkg) shouldBe Result.Unit
 
     }
 

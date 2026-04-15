@@ -318,7 +318,12 @@ class NextGenContractStateMachineSpec
       )
     }
   }
-  val templateId: Ref.TypeConId = "Template:Id"
+  val tmplIdWithoutKey: Ref.TypeConId = "Template:WithoutKey"
+  val tmplIdWithKey: Ref.TypeConId = "Template:WithKey"
+  def getTmplId(key: Option[_]): Ref.TypeConId = key match {
+    case Some(_) => tmplIdWithKey
+    case None => tmplIdWithoutKey
+  }
   val choiceId: Ref.ChoiceName = "Choice"
   val pkgName: Ref.PackageName = Ref.PackageName.assertFromString("package-name")
   val txVersion: SerializationVersion = SerializationVersion.maxVersion
@@ -359,7 +364,7 @@ class NextGenContractStateMachineSpec
   implicit class GKeyStringOps(private val key: String) {
     def gkey: GlobalKey =
       GlobalKey.assertBuild(
-        templateId,
+        tmplIdWithKey,
         pkgName,
         V.ValueText(key),
         crypto.Hash.hashPrivateKey(key),
@@ -377,26 +382,24 @@ class NextGenContractStateMachineSpec
     Node.Create(
       coid = contractId,
       packageName = pkgName,
-      templateId = templateId,
+      templateId = getTmplId(key),
       arg = unit,
       signatories = aliceS,
       stakeholders = aliceS,
-      keyOpt = toOptKeyWithMaintainers(templateId, key),
+      keyOpt = toOptKeyWithMaintainers(key),
       version = txVersion,
     )
 
   private def toOptKeyWithMaintainers(
-      templateId: Ref.TypeConId,
       key: Option[String],
   ): Option[GlobalKeyWithMaintainers] =
-    key.map(toKeyWithMaintainers(templateId, _))
+    key.map(toKeyWithMaintainers(_))
 
   private def toKeyWithMaintainers(
-      templateId: Ref.TypeConId,
       key: String,
   ): GlobalKeyWithMaintainers =
     GlobalKeyWithMaintainers.assertBuild(
-      templateId,
+      tmplIdWithKey,
       V.ValueText(key),
       crypto.Hash.hashPrivateKey(key),
       aliceS,
@@ -412,7 +415,7 @@ class NextGenContractStateMachineSpec
     Node.Exercise(
       targetCoid = contractId,
       packageName = pkgName,
-      templateId = templateId,
+      templateId = getTmplId(key),
       interfaceId = None,
       choiceId = choiceId,
       consuming = consuming,
@@ -424,7 +427,7 @@ class NextGenContractStateMachineSpec
       choiceAuthorizers = None,
       children = ImmArray.Empty,
       exerciseResult = None,
-      keyOpt = toOptKeyWithMaintainers(templateId, key),
+      keyOpt = toOptKeyWithMaintainers(key),
       byKey = byKey,
       version = txVersion,
     )
@@ -437,11 +440,11 @@ class NextGenContractStateMachineSpec
     Node.Fetch(
       coid = contractId,
       packageName = pkgName,
-      templateId = templateId,
+      templateId = getTmplId(key),
       actingParties = aliceS,
       signatories = aliceS,
       stakeholders = aliceS,
-      keyOpt = toOptKeyWithMaintainers(templateId, key),
+      keyOpt = toOptKeyWithMaintainers(key),
       byKey = byKey,
       version = txVersion,
       interfaceId = None,
@@ -454,9 +457,9 @@ class NextGenContractStateMachineSpec
   ): Node.QueryByKey =
     Node.QueryByKey(
       packageName = pkgName,
-      templateId = templateId,
+      templateId = tmplIdWithKey,
       exhaustive = exhaustive,
-      key = toKeyWithMaintainers(templateId, key),
+      key = toKeyWithMaintainers(key),
       result = result,
       version = txVersion,
     )
@@ -512,7 +515,7 @@ class NextGenContractStateMachineSpec
 
     def toGlobalKey(keyId: Int): GlobalKey =
       GlobalKey.assertBuild(
-        templateId,
+        tmplIdWithoutKey,
         pkgName,
         V.ValueInt64(keyId.toLong),
         crypto.Hash.hashPrivateKey(s"key-$keyId"),
@@ -526,7 +529,7 @@ class NextGenContractStateMachineSpec
     "reject when a contract is return by a fetch-by-id and but not by subsequent queryByKey" in {
       val r = for {
         state <- start
-        state <- state.visitFetchById(cid1, mbKey = Some(key1))
+        state <- state.visitFetchById(tmplIdWithKey, cid1, mbKey = Some(key1))
         state <- state.visitQueryByKey(key1, result = Vector(), exhaustive = true)
       } yield state
       r shouldBe a[Left[?, ?]]
@@ -536,7 +539,7 @@ class NextGenContractStateMachineSpec
       val r = for {
         state <- start
         state <- state.visitQueryByKey(key1, result = Vector(), exhaustive = true)
-        state <- state.visitFetchById(cid1, mbKey = Some(key1))
+        state <- state.visitFetchById(tmplIdWithKey, cid1, mbKey = Some(key1))
       } yield state
       r shouldBe a[Left[?, ?]]
     }
@@ -544,7 +547,7 @@ class NextGenContractStateMachineSpec
     "reject when a contract archive-by-id is then queryByKey" in {
       val r = for {
         state <- start
-        state <- state.visitExercise(NodeId(1), cid1, mbKey = Some(key1), byKey = false, consuming = true)
+        state <- state.visitExercise(NodeId(1), tmplIdWithKey, cid1, mbKey = Some(key1), byKey = false, consuming = true)
         state <- state.visitQueryByKey(key1, Vector(cid1), exhaustive = false)
       } yield state
       r shouldBe a[Left[?, ?]]
@@ -1014,7 +1017,7 @@ class NextGenContractStateMachineSpec
       UnitTest(
         description = s"archive (without setting or creating id first)",
         interaction = s => {
-          s.archive(id, NodeId(0)).isEmpty shouldBe true
+          s.archive(tmplIdWithoutKey, id, NodeId(0)).isEmpty shouldBe true
           Right(s)
         },
         expected = Right(StateMachineResult.empty),
@@ -1035,7 +1038,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
             } yield s,
           transaction = mkTx(
             mkCreate(id, optkey),
@@ -1071,7 +1074,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- s.create(NodeId(2), id, optkey)
             } yield s,
           transaction = mkTx(
@@ -1096,8 +1099,8 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- s.create(NodeId(0), id, None)
-            s <- s.archive(id, NodeId(1)).get
-            s <- s.archive(id, NodeId(2)).get
+            s <- s.archive(tmplIdWithoutKey, id, NodeId(1)).get
+            s <- s.archive(tmplIdWithoutKey, id, NodeId(2)).get
           } yield s,
         transaction = mkTx(
           mkCreate(id),
@@ -1105,7 +1108,7 @@ class NextGenContractStateMachineSpec
           mkExercise(id, consuming = true, key = None, byKey = false),
           mkExercise(id, consuming = true, key = None, byKey = false),
         ),
-        expected = Left(AlreadyConsumed(id, NodeId(1))),
+        expected = Left(AlreadyConsumed(id, tmplIdWithoutKey, NodeId(1))),
       )
     )
   }
@@ -1126,7 +1129,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- Right(s.endTry)
             } yield s,
           expected = Right(
@@ -1158,7 +1161,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- rollbackTryForTesting(s)
             } yield s,
           transaction = mkTx(
@@ -1202,7 +1205,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- Right(s.endTry)
               s <- s.create(NodeId(2), id, optkey)
             } yield s,
@@ -1230,7 +1233,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- rollbackTryForTesting(s)
               s <- s.create(NodeId(2), id, optkey)
             } yield s,
@@ -1266,7 +1269,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- Right(s.beginTry)
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- Right(s.endTry)
             } yield s,
           expected = Right(
@@ -1298,7 +1301,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- Right(s.beginTry)
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- rollbackTryForTesting(s)
             } yield s,
           transaction = mkTx(
@@ -1328,9 +1331,9 @@ class NextGenContractStateMachineSpec
           for {
             s <- s.create(NodeId(0), id, None)
             s <- Right(s.beginTry)
-            s <- s.archive(id, NodeId(1)).get
+            s <- s.archive(tmplIdWithoutKey, id, NodeId(1)).get
             s <- rollbackTryForTesting(s)
-            s <- s.archive(id, NodeId(2)).get
+            s <- s.archive(tmplIdWithoutKey, id, NodeId(2)).get
           } yield s,
         transaction = mkTx(
           mkCreate(id),
@@ -1366,7 +1369,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(getTmplId(optkey), id): @unchecked
                 resume(optkey)
               }
             } yield s,
@@ -1392,11 +1395,11 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- {
-              val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+              val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id): @unchecked
               resume(key.some)
             }
             s <- s
-              .queryById(id)
+              .queryById(tmplIdWithKey, id)
               .getOrElse(fail("unexpected NeedContract on second queryById")): ErrOr[LLState]
           } yield s,
         expected = Right(
@@ -1423,7 +1426,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              s <- s.queryById(getTmplId(optkey), id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
             } yield s,
           expected = Right(
             StateMachineResult.emptyWith(
@@ -1452,7 +1455,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(getTmplId(optkey), id): @unchecked
                 resume(optkey)
               }
               s <- s.create(NodeId(0), id, optkey)
@@ -1478,8 +1481,8 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- s.create(NodeId(0), id, key.some)
-            s <- s.archive(id, NodeId(1)).get
-            s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+            s <- s.archive(tmplIdWithKey, id, NodeId(1)).get
+            s <- s.queryById(tmplIdWithKey, id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
           } yield s,
         transaction = mkTx(
           mkCreate(id, key.some),
@@ -1487,7 +1490,7 @@ class NextGenContractStateMachineSpec
           mkExercise(id, consuming = true, key = key.some, byKey = false),
           mkFetch(id, key.some, byKey = false),
         ),
-        expected = Left(AlreadyConsumed(id, NodeId(1))),
+        expected = Left(AlreadyConsumed(id, tmplIdWithKey, NodeId(1))),
       )
     )
   }
@@ -1508,7 +1511,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- Right(s.beginTry)
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(getTmplId(optkey), id): @unchecked;
                 resume(optkey)
               }
               s <- Right(s.endTry)
@@ -1538,7 +1541,7 @@ class NextGenContractStateMachineSpec
             for {
               s <- Right(s.beginTry)
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(getTmplId(optkey), id): @unchecked;
                 resume(optkey)
               }
               s <- rollbackTryForTesting(s)
@@ -1567,12 +1570,12 @@ class NextGenContractStateMachineSpec
           for {
             s <- Right(s.beginTry)
             s <- {
-              val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+              val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id): @unchecked;
               resume(key.some)
             }
             s <- rollbackTryForTesting(s)
             s <- s
-              .queryById(id)
+              .queryById(tmplIdWithKey, id)
               .getOrElse(fail("unexpected NeedContract after rollback")): ErrOr[LLState]
           } yield s,
         expected = Right(
@@ -1598,10 +1601,10 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(getTmplId(optkey), id): @unchecked;
                 resume(optkey)
               }
-              s <- s.archive(id, NodeId(0)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(0)).get
             } yield s,
           expected = Right(
             StateMachineResult.emptyWith(
@@ -1625,17 +1628,17 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- {
-              val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+              val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id): @unchecked;
               resume(key.some)
             }
-            s <- s.archive(id, NodeId(0)).get
-            s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+            s <- s.archive(tmplIdWithKey, id, NodeId(0)).get
+            s <- s.queryById(tmplIdWithKey, id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
           } yield s,
         transaction = mkTx(
           mkExercise(id, consuming = true, key = key.some, byKey = false),
           mkFetch(id, key.some, byKey = false),
         ),
-        expected = Left(AlreadyConsumed(id, NodeId(0))),
+        expected = Left(AlreadyConsumed(id, tmplIdWithKey, NodeId(0))),
       )
     )
   }
@@ -1653,8 +1656,8 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
-              s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
+              s <- s.queryById(getTmplId(optkey), id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
             } yield s,
           transaction = mkTx(
             mkCreate(id, optkey),
@@ -1662,7 +1665,7 @@ class NextGenContractStateMachineSpec
             mkExercise(id, consuming = true, optkey, byKey = false),
             mkFetch(id, optkey, byKey = false),
           ),
-          expected = Left(AlreadyConsumed(id, NodeId(1))),
+          expected = Left(AlreadyConsumed(id, getTmplId(optkey), NodeId(1))),
         )
       },
     )
@@ -1684,11 +1687,11 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- Right(s.endTry)
-              s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[State]
+              s <- s.queryById(getTmplId(optkey), id).getOrElse(fail("unexpected NeedContract")): ErrOr[State]
             } yield s,
-          expected = Left(AlreadyConsumed(id, NodeId(1))),
+          expected = Left(AlreadyConsumed(id, getTmplId(optkey), NodeId(1))),
         )
       },
     )
@@ -1710,9 +1713,9 @@ class NextGenContractStateMachineSpec
             for {
               s <- s.create(NodeId(0), id, optkey)
               s <- Right(s.beginTry)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- rollbackTryForTesting(s)
-              s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              s <- s.queryById(getTmplId(optkey), id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
             } yield s,
           transaction = mkTx(
             mkCreate(id, optkey),
@@ -1753,9 +1756,9 @@ class NextGenContractStateMachineSpec
             for {
               s <- Right(s.beginTry)
               s <- s.create(NodeId(0), id, optkey)
-              s <- s.archive(id, NodeId(1)).get
+              s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- rollbackTryForTesting(s)
-              s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              s <- s.queryById(getTmplId(optkey), id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
             } yield s,
           transaction = mkTx(
             mkRollbackTx(
@@ -2354,6 +2357,7 @@ class NextGenContractStateMachineSpec
   // *** create then archive then querybykey
   "createArchiveQueryByKeyUnitTests" - {
     val key = "foo"
+    val tmplId = tmplIdWithKey
     val id = cid(1)
 
     runUnitTest(
@@ -2362,7 +2366,7 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- s.create(NodeId(0), id, key.some)
-            s <- s.archive(id, NodeId(1)).get
+            s <- s.archive(tmplId, id, NodeId(1)).get
             s <- {
               val Left(nk) = s.queryNByKey(key, 1): @unchecked
               nk.resume(Seq(id).view, NeedKeyProgression.Finished) match {
@@ -2422,7 +2426,7 @@ class NextGenContractStateMachineSpec
                 case Left(nk) => fail(s"unexpected NeedKeys: $nk")
               }
             }
-            s <- s.archive(id, NodeId(0)).get
+            s <- s.archive(tmplIdWithKey, id, NodeId(0)).get
           } yield s,
         transaction = mkTx(
           mkQueryByKey(Vector(id), key, exhaustive = true),
@@ -2474,7 +2478,7 @@ class NextGenContractStateMachineSpec
                     ]
                     (km1, s) = result
                     s <- toArchive.foldLeft[ErrOr[LLState]](Right(s)) { (acc, id) =>
-                      acc.flatMap(_.archive(id, freshNodeId()).get)
+                      acc.flatMap(_.archive(tmplIdWithKey, id, freshNodeId()).get)
                     }
                     result <- s
                       .queryNByKey(key, n2)
@@ -2593,7 +2597,7 @@ class NextGenContractStateMachineSpec
         interaction = s =>
           for {
             s <- {
-              val Left(NeedContract(resume)) = s.queryById(id): @unchecked;
+              val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id): @unchecked;
               resume(key.some)
             }
             s <- {
@@ -2645,7 +2649,7 @@ class NextGenContractStateMachineSpec
                 case Left(nk) => fail(s"unexpected NeedKeys: $nk")
               }
             }
-            s <- s.queryById(id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+            s <- s.queryById(tmplIdWithKey, id).getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
           } yield s,
         transaction = mkTx(
           mkQueryByKey(Vector(id), key, exhaustive = true),
@@ -2665,7 +2669,6 @@ class NextGenContractStateMachineSpec
   // ** queryNByKey
   // *** inconsistent querybyid/queryNByKey
   // **** positive case: queryById reports contract+key EXISTS that queryNByKey DID NOT find
-  // TODO[#30398]: implement when it's ready!
   "inconsistentQueryByIdBetweenQueryNByKeyUnittest" - {
     "positive case" - {
       val key = "foo"
@@ -2686,7 +2689,7 @@ class NextGenContractStateMachineSpec
                 state = s,
               )
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id2): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id2): @unchecked;
                 resume(key.some)
               }
             } yield s,
@@ -2714,7 +2717,7 @@ class NextGenContractStateMachineSpec
           interaction = s =>
             for {
               s <- {
-                val Left(NeedContract(resume)) = s.queryById(id1): @unchecked;
+                val Left(NeedContract(resume)) = s.queryById(tmplIdWithKey, id1): @unchecked;
                 resume(key.some)
               }
               s <- queryNByKeyAndReplyToNeedsKey(

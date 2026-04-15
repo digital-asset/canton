@@ -7,7 +7,7 @@ import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
+  AcsRangeInfo,
   TransactionFormat,
   TransactionShape,
   UpdateFormat,
@@ -102,8 +102,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
         .getActiveContracts(
           eventFormat = eventFormat(dsoParty),
           activeAt = ledgerEndOffset,
-          continuationToken = None,
-          checksum = AcsContinuationToken.emptyChecksum,
+          rangeInfo = AcsRangeInfo.empty,
         )
         .zipWithIndex
         .runWith(Sink.last)

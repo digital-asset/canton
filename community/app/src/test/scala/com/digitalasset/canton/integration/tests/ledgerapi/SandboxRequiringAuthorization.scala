@@ -187,6 +187,7 @@ trait SandboxRequiringAuthorizationFuns {
       identityProviderId = identityProviderId,
       primaryParty = primaryParty,
       isDeactivated = false,
+      primaryPartyAuthentication = false,
     )
     val req = proto.CreateUserRequest(Some(user), rights)
     for {

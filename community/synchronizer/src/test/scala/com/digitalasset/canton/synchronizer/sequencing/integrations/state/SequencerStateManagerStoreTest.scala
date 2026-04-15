@@ -113,7 +113,7 @@ trait SequencerStateManagerStoreTest
             )
           } yield {
             val inFlightAggregations = lowerBoundAndInFlightAggregations
-            inFlightAggregations shouldBe Map.empty
+            inFlightAggregations.byId shouldBe Map.empty
           }).failOnShutdown
         }
       }
@@ -205,23 +205,23 @@ trait SequencerStateManagerStoreTest
             )
           } yield {
             // All aggregations by sender have later timestamps and the in-flight aggregations are therefore considered inexistent
-            head2pred shouldBe Map.empty
-            head2 shouldBe Map(
+            head2pred.byId shouldBe Map.empty
+            head2.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1
                 .focus(_.aggregatedSenders)
                 // bob's aggregation happened later
                 .modify(_.removed(bob))
             )
-            head3 shouldBe Map(
+            head3.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1
             )
-            head4pred shouldBe Map(
+            head4pred.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1,
               // aggregationId2 has already expired
               aggregationId3 -> inFlightAggregation3,
             )
             // All in-flight aggregations have expired
-            head4 shouldBe Map.empty
+            head4.byId shouldBe Map.empty
           }).failOnShutdown
         }
       }
@@ -309,21 +309,21 @@ trait SequencerStateManagerStoreTest
               maxSequencingTimeUpperBound = maxSequencingTimeUpperBound,
             )
           } yield {
-            head2 shouldBe Map(
+            head2.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1,
               aggregationId2 -> inFlightAggregation2,
             )
-            head2WithBound1 shouldBe Map(
+            head2WithBound1.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1
             )
-            head2WithBound2 shouldBe Map(
+            head2WithBound2.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1,
               aggregationId2 -> inFlightAggregation2,
             )
-            head3 shouldBe Map(
+            head3.byId shouldBe Map(
               aggregationId2 -> inFlightAggregation2
             )
-            head2expired shouldBe Map(
+            head2expired.byId shouldBe Map(
               aggregationId2 -> inFlightAggregation2
             )
           }).failOnShutdown

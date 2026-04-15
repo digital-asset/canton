@@ -8,13 +8,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.HasLoggerName
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
-  AllMembersOfSynchronizer,
-  SequencersOfSynchronizer,
   SignedContent,
   SubmissionRequest,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.synchronizer.block.BlockEvents.TickTopology
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.Traced
@@ -30,6 +27,9 @@ import RawLedgerBlock.RawBlockEvent
   */
 sealed trait LedgerBlockEvent extends Product with Serializable {
   def timestamp: CantonTimestamp
+
+  def withTimestamp(newTimestamp: CantonTimestamp): LedgerBlockEvent
+
 }
 
 object LedgerBlockEvent extends HasLoggerName {
@@ -40,11 +40,17 @@ object LedgerBlockEvent extends HasLoggerName {
       orderingSequencerId: SequencerId,
       originalPayloadSize: Int =
         0, // default is 0 for testing as this value is only used for metrics
-  ) extends LedgerBlockEvent
+  ) extends LedgerBlockEvent {
+    override def withTimestamp(newTimestamp: CantonTimestamp): LedgerBlockEvent =
+      copy(timestamp = newTimestamp)
+  }
   final case class Acknowledgment(
       timestamp: CantonTimestamp,
       request: SignedContent[AcknowledgeRequest],
-  ) extends LedgerBlockEvent
+  ) extends LedgerBlockEvent {
+    override def withTimestamp(newTimestamp: CantonTimestamp): LedgerBlockEvent =
+      copy(timestamp = newTimestamp)
+  }
 
   def fromRawBlockEvent(
       protocolVersion: ProtocolVersion,
@@ -108,19 +114,12 @@ object LedgerBlockEvent extends HasLoggerName {
       )
 }
 
-/** @param tickTopology
+/** @param tickTopologyAtLeastAt
   *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
   */
 final case class BlockEvents(
     height: Long,
     baseBlockSequencingTime: CantonTimestamp,
     events: Seq[Traced[LedgerBlockEvent]],
-    tickTopology: Option[TickTopology] = None,
+    tickTopologyAtLeastAt: Option[CantonTimestamp] = None,
 )
-object BlockEvents {
-
-  final case class TickTopology(
-      atLeastAt: CantonTimestamp,
-      recipient: Either[AllMembersOfSynchronizer.type, SequencersOfSynchronizer.type],
-  )
-}

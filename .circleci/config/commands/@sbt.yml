@@ -245,7 +245,7 @@ execute_sbt_command:
         # We choose a value of 2h, because that is the highest value for << parameters.timeout >> that we currently use.
         no_output_timeout: 2h
         command: |
-          ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
+          .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
         environment:
           LOG_IMMEDIATE_FLUSH: << parameters.log_immediate_flush >>
           EXECUTION_CONTEXT_SIZE: << parameters.execution_context_size >>

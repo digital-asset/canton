@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.processing.SequencedTime
 
 import java.time.Duration
 
@@ -130,6 +131,9 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
         .contractId
         .toLfContractId
 
+      participant3.underlying.value.sync.syncPersistentStateManager
+        .get(fixture.newPsid) shouldBe empty
+
       performSynchronizerNodesLsu(fixture)
 
       // P3 performs handshake with the new synchronizer
@@ -137,8 +141,18 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
         participant3.underlying.value.sync.syncPersistentStateManager
           .get(fixture.newPsid)
           .value
-          .parameterStore
+          .connectivityStatusStore
           .lastParameters
+          .futureValueUS should not be empty
+      }
+
+      // verify that the new topology store is not empty now (local copy was successful)
+      eventually() {
+        participant3.underlying.value.sync.syncPersistentStateManager
+          .get(fixture.newPsid)
+          .value
+          .topologyStore
+          .maxTimestamp(SequencedTime.MaxValue, includeRejected = false)
           .futureValueUS should not be empty
       }
 

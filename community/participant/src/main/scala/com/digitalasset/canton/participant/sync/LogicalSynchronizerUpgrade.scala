@@ -32,12 +32,12 @@ import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.{
   AutomaticLsuRequest,
   LateLsuRequest,
   LsuRequest,
-  ManualLsuRequest,
   NegativeResult,
+  OfflineManualLsuRequest,
+  OnlineManualLsuRequest,
 }
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.synchronizer.{
-  PendingHandshakeWithLsuSuccessor,
+  PendingLsuOperation,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.resource.DbExceptionRetryPolicy
@@ -66,6 +66,7 @@ import io.scalaland.chimney.dsl.*
 import java.util.concurrent.TimeUnit
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+import scala.util.chaining.*
 
 /** Performs the upgrade from one physical synchronizer to its successor. The final step is to mark
   * the successor configuration as active.
@@ -414,8 +415,8 @@ sealed trait LogicalSynchronizerUpgrade[Req <: LsuRequest] extends NamedLogging 
 }
 
 /** Contains methods that are used for both the [[AutomaticLogicalSynchronizerUpgrade]] amd
-  * [[ManualLogicalSynchronizerUpgrade]]. Unlike [[UncheckedLateLogicalSynchronizerUpgrade]], both
-  * automatic and manual lsu perform a few checks before doing the migration.
+  * [[OnlineManualLogicalSynchronizerUpgrade]]. Unlike [[UncheckedLateLogicalSynchronizerUpgrade]],
+  * both automatic and manual lsu perform a few checks before doing the migration.
   *
   * @tparam Req
   *   Type parameter for the request.
@@ -428,7 +429,7 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     SyncServiceError,
     Option[PhysicalSynchronizerId],
   ]
-  def pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore
+  def pendingLsuOperationsStore: PendingLsuOperation.Store
 
   protected def upgrade(
       alias: SynchronizerAlias,
@@ -442,6 +443,9 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     implicit val logger = Lsu.Logger(loggerFactory, getClass, successorPsid)
 
     logger.info(s"Upgrade from $currentPsid to $successorPsid")
+
+    val upgradabilityCheck =
+      if (request.isOnline) onlineUpgradabilityCheck _ else offlineUpgradabilityCheck _
 
     // Ensure upgraded is not attempted if announcement was revoked
     performIfNotUpgradedYet(successorPsid)(
@@ -487,8 +491,12 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     *
     * This method wraps the call to [[canBeUpgradedTo]] to ensure proper connectivity to the
     * synchronizer.
+    *
+    * Checks are done when the participant is connected to the synchronizer. This method is used
+    * when the upgrade process has to wait for the processing to reach a certain state (clean
+    * synchronizer index, ACS commitment processor, ...).
     */
-  protected def upgradabilityCheck(
+  protected def onlineUpgradabilityCheck(
       alias: SynchronizerAlias,
       currentPsid: PhysicalSynchronizerId,
       request: Req,
@@ -500,13 +508,16 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     val successorPsid = request.successorPsid
     val lsid = currentPsid.logical
 
-    logger.info("Attempting upgradability check")
+    logger.info("Attempting online upgradability check")
 
     connectSynchronizer(Traced(alias)).value.flatMap {
       case Left(error) =>
         // Left will lead to a retry
         FutureUnlessShutdown.pure(
-          NegativeResult(s"Unable to connect to $alias: $error", isRetryable = true).asLeft
+          NegativeResult(
+            s"Failed to connect to $alias to perform upgradability check: $error",
+            isRetryable = true,
+          ).asLeft
         )
 
       case Right(Some(`successorPsid`)) =>
@@ -516,8 +527,52 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
         enqueueOperation(
           lsid,
           canBeUpgradedTo(currentPsid, request).value,
-          description = "lsu-upgradability-check",
+          description = "lsu-online-upgradability-check",
           shouldBeConnected = true,
+        )
+    }
+  }
+
+  /** Check whether the upgrade can be done.
+    *   - A left indicates that the upgrade cannot be done (yet). Retryability is encoded in
+    *     NegativeResult.
+    *   - A right indicates that the upgrade can be attempted or was already done.
+    *
+    * This method wraps the call to [[canBeUpgradedTo]] to ensure proper connectivity to the
+    * synchronizer.
+    *
+    * Checks are done when the participant is not connected to the synchronizer. This is used in the
+    * offline manual LSU where the latest clean synchronizer is picked as upgrade time.
+    */
+  protected def offlineUpgradabilityCheck(
+      alias: SynchronizerAlias,
+      currentPsid: PhysicalSynchronizerId,
+      request: Req,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+      logger: Lsu.Logger,
+  ): FutureUnlessShutdown[Either[NegativeResult, UpgradabilityCheckResult]] = {
+    val lsid = currentPsid.logical
+
+    logger.info("Attempting offline upgradability check")
+
+    disconnectSynchronizer(Traced(alias)).value.flatMap {
+      case Left(error) =>
+        // Left will lead to a retry
+        FutureUnlessShutdown.pure(
+          NegativeResult(
+            s"Failed to disconnect from $alias to perform upgradability check: $error",
+            isRetryable = true,
+          ).asLeft
+        )
+
+      case Right(_) =>
+        enqueueOperation(
+          lsid,
+          canBeUpgradedTo(currentPsid, request).value,
+          description = "lsu-offline-upgradability-check",
+          shouldBeConnected = false,
         )
     }
   }
@@ -578,13 +633,12 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
       executionContext: ExecutionContext,
       traceContext: TraceContext,
       logger: Lsu.Logger,
-  ): EitherT[FutureUnlessShutdown, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+
+    logger.info(s"Marking synchronizer connection $currentPsid as inactive")
+
     for {
       // Should have been checked before but this is cheap
-      _ <- canBeUpgradedTo(currentPsid, request).leftMap(_.details)
-
-      // Prevent reconnect to the current/old synchronizer
-      _ = logger.info(s"Marking synchronizer connection $currentPsid as inactive")
       _ <- synchronizerConnectionConfigStore
         .setStatus(
           alias,
@@ -594,14 +648,14 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
         .leftMap(err => s"Unable to mark current synchronizer $currentPsid as inactive: $err")
 
       /*
-       Handshake is useless now: the node is doing the LSU regardless of the outcome of the handshake.
-       Potential issues will be flagged upon connection attempt to the synchronizer.
+      Handshake and topology copy are useless now: the node is doing the LSU regardless of the outcome.
+      Potential issues will be flagged upon connection attempt to the synchronizer.
        */
       _ <- EitherT.rightT[FutureUnlessShutdown, String](
-        pendingHandshakesWithSuccessorsStore.delete(
+        pendingLsuOperationsStore.delete(
           currentPsid,
-          PendingHandshakeWithLsuSuccessor.operationKey,
-          PendingHandshakeWithLsuSuccessor.operationName,
+          PendingLsuOperation.operationKey,
+          PendingLsuOperation.operationName,
         )
       )
 
@@ -617,6 +671,7 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
           s"Unable to mark successor synchronizer ${request.successorPsid} as active: $err"
         )
     } yield logger.info("Automatic upgrade was successful")
+  }
 }
 
 protected object CheckedLogicalSynchronizerUpgrade {
@@ -650,7 +705,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       SyncServiceError,
       Unit,
     ],
-    override val pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+    override val pendingLsuOperationsStore: PendingLsuOperation.Store,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -748,7 +803,31 @@ class AutomaticLogicalSynchronizerUpgrade(
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     implicit val logger = Lsu.Logger(loggerFactory, getClass, synchronizerSuccessor.psid)
 
-    performUpgradeInternal(alias, currentPsid, AutomaticLsuRequest(synchronizerSuccessor))
+    for {
+      _disconnect <- disconnectSynchronizer(Traced(alias))
+        .leftMap(err => NegativeResult(err.toString, isRetryable = true))
+        .leftMap(_.details)
+
+      _ <- enqueueOperation(
+        currentPsid.logical,
+        operation = performUpgradeInternal(
+          alias,
+          currentPsid = currentPsid,
+          AutomaticLsuRequest(synchronizerSuccessor),
+        ).leftMap { error =>
+          /*
+          Because preconditions are checked, a failure of the upgrade is not something that can be automatically
+          recovered from (except DB exceptions).
+           */
+          NegativeResult(
+            s"Unable to finish upgrade of $currentPsid to ${synchronizerSuccessor.psid}. Not retrying. Cause: $error",
+            isRetryable = false,
+          )
+        }.value,
+        description = s"finish-lsu-upgrade",
+        shouldBeConnected = false,
+      ).pipe(EitherT(_)).leftMap(_.details)
+    } yield ()
   }
 
   /** Check whether the upgrade can be done. A left indicates that the upgrade cannot be done. A
@@ -841,10 +920,80 @@ class AutomaticLogicalSynchronizerUpgrade(
   }
 }
 
+object ManualLogicalSynchronizerUpgrade {
+  def upgrade(
+      synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
+      ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
+      syncPersistentStateManager: SyncPersistentStateManager,
+      executionQueue: SimpleExecutionQueue,
+      connectedSynchronizersLookup: ConnectedSynchronizersLookup,
+      connectSynchronizer: Traced[SynchronizerAlias] => EitherT[
+        FutureUnlessShutdown,
+        SyncServiceError,
+        Option[PhysicalSynchronizerId],
+      ],
+      disconnectSynchronizer: Traced[SynchronizerAlias] => EitherT[
+        FutureUnlessShutdown,
+        SyncServiceError,
+        Unit,
+      ],
+      pendingLsuOperationsStore: PendingLsuOperation.Store,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(
+      alias: SynchronizerAlias,
+      request: AdminManualLsuRequest,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    request.upgradeTime match {
+      case Some(upgradeTime) =>
+        new OnlineManualLogicalSynchronizerUpgrade(
+          synchronizerConnectionConfigStore,
+          ledgerApiIndexer,
+          syncPersistentStateManager,
+          executionQueue,
+          connectedSynchronizersLookup,
+          connectSynchronizer,
+          disconnectSynchronizer,
+          pendingLsuOperationsStore,
+          timeouts,
+          loggerFactory,
+        ).upgrade(
+          alias,
+          request.currentPsid,
+          request.into[OnlineManualLsuRequest].withFieldConst(_.upgradeTime, upgradeTime).transform,
+        )
+
+      case None =>
+        new OfflineManualLogicalSynchronizerUpgrade(
+          synchronizerConnectionConfigStore,
+          ledgerApiIndexer,
+          syncPersistentStateManager,
+          executionQueue,
+          connectedSynchronizersLookup,
+          connectSynchronizer,
+          disconnectSynchronizer,
+          pendingLsuOperationsStore,
+          timeouts,
+          loggerFactory,
+        ).upgrade(
+          alias,
+          request.currentPsid,
+          request.into[OfflineManualLsuRequest].withFieldConst(_.alias, alias).transform,
+        )
+    }
+}
+
 /** Perform a manual logical synchronizer upgrade. This endpoint should ONLY be used when the
   * current synchronizer was declared irrevocably broken.
+  *
+  * The upgrade process will wait until the clean synchronizer index reaches update time and fail if
+  * it is beyond. The waiting requires the node to be connected to the synchronizer (thus the
+  * 'online' prefix).
   */
-class ManualLogicalSynchronizerUpgrade(
+class OnlineManualLogicalSynchronizerUpgrade(
     override val synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     override val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
     syncPersistentStateManager: SyncPersistentStateManager,
@@ -860,49 +1009,39 @@ class ManualLogicalSynchronizerUpgrade(
       SyncServiceError,
       Unit,
     ],
-    override val pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+    override val pendingLsuOperationsStore: PendingLsuOperation.Store,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends CheckedLogicalSynchronizerUpgrade[ManualLsuRequest] {
-  override def kind: String = "manual"
+    extends CheckedLogicalSynchronizerUpgrade[OnlineManualLsuRequest] {
+  override def kind: String = "manual-online"
 
-  def upgrade(alias: SynchronizerAlias, request: AdminManualLsuRequest)(implicit
+  def upgrade(
+      alias: SynchronizerAlias,
+      currentPsid: PhysicalSynchronizerId,
+      request: OnlineManualLsuRequest,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
 
     implicit val logger = Lsu.Logger(loggerFactory, getClass, request.successorPsid)
-    val currentPsid = request.currentPsid
     val successorPsid = request.successorPsid
 
-    logger.info(s"Manual upgrade from ${request.currentPsid} to ${request.successorPsid}")
+    logger.info(s"Manual upgrade from $currentPsid to ${request.successorPsid}")
 
     performIfNotUpgradedYet(request.successorPsid)(
-      for {
-        upgradeTime <- request.upgradeTime match {
-          case Some(upgradeTime) => EitherT.pure[FutureUnlessShutdown, String](upgradeTime)
-          case None =>
-            OptionT(
-              ledgerApiIndexer.asEval.value.ledgerApiStore.value
-                .cleanSynchronizerIndex(request.lsid)
-            ).map(_.recordTime)
-              // TODO(#31526) Properly report error and resolution
-              .toRight("Unable to get clean synchronizer indexer")
-        }
-
-        _ <- super.upgrade(
-          alias,
-          currentPsid,
-          request.into[ManualLsuRequest].withFieldConst(_.upgradeTime, upgradeTime).transform,
-        )
-      } yield (),
+      super.upgrade(
+        alias,
+        currentPsid,
+        request,
+      ),
       operation = s"manual upgrade from $currentPsid to $successorPsid",
     )
   }
 
   override protected def canBeUpgradedTo(
       currentPsid: PhysicalSynchronizerId,
-      request: ManualLsuRequest,
+      request: OnlineManualLsuRequest,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, NegativeResult, UpgradabilityCheckResult] = {
@@ -958,6 +1097,144 @@ class ManualLogicalSynchronizerUpgrade(
   }
 }
 
+/** Perform a manual logical synchronizer upgrade. This endpoint should ONLY be used when the
+  * current synchronizer was declared irrevocably broken.
+  *
+  * The process will not perform any check related to the clean synchronizer index. The clean
+  * synchronizer index will be used as upgrade time. To avoid race conditions between the read of
+  * the clean synchronizer index and the updates in the stores (in [[performUpgradeInternal]]), the
+  * node will disconnect from the synchronizer (thus the `offline` prefix).
+  */
+class OfflineManualLogicalSynchronizerUpgrade(
+    override val synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
+    override val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
+    syncPersistentStateManager: SyncPersistentStateManager,
+    override val executionQueue: SimpleExecutionQueue,
+    override val connectedSynchronizersLookup: ConnectedSynchronizersLookup,
+    override val connectSynchronizer: Traced[SynchronizerAlias] => EitherT[
+      FutureUnlessShutdown,
+      SyncServiceError,
+      Option[PhysicalSynchronizerId],
+    ],
+    override val disconnectSynchronizer: Traced[SynchronizerAlias] => EitherT[
+      FutureUnlessShutdown,
+      SyncServiceError,
+      Unit,
+    ],
+    override val pendingLsuOperationsStore: PendingLsuOperation.Store,
+    override val timeouts: ProcessingTimeout,
+    override val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends CheckedLogicalSynchronizerUpgrade[OfflineManualLsuRequest] {
+  override def kind: String = "manual-offline"
+
+  def upgrade(
+      alias: SynchronizerAlias,
+      currentPsid: PhysicalSynchronizerId,
+      request: OfflineManualLsuRequest,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+
+    implicit val logger = Lsu.Logger(loggerFactory, getClass, request.successorPsid)
+    val successorPsid = request.successorPsid
+
+    logger.info(s"Manual upgrade from $currentPsid to ${request.successorPsid}")
+
+    performIfNotUpgradedYet(request.successorPsid)(
+      super.upgrade(
+        alias,
+        currentPsid,
+        request,
+      ),
+      operation = s"manual upgrade from $currentPsid to $successorPsid",
+    )
+  }
+
+  // This method MUST be called when the node is disconnected from the synchronizer
+  override protected def canBeUpgradedTo(
+      currentPsid: PhysicalSynchronizerId,
+      request: OfflineManualLsuRequest,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, NegativeResult, UpgradabilityCheckResult] = {
+
+    val successors: Map[SequencerId, LsuSequencerConnectionSuccessor] =
+      request.sequencerSuccessors.map { case (sequencerId, connection) =>
+        sequencerId -> LsuSequencerConnectionSuccessor(
+          sequencerId,
+          successorPsid = request.successorPsid,
+          connection,
+        )
+      }
+
+    def upgradeCheck(): EitherT[FutureUnlessShutdown, NegativeResult, Unit] = for {
+      currentSyncPersistentState <- EitherT.fromEither[FutureUnlessShutdown](
+        syncPersistentStateManager
+          .get(currentPsid)
+          .toRight(
+            NegativeResult(
+              s"Unable to find persistent state for $currentPsid",
+              isRetryable = false,
+            )
+          )
+      )
+
+      _ <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          synchronizerConnectionConfigStore.get(request.successorPsid).map(_ => ())
+        )
+        .orElse(
+          for {
+            currentConfigAndNewSequencers <- prepareNewSynchronizerConnectionConfig(
+              successors,
+              currentSyncPersistentState,
+            )
+            (currentConfig, successorSequencerConnections) = currentConfigAndNewSequencers
+
+            // Ensure the node will not connect to the current synchronizer...
+            _ <- synchronizerConnectionConfigStore
+              .setStatus(
+                request.alias,
+                KnownPhysicalSynchronizerId(currentPsid),
+                SynchronizerConnectionConfigStore.LsuSource,
+              )
+              .leftMap(err =>
+                NegativeResult(
+                  s"Unable to mark current synchronizer $currentPsid as inactive: $err",
+                  isRetryable = false,
+                )
+              )
+
+            // ... so that the clean synchronizer index will not progress anymore
+            upgradeTime <- OptionT(
+              ledgerApiIndexer.asEval.value.ledgerApiStore.value
+                .cleanSynchronizerIndex(request.lsid)
+            ).map(_.recordTime)
+              .toRight(
+                NegativeResult(
+                  s"Unable to get synchronizer index for ${request.lsid}",
+                  isRetryable = true,
+                )
+              )
+
+            _ <- attemptSuccessorSynchronizerRegistration(
+              currentPsid,
+              request.successorPsid,
+              upgradeTime,
+              currentConfig,
+              successorSequencerConnections,
+            )
+          } yield ()
+        )
+    } yield ()
+
+    if (isUpgradeDone(request.successorPsid))
+      EitherT.pure[FutureUnlessShutdown, NegativeResult](UpgradabilityCheckResult.UpgradeDone)
+    else upgradeCheck().map(_ => UpgradabilityCheckResult.ReadyToUpgrade)
+  }
+}
+
 /** This class implements late manual LSU. It should be called for participants that are upgrading
   * manually:
   *   - because automatic LSU failed, or
@@ -976,7 +1253,7 @@ class UncheckedLateLogicalSynchronizerUpgrade(
       SyncServiceError,
       Unit,
     ],
-    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+    pendingLsuOperationsStore: PendingLsuOperation.Store,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -1027,15 +1304,14 @@ class UncheckedLateLogicalSynchronizerUpgrade(
         )
         .leftMap(_.message)
 
-      /*
-       Handshake is useless now: the node is doing the LSU regardless of the outcome of the handshake.
-       Potential issues will be flagged upon connection attempt to the synchronizer.
+      /* Handshake and topology copy are useless now: the node is doing the LSU regardless of the
+       * outcome. Potential issues will be flagged upon connection attempt to the synchronizer.
        */
       _ <- EitherT.rightT[FutureUnlessShutdown, String](
-        pendingHandshakesWithSuccessorsStore.delete(
+        pendingLsuOperationsStore.delete(
           currentPsid,
-          PendingHandshakeWithLsuSuccessor.operationKey,
-          PendingHandshakeWithLsuSuccessor.operationName,
+          PendingLsuOperation.operationKey,
+          PendingLsuOperation.operationName,
         )
       )
 
@@ -1071,7 +1347,7 @@ class UncheckedLateLogicalSynchronizerUpgrade(
   }
 }
 
-protected object LogicalSynchronizerUpgrade {
+object LogicalSynchronizerUpgrade {
   private val RetryInitialDelay: FiniteDuration = FiniteDuration(200, TimeUnit.MILLISECONDS)
   private val RetryMaxDelay: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
 
@@ -1088,24 +1364,44 @@ protected object LogicalSynchronizerUpgrade {
   sealed trait LsuRequest {
     def successorPsid: PhysicalSynchronizerId
     def lsid: SynchronizerId = successorPsid.logical
+
+    def isOnline: Boolean
   }
 
   final case class AutomaticLsuRequest(successor: SynchronizerSuccessor) extends LsuRequest {
     override def successorPsid: PhysicalSynchronizerId = successor.psid
     def upgradeTime: CantonTimestamp = successor.upgradeTime
+
+    override def isOnline: Boolean = true
   }
 
-  final case class ManualLsuRequest(
+  sealed trait ManualLsuRequest extends LsuRequest {
+    def sequencerSuccessors: Map[SequencerId, GrpcConnection]
+  }
+
+  final case class OnlineManualLsuRequest(
       successorPsid: PhysicalSynchronizerId,
       upgradeTime: CantonTimestamp,
       sequencerSuccessors: Map[SequencerId, GrpcConnection],
-  ) extends LsuRequest
+  ) extends ManualLsuRequest {
+    override def isOnline: Boolean = true
+  }
+
+  final case class OfflineManualLsuRequest(
+      alias: SynchronizerAlias,
+      successorPsid: PhysicalSynchronizerId,
+      sequencerSuccessors: Map[SequencerId, GrpcConnection],
+  ) extends ManualLsuRequest {
+    override def isOnline: Boolean = false
+  }
 
   final case class LateLsuRequest(
       successorConfig: SynchronizerConnectionConfig,
       successor: SynchronizerSuccessor,
   ) extends LsuRequest {
     override def successorPsid: PhysicalSynchronizerId = successor.psid
+    override def isOnline: Boolean = false
+
     def upgradeTime: CantonTimestamp = successor.upgradeTime
   }
 }

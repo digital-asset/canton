@@ -24,7 +24,7 @@ import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, Un
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
+import com.digitalasset.canton.sequencing.protocol.HandshakeRequest
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   SequencerConnection,
@@ -191,11 +191,6 @@ class SequencerInfoLoader(
           dontWarnOnDeprecatedPV,
         )
         .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(alias))
-        .subflatMap {
-          case success: HandshakeResponse.Success => success.asRight
-          case HandshakeResponse.Failure(_, reason) =>
-            SequencerInfoLoaderError.HandshakeFailedError(reason).asLeft
-        }
     } yield {
       logger.info(
         s"Version handshake with sequencer $sequencerAlias and synchronizer using protocol version ${success.serverProtocolVersion} succeeded."

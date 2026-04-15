@@ -12,7 +12,6 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.ResourceOwnerOps
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.indexer.Indexer
-import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.ha.{
   HaConfig,
   HaCoordinator,
@@ -51,7 +50,6 @@ object ParallelIndexerFactory {
       dataSourceStorageBackend: DataSourceStorageBackend,
       initializeParallelIngestion: InitializeParallelIngestion,
       parallelIndexerSubscription: ParallelIndexerSubscription[?],
-      achsConfigO: Option[AchsConfig],
       mat: Materializer,
       executionContext: ExecutionContext,
       initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
@@ -134,8 +132,6 @@ object ParallelIndexerFactory {
       implicit val rc: ResourceContext = ResourceContext(ec)
       val futureQueueConsumerFactoryPromise =
         Promise[Future[Done] => FutureQueueConsumer[Update]]()
-      // disable ACHS in repair mode, initialization of the parallel indexer should be responsible to maintain the ACHS after repair
-      val achsConfigEffective = Option.when(!repairMode)(achsConfigO).flatten
       val haProtectedExecutionHandle = haCoordinator
         .protectedExecution { connectionInitializer =>
           val indexingHandleF = initializeHandle(
@@ -166,8 +162,6 @@ object ParallelIndexerFactory {
               (initialLedgerEnd, initialAchsWork) <- initializeParallelIngestion(
                 dbDispatcher = dbDispatcher,
                 initializeInMemoryState = initializeInMemoryState,
-                // TODO(#30186) test that in repair mode ACHS is not maintained
-                achsConfig = achsConfigEffective,
               )
               (handle, futureQueueForCompletion) = parallelIndexerSubscription(
                 inputMapperExecutor = inputMapperExecutor,
@@ -178,7 +172,6 @@ object ParallelIndexerFactory {
                 initialAchsWork = initialAchsWork,
                 commit = commit,
                 clock = clock,
-                achsConfigO = achsConfigEffective,
                 repairMode = repairMode,
               )
             } yield {

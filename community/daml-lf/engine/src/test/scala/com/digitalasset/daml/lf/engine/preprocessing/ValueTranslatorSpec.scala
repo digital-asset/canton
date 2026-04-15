@@ -93,8 +93,8 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
   private[this] val compiledPackage = ConcurrentCompiledPackages(
     Compiler.Config.Default
   )
-  assert(compiledPackage.addPackage(defaultPackageId, pkg) == ResultDone.Unit)
-  assert(compiledPackage.addPackage(upgradablePkgId, upgradablePkg) == ResultDone.Unit)
+  assert(compiledPackage.addPackage(defaultPackageId, pkg) == Result.Unit)
+  assert(compiledPackage.addPackage(upgradablePkgId, upgradablePkg) == Result.Unit)
 
   "translateValue" should {
 

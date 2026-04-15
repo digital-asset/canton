@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.config.NonNegativeFiniteDuration as ConfigNonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1_S1M1
@@ -66,6 +67,14 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
 
         oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer3), Seq(mediator3))
+
+        // Disable automatic assignment on synchronizer daId, as it's both a reassignment target,
+        // and undergoes LSU. Otherwise, after the assignment exclusivity timeout, the participant
+        // starts trying to complete the assignment to the old synchronizer nodes, causing errors.
+        sequencer1.topology.synchronizer_parameters.propose_update(
+          daId,
+          _.update(assignmentExclusivityTimeout = ConfigNonNegativeFiniteDuration.Zero),
+        )
       }
 
   "Logical synchronizer upgrade" should {

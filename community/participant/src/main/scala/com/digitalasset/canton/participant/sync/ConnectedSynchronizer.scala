@@ -12,7 +12,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
@@ -119,7 +119,11 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.{EngineMode, ParticipantProtocolFeatureFlags}
+import com.digitalasset.canton.version.{
+  EngineMode,
+  ParticipantProtocolFeatureFlags,
+  ProtocolVersion,
+}
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -242,7 +246,7 @@ class ConnectedSynchronizer(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -858,15 +862,17 @@ class ConnectedSynchronizer(
         logger.debug(s"Started synchronizer for $psid")(initializationTraceContext)
         ephemeral.markAsRecovered()
         logger.debug("Sync synchronizer is ready.")(initializationTraceContext)
-        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-          schedulePendingOnboardingClearances(
-            ephemeral.onboardingClearanceScheduler,
-            persistent.pendingOnboardingClearanceStore,
-          )(
-            initializationTraceContext
-          ),
-          "Pending onboarding flag clearances scheduling",
-        )
+        if (psid.protocolVersion >= ProtocolVersion.v35) {
+          FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+            schedulePendingOnboardingClearances(
+              ephemeral.onboardingClearanceScheduler,
+              persistent.pendingOnboardingClearanceStore,
+            )(
+              initializationTraceContext
+            ),
+            "Pending onboarding flag clearances scheduling",
+          )
+        }
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           completeAssignment,
           "Failed to complete outstanding assignments on startup. " +
@@ -884,7 +890,7 @@ class ConnectedSynchronizer(
   ): FutureUnlessShutdown[Unit] = {
     val processAndSchedule = synchronizeWithClosing("schedulePendingOnboardingClearances") {
       for {
-        pendingOperations <- EitherT.right(
+        allPendingClearanceRecords <- EitherT.right(
           pendingOnboardingClearanceStore.getAll(
             operationName = OnboardingClearanceOperation.operationName,
             synchronizerId = Some(psid.logical),
@@ -892,7 +898,7 @@ class ConnectedSynchronizer(
         )
 
         // Extract PartyId from the key and effective time from the operation
-        pendingClearances = pendingOperations.flatMap { pending =>
+        pendingClearances = allPendingClearanceRecords.flatMap { pending =>
           val partyId = OnboardingClearanceOperation.partyIdFromKey(pending.key)
           val effectiveTimeO = pending.operation.onboardingEffectiveAt
 
@@ -910,18 +916,17 @@ class ConnectedSynchronizer(
               //    This self-heals if the transaction is re-processed upon reconnecting. Otherwise, it results in
               //    a dangling record requiring manual clearance.
               logger.info(
-                s"Skipping clearance scheduling for party $partyId (missing effective time). " +
-                  s"This will self-heal upon synchronizer reconnect if due to offline party replication. " +
-                  s"Otherwise (for example after a crash), please manually call the onboarding flag clearance endpoint " +
-                  s"after (re)connecting to the synchronizer."
+                s"Skipped clearance scheduling for $partyId (missing effective time). " +
+                  "Monitor upon synchronizer reconnect: expect self-healing, or intervene with manual clearance (onboarding flag clearance endpoint)."
               )
               None
 
             case (Left(error), _) =>
-              logger.error(
-                s"Failed to parse party ID from pending operation key '${pending.key}'. Skipping clearance scheduling. Error: $error"
+              ErrorUtil.internalError(
+                new IllegalArgumentException(
+                  s"Failed to parse PartyId from ${pending.key}: $error"
+                )
               )
-              None
           }
         }
 
@@ -929,17 +934,11 @@ class ConnectedSynchronizer(
           logger.info(
             s"Scheduling ${pendingClearances.size} pending onboarding clearances upon synchronizer connection."
           )
+          pendingClearances.foreach { case (party, activationTs) =>
+            onboardingClearanceScheduler.requestClearanceInBackground(party, activationTs)
+          }
         }
 
-        _ <- MonadUtil.sequentialTraverse_(pendingClearances) { case (party, activationTs) =>
-          onboardingClearanceScheduler
-            .requestClearance(party, activationTs, maxInitialRetries = NonNegativeInt.three)
-            .leftMap { err =>
-              // Log the error but don't fail the whole traversal
-              logger.warn(s"Failed to schedule onboarding clearance for party $party: $err")
-              err
-            }
-        }
       } yield ()
     }
 
@@ -1050,7 +1049,7 @@ class ConnectedSynchronizer(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,

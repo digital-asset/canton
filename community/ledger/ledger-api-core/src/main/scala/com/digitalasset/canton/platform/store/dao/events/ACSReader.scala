@@ -17,9 +17,10 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
 import com.digitalasset.canton.ledger.api.{
+  AcsContinuationPointerActiveContracts,
+  AcsContinuationPointerIncompleteReassignments,
   AcsContinuationToken,
-  AcsContinuationTokenActive,
-  AcsContinuationTokenIncomplete,
+  AcsRangeInfo,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -112,8 +113,7 @@ class ACSReader(
       filteringConstraints: TemplatePartiesFilter,
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
-      continuationToken: Option[AcsContinuationToken],
-      checksum: Checksum,
+      rangeInfo: AcsRangeInfo,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -130,8 +130,7 @@ class ACSReader(
       filteringConstraints,
       activeAt,
       eventProjectionProperties,
-      continuationToken,
-      checksum,
+      rangeInfo,
     )
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -140,8 +139,7 @@ class ACSReader(
       filter: TemplatePartiesFilter,
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
-      continuationToken: Option[AcsContinuationToken],
-      checksum: Checksum,
+      rangeInfo: AcsRangeInfo,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -234,6 +232,7 @@ class ACSReader(
               (Some(input), (input, ids))
             },
             onComplete = state => {
+              // hook to trigger the next, filter table part of the stream
               achsLastInputPromise
                 .trySuccess(state)
                 .discard
@@ -244,12 +243,17 @@ class ACSReader(
           .mapConcat(_._2)
           .concat(
             Source.futureSource(
-              achsLastInputPromise.future.map(achsLastInput =>
+              achsLastInputPromise.future.map { achsLastInput =>
+                logger.debug(
+                  s"ACHS stream for $filter terminated, falling back to activate filter tables from ${achsLastInput
+                      .map(_.fromTo.toInclusive)
+                      .getOrElse(0L)}"
+                )
                 fetchActiveIdsFromFilterTables(
                   achsLastInput = achsLastInput,
                   initialFromIdExclusive = initialFromIdExclusive,
                 )(filter)
-              )(executionContext)
+              }(executionContext)
             )
           )
       }
@@ -526,66 +530,84 @@ class ACSReader(
     val inputBufferSize =
       Utils.largestSmallerOrEqualPowerOfTwo(config.maxParallelPayloadCreateQueries)
 
-    def activeContractsStream(startSequentialIdExclusive: Long) = decomposedFilters
-      .map(fetchActiveIds(startSequentialIdExclusive))
-      .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
-      .batchN(
+    val activeContractsCountPromise = Promise[Long]()
+
+    def activeContractsStream(startSequentialIdExclusive: Long) =
+      limitIfNeeded(rangeInfo.limit)(
+        decomposedFilters
+          .map(fetchActiveIds(startSequentialIdExclusive))
+          .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
+      ).statefulMap(() => 0L)(
+        f = { case (count, response) =>
+          (count + 1, response)
+        },
+        onComplete = count => {
+          activeContractsCountPromise.trySuccess(count).discard
+          None
+        },
+      ).batchN(
         maxBatchSize = config.maxPayloadsPerPayloadsPage,
         maxBatchCount = config.maxParallelPayloadCreateQueries + 1,
-      )
-      .addAttributes(Attributes.inputBuffer(initial = inputBufferSize, max = inputBufferSize))
-      .mapAsync(config.maxParallelPayloadCreateQueries)(fetchActivePayloads)
-      .mapConcat(identity)
-      .mapAsync(config.contractProcessingParallelism)(
-        toApiResponseActiveContract(eventProjectionProperties, checksum)
-      )
+      ).addAttributes(Attributes.inputBuffer(initial = inputBufferSize, max = inputBufferSize))
+        .mapAsync(config.maxParallelPayloadCreateQueries)(fetchActivePayloads)
+        .mapConcat(identity)
+        .mapAsync(config.contractProcessingParallelism)(
+          toApiResponseActiveContract(eventProjectionProperties, rangeInfo.requestChecksum)
+        )
 
-    val activeContracts = continuationToken match {
-      case Some(AcsContinuationTokenIncomplete(_, _, _)) => Source.empty
-      case Some(AcsContinuationTokenActive(_, startSequentialIdExclusive)) =>
+    val activeContracts = rangeInfo.continuationPointer match {
+      case Some(AcsContinuationPointerIncompleteReassignments(_, _)) =>
+        activeContractsCountPromise.trySuccess(0L).discard
+        Source.empty
+      case Some(AcsContinuationPointerActiveContracts(startSequentialIdExclusive)) =>
         activeContractsStream(startSequentialIdExclusive)
       case _ => activeContractsStream(0L)
     }
-    val incompleteReassignments = Source.lazyFutureSource(() =>
+    def incompleteReassignments(limit: Option[Long]) = Source.lazyFutureSource(() =>
       incompleteOffsets(
         activeAtOffset,
         filter.allFilterParties,
         loggingContext.traceContext,
       ).map { allOffsets =>
-        val (sequentialIdLimit, offsetLimit) = continuationToken match {
-          case Some(AcsContinuationTokenIncomplete(_, sequentialId, offset)) =>
-            (sequentialId, Offset.tryFromLong(offset))
-          case _ => (0L, Offset.firstOffset)
-        }
-        val offsets = allOffsets.filter(_ >= offsetLimit)
+        val (sequentialIdToContinueFrom, offsetToContinueFrom) =
+          rangeInfo.continuationPointer match {
+            case Some(AcsContinuationPointerIncompleteReassignments(sequentialId, offset)) =>
+              (sequentialId, Offset.tryFromLong(offset))
+            case _ => (0L, Offset.firstOffset)
+          }
+        val offsets = allOffsets.filter(_ >= offsetToContinueFrom)
         def incompleteOffsetPages: () => Iterator[Vector[Offset]] =
           () => offsets.sliding(config.maxIncompletePageSize, config.maxIncompletePageSize)
 
         val incompleteAssigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
-          Source
-            .fromIterator(incompleteOffsetPages)
-            .mapAsync(config.maxParallelActiveIdQueries)(
-              fetchAssignIdsForOffsets
-            )
-            .mapConcat(identity)
-            .dropWhile(_ <= sequentialIdLimit)
+          limitIfNeeded(limit)(
+            Source
+              .fromIterator(incompleteOffsetPages)
+              .mapAsync(config.maxParallelActiveIdQueries)(
+                fetchAssignIdsForOffsets
+              )
+              .mapConcat(identity)
+              .dropWhile(_ <= sequentialIdToContinueFrom)
+          )
             .grouped(config.maxIncompletePageSize)
             .mapAsync(config.maxParallelPayloadCreateQueries)(
               fetchAssignPayloads
             )
             .mapConcat(_.filter(assignMeetsConstraints))
             .mapAsync(config.contractProcessingParallelism)(
-              toApiResponseIncompleteAssigned(eventProjectionProperties, checksum)
+              toApiResponseIncompleteAssigned(eventProjectionProperties, rangeInfo.requestChecksum)
             )
 
         val incompleteUnassigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
-          Source
-            .fromIterator(incompleteOffsetPages)
-            .mapAsync(config.maxParallelActiveIdQueries)(
-              fetchUnassignIdsForOffsets
-            )
-            .mapConcat(identity)
-            .dropWhile(_ <= sequentialIdLimit)
+          limitIfNeeded(limit)(
+            Source
+              .fromIterator(incompleteOffsetPages)
+              .mapAsync(config.maxParallelActiveIdQueries)(
+                fetchUnassignIdsForOffsets
+              )
+              .mapConcat(identity)
+              .dropWhile(_ <= sequentialIdToContinueFrom)
+          )
             .grouped(config.maxIncompletePageSize)
             .mapAsync(config.maxParallelPayloadCreateQueries)(
               fetchUnassignPayloads
@@ -597,12 +619,17 @@ class ACSReader(
             )
             .mapConcat(identity)
             .mapAsync(config.contractProcessingParallelism)(
-              toApiResponseIncompleteUnassigned(eventProjectionProperties, checksum)
+              toApiResponseIncompleteUnassigned(
+                eventProjectionProperties,
+                rangeInfo.requestChecksum,
+              )
             )
 
-        incompleteAssigned
-          .mergeSorted(incompleteUnassigned)(Ordering.by(_._1))
-          .map(_._2)
+        limitIfNeeded(limit)(
+          incompleteAssigned
+            .mergeSorted(incompleteUnassigned)(Ordering.by(_._1))
+            .map(_._2)
+        )
       }.onShutdown {
         Source.failed(
           AbortedDueToShutdown.Error().asGrpcError
@@ -610,8 +637,24 @@ class ACSReader(
       }
     )
 
-    activeContracts.concatLazy(incompleteReassignments)
+    val incompleteReassignmentsFutureSource = Source.lazyFutureSource(() =>
+      activeContractsCountPromise.future.map { count =>
+        val rest = rangeInfo.limit.map(l => Math.max(0, l - count))
+        if (rest.contains(0L)) Source.empty
+        else incompleteReassignments(rest)
+      }
+    )
+
+    activeContracts.concatLazy(incompleteReassignmentsFutureSource)
   }
+
+  private def limitIfNeeded[A](
+      limit: Option[Long]
+  )(source: Source[A, NotUsed]): Source[A, NotUsed] =
+    limit match {
+      case Some(l) => source.take(l)
+      case None => source
+    }
 
   private def toApiResponseActiveContract(
       eventProjectionProperties: EventProjectionProperties,
@@ -644,8 +687,10 @@ class ACSReader(
                     rawActiveContract.fatCreatedEventProperties.thinCreatedEventProperties.reassignmentCounter,
                 )
               ),
-              streamContinuationToken =
-                AcsContinuationTokenActive(checksum, rawActiveContract.eventSeqId).encode,
+              streamContinuationToken = AcsContinuationToken.activeContracts(
+                sequentialId = rawActiveContract.eventSeqId,
+                checksum = checksum,
+              ),
             ).withPrecomputedSerializedSize()
           )
       ),
@@ -681,11 +726,11 @@ class ACSReader(
                   Some(UpdateReader.toAssignedEvent(rawFatAssign, createdEvent))
                 )
               ),
-              streamContinuationToken = AcsContinuationTokenIncomplete(
-                checksum,
-                rawFatAssign.eventSeqId,
-                rawFatAssign.offset,
-              ).encode,
+              streamContinuationToken = AcsContinuationToken.incompleteReassignments(
+                sequentialId = rawFatAssign.eventSeqId,
+                offset = rawFatAssign.offset,
+                checksum = checksum,
+              ),
             ).withPrecomputedSerializedSize()
           )
       ),
@@ -724,11 +769,11 @@ class ACSReader(
                 ),
               )
             ),
-            streamContinuationToken = AcsContinuationTokenIncomplete(
-              checksum,
-              rawUnassignEvent.eventSeqId,
-              rawUnassignEvent.offset,
-            ).encode,
+            streamContinuationToken = AcsContinuationToken.incompleteReassignments(
+              sequentialId = rawUnassignEvent.eventSeqId,
+              offset = rawUnassignEvent.offset,
+              checksum = checksum,
+            ),
           ).withPrecomputedSerializedSize()
         ),
       timer = dbMetrics.getActiveContracts.translationTimer,

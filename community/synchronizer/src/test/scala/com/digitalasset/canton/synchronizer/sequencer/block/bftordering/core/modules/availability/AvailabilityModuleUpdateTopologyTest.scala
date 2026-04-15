@@ -33,6 +33,7 @@ class AvailabilityModuleUpdateTopologyTest
       val initialCryptoProvider = failingCryptoProvider[IgnoringUnitTestEnv]
       val newMembershipOtherNodes = Set(Node1, Node2, Node3)
       val newMembership = Membership.forTesting(Node0, newMembershipOtherNodes)
+      val newEpochNumber = EpochNumber(100L)
       val newCryptoProvider = failingCryptoProvider[IgnoringUnitTestEnv]
       val disseminationProtocolState = new DisseminationProtocolState()
 
@@ -58,11 +59,12 @@ class AvailabilityModuleUpdateTopologyTest
 
       availability.receive(
         Availability.Consensus
-          .UpdateTopologyDuringStateTransfer(newMembership, newCryptoProvider)
+          .UpdateTopologyDuringStateTransfer(newMembership, newEpochNumber, newCryptoProvider)
       )
 
       // make sure new values are different
       availability.getActiveMembership shouldBe newMembership // we don't care about other fields
+      availability.getLastKnownEpochNumber shouldBe newEpochNumber
       availability.getActiveCryptoProvider shouldBe newCryptoProvider
       availability.getMessageAuthorizer shouldBe newMembership.orderingTopology
 
@@ -73,7 +75,7 @@ class AvailabilityModuleUpdateTopologyTest
       availability.receive(
         Availability.Consensus.CreateProposal(
           BlockNumber.First,
-          EpochNumber.First,
+          newEpochNumber,
           newMembership,
           newCryptoProvider,
         )
@@ -93,7 +95,7 @@ class AvailabilityModuleUpdateTopologyTest
       availability.receive(
         Availability.Consensus.CreateProposal(
           BlockNumber(1),
-          EpochNumber.First,
+          newEpochNumber,
           newMembership,
           newCryptoProvider,
         )
@@ -117,6 +119,7 @@ class AvailabilityModuleUpdateTopologyTest
           TopologyActivationTime(initialOrderingTopology.activationTime.value.minusSeconds(1))
         )
       )
+      val newEpochNumber = EpochNumber(100L)
       val newCryptoProvider = failingCryptoProvider[IgnoringUnitTestEnv]
 
       val disseminationProtocolState = new DisseminationProtocolState()
@@ -135,11 +138,16 @@ class AvailabilityModuleUpdateTopologyTest
       suppressProblemLogs(
         availability.receive(
           Availability.Consensus
-            .UpdateTopologyDuringStateTransfer(newMembershipOutdated, newCryptoProvider)
+            .UpdateTopologyDuringStateTransfer(
+              newMembershipOutdated,
+              newEpochNumber,
+              newCryptoProvider,
+            )
         )
       )
 
       availability.getActiveMembership.orderingTopology shouldBe initialOrderingTopology
+      availability.getLastKnownEpochNumber shouldBe newEpochNumber
       availability.getActiveCryptoProvider shouldBe initialCryptoProvider
       availability.getMessageAuthorizer shouldBe initialOrderingTopology
 
@@ -152,7 +160,7 @@ class AvailabilityModuleUpdateTopologyTest
         availability.receive(
           Availability.Consensus.CreateProposal(
             BlockNumber.First,
-            EpochNumber.First,
+            newEpochNumber,
             newMembership,
             newCryptoProvider,
           )

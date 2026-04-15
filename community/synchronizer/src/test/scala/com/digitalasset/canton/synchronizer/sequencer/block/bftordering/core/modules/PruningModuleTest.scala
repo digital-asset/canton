@@ -135,7 +135,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
         val module = createPruningModule[ProgrammableUnitTestEnv](outputStore = outputStore)
 
-        when(outputStore.getLastBlockInLatestCompletedEpoch(traceContext)).thenReturn(() =>
+        when(outputStore.getLastNonSequentialBlockMetadataStored(traceContext)).thenReturn(() =>
           Some(latestBlock)
         )
 
@@ -288,7 +288,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           availabilityStore = availabilityStore,
         )
 
-        when(outputStore.getLastBlockInLatestCompletedEpoch(traceContext)).thenReturn(() =>
+        when(outputStore.getLastNonSequentialBlockMetadataStored(traceContext)).thenReturn(() =>
           Some(latestBlock)
         )
 
@@ -364,7 +364,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
         val lowerBound = OutputMetadataStore.LowerBound(EpochNumber(5L), BlockNumber(50L))
         when(outputStore.getLowerBound()(traceContext)).thenReturn(() => Some(lowerBound))
-        when(outputStore.getLastBlockInLatestCompletedEpoch(traceContext)).thenReturn(() =>
+        when(outputStore.getLastNonSequentialBlockMetadataStored(traceContext)).thenReturn(() =>
           Some(latestBlock)
         )
 

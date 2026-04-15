@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.net.URI
 import scala.concurrent.duration.Duration
+import scala.util.chaining.scalaUtilChainingOps
 
 object ConfigValidations extends NamedLogging {
   import TraceContext.Implicits.Empty.*
@@ -93,6 +94,7 @@ object ConfigValidations extends NamedLogging {
       atLeastOneNode,
       sequencerClientRetryDelays,
       awsKmsDisableSSLVerificationRequiresNonStandard,
+      defaultAcsPageSizeMustBeLeqMaxPageSize,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
   /** Group node configs by db access to find matching db storage configs. Overcomplicated types
@@ -205,9 +207,12 @@ object ConfigValidations extends NamedLogging {
         case participant: ParticipantNodeConfig =>
           toList(
             participant.httpLedgerApi.enabled && participant.httpLedgerApi.internalPort.isEmpty,
-            s"canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.port not set. " +
-              s"Either set a port (canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.port = <port>) " +
-              s"or disable the service (canton.${nodeConfig.nodeTypeName}s.${name.unwrap}.http-ledger-api.enabled = false).",
+            portNotSetError(
+              nodeType = nodeConfig.nodeTypeName,
+              nodeName = name.unwrap,
+              service = "http-ledger-api",
+              canBeDisabled = true,
+            ),
           ) ++ toList(
             participant.ledgerApi.internalPort.isEmpty,
             portNotSetError(
@@ -241,8 +246,14 @@ object ConfigValidations extends NamedLogging {
       nodeName: String,
       service: String,
       intermediate: String = "",
-  ): String =
-    s"canton.${nodeType}s.$nodeName.$service.${intermediate}port not set"
+      canBeDisabled: Boolean = false,
+  ): String = {
+    val base = s"canton.${nodeType}s.$nodeName.$service.${intermediate}port not set"
+    if (canBeDisabled)
+      s"$base. Either set a port (canton.${nodeType}s.$nodeName.$service.port = <port>) " +
+        s"or disable the service (canton.${nodeType}s.$nodeName.$service.enabled = false)."
+    else base
+  }
 
   private def alphaProtocolVersionRequiresNonStandard(
       config: CantonConfig
@@ -876,4 +887,14 @@ object ConfigValidations extends NamedLogging {
   def awsKmsDisableSSLVerificationRequiresNonStandardError(nodeType: String, nodeName: String) =
     s"Disabling SSL verification for AWS KMS on $nodeType $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
 
+  private def defaultAcsPageSizeMustBeLeqMaxPageSize(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated(config.participants.flatMap { case (name, nodeConfig) =>
+      nodeConfig.ledgerApi.stateService.pipe(ssc =>
+        Option.when(ssc.defaultAcsPageSize > ssc.maxAcsPageSize)(
+          s"Default ACS page size is larger than max page size ${ssc.maxAcsPageSize} in config for participant ${name.unwrap}"
+        )
+      )
+    }.toSeq)
 }

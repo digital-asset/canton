@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
+import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -15,6 +16,15 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
+import com.digitalasset.canton.participant.admin.party.PartyReplicationStage.{
+  CleaningUp,
+  IndexingContractActivationChanges,
+  NeedSequencerChannelAgreement,
+  NeedToConnectToSequencerChannel,
+  NeedToObtainOnboardingTopologyAuthorization,
+  NeedToReconnectToDisconnectedSequencerChannel,
+  ReplicatingPartyAcs,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
@@ -94,6 +104,14 @@ final class PartyReplicator(
       exitOnFatalFailures,
       loggerFactory,
       timeouts,
+    )
+
+  private val indexingWorkflow =
+    new PartyReplicationIndexingWorkflow(
+      syncService.participantNodePersistentState.map(_.contractStore),
+      config.pauseSynchronizerIndexingDuringPartyReplication,
+      batchingConfig,
+      loggerFactory,
     )
 
   private val executionQueue = new SimpleExecutionQueue(
@@ -299,8 +317,6 @@ final class PartyReplicator(
             syncService.participantNodePersistentState,
             connectedSynchronizer,
             acsReader,
-            config,
-            batchingConfig,
             testInterceptorO,
             loggerFactory,
           )
@@ -859,8 +875,6 @@ final class PartyReplicator(
                     markDisconnected(requestId),
                     syncService.participantNodePersistentState,
                     connectedSynchronizer,
-                    config,
-                    batchingConfig,
                     futureSupervisor,
                     exitOnFatalFailures,
                     timeouts,
@@ -972,6 +986,59 @@ final class PartyReplicator(
         } yield ()
     }
 
+  private def transitionToIndexing(requestId: AddPartyRequestId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    ensureParticipantStateAndSynchronizerConnected(requestId) {
+      case (
+            PartyReplicationStatus(
+              _,
+              _,
+              Some(PartyReplicationAuthorization(_, false)),
+              Some(acsReplicationProgressCompleted),
+              None, // not yet indexing
+              false, // not completed
+              _,
+            ),
+            _,
+          ) if acsReplicationProgressCompleted.fullyProcessedAcs =>
+        partyReplicationStateManager.update_(requestId, _.setIndexing())
+    }
+
+  private def progressIndexing(requestId: AddPartyRequestId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    ensureParticipantStateAndSynchronizerConnected(requestId) {
+      case (
+            PartyReplicationStatus(
+              params,
+              _,
+              _,
+              _,
+              Some(indexingProgress),
+              false, // not completed
+              None,
+            ),
+            connectedSynchronizer,
+          ) =>
+        val indexingStore =
+          connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+            .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
+        val recordOrderPublisher = connectedSynchronizer.ephemeral.recordOrderPublisher
+        val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+
+        for {
+          progress <- indexingWorkflow.indexNextContractActivationChangeBatch(
+            params,
+            indexingProgress,
+            indexingStore,
+            recordOrderPublisher,
+            pureCrypto,
+          )
+          _ <- partyReplicationStateManager.update_(requestId, _.updateIndexing(progress))
+        } yield ()
+    }
+
   /** This completes party replication by executing the following final steps if they are found to
     * not have been executed yet:
     *
@@ -1038,6 +1105,13 @@ final class PartyReplicator(
                 _.setCompleted(),
               )
           }
+
+          // Delete the items from the party replication indexing store since all contract
+          // activation changes have been indexed.
+          _ <- EitherT.right[String](
+            connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+              .traverse(_.purgeContractActivationChanges(params.partyId))
+          )
 
           status <-
             if (statusUpdates.nonEmpty) {
@@ -1197,37 +1271,36 @@ final class PartyReplicator(
     executeAsync(requestId, s"progress party replication $requestId")(
       partyReplicationStateManager
         .get(requestId)
-        .flatMap { case s @ PartyReplicationStatus(p, agO, auO, reO, inO, _, errO) =>
-          errO match {
-            case None => Option.when(s.isProgressExpected)((p, agO, auO, reO, inO, None))
-            case Some(d: Disconnected) =>
-              Option.when(s.isProgressExpected)((p, agO, auO, reO, inO, Some(d)))
-            case Some(PartyReplicationFailed(_)) => None
-          }
-        }
+        .flatMap(PartyReplicationStage.fromPartyReplicationStatus)
         .fold(EitherTUtil.unitUS[String]) {
-          case (params, None, None, None, _, None) =>
+          // Stages specific to SequencerChannel-based OnPR:
+          case NeedSequencerChannelAgreement(params) =>
             logger.debug(
               s"Party replication $requestId proposal processed for ${params.partyId}. Progress driven by admin workflow."
             )
             EitherTUtil.unitUS
 
-          case (_, Some(_agreement), None, None, _, None) =>
+          case NeedToObtainOnboardingTopologyAuthorization =>
+            // Note that in file-based OnPR, the onboarding authorization is obtained before
+            // involving the TP. Therefore, this stage is specific to SequencerChannel-based OnPR.
             logger.debug(s"Authorizing party replication $requestId topology")
             authorizeOnboardingTopology(requestId)
 
-          case (_, agreementO, Some(_authorization), None, _, None) =>
-            EitherTUtil.ifThenET(agreementO.nonEmpty) {
-              logger.debug(s"Connecting to sequencer channel for party replication $requestId")
-              connectToSequencerChannel(requestId)
-            }
+          case NeedToConnectToSequencerChannel =>
+            logger.debug(s"Connecting to sequencer channel for party replication $requestId")
+            connectToSequencerChannel(requestId)
 
-          case (p, _, _, Some(progress), _, None) =>
+          case NeedToReconnectToDisconnectedSequencerChannel(message) =>
+            logger.info(s"Party replication $requestId attempting to reconnect after: $message")
+            attemptToReconnectToSequencerChannel(requestId)
+
+          // Stages shared between File-based and SequencerChannel-based OnPR:
+          case ReplicatingPartyAcs(p, progress) =>
             if (progress.fullyProcessedAcs) {
               logger.debug(
                 s"Party replication $requestId has finished replicating all ${progress.processedContractCount} contracts for ${p.partyId}."
               )
-              finishPartyReplication(requestId)(traceContext)
+              transitionToIndexing(requestId)
             } else {
               progress match {
                 case EphemeralSequencerChannelProgress(_, _, _, processor) =>
@@ -1250,12 +1323,11 @@ final class PartyReplicator(
                   )
               }
             }
+          case IndexingContractActivationChanges =>
+            progressIndexing(requestId)
 
-          case (_, agreementO, _, _, _, Some(Disconnected(message))) =>
-            EitherTUtil.ifThenET(agreementO.nonEmpty) {
-              logger.info(s"Party replication $requestId attempting to reconnect after: $message")
-              attemptToReconnectToSequencerChannel(requestId)
-            }
+          case CleaningUp =>
+            finishPartyReplication(requestId)
         }
     )
 

@@ -246,13 +246,33 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   "force pruning" in { implicit env =>
     import env.*
 
-    // stopping participant3 which will get disabled to avoid it logging errors
+    // Record the current time to assert on the `earliestAck`
+    val timeBeforeTraffic = environment.simClock.value.now
+    // Create extra traffic to isolate this test case from the previous one
+    sendMsgToAllMembers()
+
+    // Advance the clock so participants 1 and 2 process and acknowledge the new traffic
+    environment.simClock.value.advance(
+      sequencerClientAcknowledgementInterval.asJava.multipliedBy(2)
+    )
+
+    // Wait for the healthy participants to actually acknowledge the new traffic
+    val earliestAck = eventually() {
+      val status = sequencer1.pruning.status()
+      val probeEarliestAck = earliestAckExcludingParticipant(status, participant3Id).value
+
+      assert(
+        probeEarliestAck.isAfter(timeBeforeTraffic),
+        s"Earliest ack ($probeEarliestAck) has not yet passed traffic generation time ($timeBeforeTraffic)",
+      )
+      probeEarliestAck
+    }
+
+    // Stopping participant3 which will get disabled to avoid it logging errors
     participant3.stop()
 
-    val status = sequencer1.pruning.status()
-    val earliestAck = earliestAckExcludingParticipant(status, participant3Id).value
-
-    // the exact number of records removed will depend on the number of deliver events received so use a regex
+    // Prune using the asserted timestamp to prevent test flakiness
+    // The exact number of records removed will depend on the number of deliver events received so use a regex
     // user-manual-entry-begin: SequencerForcePruning
     val result = sequencer1.pruning.force_prune_at(earliestAck, dryRun = false)
     // user-manual-entry-end: SequencerForcePruning

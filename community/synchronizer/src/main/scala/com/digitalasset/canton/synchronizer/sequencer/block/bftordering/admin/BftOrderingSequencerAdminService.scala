@@ -10,10 +10,6 @@ import com.digitalasset.canton.sequencer.admin.v30.*
 import com.digitalasset.canton.sequencer.admin.v30.SequencerBftAdministrationServiceGrpc.SequencerBftAdministrationService
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BftNodeId,
-  EpochNumber,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
   Mempool,
@@ -38,7 +34,8 @@ final class BftOrderingSequencerAdminService(
     createWriteReadinessPromise: () => Promise[WriteReadiness] = () => Promise(),
     createBoolPromise: () => Promise[Boolean] = () => Promise(),
     createNetworkStatusPromise: () => Promise[PeerNetworkStatus] = () => Promise(),
-    createOrderingTopologyPromise: () => Promise[(EpochNumber, Set[BftNodeId])] = () => Promise(),
+    createOrderingTopologyPromise: () => Promise[Consensus.Admin.GetOrderingTopologyResponse] =
+      () => Promise(),
 )(implicit executionContext: ExecutionContext, metricsContext: MetricsContext)
     extends SequencerBftAdministrationService
     with NamedLogging {
@@ -125,14 +122,15 @@ final class BftOrderingSequencerAdminService(
   ): Future[GetOrderingTopologyResponse] = {
     val resultPromise = createOrderingTopologyPromise()
     issConsensusAdminRef.asyncSend(
-      Consensus.Admin.GetOrderingTopology { (currentEpoch, sequencerIds) =>
-        resultPromise.success(currentEpoch -> sequencerIds).discard
+      Consensus.Admin.GetOrderingTopology { orderingResponse =>
+        resultPromise.success(orderingResponse).discard
       }
     )
-    resultPromise.future.map { case (currentEpoch, nodes) =>
+    resultPromise.future.map { response =>
       GetOrderingTopologyResponse(
-        currentEpoch,
-        nodes.toSeq.sorted,
+        response.epochNumber,
+        response.nodes.toSeq.sorted,
+        Option(response.sequencingParameters.toProto),
       )
     }
   }

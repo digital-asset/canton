@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import monocle.macros.syntax.lens.*
@@ -23,7 +23,7 @@ import org.slf4j.event.Level
 import scala.concurrent.ExecutionContext
 
 /** The goal is to check persistence of
-  * [[com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor]].
+  * [[com.digitalasset.canton.participant.synchronizer.PendingLsuOperation]].
   *
   * Scenario:
   *   - LSU to pv=dev
@@ -111,25 +111,25 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
           SynchronizerNodes(Seq(sequencer3, sequencer4), Seq(mediator3, mediator4))
       }
 
-  private def getPendingHandshakesStore(p: LocalParticipantReference)(implicit
+  private def getPendingLsuOperationsStore(p: LocalParticipantReference)(implicit
       executionContext: ExecutionContext
-  ): PendingOperationStore[PendingHandshakeWithLsuSuccessor, PhysicalSynchronizerId] =
+  ): PendingOperationStore[PendingLsuOperation, PhysicalSynchronizerId] =
     PendingOperationStore(
       p.underlying.value.storage,
       timeouts,
       loggerFactory,
-      PendingHandshakeWithLsuSuccessor,
+      PendingLsuOperation,
       PhysicalSynchronizerId.fromString,
     )
 
-  private def hasPendingHandshake(
+  private def hasPendingLsuOperation(
       p: LocalParticipantReference
   )(implicit env: TestConsoleEnvironment, executionContext: ExecutionContext): Boolean =
-    getPendingHandshakesStore(p)
+    getPendingLsuOperationsStore(p)
       .get(
         env.daId,
-        PendingHandshakeWithLsuSuccessor.operationKey,
-        PendingHandshakeWithLsuSuccessor.operationName,
+        PendingLsuOperation.operationKey,
+        PendingLsuOperation.operationName,
       )
       .value
       .futureValueUS
@@ -163,16 +163,16 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
 
         // Wait until the pending handshake is inserted in the store
         eventually() {
-          hasPendingHandshake(participant1) shouldBe true
-          hasPendingHandshake(participant2) shouldBe true
+          hasPendingLsuOperation(participant1) shouldBe true
+          hasPendingLsuOperation(participant2) shouldBe true
         }
 
         // Should lead to a new attempt because of the persistence
         participant1.stop()
         sequencer3.start()
 
-        val failedHandshakeError = "Validation failure: Failed handshake: "
-          + "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+        val failedHandshakeError = "GrpcClientError: INVALID_ARGUMENT/" +
+          "The protocol version required by the server (dev) is not among the supported protocol versions by the client"
 
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
           participant1.start(),
@@ -181,7 +181,7 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
 
             forExactly(1, logs)(
               _.errorMessage should (include(
-                s"Failed to perform the synchronizer handshake with ${fixture.newPsid}"
+                s"Failed to resume pending LSU operation for ${fixture.newPsid}"
               ) and include(failedHandshakeError))
             )
           },
@@ -192,12 +192,12 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
       implicit env =>
         import env.*
 
-        hasPendingHandshake(participant1) shouldBe true
+        hasPendingLsuOperation(participant1) shouldBe true
         participant1.stop()
         participant3.db.migrate() // dev migration
         participant3.start()
         eventually() {
-          hasPendingHandshake(participant3) shouldBe false
+          hasPendingLsuOperation(participant3) shouldBe false
         }
     }
 
@@ -205,12 +205,12 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
       implicit env =>
         import env.*
 
-        hasPendingHandshake(participant2) shouldBe true
+        hasPendingLsuOperation(participant2) shouldBe true
         fixture.oldSynchronizerOwners.foreach(
           _.topology.lsu.announcement.revoke(fixture.newPsid, fixture.upgradeTime)
         )
         eventually() {
-          hasPendingHandshake(participant2) shouldBe false
+          hasPendingLsuOperation(participant2) shouldBe false
         }
     }
   }

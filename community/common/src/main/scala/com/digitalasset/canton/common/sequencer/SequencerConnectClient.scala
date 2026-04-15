@@ -57,8 +57,6 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
   ): Either[Error, Boolean] = response.value match {
     case v30.SequencerConnect.VerifyActiveResponse.Value.Success(success) =>
       Right(success.isActive)
-    case v30.SequencerConnect.VerifyActiveResponse.Value.Failure(failure) =>
-      Left(Error.DeserializationFailure(failure.reason))
     case v30.SequencerConnect.VerifyActiveResponse.Value.Empty =>
       Left(Error.InvalidResponse("Missing response from VerifyActive"))
   }

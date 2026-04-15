@@ -7,7 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
-import java.security.spec.{InvalidKeySpecException, PKCS8EncodedKeySpec, X509EncodedKeySpec}
+import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.security.{
   KeyFactory,
   NoSuchAlgorithmException,
@@ -43,7 +43,7 @@ object JceJavaKeyConverter {
           )
           .leftMap(JceJavaKeyConversionError.GeneralError.apply)
         javaPublicKey <- Either
-          .catchOnly[InvalidKeySpecException](keyFactory.generatePublic(x509KeySpec))
+          .catchNonFatal(keyFactory.generatePublic(x509KeySpec))
           .leftMap(err => JceJavaKeyConversionError.InvalidKey(show"$err"))
       } yield javaPublicKey
     }
@@ -89,7 +89,7 @@ object JceJavaKeyConverter {
           )
           .leftMap(JceJavaKeyConversionError.GeneralError.apply)
         javaPrivateKey <- Either
-          .catchOnly[InvalidKeySpecException](keyFactory.generatePrivate(pkcs8KeySpec))
+          .catchNonFatal(keyFactory.generatePrivate(pkcs8KeySpec))
           .leftMap(err => JceJavaKeyConversionError.InvalidKey(show"$err"))
       } yield javaPrivateKey
     }

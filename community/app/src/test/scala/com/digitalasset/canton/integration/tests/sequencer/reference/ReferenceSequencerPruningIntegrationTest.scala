@@ -72,7 +72,7 @@ class ReferenceSequencerPruningIntegrationTest extends SequencerPruningIntegrati
         |Removed 0 traffic purchased entries
         |Removed 0 traffic consumed entries""".stripMargin
 
-  override protected val pruningRegexWithTrafficPurchase =
+  override protected val pruningRegexWithTrafficPurchase: String =
     """Removed ([1-9]\d*) blocks
         |Removed at least ([1-9]\d*) events, at least (\d+) payloads
         |Removed ([1-9]\d*) traffic purchased entries

@@ -45,6 +45,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Membership,
   OrderingTopologyInfo,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.Admin.GetOrderingTopologyResponse
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.PbftVerifiedNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage.headerFromProto
@@ -343,8 +344,11 @@ final class IssConsensusModule[E <: Env[E]](
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
         callback(
-          epochState.epoch.info.number,
-          activeTopologyInfo.currentMembership.orderingTopology.nodes,
+          GetOrderingTopologyResponse(
+            epochState.epoch.info.number,
+            activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
+          )
         )
 
       case Consensus.Admin.SetPerformanceMetricsEnabled(enabled) =>
@@ -643,7 +647,7 @@ final class IssConsensusModule[E <: Env[E]](
       metrics.consensus.votes.cleanupVoteGauges(keepOnly = newMembership.orderingTopology.nodes)
       epochState.emitEpochStats(metrics, currentEpochInfo)
 
-      logger.debug(s"Storing new epoch $newEpochNumber")
+      logger.debug(s"Storing new epoch $newEpochInfo")
       pipeToSelf(epochStore.startEpoch(newEpochInfo)) {
         case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
         case Success(_) =>
@@ -802,7 +806,7 @@ final class IssConsensusModule[E <: Env[E]](
       // if epochState is closed, we have probably just finished an epoch and are waiting for new topology.
       // So we should wait with state transfer until we are in the new epoch.
       if (!epochState.isClosing) {
-        logger.debug(
+        logger.info(
           s"Switching to catch-up state transfer (up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
             s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
         )
@@ -810,7 +814,7 @@ final class IssConsensusModule[E <: Env[E]](
         true
       } else {
         logger.info(
-          s"Do not switching to catch-up state transfer because epochState is closing (probably just finished an epoch), but otherwise we would have since:" +
+          s"Not switching to catch-up state transfer because epochState is closing (probably just finished an epoch), but otherwise we would have since:" +
             s"(up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
             s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
         )

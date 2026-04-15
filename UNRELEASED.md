@@ -28,6 +28,34 @@ A new service is available on the Admin API of the sequencer.
 It provides an RPC that allows to query for traffic summaries of sequenced events.
 Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/howtos/operate/traffic.html) for more details.
 
+### Hardened Error Handling in Sequencer Connect Service
+We have implemented strict error sanitization and rewording for the SequencerConnectService to mitigate information leakage.
+Detailed internal error messages are now redacted before being sent to clients.
+
+If detailed diagnostics are required in a non-production environment, sanitization can be toggled via:
+```
+canton.monitoring.sanitize-public-error-messages = false
+```
+
+#### API Changes:
+The previous method of returning errors via response fields has been removed in favor of canonical gRPC error propagation.
+The following fields are now obsolete:
+
+- `HandshakeResponse.value.failure`
+- `VerifyActiveResponse.value.failure`
+
+Errors are now communicated strictly through `io.grpc.Status` codes to ensure a consistent and secure interface.
+
+Status codes have changed as follows:
+
+- SequencerAuthenticationService.challenge newly fails with `INVALID_ARGUMENT` (instead of `FAILED_PRECONDITION`),
+if the client does not support the sequencer's protocol version.
+- SequencerConnectService newly fails with `INVALID_ARGUMENT` (instead of `FAILED_PRECONDITION`) if a non-participant tries to connect.
+- SequencerConnectService.registerOnboardingTopologyTransactions newly fails with `INTERNAL` (instead of `FAILED_PRECONDITIONS`)
+- if there are no dynamic synchronizer parameters.
+- SequencerConnectService.registerOnboardingTopologyTransactions newly fails with `FAILED_PRECONDITION` if
+- the transactions cannot be added to the topology state and sanitization of error messages is enabled.
+
 ### Protocol Changes
 
 #### Protocol Version 35
@@ -178,8 +206,8 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
     A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
 - Deprecated: removed the feature flag `canton.sequencers.<node>.parameters.async-writer.enabled`, as async writing is now
   the only supported mode.
-- Added a field `MaxConcurrentStreamsPerConnection` and corresponding default
-`defaultMaxConcurrentStreamsPerConnection` (set to 500) to `ServerConfig`.
+- Added a field `MaxConcurrentCallsPerConnection` and corresponding default
+`defaultMaxConcurrentCallsPerConnection` (set to 100000) to `ServerConfig`.
 This corresponds to `max-concurrent-streams-per-connection` in the app configs, e.g.,
 `docker/canton/images/canton-sequencer/app.conf` and can be changed there. At present
 the value for sequencers is  configured to be 500 for the public API and 100 for the Admin API.
@@ -299,7 +327,8 @@ refer specifically to sequencer channels.
 
 ### Offline party replication
 
-Concluding an offline party replication by clearing the onboarding flag now includes two major updates:
+Concluding an offline party replication by clearing the onboarding flag now includes two major updates
+when using protocol version 35:
 - Added crash resilience for ongoing clearances.
 - Automatic scheduling for clearances when a participant (re)connects to the synchronizer.
 
@@ -307,7 +336,7 @@ These changes apply only to the `participant.parties.import_party_acs` and
 `participant.parties.clear_party_onboarding_flag` endpoints.
 
 Note: The replicated party ID must be included in the party ACS import call to enable automatic
-scheduling.
+scheduling. The original behaviour is retained for protocol version 34.
 
 ### Alpha Multi-Synchronizer Support
 
@@ -363,6 +392,12 @@ The `GetActiveContracts` stream request has been extended with an optional `stre
 clients to continue an interrupted ACS stream from the last element which made through. The field can be populated with
 the `stream_continuation_token` field of the last response element received before the interruption, and the stream will
 continue from the next element after that.
+
+### ACS pagination
+
+A new, `GetActiveContractsPage` endpoint added to State Service API. This enables the client to retrieve the ACS in
+paginated form, by specifying a `max_page_size`. The pages can be accessed sequentially by using the `page_token`
+field. The token can be obtained from the `GetActiveContractsPageResponse` of the last page.
 
 ### GetUpdates stream in descending order of events
 

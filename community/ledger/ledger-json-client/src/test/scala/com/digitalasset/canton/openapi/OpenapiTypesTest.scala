@@ -1000,6 +1000,15 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ](
           openapi.AllocateExternalPartyResponse.fromJson
         ),
+        Mapping[
+          v2.state_service.GetActiveContractsPageRequest,
+          openapi.GetActiveContractsPageRequest,
+        ](
+          openapi.GetActiveContractsPageRequest.fromJson
+        ),
+        Mapping[json.JsGetActiveContractsPageResponse, openapi.JsGetActiveContractsPageResponse](
+          openapi.JsGetActiveContractsPageResponse.fromJson
+        ),
       )
     }
 

@@ -17,7 +17,7 @@ final case class EpochInfo(
     startBlockNumber: BlockNumber,
     length: EpochLength,
     topologyActivationTime: TopologyActivationTime,
-) {
+) extends {
 
   def relativeBlockIndex(blockNumber: BlockNumber): Int =
     (blockNumber - startBlockNumber).toInt

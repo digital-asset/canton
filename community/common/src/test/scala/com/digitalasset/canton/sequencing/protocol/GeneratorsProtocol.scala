@@ -185,12 +185,17 @@ final class GeneratorsProtocol(
 
   implicit val submissionRequestArb: Arbitrary[SubmissionRequest] =
     if (protocolVersion >= ProtocolVersion.v35) {
-      Arbitrary(for {
-        submissionRequest <- submissionRequestV30Arb.arbitrary
-        closedCompressedEnvelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
-          closedCompressedEnvelopeArb
+      Arbitrary(
+        for {
+          submissionRequest <- submissionRequestV30Arb.arbitrary
+          closedCompressedEnvelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
+            closedCompressedEnvelopeArb
+          )
+        } yield submissionRequest.copy(
+          batch = Batch(closedCompressedEnvelopes, protocolVersion),
+          topologyTimestamp = None,
         )
-      } yield submissionRequest.copy(batch = Batch(closedCompressedEnvelopes, protocolVersion)))
+      )
     } else submissionRequestV30Arb
 
   implicit val topologyStateForInitRequestArb: Arbitrary[TopologyStateForInitRequest] = Arbitrary(

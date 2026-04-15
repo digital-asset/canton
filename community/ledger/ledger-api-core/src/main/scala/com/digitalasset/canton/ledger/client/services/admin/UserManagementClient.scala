@@ -160,6 +160,7 @@ object UserManagementClient {
       isDeactivated = user.isDeactivated,
       identityProviderId = IdentityProviderId(user.identityProviderId),
       metadata = user.metadata.fold(ObjectMeta.empty)(fromProtoMetadata),
+      primaryPartyAuthentication = user.primaryPartyAuthentication,
     )
 
   private def fromProtoMetadata(
@@ -179,6 +180,7 @@ object UserManagementClient {
       isDeactivated = user.isDeactivated,
       identityProviderId = user.identityProviderId.toRequestString,
       metadata = Some(toProtoObjectMeta(user.metadata)),
+      primaryPartyAuthentication = user.primaryPartyAuthentication,
     )
 
   private def toProtoObjectMeta(meta: ObjectMeta): admin_proto.object_meta.ObjectMeta =

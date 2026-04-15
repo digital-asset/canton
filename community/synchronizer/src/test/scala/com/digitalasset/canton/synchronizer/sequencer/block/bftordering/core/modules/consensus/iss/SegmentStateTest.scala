@@ -1729,7 +1729,8 @@ object SegmentStateTest {
   val otherIds: IndexedSeq[BftNodeId] = (1 to 3).map { index =>
     BftNodeId(s"node$index")
   }
-  val fullMembership: Membership = Membership.forTesting(myId, otherIds.toSet)
+  def fullMembership(implicit pv: ProtocolVersion): Membership =
+    Membership.forTesting(myId, otherIds.toSet)
   val otherId1: BftNodeId = otherIds.head
   val otherId2: BftNodeId = otherIds(1)
   val otherId3: BftNodeId = otherIds(2)

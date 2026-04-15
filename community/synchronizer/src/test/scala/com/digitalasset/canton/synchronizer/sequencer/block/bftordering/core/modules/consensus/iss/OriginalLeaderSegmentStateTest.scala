@@ -361,8 +361,9 @@ object OriginalLeaderSegmentStateTest {
   private val otherIds = (1 to 3).map { index =>
     BftNodeId(s"node$index")
   }.toSet
-  private val currentMembership = Membership.forTesting(myId, otherIds)
-  private val epoch =
+  private def currentMembership(implicit pv: ProtocolVersion) =
+    Membership.forTesting(myId, otherIds)
+  private def epoch(implicit pv: ProtocolVersion) =
     Epoch(
       EpochInfo.forTesting(EpochNumber.First, startBlockNumber = BlockNumber.First, 7),
       currentMembership,

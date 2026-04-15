@@ -30,6 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.io.File
 import scala.concurrent.ExecutionContext
@@ -39,7 +40,7 @@ class FixedFileBasedOrderingTopologyProvider(
     epochLength: EpochLength,
     crypto: CryptoPureApi,
     metrics: BftOrderingMetrics,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, synchronizerProtocolVersion: ProtocolVersion)
     extends OrderingTopologyProvider[PekkoEnv] {
 
   import FixedFileBasedOrderingTopologyProvider.*

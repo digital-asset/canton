@@ -398,7 +398,6 @@ class ParticipantNodeBootstrap(
           crypto,
           cryptoConfig,
           Some(arguments.metrics.kmsMetrics),
-          parameters.batchingConfig.parallelism,
           parameters.cachingConfigs.publicKeyConversionCache,
           timeouts,
           futureSupervisor,
@@ -705,7 +704,7 @@ class ParticipantNodeBootstrap(
         _ <-
           if (sync.isActive()) sync.finishLSUs() else EitherT.pure[FutureUnlessShutdown, String](())
 
-        _ = if (sync.isActive()) sync.attemptPendingHandshakesSuccessors()
+        _ = if (sync.isActive()) sync.attemptPendingLsuOperations()
 
         _ = {
           connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)

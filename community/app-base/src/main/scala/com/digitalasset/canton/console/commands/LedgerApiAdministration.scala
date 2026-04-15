@@ -2494,6 +2494,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           readAsAnyParty: Boolean = false,
           executeAs: Set[PartyId] = Set(),
           executeAsAnyParty: Boolean = false,
+          primaryPartyAuthentication: Boolean = false,
       ): User = {
         val lapiUser = consoleEnvironment.run {
           ledgerApiCommand(
@@ -2510,6 +2511,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               readAsAnyParty = readAsAnyParty,
               executeAs = executeAs.map(_.toLf),
               executeAsAnyParty = executeAsAnyParty,
+              primaryPartyAuthentication = primaryPartyAuthentication,
             )
           )
         }
@@ -2557,6 +2559,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               isDeactivatedUpdate = Some(modifiedUser.isDeactivated),
               resourceVersionO = Some(rawUser.metadata.resourceVersion),
               identityProviderId = identityProviderId,
+              primaryPartyAuthenticationUpdate = Some(modifiedUser.primaryPartyAuthentication),
             )
           )
         }

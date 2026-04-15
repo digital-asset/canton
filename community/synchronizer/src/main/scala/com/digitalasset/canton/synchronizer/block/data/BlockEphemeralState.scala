@@ -6,7 +6,8 @@ package com.digitalasset.canton.synchronizer.block.data
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.synchronizer.block.UninitializedBlockHeight
-import com.digitalasset.canton.synchronizer.sequencer.{InFlightAggregations, SequencerInitialState}
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
+import com.digitalasset.canton.synchronizer.sequencer.SequencerInitialState
 import com.digitalasset.canton.util.ErrorUtil
 import slick.jdbc.GetResult
 
@@ -75,7 +76,7 @@ final case class BlockEphemeralState(
   def checkInvariant()(implicit loggingContext: NamedLoggingContext): Unit = {
     // All expired in-flight aggregations have been evicted
     val lastTs = latestBlock.lastTs
-    val expired = inFlightAggregations.collect {
+    val expired = inFlightAggregations.byId.collect {
       case (aggregationId, inFlightAggregation) if inFlightAggregation.expired(lastTs) =>
         aggregationId
     }
@@ -85,12 +86,13 @@ final case class BlockEphemeralState(
     )
 
     // All in-flight aggregations satisfy their invariant
-    inFlightAggregations.values.foreach(_.checkInvariant())
+    inFlightAggregations.byId.values.foreach(_.checkInvariant())
   }
 }
 
 object BlockEphemeralState {
-  val empty: BlockEphemeralState = BlockEphemeralState(BlockInfo.initial, Map.empty)
+  val empty: BlockEphemeralState =
+    BlockEphemeralState(BlockInfo.initial, InFlightAggregations.empty)
 
   def fromSequencerInitialState(
       initialState: SequencerInitialState

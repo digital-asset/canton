@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -88,6 +88,18 @@ final case class PartyReplicationStatus(
       modify: Option[AcsReplicationProgress] => AcsReplicationProgress
   ): PartyReplicationStatus =
     copy(replicationO = Some(modify(replicationO)))(representativeProtocolVersion)
+  def setIndexing(): PartyReplicationStatus =
+    copy(indexingO =
+      Some(
+        AcsIndexingProgress(
+          indexedContractActivationChangeCount = NonNegativeLong.zero,
+          nextIndexingCounter = NonNegativeLong.zero,
+          indexingAlmostDoneWatermarkO = None,
+        )
+      )
+    )(representativeProtocolVersion)
+  def updateIndexing(indexingProgress: AcsIndexingProgress): PartyReplicationStatus =
+    copy(indexingO = Some(indexingProgress))(representativeProtocolVersion)
   def setCompleted(): PartyReplicationStatus =
     copy(hasCompleted = true)(representativeProtocolVersion)
   def modifyErrorO(
@@ -375,7 +387,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
   }
 
   sealed trait AcsReplicationProgress extends PrettyPrinting {
-    def processedContractCount: NonNegativeInt
+    def processedContractCount: NonNegativeLong
     def nextPersistenceCounter: RepairCounter
     def fullyProcessedAcs: Boolean
     def processorO: Option[PartyReplicationProcessor]
@@ -404,7 +416,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     * AcsReplicationProgress case classes.
     */
   final case class PersistentProgress(
-      processedContractCount: NonNegativeInt,
+      processedContractCount: NonNegativeLong,
       nextPersistenceCounter: RepairCounter,
       fullyProcessedAcs: Boolean,
   ) extends AcsReplicationProgress {
@@ -416,7 +428,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     * status of a party replication source or target participant processor.
     */
   final case class EphemeralSequencerChannelProgress(
-      processedContractCount: NonNegativeInt,
+      processedContractCount: NonNegativeLong,
       nextPersistenceCounter: RepairCounter,
       fullyProcessedAcs: Boolean,
       processor: PartyReplicationProcessor,
@@ -429,7 +441,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     * replication target participant.
     */
   final case class EphemeralFileImporterProgress(
-      processedContractCount: NonNegativeInt,
+      processedContractCount: NonNegativeLong,
       nextPersistenceCounter: RepairCounter,
       fullyProcessedAcs: Boolean,
       fileImporter: PartyReplicationFileImporter,
@@ -442,7 +454,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.AcsReplicationProgress
     ): ParsingResult[PersistentProgress] = for {
-      replicatedContractCount <- ProtoConverter.parseNonNegativeInt(
+      replicatedContractCount <- ProtoConverter.parseNonNegativeLong(
         "replicated_contract_count",
         proto.processedContractCount,
       )
@@ -458,7 +470,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
 
     def initialize(processor: PartyReplicationProcessor): AcsReplicationProgress =
       EphemeralSequencerChannelProgress(
-        NonNegativeInt.zero,
+        NonNegativeLong.zero,
         RepairCounter.Genesis,
         fullyProcessedAcs = false,
         processor,
@@ -466,7 +478,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
 
     def initialize(fileImporter: PartyReplicationFileImporter): AcsReplicationProgress =
       EphemeralFileImporterProgress(
-        NonNegativeInt.zero,
+        NonNegativeLong.zero,
         RepairCounter.Genesis,
         fullyProcessedAcs = false,
         fileImporter,
@@ -474,20 +486,33 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
   }
 
   final case class AcsIndexingProgress(
-      indexedContractCount: NonNegativeInt,
-      nextIndexingCounter: RepairCounter,
+      indexedContractActivationChangeCount: NonNegativeLong,
+      nextIndexingCounter: NonNegativeLong,
+      indexingAlmostDoneWatermarkO: Option[NonNegativeLong],
   ) extends PrettyPrinting {
+
+    /** Because completing indexing during party replication is a moving target in the face of
+      * transactions running concurrently to party replication, check if the watermark tracking the
+      * most recent indexedContractActivationChangeCount-"odometer" reading matches the odometer.
+      * The caller can use this to decide when to clear the onboarding flag thus moving party
+      * replication to the next party replication stage.
+      */
+    def isIndexingCurrentlyAlmostDone: Boolean =
+      indexingAlmostDoneWatermarkO.contains(indexedContractActivationChangeCount)
+
     def toProtoV30: v30.PartyReplicationStatus.AcsIndexingProgress =
       v30.PartyReplicationStatus.AcsIndexingProgress(
-        indexedContractCount.unwrap,
+        indexedContractActivationChangeCount.unwrap,
         nextIndexingCounter.unwrap,
+        indexingAlmostDoneWatermarkO.map(_.unwrap),
       )
 
     override protected def pretty: Pretty[AcsIndexingProgress] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*
       prettyOfClass(
-        param("contracts", _.indexedContractCount),
+        param("change count", _.indexedContractActivationChangeCount),
         param("next counter", _.nextIndexingCounter),
+        paramIfDefined("almost done watermark", _.indexingAlmostDoneWatermarkO),
       )
     }
   }
@@ -497,15 +522,21 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         proto: v30.PartyReplicationStatus.AcsIndexingProgress
     ): ParsingResult[AcsIndexingProgress] =
       for {
-        indexedContractCount <- ProtoConverter.parseNonNegativeInt(
-          "indexed_contract_count",
-          proto.indexedContractCount,
+        indexedContractCount <- ProtoConverter.parseNonNegativeLong(
+          "indexed_contract_activation_change_count",
+          proto.indexedContractActivationChangeCount,
         )
         nextIndexingCounter <- ProtoConverter.parseNonNegativeLong(
           "next_indexing_counter",
           proto.nextIndexingCounter,
         )
-      } yield AcsIndexingProgress(indexedContractCount, RepairCounter(nextIndexingCounter.unwrap))
+        lastFullDrainCountO <- proto.indexingAlmostDoneWatermark
+          .traverse(ProtoConverter.parseNonNegativeLong("indexing_almost_done_watermark", _))
+      } yield AcsIndexingProgress(
+        indexedContractCount,
+        nextIndexingCounter,
+        lastFullDrainCountO,
+      )
   }
 
   sealed trait PartyReplicationError extends PrettyPrinting {

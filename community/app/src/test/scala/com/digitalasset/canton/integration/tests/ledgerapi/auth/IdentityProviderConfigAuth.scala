@@ -173,6 +173,7 @@ trait IdentityProviderConfigAuth extends KeyPairs {
       isDeactivated = false,
       metadata = Some(ObjectMeta.defaultInstance),
       identityProviderId = serviceCallContext.identityProviderId,
+      primaryPartyAuthentication = false,
     )
     val req = uproto.CreateUserRequest(Some(user), rights)
     stub(uproto.UserManagementServiceGrpc.stub(channel), serviceCallContext.token)

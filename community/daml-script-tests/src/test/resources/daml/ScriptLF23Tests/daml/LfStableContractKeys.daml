@@ -89,7 +89,6 @@ template Helper
       do
         fetchByKey @TextKey key
 
--- @LEDGER run LfStableContractKeys.EXPECTED.ledger
 run = script do
   alice <- allocateParty "Alice-LfStableContractKeys:run"
   bob <- allocateParty "Bob-LfStableContractKeys:run"

@@ -158,16 +158,15 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
       .toSeq
       .sortBy(_.blockNumber)
 
-  override def getLastBlockInLatestCompletedEpoch(implicit
+  override def getLastNonSequentialBlockMetadataStored(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[OutputBlockMetadata]] =
-    createFuture(lastBlockInLatestCompletedEpochName) { () =>
-      val lastStartedEpoch = epochs.keySet.maxOption
+    createFuture(lastNonSequentialBlockMetadataStoredName) { () =>
+      val lastBlockNumberO = blocks.values.map(_.blockNumber).maxOption
       Success(
-        lastStartedEpoch.flatMap { epochNumber =>
-          sortedBlocksForEpoch(
-            EpochNumber(epochNumber - 1L) // we go the previous to get last completed
-          ).maxByOption(_.blockNumber)
+        lastBlockNumberO match {
+          case Some(blockNumber) => blocks.get(blockNumber)
+          case _ => None
         }
       )
     }

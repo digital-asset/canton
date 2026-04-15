@@ -9,7 +9,7 @@ import cats.implicits.toTraverseOps
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.RepairCounter
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
@@ -77,7 +77,7 @@ abstract class TargetParticipantAcsPersistence(
       contracts: NonEmpty[Seq[ActiveContract]]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, NonNegativeInt] =
+  ): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
     for {
       replicationProgress <- EitherT.fromEither[FutureUnlessShutdown](
         replicationProgressState
@@ -108,7 +108,7 @@ abstract class TargetParticipantAcsPersistence(
         indexingStore.addImportedContractActivations(partyId, toc, validatedActivations)
       )
       updatedProcessedContractsCount =
-        replicationProgress.processedContractCount + NonNegativeInt.size(contracts)
+        replicationProgress.processedContractCount + NonNegativeLong.size(contracts)
       _ <- replicationProgressState.updateAcsReplicationProgress(
         requestId,
         newProgress(updatedProcessedContractsCount, repairCounter),
@@ -118,7 +118,7 @@ abstract class TargetParticipantAcsPersistence(
   /** The new progress depends on ephemeral state depending on the derived class.
     */
   protected def newProgress(
-      updatedProcessedContractsCount: NonNegativeInt,
+      updatedProcessedContractsCount: NonNegativeLong,
       usedRepairCounter: RepairCounter,
   ): PartyReplicationStatus.AcsReplicationProgress
 

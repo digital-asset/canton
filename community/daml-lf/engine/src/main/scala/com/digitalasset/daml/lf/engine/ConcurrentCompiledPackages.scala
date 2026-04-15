@@ -156,7 +156,7 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
         }
       }
 
-      ResultDone.Unit
+      Result.Unit
     }
 
   def clear(): Unit = this.synchronized[Unit] {

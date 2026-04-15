@@ -57,6 +57,7 @@ class UserManagementService(channel: Channel, authorizationToken: Option[String]
               isDeactivated = false,
               metadata = None,
               identityProviderId = "",
+              primaryPartyAuthentication = false,
             )
           ),
           rights = rights,

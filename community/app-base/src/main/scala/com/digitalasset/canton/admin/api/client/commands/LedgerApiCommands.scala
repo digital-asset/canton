@@ -666,6 +666,7 @@ object LedgerApiCommands {
         isDeactivated: Boolean,
         annotations: Map[String, String],
         identityProviderId: String,
+        primaryPartyAuthentication: Boolean,
         readAsAnyParty: Boolean,
         executeAs: Set[LfPartyId],
         executeAsAnyParty: Boolean,
@@ -687,6 +688,7 @@ object LedgerApiCommands {
               isDeactivated = isDeactivated,
               metadata = Some(ObjectMeta(resourceVersion = "", annotations = annotations)),
               identityProviderId = identityProviderId,
+              primaryPartyAuthentication = primaryPartyAuthentication,
             )
           ),
           rights = getRights,
@@ -709,6 +711,7 @@ object LedgerApiCommands {
         annotationsUpdate: Option[Map[String, String]],
         resourceVersionO: Option[String],
         identityProviderId: String,
+        primaryPartyAuthenticationUpdate: Option[Boolean],
     ) extends BaseCommand[UpdateUserRequest, UpdateUserResponse, LedgerApiUser] {
 
       override protected def submitRequest(
@@ -729,11 +732,13 @@ object LedgerApiCommands {
             )
           ),
           identityProviderId = identityProviderId,
+          primaryPartyAuthentication = primaryPartyAuthenticationUpdate.getOrElse(false),
         )
         val updatePaths: Seq[String] = Seq(
           primaryPartyUpdate.map(_ => "primary_party"),
           isDeactivatedUpdate.map(_ => "is_deactivated"),
           annotationsUpdate.map(_ => "metadata.annotations"),
+          primaryPartyAuthenticationUpdate.map(_ => "primary_party_authentication"),
         ).flatten
         Right(
           UpdateUserRequest(

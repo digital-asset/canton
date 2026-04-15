@@ -52,6 +52,8 @@ import scala.concurrent.ExecutionContext
   */
 trait SigningOps {
 
+  def signatureVerificationParallelism: PositiveInt
+
   def signingAlgorithmSpecs: CryptoScheme[SigningAlgorithmSpec]
 
   /** Signs the given hash using the private signing key.

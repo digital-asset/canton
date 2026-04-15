@@ -89,13 +89,12 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
         driverFactory
           .configWriter(confidential = false)
           .to(
-            ReferenceSequencerDriver
-              .Config(
-                storageConfigs.getOrElse(
-                  sequencerName,
-                  ErrorUtil.invalidState(s"Missing storage config for $sequencerName"),
-                )
+            ReferenceSequencerDriver.Config(
+              storageConfigs.getOrElse(
+                sequencerName,
+                ErrorUtil.invalidState(s"Missing storage config for $sequencerName"),
               )
+            )
           ),
         List(),
       )

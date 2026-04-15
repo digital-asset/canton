@@ -11,8 +11,7 @@ import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.HealthStatus
-import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
-import com.digitalasset.canton.ledger.api.{AcsContinuationToken, EventFormat, UpdateFormat}
+import com.digitalasset.canton.ledger.api.{AcsRangeInfo, EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -67,14 +66,13 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
   override def getActiveContracts(
       eventFormat: EventFormat,
       activeAt: Option[Offset],
-      continuationToken: Option[AcsContinuationToken],
-      checksum: Checksum,
+      rangeInfo: AcsRangeInfo,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
     Timed.source(
       metrics.services.index.getActiveContracts,
-      delegate.getActiveContracts(eventFormat, activeAt, continuationToken, checksum),
+      delegate.getActiveContracts(eventFormat, activeAt, rangeInfo),
     )
 
   override def lookupActiveContract(

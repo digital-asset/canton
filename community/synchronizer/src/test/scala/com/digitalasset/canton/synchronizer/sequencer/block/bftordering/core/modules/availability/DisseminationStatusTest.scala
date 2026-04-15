@@ -22,6 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Instant
@@ -750,7 +751,9 @@ object DisseminationStatusTest {
       stats = stats,
     )
 
-  private def createMembership(myId: BftNodeId, nodeIds: BftNodeId*): Membership =
+  private def createMembership(myId: BftNodeId, nodeIds: BftNodeId*)(implicit
+      pv: ProtocolVersion
+  ): Membership =
     Membership.forTesting(
       myId,
       OrderingTopology(

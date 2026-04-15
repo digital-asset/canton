@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.scalautil.Statement
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.PruningDto.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
@@ -50,6 +51,17 @@ private[backend] trait StorageBackendTestsPruning
       conn.commit()
       conn.setAutoCommit(false)
     }
+
+  def populateAchsFromActivateStakeholder(endInclusive: Long, activeAt: Long): Unit =
+    executeSql(
+      backend.event.addActivationsToAchs(
+        AchsAddActivationsParams(
+          startExclusive = 0L,
+          endInclusive = endInclusive,
+          activeAt = activeAt,
+        )
+      )
+    )
 
   it should "correctly update the pruning offset" in {
     val offset_1 = offset(3)
@@ -330,6 +342,7 @@ private[backend] trait StorageBackendTestsPruning
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(22), 2200L))
+    populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
     assertIndexDbDataSql(
       activate = List(
         100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1600, 1700, 1800, 1900,
@@ -340,6 +353,10 @@ private[backend] trait StorageBackendTestsPruning
       ),
       activateFilterWitness = List(
         100, 100, 300, 300, 500, 500, 700, 700, 900, 900, 1600, 1600, 1800, 1800,
+      ),
+      achsFilterStakeholder = List(
+        100, 100, 200, 200, 300, 300, 400, 400, 500, 500, 600, 600, 700, 700, 800, 800, 900, 900,
+        1000, 1000,
       ),
       deactivate = List(
         1100, 1200, 1300, 1400, 1500, 2000, 2100, 2200,
@@ -394,6 +411,9 @@ private[backend] trait StorageBackendTestsPruning
       ),
       activateFilterWitness = List(
         300, 300, 700, 700, 900, 900, 1600, 1600, 1800, 1800,
+      ),
+      achsFilterStakeholder = List(
+        300, 300, 400, 400, 700, 700, 800, 800, 900, 900, 1000, 1000,
       ),
       deactivate = List(
         2000,
@@ -469,6 +489,7 @@ private[backend] trait StorageBackendTestsPruning
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
+    populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
     executeSql(updateLedgerEnd(offset(22), 2200L))
     assertIndexDbDataSql(
       activate = List(
@@ -482,6 +503,9 @@ private[backend] trait StorageBackendTestsPruning
         500,
         600,
         600,
+      ),
+      achsFilterStakeholder = List(
+        200, 200, 201, 201, 500, 500, 600, 600,
       ),
       deactivate = List(
         300, 1100, 1101, 1200, 1201,
@@ -523,6 +547,9 @@ private[backend] trait StorageBackendTestsPruning
         600,
         600,
       ),
+      achsFilterStakeholder = List(
+        200, 200, 201, 201, 600, 600,
+      ),
       deactivate = List(
         300,
         1101,
@@ -562,6 +589,12 @@ private[backend] trait StorageBackendTestsPruning
         200, 200, 201, 201, 202, 202,
       ),
       activateFilterWitness = List(),
+      achsFilterStakeholder = List(
+        200,
+        200,
+        201,
+        201,
+      ),
       deactivate = List(
         300,
         1101,
@@ -594,6 +627,7 @@ private[backend] trait StorageBackendTestsPruning
       activate = List(),
       activateFilterStakeholder = List(),
       activateFilterWitness = List(),
+      achsFilterStakeholder = List(),
       deactivate = List(),
       deactivateFilterStakeholder = List(),
       deactivateFilterWitness = List(),
@@ -649,6 +683,7 @@ private[backend] trait StorageBackendTestsPruning
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(22), 2200L))
+    populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
     assertIndexDbDataSql(
       activate = List(
         200, 201, 202, 500, 600,
@@ -661,6 +696,9 @@ private[backend] trait StorageBackendTestsPruning
         500,
         600,
         600,
+      ),
+      achsFilterStakeholder = List(
+        200, 200, 201, 201, 500, 500, 600, 600,
       ),
       deactivate = List(
         300, 1100, 1101, 1200, 1201,
@@ -703,6 +741,12 @@ private[backend] trait StorageBackendTestsPruning
         600,
         600,
       ),
+      achsFilterStakeholder = List(
+        200,
+        200,
+        600,
+        600,
+      ),
       deactivate = List(
         1200,
         1201,
@@ -732,6 +776,7 @@ private[backend] trait StorageBackendTestsPruning
       activate = List(),
       activateFilterStakeholder = List(),
       activateFilterWitness = List(),
+      achsFilterStakeholder = List(),
       deactivate = List(),
       deactivateFilterStakeholder = List(),
       deactivateFilterWitness = List(),
@@ -744,12 +789,14 @@ private[backend] trait StorageBackendTestsPruning
 
   // TODO(i21351) Implement pruning tests for topology events
 
-  /** Asserts the content of the tables subject to pruning. Be default asserts the tables are empty.
+  /** Asserts the content of the tables subject to pruning. By default, asserts the tables are
+    * empty.
     */
   def assertIndexDbDataSql(
       activate: Seq[Long] = Seq.empty,
       activateFilterStakeholder: Seq[Long] = Seq.empty,
       activateFilterWitness: Seq[Long] = Seq.empty,
+      achsFilterStakeholder: Seq[Long] = Seq.empty,
       deactivate: Seq[Long] = Seq.empty,
       deactivateFilterStakeholder: Seq[Long] = Seq.empty,
       deactivateFilterWitness: Seq[Long] = Seq.empty,
@@ -770,6 +817,12 @@ private[backend] trait StorageBackendTestsPruning
     cp(
       clue("activate filter witness")(
         Statement.discard(queries.filterActivateWitness shouldBe activateFilterWitness)
+      )
+    )
+    // achs
+    cp(
+      clue("achs filter stakeholder")(
+        Statement.discard(queries.filterAchsStakeholder shouldBe achsFilterStakeholder)
       )
     )
     // deactivate

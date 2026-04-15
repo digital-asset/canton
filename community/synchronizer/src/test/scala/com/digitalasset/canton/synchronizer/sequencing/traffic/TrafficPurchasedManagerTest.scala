@@ -54,6 +54,7 @@ class TrafficPurchasedManagerTest
     futureSupervisor,
     sequencerMetrics,
     timeouts,
+    lsuSequencingBounds = None,
     loggerFactory,
   )
 
@@ -147,6 +148,7 @@ class TrafficPurchasedManagerTest
         futureSupervisor,
         SequencerMetrics.noop("traffic-balance-manager"),
         timeouts,
+        lsuSequencingBounds = None,
         loggerFactory,
       ) {
         override private[traffic] def makePromiseForBalance(

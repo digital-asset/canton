@@ -139,7 +139,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   )
   private val daStable = PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.latest)
   private val daBeta =
-    PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.parseUnchecked(3444).value)
+    PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.parseUnchecked(3444))
   private val daDev = PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.dev)
   private val daName = SynchronizerAlias.tryCreate("da")
 

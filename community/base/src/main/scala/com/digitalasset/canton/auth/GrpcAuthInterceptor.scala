@@ -4,8 +4,8 @@
 package com.digitalasset.canton.auth
 
 import cats.implicits.showInterpolator
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.config.ApiLoggingConfig
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.networking.grpc.{CallMetadata, GrpcAddressHelper}
-import com.digitalasset.canton.tracing.W3CTraceContext
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.ShowUtil.ShowStringSyntax
 import io.grpc.*
 
@@ -23,7 +23,6 @@ import scala.util.{Failure, Success}
 
 class GrpcAuthInterceptor(
     val genInterceptor: AuthInterceptor,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
     private val apiLoggingConfig: ApiLoggingConfig,
     implicit val ec: ExecutionContext,
@@ -43,11 +42,9 @@ class GrpcAuthInterceptor(
     val prevCtx = Context.current
     val serviceName = call.getMethodDescriptor.getServiceName
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext(logger, loggingContextWithTrace)
-
-    implicit val tc = W3CTraceContext.fromGrpcMetadata(headers)
 
     val (transport, clientAddr) = GrpcAddressHelper.extractTransportFromHeaders(call, headers)
     val callMetadata = CallMetadata(

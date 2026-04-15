@@ -84,8 +84,37 @@ template Iou
        do
          return $ insert "b" 42 payload
 
+    -- Nonconsuming choice exercisable by any party (via explicit disclosure)
+    nonconsuming choice Iou_Inspect : Text
+      with
+        viewer : Party
+      controller viewer
+      do return (show amount <> " " <> currency)
+
+    -- Consuming choice to close/settle the contract
+    choice Iou_Settle : ()
+      controller owner
+      do return ()
+
     interface instance IIou for Iou where
       view = AmountAndCurrency currency amount
+
+-- Single-signatory contract referencing an Iou.
+-- Used for automatic reassignment scenarios: when submitted to a different
+-- synchronizer than where the referenced Iou lives, it triggers auto-reassignment.
+template IouLinked
+  with
+    holder : Party
+    iouRef : ContractId Iou
+    note : Text
+  where
+    signatory holder
+
+    choice ProcessWithIou : Text
+      controller holder
+      do
+        iou <- fetch iouRef
+        return (show iou.amount <> " " <> iou.currency)
 
 template IouTransfer
   with

@@ -1,6 +1,12 @@
-sdk-version: 3.4.9
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
 build-options:
-  - --enable-interfaces=yes
+  - -Wno-upgrade-interfaces
 name: model-tests
 source: .
 version: 1.0.0

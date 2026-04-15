@@ -1061,7 +1061,7 @@ class ProtocolProcessorTest
     ): Unit = {
 
       val setupF = for {
-        _ <- persistent.parameterStore.setParameters(defaultStaticSynchronizerParameters)
+        _ <- persistent.connectivityStatusStore.setParameters(defaultStaticSynchronizerParameters)
 
         _ <- ephemeral.requestJournal.insert(rc, CantonTimestamp.Epoch)
       } yield ephemeral.phase37Synchronizer

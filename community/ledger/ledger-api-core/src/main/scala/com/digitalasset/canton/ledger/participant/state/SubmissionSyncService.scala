@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.digitalasset.canton.LfKeyResolver
+import com.digitalasset.canton.LfGlobalKeyMapping
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -95,7 +95,7 @@ trait SubmissionSyncService {
       transactionMeta: TransactionMeta,
       // TODO(#25385): Consider removing since it's currently not used
       _estimatedInterpretationCost: Long,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext

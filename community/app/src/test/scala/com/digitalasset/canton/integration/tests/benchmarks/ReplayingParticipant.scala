@@ -207,7 +207,6 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         synchronizerTopologyClient,
         defaultStaticSynchronizerParameters,
         synchronizerCrypto,
-        verificationParallelismLimit = PositiveInt.one,
         CachingConfigs.defaultPublicKeyConversionCache,
         timeouts,
         futureSupervisor,

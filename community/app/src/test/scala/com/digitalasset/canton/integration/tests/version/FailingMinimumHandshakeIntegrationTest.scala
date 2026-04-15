@@ -44,9 +44,11 @@ class FailingMinimumHandshakeIntegrationTestH2
       if (testedProtocolVersion.isStable) {
         loggerFactory.assertLogs(
           a[CommandFailure] should be thrownBy connectP1(),
-          _.errorMessage should (include("HandshakeFailedError") and include(
-            s"minimum version configured by the participant (${TestProtocolVersions.UnreleasedValidPV})"
-          )),
+          _.errorMessage should include(
+            s"GrpcClientError: INVALID_ARGUMENT/" +
+              s"The version required by the synchronizer ($testedProtocolVersion) is lower than the " +
+              s"minimum version configured by the participant (${TestProtocolVersions.UnreleasedValidPV})."
+          ),
         )
       } else connectP1()
   }

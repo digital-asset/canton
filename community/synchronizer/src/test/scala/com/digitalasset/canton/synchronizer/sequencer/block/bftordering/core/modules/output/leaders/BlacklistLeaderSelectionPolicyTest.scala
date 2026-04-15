@@ -21,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ViewNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.SortedSet
@@ -35,6 +36,7 @@ class BlacklistLeaderSelectionPolicyTest extends AnyWordSpec with BaseTest {
   implicit val futureContext: FutureContext[IgnoringUnitTestEnv] = new FunctionFutureContext
   private val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
   implicit val metricsContext: MetricsContext = MetricsContext.Empty
+  implicit val pv: ProtocolVersion = testedProtocolVersion
 
   "BlacklistLeaderSelectionPolicy" should {
     "be able to get leaders" in {

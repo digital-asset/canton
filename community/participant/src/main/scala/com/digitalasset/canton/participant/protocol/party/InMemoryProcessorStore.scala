@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.party
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -37,9 +37,9 @@ object SourceParticipantStore {
     *      initializations.
     */
   private final case class SPState(
-      sentContractsCount: NonNegativeInt,
-      contractOrdinalToSendUpToExclusive: NonNegativeInt,
-      initialContractOrdinalInclusiveO: Option[NonNegativeInt],
+      sentContractsCount: NonNegativeLong,
+      contractOrdinalToSendUpToExclusive: NonNegativeLong,
+      initialContractOrdinalInclusiveO: Option[NonNegativeLong],
       hasEndOfACSBeenReached: Boolean = false,
       acsReaderO: Option[PartyReplicationAcsReader] = None,
       nextAcsReaderId: Int = 0,
@@ -65,14 +65,14 @@ final class SourceParticipantStore(
     with NamedLogging {
   private val state = new AtomicReference[SourceParticipantStore.SPState](
     SourceParticipantStore.SPState(
-      sentContractsCount = NonNegativeInt.zero,
-      contractOrdinalToSendUpToExclusive = NonNegativeInt.zero,
+      sentContractsCount = NonNegativeLong.zero,
+      contractOrdinalToSendUpToExclusive = NonNegativeLong.zero,
       initialContractOrdinalInclusiveO = None,
     )
   )
 
   def initializeSourceParticipantState(
-      initialContractOrdinalInclusive: NonNegativeInt,
+      initialContractOrdinalInclusive: NonNegativeLong,
       createAcsReader: (SourceParticipantStore, NamedLoggerFactory) => PartyReplicationAcsReader,
   )(implicit traceContext: TraceContext): Either[String, Unit] =
     Either
@@ -102,22 +102,22 @@ final class SourceParticipantStore(
         state.updateAndGet(_.copy(acsReaderO = Some(acsReader))).discard
       }
 
-  def sentContractsCount: NonNegativeInt = state.get().sentContractsCount
+  def sentContractsCount: NonNegativeLong = state.get().sentContractsCount
 
   /** Increase the number of sent contracts and return the increased sent contract count. */
-  private[party] def increaseSentContractsCount(delta: NonNegativeInt): NonNegativeInt =
+  private[party] def increaseSentContractsCount(delta: NonNegativeInt): NonNegativeLong =
     state
       .updateAndGet(state =>
         state.copy(sentContractsCount = state.sentContractsCount.map(_ + delta.unwrap))
       )
       .sentContractsCount
 
-  private[party] def contractOrdinalToSendUpToExclusive: NonNegativeInt =
+  private[party] def contractOrdinalToSendUpToExclusive: NonNegativeLong =
     state.get().contractOrdinalToSendUpToExclusive
-  private[party] def setContractOrdinalToSendUpToExclusive(n: NonNegativeInt): Unit =
+  private[party] def setContractOrdinalToSendUpToExclusive(n: NonNegativeLong): Unit =
     state.updateAndGet(_.copy(contractOrdinalToSendUpToExclusive = n)).discard
 
-  private[party] def initialContractOrdinalInclusiveO: Option[NonNegativeInt] =
+  private[party] def initialContractOrdinalInclusiveO: Option[NonNegativeLong] =
     state.get().initialContractOrdinalInclusiveO
   override private[party] def resetConnection(): Unit =
     state
@@ -142,9 +142,9 @@ object TargetParticipantStore {
     *   1. whether the TP has been notified that end of the ACS has been reached.
     */
   private final case class TPState(
-      requestedContractsCount: NonNegativeInt,
-      processedContractsCount: NonNegativeInt,
-      initialContractOrdinalInclusiveO: Option[NonNegativeInt],
+      requestedContractsCount: NonNegativeLong,
+      processedContractsCount: NonNegativeLong,
+      initialContractOrdinalInclusiveO: Option[NonNegativeLong],
       hasEndOfACSBeenReached: Boolean,
   )
 }
@@ -152,28 +152,28 @@ object TargetParticipantStore {
 final class TargetParticipantStore extends PartyReplicationProcessorStore {
   private val state = new AtomicReference[TargetParticipantStore.TPState](
     TargetParticipantStore.TPState(
-      requestedContractsCount = NonNegativeInt.zero,
-      processedContractsCount = NonNegativeInt.zero,
+      requestedContractsCount = NonNegativeLong.zero,
+      processedContractsCount = NonNegativeLong.zero,
       initialContractOrdinalInclusiveO = None,
       hasEndOfACSBeenReached = false,
     )
   )
 
-  private[party] def requestedContractsCount: NonNegativeInt = state.get().requestedContractsCount
-  private[party] def setRequestedContractsCount(count: NonNegativeInt): Unit =
+  private[party] def requestedContractsCount: NonNegativeLong = state.get().requestedContractsCount
+  private[party] def setRequestedContractsCount(count: NonNegativeLong): Unit =
     state
       .updateAndGet(_.copy(requestedContractsCount = count))
       .discard
 
-  def processedContractsCount: NonNegativeInt = state.get().processedContractsCount
-  private[party] def setProcessedContractsCount(count: NonNegativeInt): Unit =
+  def processedContractsCount: NonNegativeLong = state.get().processedContractsCount
+  private[party] def setProcessedContractsCount(count: NonNegativeLong): Unit =
     state.updateAndGet(_.copy(processedContractsCount = count)).discard
 
-  private[party] def initialContractOrdinalInclusiveO: Option[NonNegativeInt] =
+  private[party] def initialContractOrdinalInclusiveO: Option[NonNegativeLong] =
     state.get().initialContractOrdinalInclusiveO
   override private[party] def resetConnection(): Unit =
     state.updateAndGet(_.copy(initialContractOrdinalInclusiveO = None)).discard
-  private[party] def setInitialContractOrdinalInclusive(ordinal: NonNegativeInt): Unit =
+  private[party] def setInitialContractOrdinalInclusive(ordinal: NonNegativeLong): Unit =
     state
       .updateAndGet(_.copy(initialContractOrdinalInclusiveO = Some(ordinal)))
       .discard

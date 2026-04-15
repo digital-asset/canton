@@ -82,7 +82,7 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion.V2
-import com.digitalasset.canton.{LedgerSubmissionId, LfKeyResolver, WorkflowId}
+import com.digitalasset.canton.{LedgerSubmissionId, LfGlobalKeyMapping, WorkflowId}
 import com.google.protobuf.ByteString
 
 import java.security.{GeneralSecurityException, KeyPairGenerator}
@@ -117,7 +117,7 @@ class TrafficCostEstimator(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -215,7 +215,7 @@ class TrafficCostEstimator(
       client: SynchronizerSnapshotSyncCryptoApi,
       snapshot: TopologySnapshot,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       costHints: CostEstimationHints,
       disclosedContracts: Map[LfContractId, ContractInstance],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] = {

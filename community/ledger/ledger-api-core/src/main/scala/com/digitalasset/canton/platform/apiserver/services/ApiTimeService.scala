@@ -11,7 +11,6 @@ import com.daml.ledger.api.v2.testing.time_service.{
   SetTimeRequest,
   TimeServiceGrpc,
 }
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.util.TimestampConversion.*
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
@@ -20,6 +19,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.TimeServiceBackend
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.protobuf.empty.Empty
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
@@ -29,7 +29,6 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[apiserver] final class ApiTimeService(
     backend: TimeServiceBackend,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -38,7 +37,8 @@ private[apiserver] final class ApiTimeService(
     with NamedLogging {
 
   def getTime(request: GetTimeRequest): Future[GetTimeResponse] = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     logger.info(s"Received request for time.")
     Future.successful(GetTimeResponse(Some(fromInstant(backend.getCurrentTime))))
@@ -46,7 +46,8 @@ private[apiserver] final class ApiTimeService(
 
   @SuppressWarnings(Array("org.wartremover.warts.JavaSerializable"))
   override def setTime(request: SetTimeRequest): Future[Empty] = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
     def updateTime(
         expectedTime: Instant,

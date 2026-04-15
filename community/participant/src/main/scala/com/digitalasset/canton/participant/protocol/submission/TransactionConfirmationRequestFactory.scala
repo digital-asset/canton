@@ -85,7 +85,7 @@ class TransactionConfirmationRequestFactory(
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       submitterInfo: SubmitterInfo,
       workflowId: Option[WorkflowId],
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       mediator: MediatorGroupRecipient,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
       approximateTimestampForSigning: CantonTimestamp,

@@ -198,16 +198,23 @@ final case class ClientSettings(
     numberOfRequestsPerInterval: PositiveInt = PositiveInt.one,
 )
 
+final case class PhaseDurations(
+    faulty: FiniteDuration,
+    recovery: FiniteDuration = 0.seconds,
+    livenessChecking: FiniteDuration = 30.seconds,
+) {
+  def totalTime: FiniteDuration =
+    faulty.plus(recovery).plus(livenessChecking)
+}
+
 final case class SimulationSettings(
     localSettings: LocalSettings,
     networkSettings: NetworkSettings,
     futureSettings: FutureSettings,
-    durationOfFirstPhaseWithFaults: FiniteDuration,
-    durationOfSecondPhaseWithoutFaults: FiniteDuration = 30.seconds,
+    phaseDurations: PhaseDurations,
     clientSettings: ClientSettings = ClientSettings(),
     livenessCheckInterval: FiniteDuration = 25.seconds,
     shouldRecordHistory: Boolean = false,
 ) {
-  def totalSimulationTime: FiniteDuration =
-    durationOfFirstPhaseWithFaults.plus(durationOfSecondPhaseWithoutFaults)
+  def totalSimulationTime: FiniteDuration = phaseDurations.totalTime
 }

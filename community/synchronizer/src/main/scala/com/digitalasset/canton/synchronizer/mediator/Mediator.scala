@@ -13,7 +13,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.*
@@ -106,6 +106,17 @@ private[mediator] class Mediator(
     extends NamedLogging
     with FlagCloseableAsync
     with HasCloseContext {
+
+  val lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorAfterUpgradeTime =
+    new Mediator.LsuSuccessorAfterUpgradeTime {
+      override def apply(ts: CantonTimestamp)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Option[SynchronizerSuccessor]] = for {
+        snapshot <- syncCrypto.awaitSnapshot(ts)
+        lsuO <- snapshot.ipsSnapshot.announcedLsu()
+        activeSuccessor = lsuO.collect { case (s, _) if s.upgradeTime <= ts => s }
+      } yield activeSuccessor
+    }
 
   def psid: PhysicalSynchronizerId = sequencerClient.psid
   def protocolVersion: ProtocolVersion = sequencerClient.protocolVersion
@@ -417,6 +428,16 @@ private[mediator] class Mediator(
 }
 
 private[mediator] object Mediator {
+
+  /** LsuSuccessorAfterUpgradeTime gives us the successor to the current physical synchronizer id,
+    * iff the provided timestamp is past the upgrade time. Otherwise it returns None.
+    */
+  trait LsuSuccessorAfterUpgradeTime {
+    def apply(at: CantonTimestamp)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
+  }
+
   sealed trait PruningError {
     def message: String
   }

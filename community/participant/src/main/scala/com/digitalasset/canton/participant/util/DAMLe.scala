@@ -12,7 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
-import com.digitalasset.canton.participant.store.ContractAndKeyLookup
+import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
@@ -21,7 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.VersionRange
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -45,7 +45,7 @@ object DAMLe {
   final case class ReInterpretationResult(
       transaction: LfVersionedTransaction,
       metadata: TransactionMetadata,
-      keyResolver: LfKeyResolver,
+      legacyKeyResolver: LfGlobalKeyMapping,
       usedPackages: Set[PackageId],
       timeBoundaries: LedgerTimeBoundaries,
   )
@@ -118,7 +118,7 @@ object DAMLe {
 
   trait HasReinterpret {
     def reinterpret(
-        contracts: ContractAndKeyLookup,
+        contracts: ReplayContractLookup,
         contractAuthenticator: ContractAuthenticatorFn,
         submitters: Set[LfPartyId],
         command: LfCommand,
@@ -135,6 +135,9 @@ object DAMLe {
       ReInterpretationResult,
     ]
   }
+
+  private final case class ContinuationToken(rest: Vector[FatContractInstance])
+      extends NeedKeyProgression.Token
 
 }
 
@@ -203,7 +206,7 @@ class DAMLe(
   }
 
   override def reinterpret(
-      contracts: ContractAndKeyLookup,
+      contracts: ReplayContractLookup,
       contractAuthenticator: ContractAuthenticatorFn,
       submitters: Set[LfPartyId],
       command: LfCommand,
@@ -286,6 +289,7 @@ class DAMLe(
         )
       )
       (tx, metadata) = txWithMetadata
+
       peeledTxE = peelAwayRootLevelRollbackNode(tx).leftMap(EngineError.apply)
       txNoRootRollback <- EitherT.fromEither[FutureUnlessShutdown](
         peeledTxE: Either[ReinterpretationError, LfVersionedTransaction]
@@ -304,16 +308,18 @@ class DAMLe(
   private[this] def handleResult[A](
       topologySnapshot: TopologySnapshot,
       ledgerTime: CantonTimestamp,
-      contracts: ContractAndKeyLookup,
+      contractLookup: ReplayContractLookup,
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-    def handleResultInternal(contracts: ContractAndKeyLookup, result: Result[A])(implicit
-        traceContext: TraceContext
+
+    def handleResultInternal(
+        result: Result[A]
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+
       @tailrec
       def iterateOverInterrupts(
           continue: () => Result[A]
@@ -339,57 +345,44 @@ class DAMLe(
             )
             .transformWithHandledAborted {
               case Success(pkg) =>
-                handleResultInternal(contracts, resume(pkg))
+                handleResultInternal(resume(pkg))
               case Failure(ex) =>
                 logger.error(s"Package resolution failed for [$packageId]", ex)
                 FutureUnlessShutdown.failed(ex)
             }
         case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
 
-        // TODO(#31527): SPM in a follow up PR this code below is reworked to support multiple contract ids per key.
-        case ResultNeedKey(key, _, _, resume) =>
-          contracts
-            .lookupKey(key)
-            .value
-            .map(_.flatten)
-            .flatMap {
-              case Some(cid) =>
-                contracts.lookupFatContract(cid).value.flatMap {
-                  case Some(fatContract) =>
-                    handleResultInternal(
-                      contracts,
-                      resume(Vector(fatContract), NeedKeyProgression.Finished),
-                    )
-                  case None =>
-                    handleResultInternal(
-                      contracts,
-                      resume(Vector.empty, NeedKeyProgression.Finished),
-                    )
-                }
-              case None =>
-                handleResultInternal(contracts, resume(Vector.empty, NeedKeyProgression.Finished))
-            }
+        case ResultNeedKey(key, n, mbToken, resume) =>
+          val keyContracts = mbToken match {
+            case NeedKeyProgression.Unstarted => contractLookup.lookupKey(key).toVector
+            case NeedKeyProgression.InProgress(ContinuationToken(rest)) => rest
+            case _ => throw new IllegalStateException("unexpected continuation token")
+          }
+          val (result, rest) = keyContracts.splitAt(n)
+          val hasStarted: NeedKeyProgression.HasStarted =
+            if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
+            else NeedKeyProgression.Finished
+          FutureUnlessShutdown
+            .pure(result)
+            .flatMap(r => handleResultInternal(resume(r, hasStarted)))
 
         case ResultNeedContract(acoid, resume) =>
-          (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
-            case Right(version) =>
-              contracts.lookupFatContract(acoid).value.map[Response] {
-                case Some(contract) =>
-                  Response.ContractFound(
-                    contract,
-                    version.contractHashingMethod,
-                    hash => contractAuthenticator(contract, hash).isRight,
-                  )
-                case None => Response.ContractNotFound
-              }
-            case Left(_) =>
-              FutureUnlessShutdown.pure[Response](Response.UnsupportedContractIdVersion)
-          }).flatMap(response =>
-            handleResultInternal(
-              contracts,
-              resume(response),
-            )
-          )
+          val response: Response =
+            CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
+              case Right(version) =>
+                contractLookup.lookupInst(acoid) match {
+                  case Some(contract) =>
+                    Response.ContractFound(
+                      contract,
+                      version.contractHashingMethod,
+                      hash => contractAuthenticator(contract, hash).isRight,
+                    )
+                  case None => Response.ContractNotFound
+                }
+              case Left(_) =>
+                Response.UnsupportedContractIdVersion
+            }
+          FutureUnlessShutdown.pure(response).flatMap(r => handleResultInternal(resume(r)))
 
         case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
         case ResultInterruption(continue, _) =>
@@ -397,15 +390,15 @@ class DAMLe(
           // Using a `Future` as a trampoline also makes the recursive call to `handleResult` stack safe.
           FutureUnlessShutdown.pure(iterateOverInterrupts(continue)).flatMap {
             case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
-            case Right(result) => handleResultInternal(contracts, result)
+            case Right(result) => handleResultInternal(result)
           }
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
-          handleResultInternal(contracts, resume())
+          handleResultInternal(resume())
       }
     }
 
-    handleResultInternal(contracts, result)
+    handleResultInternal(result)
   }
 
 }

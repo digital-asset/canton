@@ -115,8 +115,9 @@ class TransactionProcessor(
         damle.enrichTransaction,
         damle.enrichContract,
         new AuthorizationValidator(participantId),
-        new InternalConsistencyChecker(
-          loggerFactory
+        InternalConsistencyChecker(
+          staticSynchronizerParameters.protocolVersion,
+          loggerFactory,
         ),
         commandProgressTracker,
         loggerFactory,
@@ -145,7 +146,7 @@ class TransactionProcessor(
   def submit(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,

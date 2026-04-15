@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
   GetEngineAbortStatus,
 }
-import com.digitalasset.canton.participant.store.{ContractAndKeyLookup, ExtendedContractLookup}
+import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -84,7 +84,7 @@ class DAMLeTest
         command: LfCommand,
         rootSeed: LfHash,
         submitters: Set[LfPartyId],
-        contracts: ContractAndKeyLookup = new ExtendedContractLookup(Map.empty, Map.empty),
+        contracts: ReplayContractLookup = new ReplayContractLookup(Map.empty, Map.empty),
         contractAuthenticator: ContractAuthenticatorFn = (_, _) => Either.unit,
         getEngineAbortStatus: GetEngineAbortStatus = () => EngineAbortStatus.notAborted,
     ): EitherT[FutureUnlessShutdown, DAMLe.ReinterpretationError, DAMLe.ReInterpretationResult] =
@@ -157,7 +157,7 @@ class DAMLeTest
         submitters = submitters,
         command = replayExercise,
         rootSeed = exerciseSeed,
-        contracts = new ExtendedContractLookup(Map(contract.contractId -> contract), Map.empty),
+        contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty),
       ).value
         .map(inside(_) { case Right(_) =>
           succeed
@@ -200,7 +200,7 @@ class DAMLeTest
         submitters = submitters,
         command = replayExercise,
         rootSeed = exerciseSeed,
-        contracts = new ExtendedContractLookup(Map(contract.contractId -> contract), Map.empty),
+        contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty),
         contractAuthenticator = {
           case (`inst`, `contractHash`) => Either.unit
           case (`inst`, h) => fail(s"Hash mismatch: $h : $contractHash")
@@ -226,7 +226,7 @@ class DAMLeTest
         submitters = submitters,
         command = replayExercise,
         rootSeed = exerciseSeed,
-        contracts = new ExtendedContractLookup(Map(contract.contractId -> contract), Map.empty),
+        contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty),
         contractAuthenticator = {
           case (`inst`, `contractHash`) => Left("Authentication failed")
           case other => fail(s"Unexpected: $other")

@@ -9,7 +9,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
@@ -31,7 +31,8 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Syn
     sidParser: String => Either[String, SId],
 )(implicit val executionContext: ExecutionContext)
     extends DbStore
-    with PendingOperationStore[Op, SId] {
+    with PendingOperationStore[Op, SId]
+    with NamedLogging {
 
   import storage.api.*
   import storage.converters.*
@@ -60,15 +61,13 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Syn
 
     val transaction = readAction.flatMap {
       case Some(existingOperation) if existingOperation != operation =>
-        DBIO.successful(
-          Left(
-            ConflictingPendingOperationError(
-              operation.synchronizer,
-              operation.key,
-              operation.name,
-            )
-          )
+        val error = ConflictingPendingOperationError(
+          operation.synchronizer,
+          operation.key,
+          operation.name,
         )
+        logger.info(error.message)
+        DBIO.successful(Left(error))
 
       case Some(_) => DBIO.successful(Right(()))
 

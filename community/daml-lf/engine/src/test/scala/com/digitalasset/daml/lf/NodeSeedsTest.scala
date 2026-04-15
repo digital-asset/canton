@@ -18,7 +18,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.zip.ZipInputStream
 
 
-// TODO(#30398): reactivate {by dropping the abstract}
+// TODO(#31853): reactivate {by dropping the abstract}
 abstract class NodeSeedsTestV2 extends NodeSeedsTest(LanguageVersion.Major.V2)
 
 class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWordSpec with Matchers with SuppressingLogging {
@@ -170,7 +170,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
   }
 
   val n = tx.nodes.iterator.collect { case (nid, _: Node.Action) =>
-    // TODO(#30398): Review in context of rollback abd by-key nodes.
+    // TODO(#31853): Review in context of rollback abd by-key nodes.
     s"when run with $nid" ignore {
       replay(nid) shouldBe projectCreates(nid)
     }

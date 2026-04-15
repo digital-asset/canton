@@ -12,10 +12,6 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.{
-  StoreBasedSynchronizerTopologyInitializationCallback,
-  SynchronizerTopologyInitializationCallback,
-}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -125,7 +121,7 @@ class SyncPersistentStateManager(
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     parameters: ParticipantNodeParameters,
     topologyConfig: TopologyConfig,
-    synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
+    val synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     synchronizerCryptoFactory: StaticSynchronizerParameters => SynchronizerCrypto,
     clock: Clock,
     ledgerApiStore: Eval[LedgerApiStore],
@@ -154,7 +150,7 @@ class SyncPersistentStateManager(
     ): EitherT[FutureUnlessShutdown, String, StaticSynchronizerParameters] =
       EitherT
         .fromOptionF(
-          SynchronizerParameterStore(
+          SynchronizerConnectivityStatusStore(
             storage,
             synchronizerId,
             parameters.processingTimeouts,
@@ -265,7 +261,7 @@ class SyncPersistentStateManager(
 
         _ <- checkAndUpdateSynchronizerParameters(
           psid,
-          physical.parameterStore,
+          physical.connectivityStatusStore,
           synchronizerParameters,
         )
       } yield {
@@ -304,19 +300,21 @@ class SyncPersistentStateManager(
 
   private def checkAndUpdateSynchronizerParameters(
       psid: PhysicalSynchronizerId,
-      parameterStore: SynchronizerParameterStore,
+      connectivityStatusStore: SynchronizerConnectivityStatusStore,
       newParameters: StaticSynchronizerParameters,
   )(implicit
       traceContext: TraceContext,
       @unused writeLockHandle: lock.WriteLockHandle,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
     for {
-      oldParametersO <- EitherT.right(parameterStore.lastParameters)
+      oldParametersO <- EitherT.right(connectivityStatusStore.lastParameters)
       _ <- oldParametersO match {
         case None =>
           // Store the parameters
           logger.debug(s"Storing synchronizer parameters for synchronizer $psid: $newParameters")
-          EitherT.right[SynchronizerRegistryError](parameterStore.setParameters(newParameters))
+          EitherT.right[SynchronizerRegistryError](
+            connectivityStatusStore.setParameters(newParameters)
+          )
         case Some(oldParameters) =>
           EitherT.cond[FutureUnlessShutdown](
             oldParameters == newParameters,
@@ -463,37 +461,6 @@ class SyncPersistentStateManager(
         loggerFactory.append("psid", psid.toString),
       )
     )
-
-  def synchronizerTopologyStateInitFor(
-      synchronizerId: PhysicalSynchronizerId,
-      participantId: ParticipantId,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Option[
-    SynchronizerTopologyInitializationCallback
-  ]] =
-    get(synchronizerId) match {
-      case None =>
-        EitherT.leftT[FutureUnlessShutdown, Option[SynchronizerTopologyInitializationCallback]](
-          SynchronizerRegistryError.SynchronizerRegistryInternalError.InvalidState(
-            s"topology factory for synchronizer $synchronizerId is unavailable"
-          )
-        )
-
-      case Some(state) =>
-        EitherT.right(
-          state.topologyStore
-            .findFirstTrustCertificateForParticipant(participantId)
-            .map(trustCert =>
-              // only if the participant's trustCert is not yet in the topology store do we have to initialize it.
-              // The callback will fetch the essential topology state from the sequencer
-              Option.when(trustCert.isEmpty)(
-                new StoreBasedSynchronizerTopologyInitializationCallback
-              )
-            )
-        )
-
-    }
 
   override def close(): Unit =
     LifeCycle.close((physicalPersistentStates.values.toSeq :+ aliasResolution)*)(logger)

@@ -61,7 +61,8 @@ class SyncPersistentState(
   override def sequencedEventStore: SequencedEventStore = physical.sequencedEventStore
   override def sendTrackerStore: SendTrackerStore = physical.sendTrackerStore
   override def requestJournalStore: RequestJournalStore = physical.requestJournalStore
-  override def parameterStore: SynchronizerParameterStore = physical.parameterStore
+  override def connectivityStatusStore: SynchronizerConnectivityStatusStore =
+    physical.connectivityStatusStore
   override def submissionTrackerStore: SubmissionTrackerStore = physical.submissionTrackerStore
   override def isMemory: Boolean = physical.isMemory
   override def topologyStore: TopologyStore[SynchronizerStore] = physical.topologyStore
@@ -104,7 +105,7 @@ trait PhysicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def sendTrackerStore: SendTrackerStore
   def requestJournalStore: RequestJournalStore
 
-  def parameterStore: SynchronizerParameterStore
+  def connectivityStatusStore: SynchronizerConnectivityStatusStore
   def submissionTrackerStore: SubmissionTrackerStore
   def isMemory: Boolean
 

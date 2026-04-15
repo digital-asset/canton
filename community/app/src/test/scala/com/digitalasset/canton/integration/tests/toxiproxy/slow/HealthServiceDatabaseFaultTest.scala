@@ -5,8 +5,8 @@ package com.digitalasset.canton.integration.tests.toxiproxy.slow
 
 import com.digitalasset.canton
 import com.digitalasset.canton.config.DbConfig.Postgres
-import com.digitalasset.canton.config.LocalNodeConfig
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.{LocalNodeConfig, ReplicationConfig}
 import com.digitalasset.canton.integration.ConfigTransforms.ConfigNodeType
 import com.digitalasset.canton.integration.plugins.toxiproxy.*
 import com.digitalasset.canton.integration.plugins.{
@@ -205,8 +205,16 @@ class HealthServiceSequencerFaultBftOrderingIntegrationTestPostgres
   override protected val getToxiProxy: () => RunningProxy =
     setupPluginsWithToxiproxy(
       new UsePostgres(loggerFactory),
-      // Run after the DB plugin to alter the DB configuration
-      new UseConfigTransforms(Seq(lowerFailedToFatalDelay), loggerFactory),
+      new UseConfigTransforms(
+        Seq(
+          lowerFailedToFatalDelay, // Run after the DB plugin to alter the DB configuration
+          ConfigTransforms.updateSequencerConfig("sequencer1")(
+            // This test only works with replication turned off, otherwise the sequencer node would crash
+            _.focus(_.replication).replace(Some(ReplicationConfig(enabled = Some(false))))
+          ),
+        ),
+        loggerFactory,
+      ),
       new UseBftSequencer(loggerFactory),
     )
 }

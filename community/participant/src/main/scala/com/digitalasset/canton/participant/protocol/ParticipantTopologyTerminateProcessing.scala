@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   LogicalUpgradeTime,
@@ -17,8 +17,8 @@ import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
+  Revoked,
 }
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -27,8 +27,7 @@ import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
-import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
+import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -36,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerCounter, topology}
 import org.slf4j.event.Level
 
@@ -48,6 +48,7 @@ object ParticipantTopologyTerminateProcessing {
       event: Update.TopologyTransactionEffective,
       onboardingLocallyHostedParty: Boolean,
       clearingOnboardingLocallyHostedParty: Boolean,
+      abortingOnboardingLocallyHostedParty: Boolean,
   )
 }
 
@@ -58,7 +59,7 @@ class ParticipantTopologyTerminateProcessing(
     participantId: ParticipantId,
     pauseSynchronizerIndexingDuringPartyReplication: Boolean,
     synchronizerPredecessor: Option[SynchronizerPredecessor],
-    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
+    pendingLsuOperationsStore: PendingLsuOperation.Store,
     pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
     onboardingClearanceScheduler: OnboardingClearanceScheduler,
     retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
@@ -102,7 +103,10 @@ class ParticipantTopologyTerminateProcessing(
           )
         events = effectiveStateChanges.headOption.flatMap(getNewEvents)
 
-        _ <- events.traverse(processPartyHostingEvents)
+        _ <-
+          if (store.protocolVersion >= ProtocolVersion.v35) {
+            events.traverse(processPartyHostingEvents)
+          } else { FutureUnlessShutdown.unit }
 
         _ <- FutureUnlessShutdown.lift(
           events
@@ -125,132 +129,124 @@ class ParticipantTopologyTerminateProcessing(
     *
     * When a party is onboarded, it records a pending operation and schedules a clearance task. When
     * the party is finally added (onboarding flag cleared), it removes the pending operation from
-    * the store.
+    * the store. When a party is revoked (offboarded), it cleans up any aborted operations.
     */
   private def processPartyHostingEvents(eventInfo: EventInfo)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[Unit] = {
-    if (eventInfo.onboardingLocallyHostedParty || eventInfo.clearingOnboardingLocallyHostedParty) {
-      MonadUtil.sequentialTraverse_[FutureUnlessShutdown, TopologyEvent, Unit](
-        eventInfo.event.events
-      ) {
-        // Onboarding: Persist the clearance intent and trigger the scheduler
-        case PartyToParticipantAuthorization(lfParty, participant, Onboarding(_permission))
+
+    val requiresProcessing = eventInfo.onboardingLocallyHostedParty ||
+      eventInfo.clearingOnboardingLocallyHostedParty ||
+      eventInfo.abortingOnboardingLocallyHostedParty
+
+    if (requiresProcessing) {
+      // Pre-filter: We only care about PartyToParticipantAuthorization on the local participant
+      val localAuthEvents = eventInfo.event.events.collect {
+        case auth @ PartyToParticipantAuthorization(_, participant, _)
             if participant == participantId.toLf =>
-          val effectiveAt = EffectiveTime(eventInfo.event.effectiveTime)
+          auth
+      }
 
-          PartyId
-            .fromLfParty(lfParty)
-            .fold(
-              err => {
-                logger.error(
-                  s"Failed to parse PartyId from $lfParty during 'Onboarding' event. Reason: $err"
-                )
-                FutureUnlessShutdown.unit
-              },
-              partyId => {
-                logger.info(
-                  s"Party $partyId is onboarding on the local participant."
-                )
-
-                pendingOnboardingClearanceStore
-                  .get(
-                    psid.logical,
-                    OnboardingClearanceOperation.operationKey(partyId),
-                    OnboardingClearanceOperation.operationName,
-                  )
-                  .value
-                  .flatMap {
-                    case None =>
-                      // If no record is found, do nothing (no DB insertion, no clearance request)
-                      logger.info(
-                        s"No pending onboarding clearance operation found for party $partyId. Skipping clearance request."
-                      )
-                      FutureUnlessShutdown.unit
-
-                    // Record's existence guards against prematurely scheduling of an onboarding flag clearance
-                    case Some(record) =>
-                      // If a record is found, update it only if onboardingEffectiveAt is undefined
-                      // (the record was persisted as part of the offline party ACS import)
-                      val persistOperationFus =
-                        if (record.operation.onboardingEffectiveAt.isDefined) {
-                          logger.warn(
-                            s"Unexpected: An effective PTP mapping with set onboarding flag (validFrom=${record.operation.onboardingEffectiveAt}) " +
-                              s"together with a pending onboarding clearance operation record for party $partyId."
-                          )
-                          FutureUnlessShutdown.unit // Already tracked with the effective time
-                        } else {
-                          val operation =
-                            OnboardingClearanceOperation(Some(effectiveAt))(
-                              OnboardingClearanceOperation
-                                .protocolVersionRepresentativeFor(store.protocolVersion)
-                            )
-                          pendingOnboardingClearanceStore
-                            .updateOperation(
-                              operation,
-                              psid.logical,
-                              OnboardingClearanceOperation.operationName,
-                              OnboardingClearanceOperation.operationKey(partyId),
-                            )
-                        }
-
-                      // After ensuring the update is persisted (if it was needed), request clearance
-                      persistOperationFus.flatMap { _ =>
-                        val onboardingEffectiveAt =
-                          record.operation.onboardingEffectiveAt.getOrElse(effectiveAt)
-
-                        onboardingClearanceScheduler
-                          .requestClearance(
-                            partyId,
-                            onboardingEffectiveAt,
-                            maxInitialRetries = NonNegativeInt.one,
-                          )
-                          .fold(
-                            error =>
-                              logger.warn(
-                                s"Failed to request onboarding clearance for party $partyId: $error. " +
-                                  "Please recover by manually calling the clear party onboarding flag endpoint."
-                              ),
-                            _ => (), // Successfully requested the onboarding flag clearance
-                          )
-                      }
-                  }
-              },
+      MonadUtil.sequentialTraverse_[FutureUnlessShutdown, PartyToParticipantAuthorization, Unit](
+        localAuthEvents
+      ) { case PartyToParticipantAuthorization(lfParty, _, permission) =>
+        // Parse PartyId exactly once per event
+        PartyId.fromLfParty(lfParty) match {
+          case Left(err) =>
+            // permission.getClass.getSimpleName will print "Onboarding", "Added", or "Revoked$"
+            ErrorUtil.internalError(
+              new IllegalArgumentException(
+                s"Failed to parse PartyId from $lfParty during '${permission.getClass.getSimpleName}' event. Reason: $err"
+              )
             )
 
-        // Added: The onboarding flag has been successfully cleared
-        case PartyToParticipantAuthorization(lfParty, participant, Added(_permission))
-            if participant == participantId.toLf =>
-          PartyId
-            .fromLfParty(lfParty)
-            .fold(
-              err => {
-                logger.error(
-                  s"Failed to parse PartyId from $lfParty during 'Added' event. Reason: $err"
-                )
-                FutureUnlessShutdown.unit
-              },
-              partyId => {
+          case Right(partyId) =>
+            permission match {
+              case Onboarding(_) =>
+                val effectiveAt = EffectiveTime(eventInfo.event.effectiveTime)
+                handleOnboardingEvent(partyId, effectiveAt)
+
+              case Added(_) | Revoked =>
+                // Group identical cleanup logic
+                val action =
+                  if (permission == Revoked) "revoked (offboarded) from"
+                  else "successfully added to"
                 logger.info(
-                  s"Party $partyId was successfully added to the local participant. Removing pending onboarding clearance operation."
+                  s"Party $partyId was $action the local participant. Cleaning up any pending onboarding clearance operation."
                 )
                 pendingOnboardingClearanceStore.delete(
                   psid.logical,
                   OnboardingClearanceOperation.operationKey(partyId),
                   OnboardingClearanceOperation.operationName,
                 )
-              },
-            )
 
-        case _ =>
-          // Ignore other events (Revoked, ChangedTo, or events for other parties/participants)
-          FutureUnlessShutdown.unit
+              case _ =>
+                // Ignore other permissions (e.g. ChangedTo)
+                FutureUnlessShutdown.unit
+            }
+        }
       }
     } else {
-      // When neither onboardingLocallyHostedParty nor clearingOnboardingLocallyHostedParty is true
+      // When none of onboarding, clearing, or revoking locally hosted party flags are true
       FutureUnlessShutdown.unit
     }
+  }
+
+  private def handleOnboardingEvent(partyId: PartyId, effectiveAt: EffectiveTime)(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Unit] = {
+    logger.info(s"Party $partyId is onboarding on the local participant.")
+
+    pendingOnboardingClearanceStore
+      .get(
+        psid.logical,
+        OnboardingClearanceOperation.operationKey(partyId),
+        OnboardingClearanceOperation.operationName,
+      )
+      .value
+      .flatMap {
+        case None =>
+          // If no record is found, do nothing (no DB insertion, no clearance request)
+          logger.info(
+            s"No pending onboarding clearance operation found for party $partyId. Skipping clearance request."
+          )
+          FutureUnlessShutdown.unit
+
+        // Record's existence guards against prematurely scheduling an onboarding flag clearance
+        case Some(record) =>
+          // If a record is found, update it only if onboardingEffectiveAt is undefined
+          // (the record was persisted as part of the offline party ACS import)
+          val persistOperationFus = record.operation.onboardingEffectiveAt match {
+            case Some(existingTime) if existingTime == effectiveAt =>
+              logger.debug(
+                s"Clearance record for $partyId already has effective time $effectiveAt. Skipping DB update."
+              )
+              FutureUnlessShutdown.unit
+            case _ =>
+              // It was None (expected), OR it had a mismatched time (self-healing overwrite)
+              val operation = OnboardingClearanceOperation(Some(effectiveAt))(
+                OnboardingClearanceOperation.protocolVersionRepresentativeFor(store.protocolVersion)
+              )
+              pendingOnboardingClearanceStore.updateOperation(
+                operation,
+                psid.logical,
+                OnboardingClearanceOperation.operationName,
+                OnboardingClearanceOperation.operationKey(partyId),
+              )
+          }
+
+          // After ensuring the update is persisted (if it was needed), request clearance
+          persistOperationFus.map { _ =>
+            val onboardingEffectiveAt =
+              record.operation.onboardingEffectiveAt.getOrElse(effectiveAt)
+            onboardingClearanceScheduler.requestClearanceInBackground(
+              partyId,
+              onboardingEffectiveAt,
+            )
+          }
+      }
   }
 
   override def notifyUpgradeAnnouncement(
@@ -270,7 +266,8 @@ class ParticipantTopologyTerminateProcessing(
   }
 
   override def notifyUpgradeCancellation()(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      ec: ExecutionContext,
   ): FutureUnlessShutdown[Unit] = {
     logger.info(
       s"Node is notified about the cancellation of upgrade"
@@ -278,10 +275,10 @@ class ParticipantTopologyTerminateProcessing(
 
     recordOrderPublisher.setSuccessor(None)
 
-    pendingHandshakesWithSuccessorsStore.delete(
+    pendingLsuOperationsStore.delete(
       psid,
-      PendingHandshakeWithLsuSuccessor.operationKey,
-      PendingHandshakeWithLsuSuccessor.operationName,
+      PendingLsuOperation.operationKey,
+      PendingLsuOperation.operationName,
     )
   }
 
@@ -473,6 +470,7 @@ class ParticipantTopologyTerminateProcessing(
             updateId,
             onboardingLocalParty,
             clearingOnboardingLocalParty,
+            revokingLocalParty,
           ) =>
         EventInfo(
           Update.TopologyTransactionEffective(
@@ -483,6 +481,7 @@ class ParticipantTopologyTerminateProcessing(
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,
+          abortingOnboardingLocallyHostedParty = revokingLocalParty,
         )
     }
 }

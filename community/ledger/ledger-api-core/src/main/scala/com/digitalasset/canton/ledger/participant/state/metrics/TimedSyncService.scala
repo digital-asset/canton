@@ -42,7 +42,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
+import com.digitalasset.canton.{LfGlobalKeyMapping, LfPartyId}
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -64,7 +64,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       transactionMeta: TransactionMeta,
       // Currently, the estimated interpretation cost is not used
       _estimatedInterpretationCost: Long,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -308,7 +308,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       transaction: LfVersionedTransaction,
       transactionMetadata: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfKeyResolver,
+      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit

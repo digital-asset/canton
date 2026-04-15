@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   exerciseNode,
   fetchNode,
-  lookupByKeyNode,
+  queryByKeyNode,
   templateId,
 }
 import com.digitalasset.canton.protocol.{ExampleContractFactory, LfGlobalKey, LfTemplateId}
@@ -42,7 +42,7 @@ class InputContractPackagesTest extends AnyWordSpec with BaseTest with TestIdFac
 
       val example = toVersionedTransaction(
         exerciseNode(cid1, templateId = t(p1)).withChildren(
-          lookupByKeyNode(globalKey, resolution = Some(cid2)),
+          queryByKeyNode(globalKey, resolution = Vector(cid2)),
           fetchNode(cid3, templateId = t(p3)),
         )
       ).transaction

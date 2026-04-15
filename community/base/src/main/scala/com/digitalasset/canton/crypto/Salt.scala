@@ -4,13 +4,12 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeterministicEncoding}
-import com.digitalasset.canton.{ProtoDeserializationError, admin, crypto}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import io.scalaland.chimney.Transformer
 
 /** A seed to derive further salts from.
   *
@@ -112,23 +111,12 @@ object Salt {
 
   /** Derives a salt from a `seed` salt and an `index`. */
   def deriveSalt(seed: SaltSeed, index: Int, hmacOps: HmacOps): Either[SaltError, Salt] =
-    deriveSalt(seed, DeterministicEncoding.encodeInt(index), hmacOps)
+    deriveSalt(seed.unwrap, DeterministicEncoding.encodeInt(index), hmacOps)
 
   def tryDeriveSalt(seed: SaltSeed, index: Int, hmacOps: HmacOps): Salt =
     deriveSalt(seed, index, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
 
-  /** Derives a salt from a `seed` salt and `bytes` using an HMAC as a pseudo-random function. */
-  def deriveSalt(seed: SaltSeed, bytes: ByteString, hmacOps: HmacOps): Either[SaltError, Salt] =
-    deriveSalt(seed.unwrap, bytes, hmacOps)
-
-  def tryDeriveSalt(seed: SaltSeed, bytes: ByteString, hmacOps: HmacOps): Salt =
-    deriveSalt(seed, bytes, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
-
-  def tryDeriveSalt(
-      seed: Salt,
-      bytes: ByteString,
-      hmacOps: HmacOps,
-  ): Salt =
+  def tryDeriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Salt =
     deriveSalt(seed.forHashing, bytes, hmacOps).valueOr(err =>
       throw new IllegalStateException(err.toString)
     )
@@ -142,40 +130,6 @@ object Salt {
         )
       )
     } yield salt
-
-  object TransformerImplicits {
-    implicit val v30ToAdminV30AlgorithmTransformer
-        : Transformer[crypto.v30.Salt.Algorithm, admin.crypto.v30.Salt.Algorithm] = {
-      case crypto.v30.Salt.Algorithm.Empty => admin.crypto.v30.Salt.Algorithm.Empty
-      case crypto.v30.Salt.Algorithm.Hmac(value) =>
-        val hmac = value match {
-          case crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_UNSPECIFIED =>
-            admin.crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_UNSPECIFIED
-          case crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_HMAC_SHA256 =>
-            admin.crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_HMAC_SHA256
-          case crypto.v30.HmacAlgorithm.Unrecognized(unrecognizedValue) =>
-            admin.crypto.v30.HmacAlgorithm.Unrecognized(unrecognizedValue)
-        }
-
-        admin.crypto.v30.Salt.Algorithm.Hmac(hmac)
-    }
-
-    implicit val adminV30Tov30AlgorithmTransformer
-        : Transformer[admin.crypto.v30.Salt.Algorithm, crypto.v30.Salt.Algorithm] = {
-      case admin.crypto.v30.Salt.Algorithm.Empty => crypto.v30.Salt.Algorithm.Empty
-      case admin.crypto.v30.Salt.Algorithm.Hmac(value) =>
-        val hmac = value match {
-          case admin.crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_UNSPECIFIED =>
-            crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_UNSPECIFIED
-          case admin.crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_HMAC_SHA256 =>
-            crypto.v30.HmacAlgorithm.HMAC_ALGORITHM_HMAC_SHA256
-          case admin.crypto.v30.HmacAlgorithm.Unrecognized(unrecognizedValue) =>
-            crypto.v30.HmacAlgorithm.Unrecognized(unrecognizedValue)
-        }
-
-        crypto.v30.Salt.Algorithm.Hmac(hmac)
-    }
-  }
 
 }
 

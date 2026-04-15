@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.examples
 
 import better.files.*
 import com.digitalasset.canton.ConsoleScriptRunner
+import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.Environment
@@ -22,6 +23,20 @@ abstract class ExampleIntegrationTest(configPaths: File*)
     extends BaseIntegrationTest
     with IsolatedEnvironments
     with HasConsoleScriptRunner {
+
+  // Validates that the config files for this example parse correctly exactly as a user would run
+  // them manually with bin/canton — without any ConfigTransforms (no automatic port injection etc.).
+  // This ensures that the example stays runnable even as configs evolve alongside the integration test.
+  override protected def beforeAll(): Unit = {
+    CantonConfig
+      .parseAndLoad(configPaths.map(_.toJava), defaultPorts = None)
+      .valueOrFail(
+        s"Config files for ${this.getClass.getSimpleName} must parse correctly without " +
+          s"ConfigTransforms: ${configPaths.map(_.name).mkString(", ")}"
+      )
+      .discard
+    super.beforeAll()
+  }
 
   protected def runAndAssertCommandSuccess(
       pb: scala.sys.process.ProcessBuilder,

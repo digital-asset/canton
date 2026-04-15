@@ -11,6 +11,8 @@ import com.digitalasset.canton.crypto.CryptoKeyFormat.DerX509Spki
 import com.digitalasset.canton.crypto.provider.jce.{JcePureCrypto, JceSecurityProvider}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.google.protobuf.ByteString
+import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
+import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.security.KeyPairGenerator
@@ -136,6 +138,25 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
         validationRes.left.value.toString should include(
           s"RSA key modulus size ${4096} does not match expected " +
             s"size ${EncryptionKeySpec.Rsa2048.keySizeInBits}"
+        )
+      }
+
+      "fail if Ed25519 public key is invalid" in {
+        val invalidPublicKey = ByteString.copyFrom(
+          new SubjectPublicKeyInfo(
+            new AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
+            Array.fill[Byte](32)(0),
+          ).getEncoded
+        )
+        val validationRes =
+          SigningPublicKey.create(
+            DerX509Spki,
+            invalidPublicKey,
+            SigningKeySpec.EcCurve25519,
+            SigningKeyUsage.ProtocolOnly,
+          )
+        validationRes.left.value.toString should include(
+          s"invalid public key"
         )
       }
 

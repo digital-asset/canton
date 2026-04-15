@@ -29,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeModuleExpectingSilence,
 }
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -411,12 +412,12 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
 private object MempoolModuleTest {
 
-  val AP2PConnectivityUpdate =
+  def AP2PConnectivityUpdate(implicit pv: ProtocolVersion) =
     Mempool.P2PConnectivityUpdate(
       Membership.forTesting(BftNodeId("myself"), (1 to 7).map(i => BftNodeId(i.toString)).toSet),
       2,
     )
-  val AnotherP2PConnectivityUpdate =
+  def AnotherP2PConnectivityUpdate(implicit pv: ProtocolVersion) =
     Mempool.P2PConnectivityUpdate(
       Membership.forTesting(BftNodeId("myself"), (1 to 7).map(i => BftNodeId(i.toString)).toSet),
       3,

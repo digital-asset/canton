@@ -23,13 +23,21 @@ final case class LedgerApiUser(
     isDeactivated: Boolean,
     metadata: LedgerApiObjectMeta,
     identityProviderId: String,
+    primaryPartyAuthentication: Boolean,
 )
 
 object LedgerApiUser {
   def fromProtoV0(
       value: ProtoLedgerApiUser
   ): ParsingResult[LedgerApiUser] = {
-    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO, identityProviderId) = value
+    val ProtoLedgerApiUser(
+      id,
+      primaryParty,
+      isDeactivated,
+      metadataO,
+      identityProviderId,
+      primaryPartyAuthentication,
+    ) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
       .traverse(LfPartyId.fromString(_).flatMap(PartyId.fromLfParty(_)))
@@ -46,6 +54,7 @@ object LedgerApiUser {
             annotations = metadataO.fold(Map.empty[String, String])(_.annotations),
           ),
           identityProviderId = identityProviderId,
+          primaryPartyAuthentication = primaryPartyAuthentication,
         )
       }
   }
@@ -116,6 +125,7 @@ final case class User(
     isDeactivated: Boolean,
     annotations: Map[String, String],
     identityProviderId: String,
+    primaryPartyAuthentication: Boolean,
 )
 
 object User {
@@ -125,6 +135,7 @@ object User {
     isDeactivated = u.isDeactivated,
     annotations = u.metadata.annotations,
     identityProviderId = u.identityProviderId,
+    primaryPartyAuthentication = u.primaryPartyAuthentication,
   )
   def toLapiUser(u: User, resourceVersion: Option[String]): LedgerApiUser = LedgerApiUser(
     id = u.id,
@@ -135,6 +146,7 @@ object User {
       annotations = u.annotations,
     ),
     identityProviderId = u.identityProviderId,
+    primaryPartyAuthentication = u.primaryPartyAuthentication,
   )
 }
 
