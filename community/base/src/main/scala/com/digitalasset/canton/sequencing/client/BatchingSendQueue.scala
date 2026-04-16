@@ -95,9 +95,12 @@ class BatchingSendQueue(
       )
     } else {
       // Multiple items — merge into ONE batch, ONE sendAsync call.
-      // Each original batch's envelopes are concatenated. Each envelope
-      // carries its own Recipients, so the sequencer delivers correctly.
-      val mergedEnvelopes = drained.flatMap(_.batch.envelopes)
+      // Each original batch's envelopes are concatenated, ordered by
+      // original timestamp to preserve causal ordering within the batch.
+      // Each envelope carries its own Recipients, so the sequencer
+      // delivers correctly.
+      val sorted = drained.sortBy(_.timestamps.maxSequencingTime)
+      val mergedEnvelopes = sorted.flatMap(_.batch.envelopes)
       val first = drained.head
       implicit val tc: TraceContext = first.traceContext
       implicit val mc: MetricsContext = first.metricsContext
