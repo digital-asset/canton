@@ -77,33 +77,47 @@ abstract class GenericRunningCommitments[T: Pretty](
   ): Unit =
     lock.exclusive {
       this.rt = rt
-      change.activations.foreach { case (cid, stakeholdersAndReassignmentCounter) =>
-        val sortedStakeholders =
-          SortedSet(stakeholdersAndReassignmentCounter.stakeholders.toSeq*)
-        val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
-        AcsCommitmentProcessor.addContractToCommitmentDigest(
-          h,
-          cid,
-          stakeholdersAndReassignmentCounter.reassignmentCounter,
-        )
-        loggingContext.debug(
-          s"Adding to commitment activation cid $cid reassignmentCounter ${stakeholdersAndReassignmentCounter.reassignmentCounter}"
-        )
-        deltaB += sortedStakeholders -> h
+
+      // Group activations and deactivations by stakeholder set so we can
+      // process independent groups in parallel. Within each group, operations
+      // are serial (same mutable LtHash16 accumulator).
+      val activationsByGroup = change.activations.groupBy { case (_, sr) =>
+        SortedSet(sr.stakeholders.toSeq*)
       }
-      change.deactivations.foreach { case (cid, stakeholdersAndReassignmentCounter) =>
-        val sortedStakeholders =
-          SortedSet(stakeholdersAndReassignmentCounter.stakeholders.toSeq*)
-        val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
-        AcsCommitmentProcessor.removeContractFromCommitmentDigest(
-          h,
-          cid,
-          stakeholdersAndReassignmentCounter.reassignmentCounter,
-        )
-        loggingContext.debug(
-          s"Removing from commitment deactivation cid $cid reassignmentCounter ${stakeholdersAndReassignmentCounter.reassignmentCounter}"
-        )
-        deltaB += sortedStakeholders -> h
+      val deactivationsByGroup = change.deactivations.groupBy { case (_, sr) =>
+        SortedSet(sr.stakeholders.toSeq*)
+      }
+      val allGroups = (activationsByGroup.keySet ++ deactivationsByGroup.keySet).toSeq
+
+      // Ensure all LtHash16 accumulators exist before parallel access
+      allGroups.foreach(stkhs => commitments.getOrElseUpdate(stkhs, LtHash16()))
+
+      // Process groups in parallel — each group has its own LtHash16
+      val pool = java.util.concurrent.ForkJoinPool.commonPool()
+      val tasks = allGroups.map { sortedStakeholders =>
+        pool.submit(new Runnable {
+          def run(): Unit = {
+            val h = commitments(sortedStakeholders)
+            activationsByGroup.getOrElse(sortedStakeholders, Map.empty).foreach {
+              case (cid, sr) =>
+                AcsCommitmentProcessor.addContractToCommitmentDigest(h, cid, sr.reassignmentCounter)
+            }
+            deactivationsByGroup.getOrElse(sortedStakeholders, Map.empty).foreach {
+              case (cid, sr) =>
+                AcsCommitmentProcessor.removeContractFromCommitmentDigest(
+                  h,
+                  cid,
+                  sr.reassignmentCounter,
+                )
+            }
+          }
+        })
+      }
+      tasks.foreach(_.get())
+
+      // Update delta tracking (single-threaded, deltaB is not thread-safe)
+      allGroups.foreach { sortedStakeholders =>
+        deltaB += sortedStakeholders -> commitments(sortedStakeholders)
       }
     }
 
