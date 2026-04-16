@@ -103,6 +103,21 @@ service PartyManagementService {
   // - An 'onboarding=true' mapping must exist for the party on this participant.
   // - The participant must be connected to the requested synchronizer.
   rpc ClearPartyOnboardingFlag(ClearPartyOnboardingFlagRequest) returns (ClearPartyOnboardingFlagResponse);
+
+  // Register a template-bound party.
+  //
+  // Creates a TemplateBoundPartyMapping topology transaction that locks the party
+  // to a fixed set of allowed Daml templates, then destroys the party's signing key.
+  // After registration, the hosting participant auto-confirms transactions where the
+  // party acts, provided all actions are on allowed templates.
+  //
+  // This operation is irreversible: the signing key is permanently destroyed and the
+  // allowed template set is immutable.
+  //
+  // Prerequisites:
+  // - The party must already be allocated on this participant.
+  // - The party must have a signing key.
+  rpc RegisterTemplateBoundParty(RegisterTemplateBoundPartyRequest) returns (RegisterTemplateBoundPartyResponse);
 }
 
 message AddPartyAsyncRequest {
@@ -444,4 +459,31 @@ message ClearPartyOnboardingFlagResponse {
   // computed "latest decision deadline", which is the maximum of all `validUntil + decisionTimeout`
   // from the synchronizer's parameter history, ensuring all past in-flight transactions are finalized.
   optional google.protobuf.Timestamp earliest_retry_timestamp = 2;
+}
+
+message RegisterTemplateBoundPartyRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The party to register as template-bound.
+  // Must already be allocated on this participant.
+  // Required
+  string party_id = 1;
+
+  // Fully qualified Daml template IDs that this party is allowed to act on.
+  // e.g. "com.example:AMMPool:1.0"
+  // Required (at least one)
+  repeated string allowed_template_ids = 2;
+
+  // Fingerprint of the party's signing key.
+  // This key will be used to sign the topology transaction and then destroyed.
+  // Required
+  string signing_key_fingerprint = 3;
+}
+
+message RegisterTemplateBoundPartyResponse {
+  // The party ID that was registered as template-bound.
+  string party_id = 1;
+
+  // Whether the signing key was successfully destroyed.
+  bool key_destroyed = 2;
 }

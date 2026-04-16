@@ -183,6 +183,7 @@ class StartableStoppableLedgerApiDependentServices(
                     syncService,
                     topologyLookup,
                     parameters,
+                    templateBoundPartyRegistrationO = None, // TODO: wire from participant node
                     loggerFactory,
                   ),
                   ec,

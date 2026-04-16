@@ -38,6 +38,7 @@ class TransactionConfirmationResponsesFactory(
       malformedPayloads: Seq[MalformedPayload],
       transactionValidationResult: TransactionValidationResult,
       topologySnapshot: TopologySnapshot,
+      autoConfirmedParties: Set[LfPartyId] = Set.empty,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -48,7 +49,12 @@ class TransactionConfirmationResponsesFactory(
     ): FutureUnlessShutdown[Set[LfPartyId]] = {
       val confirmingParties =
         viewValidationResult.view.viewCommonData.viewConfirmationParameters.confirmers
-      topologySnapshot.canConfirm(participantId, confirmingParties)
+      topologySnapshot.canConfirm(participantId, confirmingParties).map { canConfirmParties =>
+        // Union with template-bound parties that passed structural validation.
+        // These parties' signing keys are destroyed, so canConfirm won't include them,
+        // but the auto-confirmer has verified their actions are on allowed templates.
+        canConfirmParties ++ (autoConfirmedParties intersect confirmingParties)
+      }
     }
 
     def verdictsForView(

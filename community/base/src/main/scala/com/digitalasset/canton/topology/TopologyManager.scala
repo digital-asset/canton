@@ -67,6 +67,7 @@ import com.digitalasset.canton.topology.transaction.checks.{
   NoopTopologyMappingChecks,
   OptionalTopologyMappingChecks,
   RequiredTopologyMappingChecks,
+  TemplateBoundPartyChecks,
   TopologyMappingChecks,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -125,12 +126,15 @@ class SynchronizerTopologyManager(
       val required =
         RequiredTopologyMappingChecks(Some(staticSynchronizerParameters), lookup, loggerFactory)
 
+      val templateBoundChecks = new TemplateBoundPartyChecks()
+
       if (!disableOptionalTopologyChecks)
         new TopologyMappingChecks.All(
           required,
           new OptionalTopologyMappingChecks(store, loggerFactory),
+          templateBoundChecks,
         )
-      else required
+      else new TopologyMappingChecks.All(required, templateBoundChecks)
     }
     TopologyStateProcessor.forTopologyManager(
       store,

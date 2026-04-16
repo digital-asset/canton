@@ -11,7 +11,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -72,6 +72,9 @@ class GrpcPartyManagementService(
     sync: CantonSyncService,
     topologyLookup: TopologyLookup,
     parameters: ParticipantNodeParameters,
+    private val templateBoundPartyRegistrationO: Option[
+      com.digitalasset.canton.participant.topology.TemplateBoundPartyRegistration
+    ],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -1049,6 +1052,52 @@ class GrpcPartyManagementService(
       request.waitForActivationTimeout,
     )(ledgerEnd, synchronizerIds)
 
+  override def registerTemplateBoundParty(
+      request: v30.RegisterTemplateBoundPartyRequest
+  ): Future[v30.RegisterTemplateBoundPartyResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val registration = templateBoundPartyRegistrationO.getOrElse(
+      throw Status.UNIMPLEMENTED
+        .withDescription("Template-bound party registration is not configured on this participant")
+        .asRuntimeException()
+    )
+
+    val partyId = PartyId
+      .fromProtoPrimitive(request.partyId, "party_id")
+      .valueOr(e =>
+        throw Status.INVALID_ARGUMENT.withDescription(e.message).asRuntimeException()
+      )
+
+    if (request.allowedTemplateIds.isEmpty)
+      throw Status.INVALID_ARGUMENT
+        .withDescription("allowed_template_ids must not be empty")
+        .asRuntimeException()
+
+    val signingKeyFingerprint = Fingerprint
+      .fromProtoPrimitive(request.signingKeyFingerprint)
+      .valueOr(e =>
+        throw Status.INVALID_ARGUMENT
+          .withDescription(s"Invalid signing_key_fingerprint: ${e.message}")
+          .asRuntimeException()
+      )
+
+    registration
+      .register(
+        partyId = partyId,
+        participantId = participantId,
+        allowedTemplateIds = request.allowedTemplateIds.toSet,
+        signingKeyFingerprint = signingKeyFingerprint,
+      )
+      .valueOr(e => throw Status.INTERNAL.withDescription(e).asRuntimeException())
+      .map(mapping =>
+        v30.RegisterTemplateBoundPartyResponse(
+          partyId = mapping.partyId.toProtoPrimitive,
+          keyDestroyed = true,
+        )
+      )
+      .onShutdown(throw Status.ABORTED.withDescription("Shutting down").asRuntimeException())
+  }
 }
 
 object GrpcPartyManagementService {

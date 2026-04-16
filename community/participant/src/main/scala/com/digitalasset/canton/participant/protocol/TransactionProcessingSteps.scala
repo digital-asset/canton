@@ -985,13 +985,16 @@ class TransactionProcessingSteps(
             FutureUnlessShutdown.pure(
               None: Option[ConfirmationResponses]
             )
-          case Right(_autoConfirmedParties) =>
+          case Right(autoConfirmedParties) =>
             // All template-bound parties passed validation. Proceed with normal response creation.
+            // Pass auto-confirmed parties so they get included in confirmation responses
+            // even though their signing keys are destroyed (canConfirm would miss them).
             confirmationResponsesFactory.createConfirmationResponses(
               requestId,
               malformedPayloads,
               transactionValidationResult,
               ipsSnapshot,
+              autoConfirmedParties,
             )
         }
 
