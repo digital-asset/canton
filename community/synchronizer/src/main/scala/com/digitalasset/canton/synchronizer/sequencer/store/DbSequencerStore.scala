@@ -107,57 +107,6 @@ class DbSequencerStore(
       .map(CloseContext.combineUnsafe(_, CloseContext(this), timeouts, logger)(TraceContext.empty))
       .getOrElse(CloseContext(this))
 
-  /** Queue for lazy compression of legacy uncompressed payloads.
-    * When a read encounters unflagged data, it queues a (payloadId, compressedContent)
-    * pair. A background thread drains the queue and updates the DB rows.
-    * Each payload is compressed at most once — once the flag byte is written,
-    * subsequent reads skip the queue.
-    */
-  private val lazyCompressionQueue =
-    new java.util.concurrent.ConcurrentLinkedQueue[(PayloadId, com.google.protobuf.ByteString)]()
-
-  // Background flush: drain and update, periodic
-  private val lazyCompressionExecutor = {
-    val executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
-      val t = new Thread(r, "lazy-compression")
-      t.setDaemon(true)
-      t
-    })
-    executor.scheduleAtFixedRate(
-      () => flushLazyCompression()(TraceContext.empty),
-      1000, // initial delay ms
-      500,  // period ms
-      java.util.concurrent.TimeUnit.MILLISECONDS,
-    )
-    executor
-  }
-
-  private def flushLazyCompression()(implicit traceContext: TraceContext): Unit = {
-    var batch = List.newBuilder[(PayloadId, com.google.protobuf.ByteString)]
-    var count = 0
-    var item = lazyCompressionQueue.poll()
-    while (item != null && count < 100) { // batch up to 100 per flush
-      batch += item
-      count += 1
-      item = lazyCompressionQueue.poll()
-    }
-    val items = batch.result()
-    if (items.nonEmpty) {
-      val updateSql = "UPDATE sequencer_payloads SET content = ? WHERE id = ?"
-      storage
-        .queryAndUpdate(
-          DbStorage.bulkOperation(updateSql, items, storage.profile) { pp =>
-            { case (id, compressed) =>
-              pp >> compressed
-              pp >> id.unwrap
-            }
-          },
-          "flushLazyCompression",
-        )
-      logger.debug(s"Lazy-compressed $count legacy payloads")
-    }
-  }
-
   private implicit val setRecipientsArrayOParameter
       : SetParameter[Option[NonEmpty[SortedSet[SequencerMemberId]]]] =
     (v, pp) => DbParameterUtils.setArrayIntOParameterDb(v.map(_.toArray.map(_.unwrap)), pp)
@@ -214,17 +163,6 @@ class DbSequencerStore(
         // Uncompressed (legacy) data is returned as-is since the first byte of valid protobuf
         // will never be 0x00 or 0x01 (protobuf field tags start at 0x08 for field 1).
         val decompressed = ValueCompression.decompressIfFlagged(content)
-
-        // Lazy migration: if this was legacy uncompressed data, compress it back to the DB
-        // in the background. This is a one-time cost per payload — once compressed, subsequent
-        // reads skip this path (the flag byte is present).
-        if (!ValueCompression.hasFlagByte(content)) {
-          val compressed = ValueCompression.compress(decompressed)
-          if (compressed.size() < content.size()) {
-            lazyCompressionQueue.add((id, compressed))
-          }
-        }
-
         BytesPayload(id, decompressed)
       }
 
