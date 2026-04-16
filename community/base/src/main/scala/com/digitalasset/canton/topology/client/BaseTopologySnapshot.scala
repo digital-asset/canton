@@ -39,11 +39,13 @@ import com.digitalasset.canton.topology.transaction.{
   SequencerSynchronizerState,
   SynchronizerParametersState,
   SynchronizerTrustCertificate,
+  TemplateBoundPartyMapping,
   TopologyChangeOp,
   TopologyMapping,
   VettedPackage,
   VettedPackages,
 }
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.{
   KeyCollection,
   MediatorGroup,
@@ -87,6 +89,21 @@ abstract class BaseTopologySnapshot(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[StoredTopologyTransactions[TopologyChangeOp.Replace, TopologyMapping]]
+
+  override def templateBoundPartyConfig(
+      party: LfPartyId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[TemplateBoundPartyMapping]] = {
+    val partyId = PartyId.tryFromLfParty(party)
+    findTransactionsByUids(
+      types = Seq(TopologyMapping.Code.TemplateBoundParty),
+      filterUid = NonEmpty(Seq, partyId.uid),
+    ).map { transactions =>
+      collectLatestMapping(
+        TopologyMapping.Code.TemplateBoundParty,
+        transactions.collectOfMapping[TemplateBoundPartyMapping].result,
+      )
+    }
+  }
 
   override def loadVettedPackages(
       participant: ParticipantId

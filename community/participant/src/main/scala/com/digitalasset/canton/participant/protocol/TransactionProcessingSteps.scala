@@ -959,6 +959,19 @@ class TransactionProcessingSteps(
           parallelChecksResult,
           activenessResult,
         )
+        // Check for template-bound parties: if any signatory/controller in this transaction
+        // is a template-bound party, verify that all its actions are on allowed templates.
+        // If the check passes, the participant auto-confirms on behalf of that party.
+        // This runs alongside the normal validation — it doesn't replace it, it augments it.
+        // TODO: wire TemplateBoundAutoConfirmer here once topology store integration is complete.
+        // The auto-confirmer would call:
+        //   autoConfirmer.checkAndAutoConfirm(
+        //     involvedParties = parsedRequest.allInformees,
+        //     actionTemplateIdsByParty = extractTemplateIdsByParty(parsedRequest),
+        //     topologySnapshot = ipsSnapshot,
+        //   )
+        // and reject the transaction if any template-bound party violates its constraints.
+
         // The responses depend on the result of the model conformance check, and are therefore also delayed.
         val responsesF =
           confirmationResponsesFactory.createConfirmationResponses(
