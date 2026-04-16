@@ -138,6 +138,7 @@ class TransactionProcessingSteps(
     futureSupervisor: FutureSupervisor,
     onlyForTestingTransactionInMemoryStore: Option[OnlyForTestingTransactionInMemoryStore],
     participantNodeParameters: ParticipantNodeParameters,
+    templateBoundAutoConfirmer: validation.TemplateBoundAutoConfirmer,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       SubmissionParam,
@@ -969,24 +970,30 @@ class TransactionProcessingSteps(
           )
         // The auto-confirmation check runs asynchronously alongside the model conformance check.
         // It only affects template-bound parties — regular parties are unaffected.
-        // TODO: inject TemplateBoundAutoConfirmer as a constructor dependency and call:
-        //   val templateBoundCheckF = templateBoundAutoConfirmer.checkAndAutoConfirm(
-        //     templateIdsByParty.keySet,
-        //     templateIdsByParty,
-        //     ipsSnapshot,
-        //   )
-        // Then incorporate the result: if Left(invalid), reject the transaction.
-        // For now, the extraction is wired and the auto-confirmer module is ready to plug in.
-        val _ = templateIdsByParty // suppress unused warning
+        val templateBoundCheckF = templateBoundAutoConfirmer.checkAndAutoConfirm(
+          templateIdsByParty.keySet,
+          templateIdsByParty,
+          ipsSnapshot,
+        )
 
-        // The responses depend on the result of the model conformance check, and are therefore also delayed.
-        val responsesF =
-          confirmationResponsesFactory.createConfirmationResponses(
-            requestId,
-            malformedPayloads,
-            transactionValidationResult,
-            ipsSnapshot,
-          )
+        // The responses depend on the result of the model conformance check AND the template-bound
+        // party check. If any template-bound party violates its constraints, we reject.
+        val responsesF = templateBoundCheckF.flatMap {
+          case Left(invalid) =>
+            // A template-bound party acted on a disallowed template — reject the transaction.
+            logger.warn(s"Request $requestId: ${invalid.message}")
+            FutureUnlessShutdown.pure(
+              None: Option[ConfirmationResponses]
+            )
+          case Right(_autoConfirmedParties) =>
+            // All template-bound parties passed validation. Proceed with normal response creation.
+            confirmationResponsesFactory.createConfirmationResponses(
+              requestId,
+              malformedPayloads,
+              transactionValidationResult,
+              ipsSnapshot,
+            )
+        }
 
         val pendingTransaction =
           createPendingTransaction(
