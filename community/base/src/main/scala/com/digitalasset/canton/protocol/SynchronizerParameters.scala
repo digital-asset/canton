@@ -365,6 +365,11 @@ final case class DynamicSynchronizerParameters private (
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+    /** Whether fetchExternal (pinned external data fetches) is enabled on this synchronizer.
+      * When false, transactions containing PinnedDataNodes are rejected.
+      * Gated for phased rollout per CIP-draft-external-data-pinning.
+      */
+    enableExternalFetches: Boolean = false,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       DynamicSynchronizerParameters.type

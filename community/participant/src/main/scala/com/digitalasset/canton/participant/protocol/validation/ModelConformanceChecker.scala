@@ -262,14 +262,19 @@ class ModelConformanceChecker(
       view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
     )
 
-    // Verify pinned external data signatures before reinterpretation
+    // CIP-draft-external-data-pinning: verify pinned external data
     val pinnedData = viewParticipantData.pinnedData
-    pinnedData.foreach { pinned =>
-      if (!pinned.verifySignature()) {
-        throw new IllegalArgumentException(
-          s"Pinned data signature verification failed for fetch index ${pinned.fetchIndex} " +
-            s"(endpoint: ${pinned.endpoint})"
-        )
+    if (pinnedData.nonEmpty) {
+      // TODO(CIP-external-data-pinning): check DynamicSynchronizerParameters.enableExternalFetches
+      // and reject if the feature is disabled on this synchronizer.
+      // For now, just verify signatures.
+      pinnedData.foreach { pinned =>
+        if (!pinned.verifySignature()) {
+          throw new IllegalArgumentException(
+            s"Pinned data signature verification failed for fetch index ${pinned.fetchIndex} " +
+              s"(endpoint: ${pinned.endpoint})"
+          )
+        }
       }
     }
 
