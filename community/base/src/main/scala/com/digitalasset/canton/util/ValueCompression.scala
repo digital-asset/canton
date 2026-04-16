@@ -86,6 +86,36 @@ object ValueCompression {
     bytes.nonEmpty && bytes(0) != FLAG_UNCOMPRESSED
   }
 
+  /** Decompress if the data has a compression flag byte. If the first byte is
+    * not a recognized flag (i.e., it's a valid protobuf field tag), return the
+    * data as-is. This handles legacy uncompressed data transparently.
+    *
+    * Protobuf field tags are always >= 0x08 (field 1, wire type 0). Our flags
+    * are 0x00 (uncompressed) and 0x01 (gzip), which never appear as the first
+    * byte of valid protobuf.
+    */
+  def decompressIfFlagged(data: ByteString): ByteString = {
+    val bytes = data.toByteArray
+    if (bytes.isEmpty) return data
+
+    bytes(0) match {
+      case FLAG_UNCOMPRESSED =>
+        ByteString.copyFrom(bytes, 1, bytes.length - 1)
+      case FLAG_GZIP =>
+        try {
+          ByteString.copyFrom(gzipDecompress(bytes, 1, bytes.length - 1))
+        } catch {
+          case _: Exception =>
+            // If decompression fails, the data might be legacy uncompressed
+            // protobuf that happens to start with 0x01 (extremely unlikely but safe)
+            data
+        }
+      case _ =>
+        // No flag byte — legacy uncompressed data, return as-is
+        data
+    }
+  }
+
   /** Compression ratio for monitoring. Returns compressed/original size. */
   def compressionRatio(original: ByteString, stored: ByteString): Double =
     if (original.isEmpty) 1.0

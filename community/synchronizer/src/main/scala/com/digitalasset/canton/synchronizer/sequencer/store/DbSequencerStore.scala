@@ -27,6 +27,7 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.util.ValueCompression
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -158,7 +159,11 @@ class DbSequencerStore(
     GetResult
       .createGetTuple2[PayloadId, ByteString]
       .andThen { case (id, content) =>
-        BytesPayload(id, content)
+        // Transparent decompression: if the content has a compression flag byte, decompress.
+        // Uncompressed (legacy) data is returned as-is since the first byte of valid protobuf
+        // will never be 0x00 or 0x01 (protobuf field tags start at 0x08 for field 1).
+        val decompressed = ValueCompression.decompressIfFlagged(content)
+        BytesPayload(id, decompressed)
       }
 
   /** @param trafficReceiptO
@@ -487,7 +492,7 @@ class DbSequencerStore(
           DbStorage.bulkOperation(insertSql, payloads, storage.profile) { pp => payload =>
             pp >> payload.id.unwrap
             pp >> instanceDiscriminator
-            pp >> payload.content
+            pp >> ValueCompression.compress(payload.content)
           },
           functionFullName,
         )
@@ -568,7 +573,7 @@ class DbSequencerStore(
           DbStorage.bulkOperation(insertSql, payloadsToInsert, storage.profile) { pp => payload =>
             pp >> payload.id.unwrap
             pp >> instanceDiscriminator
-            pp >> payload.content
+            pp >> ValueCompression.compress(payload.content)
           },
           functionFullName,
         )
