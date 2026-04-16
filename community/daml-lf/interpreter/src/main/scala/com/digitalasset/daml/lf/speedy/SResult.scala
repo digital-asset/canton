@@ -48,6 +48,30 @@ object Question {
         committers: Set[Party],
         callback: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Unit,
     ) extends Update
+
+    /** Update interpretation requires data from an external TCP service.
+      * The host must execute the fetch (during submission) or supply pinned data
+      * (during validation), then invoke the callback with the response.
+      *
+      * See CIP-draft-external-data-pinning.
+      */
+    final case class NeedExternalFetch(
+        endpoint: String, // TCP endpoint "host:port"
+        payload: Array[Byte], // request payload
+        signerKeys: Seq[Array[Byte]], // accepted signing public keys (DER)
+        maxBytes: Int,
+        timeoutMs: Int,
+        nonce: Array[Byte], // 32-byte transaction-bound nonce
+        callback: ExternalFetchResult => Unit,
+    ) extends Update
+
+    /** Result of an external fetch, passed back to the Speedy machine via callback. */
+    final case class ExternalFetchResult(
+        body: Array[Byte],
+        signature: Array[Byte],
+        signerKey: Array[Byte],
+        fetchedAt: Long, // microseconds since epoch
+    )
   }
 }
 

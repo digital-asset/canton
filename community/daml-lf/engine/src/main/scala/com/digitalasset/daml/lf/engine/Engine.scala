@@ -772,6 +772,28 @@ class Engine(
                     )
                   )
               }
+
+            case Question.Update.NeedExternalFetch(
+                  endpoint,
+                  payload,
+                  signerKeys,
+                  maxBytes,
+                  timeoutMs,
+                  nonce,
+                  callback,
+                ) =>
+              ResultNeedExternalFetch(
+                ExternalFetchDescriptor(endpoint, payload, signerKeys, maxBytes, timeoutMs, nonce),
+                { (response: ExternalFetchResponse) =>
+                  callback(Question.Update.ExternalFetchResult(
+                    response.body,
+                    response.signature,
+                    response.signerKey,
+                    response.fetchedAt,
+                  ))
+                  interpretLoop(machine, time, submissionInfo)
+                },
+              )
           }
 
         case SResultInterruption =>
