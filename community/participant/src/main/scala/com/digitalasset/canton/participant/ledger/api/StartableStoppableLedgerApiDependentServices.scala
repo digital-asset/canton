@@ -58,6 +58,9 @@ class StartableStoppableLedgerApiDependentServices(
     adminTokenDispenser: CantonAdminTokenDispenser,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
+    templateBoundPartyRegistrationO: Option[
+      com.digitalasset.canton.participant.topology.TemplateBoundPartyRegistration
+    ],
     val loggerFactory: NamedLoggerFactory,
     tracerProvider: TracerProvider,
 )(implicit
@@ -183,7 +186,7 @@ class StartableStoppableLedgerApiDependentServices(
                     syncService,
                     topologyLookup,
                     parameters,
-                    templateBoundPartyRegistrationO = None, // TODO: wire from participant node
+                    templateBoundPartyRegistrationO,
                     loggerFactory,
                   ),
                   ec,

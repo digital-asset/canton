@@ -747,6 +747,15 @@ class ParticipantNodeBootstrap(
           else EitherT.right[String](FutureUnlessShutdown.unit)
 
       } yield {
+        val templateBoundPartyRegistration =
+          new com.digitalasset.canton.participant.topology.TemplateBoundPartyRegistration(
+            topologyManager = authorizedTopologyManager,
+            privateStore = crypto.cryptoPrivateStore,
+            hashOps = crypto.pureCrypto,
+            protocolVersion = ProtocolVersion.latest,
+            loggerFactory = loggerFactory,
+          )
+
         val ledgerApiDependentServices =
           new StartableStoppableLedgerApiDependentServices(
             config,
@@ -759,6 +768,7 @@ class ParticipantNodeBootstrap(
             adminTokenDispenser,
             storage,
             futureSupervisor,
+            Some(templateBoundPartyRegistration),
             loggerFactory,
             tracerProvider,
           )
