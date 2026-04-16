@@ -14,18 +14,14 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.ExecutionContext
 
-/** Drain-the-queue batching for sequencer submissions.
+/** Natural batching for sequencer submissions.
   *
-  * Wraps a SequencerClientSend and batches outbound sendAsync calls.
-  * Submissions are queued and flushed in tight bursts — the flush is
-  * scheduled on the EC (one scheduling cycle delay), giving concurrent
-  * callers a chance to enqueue before the drain.
+  * N queued submissions are merged into ONE Batch with ONE sendAsync call.
+  * This collapses N sign + serialize + gRPC flush operations into 1.
   *
-  * Under low load: 1 item queued, flushed immediately (no added latency).
-  * Under high load: N items drain in one burst — back-to-back sendAsync
-  * calls on the delegate. HTTP/2 coalesces frames, OS coalesces TCP segments.
-  *
-  * Benchmarked: 3.6x throughput at 16 concurrent producers on TCP.
+  * Under low load: 1 item, 1 sendAsync (no overhead).
+  * Under high load: N items → 1 merged Batch → 1 sendAsync.
+  * N operations become 1 operation, not N operations fired quickly.
   */
 class BatchingSendQueue(
     delegate: SequencerClientSend,
@@ -48,9 +44,6 @@ class BatchingSendQueue(
   private val queue = new ConcurrentLinkedQueue[QueuedSend]()
   private val flushScheduled = new AtomicBoolean(false)
 
-  /** Queue a sendAsync call for batched flushing. Fire-and-forget —
-    * the callback will fire when the delegate's sendAsync completes during flush.
-    */
   def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       timestamps: SendRequestTimestamps,
@@ -74,21 +67,71 @@ class BatchingSendQueue(
 
   private def flush(): Unit = {
     flushScheduled.set(false)
-    var item = queue.poll()
+
+    // Drain everything into a list
+    var items = List.newBuilder[QueuedSend]
     var count = 0
+    var item = queue.poll()
     while (item != null) {
-      val s = item
+      items += item
+      count += 1
+      item = queue.poll()
+    }
+
+    val drained = items.result()
+    if (drained.isEmpty) {
+      if (!queue.isEmpty) scheduleFlush()
+      return
+    }
+
+    if (drained.sizeIs == 1) {
+      // Single item — send directly, no merging overhead
+      val s = drained.head
       implicit val tc: TraceContext = s.traceContext
       implicit val mc: MetricsContext = s.metricsContext
       delegate.sendAsync(
         s.batch, s.timestamps, s.messageId, s.aggregationRule,
         s.callback, s.amplify, s.useConfirmationResponseAmplificationParameters,
       )
-      count += 1
-      item = queue.poll()
+    } else {
+      // Multiple items — merge into ONE batch, ONE sendAsync call.
+      // Each original batch's envelopes are concatenated. Each envelope
+      // carries its own Recipients, so the sequencer delivers correctly.
+      val mergedEnvelopes = drained.flatMap(_.batch.envelopes)
+      val first = drained.head
+      implicit val tc: TraceContext = first.traceContext
+      implicit val mc: MetricsContext = first.metricsContext
+
+      val mergedBatch = Batch(mergedEnvelopes, delegate.protocolVersion)
+
+      // Use the earliest maxSequencingTime (most conservative deadline)
+      val earliestMaxSeqTime = drained.map(_.timestamps.maxSequencingTime).min
+      val mergedTimestamps = SendRequestTimestamps(
+        topologyTimestamp = first.timestamps.topologyTimestamp,
+        approximateTimestampForSigning = first.timestamps.approximateTimestampForSigning,
+        maxSequencingTime = earliestMaxSeqTime,
+      )
+
+      // Fan out the callback: when the merged send completes, notify all original callers
+      val allCallbacks = drained.map(_.callback)
+      val mergedCallback: SendCallback = { result =>
+        allCallbacks.foreach(cb => cb(result))
+      }
+
+      logger.debug(s"Natural batch: merged $count submissions into 1 sendAsync")(TraceContext.empty)
+
+      delegate.sendAsync(
+        mergedBatch,
+        mergedTimestamps,
+        first.messageId, // use first item's messageId for tracking
+        first.aggregationRule,
+        mergedCallback,
+        amplify = first.amplify,
+        useConfirmationResponseAmplificationParameters =
+          first.useConfirmationResponseAmplificationParameters,
+      )
     }
-    if (count > 1)
-      logger.debug(s"Flushed $count submissions in one batch")(TraceContext.empty)
+
     if (!queue.isEmpty) scheduleFlush()
   }
 
