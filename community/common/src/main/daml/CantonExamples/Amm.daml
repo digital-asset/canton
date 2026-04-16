@@ -1,0 +1,243 @@
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Constant-product AMM for a single pair (TokenA / TokenB) under Template-Bound Parties.
+--
+-- The AMM party ("pool") is a template-bound party whose signing key is destroyed.
+-- Its allowedTemplates = { Amm.Pool, Amm.LPToken }
+--
+-- The pool party is signatory on Pool and LPToken. It can never sign arbitrary
+-- transactions because its key is gone. The only way it can act is through
+-- choices on these two templates, auto-confirmed by the hosting participant.
+--
+-- Security model:
+--   pool's allowedTemplates does NOT include Token. Therefore pool cannot
+--   exercise Token.Transfer as a root action. But Token.Transfer can happen
+--   WITHIN a Pool.Swap choice body (sub-action, inherited authority).
+--   This is the key insight: TBP checks root actions only.
+
+module Amm where
+
+-- A fungible token. Issuer is signatory, owner is observer+controller.
+-- The pool party will hold Token contracts but Token is NOT in its
+-- allowedTemplates. Pool can only touch Tokens via sub-actions inside
+-- Pool choices (inherited Daml authority).
+template Token
+  with
+    issuer   : Party
+    owner    : Party
+    symbol   : Text
+    amount   : Decimal
+  where
+    signatory issuer
+    observer owner
+
+    ensure amount > 0.0
+
+    choice Transfer : ContractId Token
+      with
+        newOwner : Party
+      controller owner
+      do create this with owner = newOwner
+
+    -- Split a token into two: one with `splitAmount`, remainder back to owner.
+    choice Split : (ContractId Token, ContractId Token)
+      with
+        splitAmount : Decimal
+      controller owner
+      do
+        assertMsg "Split amount must be positive" (splitAmount > 0.0)
+        assertMsg "Split amount must be less than total" (splitAmount < amount)
+        cid1 <- create this with amount = splitAmount
+        cid2 <- create this with amount = amount - splitAmount
+        return (cid1, cid2)
+
+-- LP token issued to liquidity providers. Pool is signatory.
+-- This IS in pool's allowedTemplates.
+template LPToken
+  with
+    pool     : Party    -- the template-bound AMM party
+    provider : Party    -- the liquidity provider
+    shares   : Decimal
+  where
+    signatory pool
+    observer provider
+
+    ensure shares > 0.0
+
+    choice Redeem : ContractId RedeemRequest
+      controller provider
+      do create RedeemRequest with pool; provider; shares
+
+-- Redemption request. Pool is signatory so it's in allowedTemplates.
+template RedeemRequest
+  with
+    pool     : Party
+    provider : Party
+    shares   : Decimal
+  where
+    signatory pool, provider
+
+-- The pool itself. Constant-product invariant: reserveA * reserveB = k
+-- Pool party is signatory. This IS in pool's allowedTemplates.
+template Pool
+  with
+    pool       : Party    -- template-bound party (key destroyed)
+    tokenAIssuer : Party
+    tokenBIssuer : Party
+    symbolA    : Text
+    symbolB    : Text
+    reserveA   : Decimal  -- virtual reserves (actual tokens held separately)
+    reserveB   : Decimal
+    totalLP    : Decimal
+    feeNum     : Int      -- fee numerator (e.g. 3 for 0.3%)
+    feeDen     : Int      -- fee denominator (e.g. 1000)
+  where
+    signatory pool
+    observer tokenAIssuer, tokenBIssuer
+
+    ensure reserveA > 0.0 && reserveB > 0.0 && totalLP > 0.0
+
+    -- Swap tokenA for tokenB.
+    -- Caller sends inputA tokens to the pool, receives outputB tokens.
+    -- Constant product: (reserveA + inputA*fee) * (reserveB - outputB) >= reserveA * reserveB
+    nonconsuming choice SwapAforB : (ContractId Pool, ContractId Token)
+      with
+        trader     : Party
+        inputTokenCid : ContractId Token
+      controller trader
+      do
+        inputToken <- fetch inputTokenCid
+        assertMsg "Wrong token symbol" (inputToken.symbol == symbolA)
+        assertMsg "Wrong token issuer" (inputToken.issuer == tokenAIssuer)
+        let inputA = inputToken.amount
+
+        -- Calculate output with fee
+        let inputWithFee = inputA * intToDecimal feeNum
+        let numerator = inputWithFee * reserveB
+        let denominator = reserveA * intToDecimal feeDen + inputWithFee
+        let outputB = numerator / denominator
+
+        assertMsg "Insufficient output" (outputB > 0.0)
+        assertMsg "Output exceeds reserves" (outputB < reserveB)
+
+        -- Transfer input token to pool (sub-action, inherited authority)
+        exercise inputTokenCid Transfer with newOwner = pool
+
+        -- Create output token for trader
+        outputCid <- create Token with
+          issuer = tokenBIssuer
+          owner = trader
+          symbol = symbolB
+          amount = outputB
+
+        -- Update pool reserves
+        newPoolCid <- create this with
+          reserveA = reserveA + inputA
+          reserveB = reserveB - outputB
+
+        return (newPoolCid, outputCid)
+
+    -- Swap tokenB for tokenA (symmetric).
+    nonconsuming choice SwapBforA : (ContractId Pool, ContractId Token)
+      with
+        trader     : Party
+        inputTokenCid : ContractId Token
+      controller trader
+      do
+        inputToken <- fetch inputTokenCid
+        assertMsg "Wrong token symbol" (inputToken.symbol == symbolB)
+        assertMsg "Wrong token issuer" (inputToken.issuer == tokenBIssuer)
+        let inputB = inputToken.amount
+
+        let inputWithFee = inputB * intToDecimal feeNum
+        let numerator = inputWithFee * reserveA
+        let denominator = reserveB * intToDecimal feeDen + inputWithFee
+        let outputA = numerator / denominator
+
+        assertMsg "Insufficient output" (outputA > 0.0)
+        assertMsg "Output exceeds reserves" (outputA < reserveA)
+
+        exercise inputTokenCid Transfer with newOwner = pool
+
+        outputCid <- create Token with
+          issuer = tokenAIssuer
+          owner = trader
+          symbol = symbolA
+          amount = outputA
+
+        newPoolCid <- create this with
+          reserveA = reserveA - outputA
+          reserveB = reserveB + inputB
+
+        return (newPoolCid, outputCid)
+
+    -- Add liquidity. Provider sends both tokens, receives LP tokens.
+    nonconsuming choice AddLiquidity : (ContractId Pool, ContractId LPToken)
+      with
+        provider    : Party
+        tokenACid   : ContractId Token
+        tokenBCid   : ContractId Token
+      controller provider
+      do
+        tokenA <- fetch tokenACid
+        tokenB <- fetch tokenBCid
+        assertMsg "Wrong tokenA" (tokenA.symbol == symbolA && tokenA.issuer == tokenAIssuer)
+        assertMsg "Wrong tokenB" (tokenB.symbol == symbolB && tokenB.issuer == tokenBIssuer)
+
+        -- Proportional deposit: amountB must match amountA * (reserveB/reserveA)
+        let expectedB = tokenA.amount * reserveB / reserveA
+        assertMsg "Amounts not proportional" (abs (tokenB.amount - expectedB) < 0.000001)
+
+        -- Transfer tokens to pool
+        exercise tokenACid Transfer with newOwner = pool
+        exercise tokenBCid Transfer with newOwner = pool
+
+        -- Mint LP tokens proportional to share of pool
+        let newShares = tokenA.amount * totalLP / reserveA
+        lpCid <- create LPToken with pool; provider; shares = newShares
+
+        newPoolCid <- create this with
+          reserveA = reserveA + tokenA.amount
+          reserveB = reserveB + tokenB.amount
+          totalLP = totalLP + newShares
+
+        return (newPoolCid, lpCid)
+
+    -- Process a redemption. Burns LP tokens, returns proportional reserves.
+    nonconsuming choice ProcessRedeem : (ContractId Pool, ContractId Token, ContractId Token)
+      with
+        redeemCid : ContractId RedeemRequest
+      controller pool
+      do
+        redeem <- fetch redeemCid
+        assertMsg "Wrong pool" (redeem.pool == pool)
+
+        let shareRatio = redeem.shares / totalLP
+        let outA = reserveA * shareRatio
+        let outB = reserveB * shareRatio
+
+        assertMsg "Redemption too large" (outA < reserveA && outB < reserveB)
+
+        -- Create output tokens for provider
+        outACid <- create Token with
+          issuer = tokenAIssuer
+          owner = redeem.provider
+          symbol = symbolA
+          amount = outA
+
+        outBCid <- create Token with
+          issuer = tokenBIssuer
+          owner = redeem.provider
+          symbol = symbolB
+          amount = outB
+
+        newPoolCid <- create this with
+          reserveA = reserveA - outA
+          reserveB = reserveB - outB
+          totalLP = totalLP - redeem.shares
+
+        return (newPoolCid, outACid, outBCid)
+
+-- Helper: absolute value
+abs : Decimal -> Decimal
+abs x = if x < 0.0 then -x else x
