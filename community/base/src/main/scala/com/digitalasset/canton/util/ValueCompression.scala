@@ -86,6 +86,14 @@ object ValueCompression {
     bytes.nonEmpty && bytes(0) != FLAG_UNCOMPRESSED
   }
 
+  /** Returns true if the data starts with a recognized flag byte (0x00 or 0x01).
+    * False means legacy uncompressed data (first byte is a protobuf field tag >= 0x08).
+    */
+  def hasFlagByte(data: ByteString): Boolean = {
+    val bytes = data.toByteArray
+    bytes.nonEmpty && (bytes(0) == FLAG_UNCOMPRESSED || bytes(0) == FLAG_GZIP)
+  }
+
   /** Decompress if the data has a compression flag byte. If the first byte is
     * not a recognized flag (i.e., it's a valid protobuf field tag), return the
     * data as-is. This handles legacy uncompressed data transparently.
