@@ -269,6 +269,7 @@ class TopologyStateProcessorImpl private[processing] (
         (active.forgetNE ++ observers).map(sid => uidKey(Code.OwnerToKeyMapping, sid.uid)).toSet
       case LsuAnnouncement(_, _) => Set.empty
       case LsuSequencerConnectionSuccessor(_, _, _) => Set.empty
+      case TemplateBoundPartyMapping(_, _, _, _) => Set.empty
     }
 
     val start = this.store.storeId.forSynchronizer

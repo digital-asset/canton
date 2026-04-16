@@ -25,33 +25,33 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
   "TemplateBoundPartyMapping" should {
 
     "round-trip through protobuf serialization" in {
-      val proto = mapping.toProtoV30
+      val proto = mapping.toProto
       val restored = TemplateBoundPartyMapping.fromProtoV30(proto)
       restored shouldBe Right(mapping)
     }
 
     "serialize party ID correctly" in {
-      val proto = mapping.toProtoV30
+      val proto = mapping.toProto
       proto.party shouldBe partyId.toProtoPrimitive
     }
 
     "serialize participant ID correctly" in {
-      val proto = mapping.toProtoV30
+      val proto = mapping.toProto
       proto.hostingParticipantUid shouldBe participantId.uid.toProtoPrimitive
     }
 
     "serialize allowed template IDs" in {
-      val proto = mapping.toProtoV30
+      val proto = mapping.toProto
       proto.allowedTemplateIds.toSet shouldBe Set("com.example:AMMPool:1.0", "com.example:Token:1.0")
     }
 
     "serialize signing key hash" in {
-      val proto = mapping.toProtoV30
+      val proto = mapping.toProto
       proto.signingKeyHash shouldBe keyHash
     }
 
     "wrap in TopologyMapping correctly" in {
-      val topologyMapping = mapping.toProto
+      val topologyMapping = mapping.toProtoV30
       topologyMapping.mapping.isTemplateBoundParty shouldBe true
     }
 
@@ -67,8 +67,8 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
       mapping.maybeUid shouldBe Some(partyId.uid)
     }
 
-    "not be restricted to a domain" in {
-      mapping.restrictedToDomain shouldBe None
+    "not be restricted to a synchronizer" in {
+      mapping.restrictedToSynchronizer shouldBe None
     }
 
     "isTemplateAllowed with exact match" in {

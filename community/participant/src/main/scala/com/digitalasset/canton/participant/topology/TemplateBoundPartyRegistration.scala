@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.{Fingerprint, HashOps}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology.{ParticipantId, PartyId, TopologyManager, TopologyManagerError}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, TopologyManager}
 import com.digitalasset.canton.topology.store.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{TemplateBoundPartyMapping, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext

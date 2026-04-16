@@ -7,7 +7,6 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.TemplateBoundPartyMapping
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -44,7 +43,6 @@ class TemplateBoundAutoConfirmer(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[TemplateBoundPartyValidator.Invalid, Set[LfPartyId]]] = {
-    import cats.syntax.traverse.*
     import cats.syntax.parallel.*
 
     // Look up which parties are template-bound

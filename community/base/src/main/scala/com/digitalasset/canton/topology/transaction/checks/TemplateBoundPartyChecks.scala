@@ -8,7 +8,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyTransactionRejection
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.{TemplateBoundPartyMapping, TopologyMapping}
+import com.digitalasset.canton.topology.transaction.TemplateBoundPartyMapping
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -44,7 +44,7 @@ class TemplateBoundPartyChecks(implicit ec: ExecutionContext) extends TopologyMa
             // A TemplateBoundPartyMapping already exists for this party.
             // Reject the update — template-bound parties are immutable.
             EitherT.leftT[FutureUnlessShutdown, Unit](
-              TopologyTransactionRejection.Other(
+              TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
                 "Template-bound party configurations are immutable. " +
                   "The allowed template set cannot be modified after creation. " +
                   "Create a new template-bound party if different templates are needed."

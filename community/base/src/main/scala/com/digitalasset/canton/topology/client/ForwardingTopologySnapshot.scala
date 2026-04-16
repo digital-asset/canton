@@ -7,6 +7,7 @@ import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
@@ -63,6 +64,11 @@ class ForwardingTopologySnapshot(
       ],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[PartyInfo] =
     parent.loadActiveParticipantsOf(party, participantStates)
+
+  override def templateBoundPartyConfig(
+      party: LfPartyId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[TemplateBoundPartyMapping]] =
+    parent.templateBoundPartyConfig(party)
 
   override def inspectKeys(
       filterOwner: String,
@@ -364,6 +370,11 @@ class CachingTopologySnapshot(
       vettedPackages: Map[PackageId, VettedPackage],
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+
+  override def templateBoundPartyConfig(
+      party: LfPartyId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[TemplateBoundPartyMapping]] =
+    parent.templateBoundPartyConfig(party)
 
   override def inspectKeys(
       filterOwner: String,

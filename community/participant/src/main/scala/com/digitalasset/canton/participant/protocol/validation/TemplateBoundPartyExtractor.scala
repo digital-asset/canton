@@ -44,8 +44,8 @@ object TemplateBoundPartyExtractor {
           // validation, we care about creates because the party becomes a
           // signatory. Extract from the created core contracts.
           vpd.createdCore.foreach { created =>
-            val templateIdStr = created.contract.contractInstance.unversioned.template.toString
-            created.contract.metadata.signatories.foreach { party =>
+            val templateIdStr = created.contract.templateId.toString
+            created.contract.signatories.foreach { party =>
               builder.updateWith(party) {
                 case Some(existing) => Some(existing + templateIdStr)
                 case None => Some(Set(templateIdStr))

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import cats.{Id, Monad}
-import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.{LfPartyId, SequencerCounter}
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.{
   LsuSequencerConnectionSuccessor,
   ParticipantAttributes,
+  TemplateBoundPartyMapping,
   VettedPackage,
 }
 import com.digitalasset.canton.topology.{
@@ -554,4 +555,9 @@ class ValidatingTopologySnapshot(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
     verify(s"loadVettedPackages $participants")(_.loadVettedPackages(participants))
+
+  override def templateBoundPartyConfig(
+      party: LfPartyId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[TemplateBoundPartyMapping]] =
+    verify(s"templateBoundPartyConfig $party")(_.templateBoundPartyConfig(party))
 }

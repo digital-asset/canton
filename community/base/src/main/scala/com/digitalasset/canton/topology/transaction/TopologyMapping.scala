@@ -2462,3 +2462,75 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
       connection,
     )
 }
+
+/** A template-bound party whose signing key is destroyed after registration.
+  * Can only act through the whitelisted templates via auto-confirmation.
+  *
+  * See CIP-draft-template-bound-parties.
+  */
+final case class TemplateBoundPartyMapping(
+    partyId: PartyId,
+    hostingParticipantId: ParticipantId,
+    allowedTemplateIds: Set[String],
+    signingKeyHash: ByteString,
+) extends TopologyMapping {
+
+  override def companion: TemplateBoundPartyMapping.type = TemplateBoundPartyMapping
+
+  override def namespace: Namespace = partyId.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
+  override def restrictedToSynchronizer: Option[SynchronizerId] = None
+  override def referencedUids: Set[UniqueIdentifier] = Set(partyId.uid, hostingParticipantId.uid)
+
+  override lazy val uniqueKey: MappingHash =
+    TemplateBoundPartyMapping.uniqueKey(partyId)
+
+  override def requiredAuth(
+      previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
+  ): RequiredAuth = RequiredNamespaces(Set(namespace))
+
+  def toProto: v30.TemplateBoundParty =
+    v30.TemplateBoundParty(
+      party = partyId.toProtoPrimitive,
+      hostingParticipantUid = hostingParticipantId.uid.toProtoPrimitive,
+      allowedTemplateIds = allowedTemplateIds.toSeq,
+      signingKeyHash = signingKeyHash,
+    )
+
+  override def toProtoV30: v30.TopologyMapping =
+    v30.TopologyMapping(
+      mapping = v30.TopologyMapping.Mapping.TemplateBoundParty(toProto)
+    )
+
+  override protected def pretty: Pretty[TemplateBoundPartyMapping] = prettyOfClass(
+    param("partyId", _.partyId),
+    param("hostingParticipantId", _.hostingParticipantId),
+    param("allowedTemplateIds", _.allowedTemplateIds.size),
+  )
+
+  def isTemplateAllowed(templateId: String): Boolean =
+    allowedTemplateIds.contains(templateId)
+}
+
+object TemplateBoundPartyMapping extends TopologyMappingCompanion {
+  override def code: Code = Code.TemplateBoundParty
+
+  def uniqueKey(partyId: PartyId): MappingHash =
+    TopologyMapping.buildUniqueKey(code)(_.addString(partyId.toProtoPrimitive))
+
+  def fromProtoV30(
+      proto: v30.TemplateBoundParty
+  ): ParsingResult[TemplateBoundPartyMapping] =
+    for {
+      partyId <- PartyId.fromProtoPrimitive(proto.party, "party")
+      participantId <- TopologyMapping.participantIdFromProtoPrimitive(
+        proto.hostingParticipantUid,
+        "hosting_participant_uid",
+      )
+    } yield TemplateBoundPartyMapping(
+      partyId = partyId,
+      hostingParticipantId = participantId,
+      allowedTemplateIds = proto.allowedTemplateIds.toSet,
+      signingKeyHash = proto.signingKeyHash,
+    )
+}

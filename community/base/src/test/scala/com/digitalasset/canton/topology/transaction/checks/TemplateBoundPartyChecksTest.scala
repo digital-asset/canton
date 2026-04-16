@@ -4,11 +4,7 @@
 package com.digitalasset.canton.topology.transaction.checks
 
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.topology.transaction.{TemplateBoundPartyMapping, TopologyMapping}
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.store.TopologyTransactionRejection
-import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.topology.transaction.TemplateBoundPartyMapping
 import com.google.protobuf.ByteString
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
