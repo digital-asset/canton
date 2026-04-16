@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.data.{ActionDescription, FullTransactionViewTree, ViewParticipantData}
+import com.digitalasset.canton.data.{ActionDescription, FullTransactionViewTree}
 
 /** Extracts per-party template IDs from a parsed transaction request.
   *
@@ -56,6 +56,10 @@ object TemplateBoundPartyExtractor {
         case _: ActionDescription.FetchActionDescription =>
           // Fetch actions don't create or exercise — no template-bound party
           // constraint check needed (fetching is read-only).
+          ()
+
+        case _: ActionDescription.LookupByKeyActionDescription =>
+          // LookupByKey is read-only — no template-bound constraint needed.
           ()
       }
     }

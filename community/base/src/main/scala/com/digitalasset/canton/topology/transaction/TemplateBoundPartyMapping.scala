@@ -3,13 +3,10 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
-import com.digitalasset.daml.lf.data.Ref.QualifiedName
 import com.google.protobuf.ByteString
 
 /** A template-bound party mapping. The party's signing key is destroyed after
@@ -41,7 +38,7 @@ final case class TemplateBoundPartyMapping(
   override def restrictedToDomain: Option[com.digitalasset.canton.topology.SynchronizerId] = None
 
   override def requiredAuth(
-      previous: Option[TopologyTransaction[TopologyMapping.Code]]
+      previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
   ): TopologyMapping.RequiredAuth =
     // Registration must be authorized by the party's namespace (which owns the key
     // that signs this one transaction before being destroyed)
