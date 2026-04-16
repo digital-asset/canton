@@ -84,6 +84,7 @@ final case class ViewParticipantData private (
     actionDescription: ActionDescription,
     rollbackContext: RollbackContext,
     salt: Salt,
+    pinnedData: Seq[PinnedDataNode] = Seq.empty, // CIP-draft-external-data-pinning
 )(
     hashOps: HashOps,
     override val representativeProtocolVersion: RepresentativeProtocolVersion[

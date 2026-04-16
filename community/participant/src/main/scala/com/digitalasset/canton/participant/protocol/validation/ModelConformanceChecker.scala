@@ -262,6 +262,17 @@ class ModelConformanceChecker(
       view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
     )
 
+    // Verify pinned external data signatures before reinterpretation
+    val pinnedData = viewParticipantData.pinnedData
+    pinnedData.foreach { pinned =>
+      if (!pinned.verifySignature()) {
+        throw new IllegalArgumentException(
+          s"Pinned data signature verification failed for fetch index ${pinned.fetchIndex} " +
+            s"(endpoint: ${pinned.endpoint})"
+        )
+      }
+    }
+
     for {
 
       packagePreference <- buildPackageNameMap(packageIdPreference, topologySnapshot, ledgerTime)
