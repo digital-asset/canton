@@ -67,6 +67,19 @@ trait EncryptionOps {
       encryptionAlgorithmSpec: EncryptionAlgorithmSpec = encryptionAlgorithmSpecs.default,
   ): Either[EncryptionError, AsymmetricEncrypted[M]]
 
+  /** Encrypts the same message for multiple recipients, sharing a single ephemeral keypair.
+    * This amortizes the EC key generation cost (O(1) keygen instead of O(N)) while performing
+    * O(N) ECDH key agreements. Safe under the multi-recipient DHIES security model.
+    *
+    * Falls back to individual encryptWith calls if the algorithm doesn't support batching.
+    */
+  def batchEncryptWith[M <: HasToByteString](
+      message: M,
+      publicKeys: Seq[EncryptionPublicKey],
+      encryptionAlgorithmSpec: EncryptionAlgorithmSpec = encryptionAlgorithmSpecs.default,
+  ): Either[EncryptionError, Seq[AsymmetricEncrypted[M]]] =
+    publicKeys.traverse(k => encryptWith(message, k, encryptionAlgorithmSpec))
+
   /** Deterministically encrypts the given bytes using the given public key. This is unsafe for
     * general use, and it's only used to encrypt the decryption key of each view.
     */

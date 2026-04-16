@@ -99,6 +99,13 @@ final class SynchronizerCryptoPureApi(
   ): Either[EncryptionError, AsymmetricEncrypted[M]] =
     pureCrypto.encryptWith(message, publicKey, encryptionAlgorithmSpec)
 
+  override def batchEncryptWith[M <: HasToByteString](
+      message: M,
+      publicKeys: Seq[EncryptionPublicKey],
+      encryptionAlgorithmSpec: EncryptionAlgorithmSpec,
+  ): Either[EncryptionError, Seq[AsymmetricEncrypted[M]]] =
+    pureCrypto.batchEncryptWith(message, publicKeys, encryptionAlgorithmSpec)
+
   override def encryptDeterministicWith[M <: HasToByteString](
       message: M,
       publicKey: EncryptionPublicKey,

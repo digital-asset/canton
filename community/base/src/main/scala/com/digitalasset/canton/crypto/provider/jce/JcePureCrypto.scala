@@ -543,6 +543,139 @@ class JcePureCrypto(
       publicKey.fingerprint,
     )
 
+  /** Batch ECIES encryption using BouncyCastle's IESEngine directly.
+    * Generates ONE ephemeral EC keypair and reuses it for all recipients.
+    * Each recipient gets a unique ciphertext (different ECDH shared secret)
+    * but the ephemeral key generation cost is amortized O(1) instead of O(N).
+    *
+    * Output format per recipient matches the standard single-recipient format:
+    * IV(16 bytes) || IESEngine_output(ephemeralPubKey || encrypted_data || mac)
+    * so decryption uses the unchanged high-level Cipher API.
+    */
+  private def batchEncryptEciesP256[M <: HasToByteString](
+      message: M,
+      publicKeys: Seq[EncryptionPublicKey],
+      random: SecureRandom,
+  ): Either[EncryptionError, Seq[AsymmetricEncrypted[M]]] = {
+    import org.bouncycastle.crypto.agreement.ECDHBasicAgreement
+    import org.bouncycastle.crypto.digests.SHA256Digest
+    import org.bouncycastle.crypto.engines.{AESEngine, IESEngine}
+    import org.bouncycastle.crypto.generators.{ECKeyPairGenerator, KDF2BytesGenerator}
+    import org.bouncycastle.crypto.macs.HMac
+    import org.bouncycastle.crypto.modes.CBCBlockCipher
+    import org.bouncycastle.crypto.paddings.PaddedBufferedBlockCipher
+    import org.bouncycastle.crypto.params.*
+    import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey
+    import org.bouncycastle.jce.ECNamedCurveTable
+
+    val messageBytes = message.toByteString.toByteArray
+    val macKeySizeInBits = 512
+    val cipherKeySizeInBits = 128
+    val ivSize = EciesHmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes
+
+    for {
+      // Generate ONE ephemeral EC keypair on secp256r1 (the expensive operation)
+      ephemeralKeyPair <- Either
+        .catchOnly[Throwable] {
+          val ecSpec = ECNamedCurveTable.getParameterSpec("secp256r1")
+          val kpg = new ECKeyPairGenerator()
+          kpg.init(new ECKeyGenerationParameters(new ECDomainParameters(
+            ecSpec.getCurve, ecSpec.getG, ecSpec.getN, ecSpec.getH
+          ), random))
+          kpg.generateKeyPair()
+        }
+        .leftMap(err => EncryptionError.FailedToEncrypt(
+          s"Failed to generate ephemeral keypair: ${ThrowableUtil.messageWithStacktrace(err)}"
+        ))
+
+      // For each recipient: reuse the ephemeral keypair, do ECDH + KDF + AES-CBC + HMAC
+      results <- publicKeys.toList.traverse { publicKey =>
+        for {
+          ecPublicKey <- toJavaPublicKey(
+            publicKey,
+            { case k: java.security.interfaces.ECPublicKey => Right(k) },
+            EncryptionError.InvalidEncryptionKey.apply,
+          )
+          bcPubKey <- Either
+            .catchOnly[Throwable] {
+              // Convert JCA public key to BouncyCastle ECPublicKeyParameters
+              val bcKey = ecPublicKey match {
+                case bc: BCECPublicKey => bc.engineGetQ()
+                case other =>
+                  val ecSpec = ECNamedCurveTable.getParameterSpec("secp256r1")
+                  ecSpec.getCurve.createPoint(
+                    other.getW.getAffineX, other.getW.getAffineY
+                  )
+              }
+              val ecSpec = ECNamedCurveTable.getParameterSpec("secp256r1")
+              new ECPublicKeyParameters(bcKey, new ECDomainParameters(
+                ecSpec.getCurve, ecSpec.getG, ecSpec.getN, ecSpec.getH
+              ))
+            }
+            .leftMap(err => EncryptionError.InvalidEncryptionKey(
+              ThrowableUtil.messageWithStacktrace(err)
+            ))
+          ciphertext <- Either
+            .catchOnly[Throwable] {
+              val iv = new Array[Byte](ivSize)
+              random.nextBytes(iv)
+
+              val iesEngine = new IESEngine(
+                new ECDHBasicAgreement(),
+                new KDF2BytesGenerator(new SHA256Digest()),
+                new HMac(new SHA256Digest()),
+                new PaddedBufferedBlockCipher(CBCBlockCipher.newInstance(AESEngine.newInstance())),
+              )
+
+              val iesParams = new IESWithCipherParameters(
+                Array.emptyByteArray, // derivation
+                Array.emptyByteArray, // encoding
+                macKeySizeInBits,
+                cipherKeySizeInBits,
+              )
+
+              val paramsWithIV = new ParametersWithIV(iesParams, iv)
+
+              iesEngine.init(
+                true, // forEncryption
+                ephemeralKeyPair.getPrivate, // same ephemeral private key for all recipients
+                bcPubKey,
+                paramsWithIV,
+              )
+
+              val engineOutput = iesEngine.processBlock(messageBytes, 0, messageBytes.length)
+              // Prepend IV to match the standard format
+              iv ++ engineOutput
+            }
+            .leftMap(err => EncryptionError.FailedToEncrypt(
+              ThrowableUtil.messageWithStacktrace(err)
+            ))
+        } yield new AsymmetricEncrypted[M](
+          ByteString.copyFrom(ciphertext),
+          EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc,
+          publicKey.fingerprint,
+        )
+      }
+    } yield results
+  }
+
+  override def batchEncryptWith[M <: HasToByteString](
+      message: M,
+      publicKeys: Seq[EncryptionPublicKey],
+      encryptionAlgorithmSpec: EncryptionAlgorithmSpec,
+  ): Either[EncryptionError, Seq[AsymmetricEncrypted[M]]] =
+    if (publicKeys.sizeIs <= 1) {
+      // Not worth the overhead for a single key
+      publicKeys.toList.traverse(k => encryptWith(message, k, encryptionAlgorithmSpec))
+    } else {
+      encryptionAlgorithmSpec match {
+        case EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc =>
+          batchEncryptEciesP256(message, publicKeys, JceSecureRandom.random.get())
+        case _ =>
+          publicKeys.toList.traverse(k => encryptWith(message, k, encryptionAlgorithmSpec))
+      }
+    }
+
   private def encryptWithRSAOaepSha256[M <: HasToByteString](
       message: M,
       publicKey: EncryptionPublicKey,

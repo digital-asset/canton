@@ -599,7 +599,8 @@ class SynchronizerSnapshotSyncCryptoApi(
     MemberType,
     AsymmetricEncrypted[M],
   ]] = {
-    def encryptFor(keys: Map[Member, EncryptionPublicKey])(
+    // Individual encryption fallback (for deterministic encryption or single-member case)
+    def encryptForSingle(keys: Map[Member, EncryptionPublicKey])(
         member: MemberType
     ): Either[(MemberType, SyncCryptoError), (MemberType, AsymmetricEncrypted[M])] = keys
       .get(member)
@@ -621,9 +622,42 @@ class SynchronizerSnapshotSyncCryptoApi(
       ipsSnapshot
         .encryptionKey(members)
         .map { keys =>
-          members
-            .traverse(encryptFor(keys))
-            .map(_.toMap)
+          if (deterministicEncryption || members.sizeIs <= 1) {
+            // Use individual encryption for deterministic mode or single member
+            members
+              .traverse(encryptForSingle(keys))
+              .map(_.toMap)
+          } else {
+            // Batch encrypt: resolve keys for all members, then encrypt with shared ephemeral key
+            val (missing, resolved) = members.partitionMap { member =>
+              keys.get(member) match {
+                case Some(key) => Right(member -> key)
+                case None =>
+                  Left(
+                    member -> (KeyNotAvailable(
+                      member,
+                      KeyPurpose.Encryption,
+                      ipsSnapshot.timestamp,
+                      Seq.empty,
+                    ): SyncCryptoError)
+                  )
+              }
+            }
+            if (missing.nonEmpty) {
+              Left(missing.head)
+            } else {
+              val memberList = resolved.toList
+              val pubKeys = memberList.map(_._2)
+              pureCrypto
+                .batchEncryptWith(message, pubKeys)
+                .bimap(
+                  err =>
+                    memberList.head._1 -> (SyncCryptoEncryptionError(err): SyncCryptoError),
+                  encrypted =>
+                    memberList.map(_._1).zip(encrypted).toMap,
+                )
+            }
+          }
         }
     )
   }
