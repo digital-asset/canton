@@ -312,6 +312,7 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
+      externalFetchResolver: Option[ExternalFetchResolver] = None,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
@@ -395,6 +396,33 @@ class DAMLe(
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(resume())
+
+        case ResultNeedExternalFetch(descriptor, resume) =>
+          // CIP-draft-external-data-pinning: resolve external fetch
+          // During submission: execute TCP fetch, verify signature, pin the response
+          // During validation: look up pinned data from the transaction view
+          externalFetchResolver match {
+            case Some(resolver) =>
+              resolver
+                .resolve(descriptor)
+                .flatMap { response =>
+                  handleResultInternal(resume(response))
+                }
+            case None =>
+              // No resolver available — external fetches not supported in this context
+              FutureUnlessShutdown.pure(Left(EngineError(
+                com.digitalasset.daml.lf.engine.Error(
+                  com.digitalasset.daml.lf.engine.Error.Interpretation(
+                    com.digitalasset.daml.lf.engine.Error.Interpretation.Internal(
+                      "handleResult",
+                      s"External fetch not supported: no resolver configured for endpoint ${descriptor.endpoint}",
+                      None,
+                    )
+                  ),
+                  None,
+                )
+              )))
+          }
       }
     }
 

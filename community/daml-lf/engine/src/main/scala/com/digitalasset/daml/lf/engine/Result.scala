@@ -38,6 +38,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
+    case ResultNeedExternalFetch(descriptor, resume) =>
+      ResultNeedExternalFetch(descriptor, response => resume(response).map(f))
   }
 
   def flatMap[B](f: A => Result[B]): Result[B] = this match {
@@ -58,6 +60,8 @@ sealed trait Result[+A] extends Product with Serializable {
       )
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
+    case ResultNeedExternalFetch(descriptor, resume) =>
+      ResultNeedExternalFetch(descriptor, response => resume(response).flatMap(f))
   }
 
   private[lf] def consume(
@@ -67,6 +71,8 @@ sealed trait Result[+A] extends Product with Serializable {
         PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
+      externalFetches: PartialFunction[ExternalFetchDescriptor, ExternalFetchResponse] =
+        PartialFunction.empty,
   ): Either[Error, A] = {
 
     @tailrec
@@ -85,6 +91,16 @@ sealed trait Result[+A] extends Product with Serializable {
         case ResultNeedKey(key, _, _, resume) =>
           go(resume(keys.lift(key).getOrElse(Vector.empty), NeedKeyProgression.Finished))
         case ResultPrefetch(_, _, result) => go(result())
+        case ResultNeedExternalFetch(descriptor, resume) =>
+          externalFetches.lift(descriptor) match {
+            case Some(response) => go(resume(response))
+            case None =>
+              Left(Error(Error.Interpretation(Error.Interpretation.DamlException(
+                com.digitalasset.daml.lf.interpretation.Error.UnhandledException(
+                  com.digitalasset.daml.lf.data.Ref.QualifiedName.assertFromString("DA.External:FetchFailed"),
+                  com.digitalasset.daml.lf.value.Value.ValueText(s"External fetch not available for ${descriptor.endpoint}"),
+                )), None)))
+          }
       }
     go(this)
   }
@@ -199,6 +215,33 @@ final case class ResultPrefetch[A](
     contractIds: Seq[ContractId],
     keys: Seq[GlobalKey],
     resume: () => Result[A],
+) extends Result[A]
+
+/** Descriptor for an external data fetch request (CIP-draft-external-data-pinning). */
+final case class ExternalFetchDescriptor(
+    endpoint: String, // TCP endpoint as "host:port"
+    payload: Array[Byte], // request payload
+    signerKeys: Seq[Array[Byte]], // accepted signing public keys (DER-encoded)
+    maxBytes: Int, // maximum response size
+    timeoutMs: Int, // network timeout
+    nonce: Array[Byte], // 32-byte transaction-bound nonce
+)
+
+/** Response from an external data fetch. */
+final case class ExternalFetchResponse(
+    body: Array[Byte], // response payload
+    signature: Array[Byte], // signature over SHA-256(nonce || body)
+    signerKey: Array[Byte], // which key signed
+    fetchedAt: Long, // wall-clock time in microseconds since epoch
+)
+
+/** Intermediate result indicating that an external data fetch is required.
+  * During submission: the host executes a TCP fetch and verifies the signature.
+  * During validation: the host supplies the pinned response from the transaction view.
+  */
+final case class ResultNeedExternalFetch[A](
+    descriptor: ExternalFetchDescriptor,
+    resume: ExternalFetchResponse => Result[A],
 ) extends Result[A]
 
 object Result {

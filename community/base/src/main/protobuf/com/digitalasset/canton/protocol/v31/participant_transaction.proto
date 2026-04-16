@@ -62,6 +62,34 @@ message ActionDescription {
   }
 }
 
+// External data pinning: request and response types for fetchExternal
+// See CIP-draft-external-data-pinning
+
+message FetchExternalRequest {
+  string endpoint = 1;           // TCP endpoint as "host:port"
+  bytes payload = 2;             // request bytes sent to the service
+  repeated bytes signer_keys = 3; // accepted signing public keys (DER-encoded)
+  uint32 max_bytes = 4;          // maximum response size
+  uint32 timeout_ms = 5;         // network timeout in milliseconds
+}
+
+message FetchExternalResponse {
+  bytes body = 1;                // response payload from the external service
+  bytes signature = 2;           // signature over SHA-256(nonce || body)
+  bytes signer_key = 3;          // which key from signer_keys signed this response
+  int64 fetched_at = 4;          // wall-clock time of the fetch (microseconds since epoch)
+}
+
+// A pinned data node records the result of a fetchExternal call in the transaction tree.
+// During submission, the submitter executes the TCP fetch and pins the signed response.
+// During validation, confirming participants verify the signature and replay the pinned data.
+message PinnedDataNode {
+  FetchExternalRequest request = 1;
+  FetchExternalResponse response = 2;
+  bytes nonce = 3;               // 32-byte transaction-bound nonce: SHA-256(tx_uuid || fetch_index)
+  uint32 fetch_index = 4;        // zero-based index of this fetchExternal call within the transaction
+}
+
 // Compared to v30:
 // - resolved_keys now has new structure
 // - action_description uses updated structure
@@ -81,4 +109,5 @@ message ViewParticipantData {
   repeated KeyResolutionWithMaintainers resolved_keys = 5;
   ActionDescription action_description = 6;
   v30.ViewParticipantData.RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.
+  repeated PinnedDataNode pinned_data = 8; // pinned external data fetches for this view (CIP-draft-external-data-pinning)
 }
