@@ -79,10 +79,7 @@ class BatchingSendQueue(
     }
 
     val drained = items.result()
-    if (drained.isEmpty) {
-      if (!queue.isEmpty) scheduleFlush()
-      return
-    }
+    if (drained.isEmpty) return
 
     if (drained.sizeIs == 1) {
       // Single item — send directly, no merging overhead
