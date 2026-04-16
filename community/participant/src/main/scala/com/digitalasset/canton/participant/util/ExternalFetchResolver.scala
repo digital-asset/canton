@@ -10,8 +10,10 @@ import com.digitalasset.daml.lf.engine.{ExternalFetchDescriptor, ExternalFetchRe
 
 import java.io.{DataInputStream, DataOutputStream}
 import java.net.{InetSocketAddress, Socket}
-import java.security.{MessageDigest, PublicKey, Signature, KeyFactory}
-import java.security.spec.X509EncodedKeySpec
+import java.security.{KeyFactory, KeyPairGenerator, MessageDigest, PublicKey, Signature}
+import java.security.spec.{ECGenParameterSpec, X509EncodedKeySpec}
+import javax.crypto.{Cipher, KeyAgreement}
+import javax.crypto.spec.{GCMParameterSpec, SecretKeySpec}
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
@@ -61,24 +63,76 @@ class TcpExternalFetchResolver(
       val out = new DataOutputStream(socket.getOutputStream)
       val in = new DataInputStream(socket.getInputStream)
 
-      // Send: nonce (32 bytes) || payload
-      out.write(descriptor.nonce)
-      out.write(descriptor.payload)
-      out.flush()
+      // Encrypt the request payload using the first signer's public key (ECIES-like).
+      // This ensures the request content (which may contain account numbers, party
+      // identifiers, amounts) is confidential in transit — only the signing service
+      // can decrypt it with its private key.
+      //
+      // Wire format:
+      //   nonce (32 bytes)
+      //   || ephemeral_pub_key (65 bytes, uncompressed EC point)
+      //   || iv (12 bytes)
+      //   || encrypted_payload (AES-128-GCM)
+      val signerPubKeyBytes = descriptor.signerKeys.headOption.getOrElse(
+        throw new IllegalArgumentException("No signer keys provided")
+      )
+      val signerPubKey = try {
+        KeyFactory.getInstance("EC")
+          .generatePublic(new X509EncodedKeySpec(signerPubKeyBytes))
+      } catch {
+        case _: Exception =>
+          KeyFactory.getInstance("Ed25519")
+            .generatePublic(new X509EncodedKeySpec(signerPubKeyBytes))
+      }
 
-      // Receive: length (4 bytes big-endian) || body || signature
-      val bodyLength = in.readInt()
-      require(
-        bodyLength >= 0 && bodyLength <= descriptor.maxBytes,
-        s"Response body length $bodyLength exceeds maxBytes ${descriptor.maxBytes}",
+      val ephemeralKpg = KeyPairGenerator.getInstance("EC")
+      ephemeralKpg.initialize(new ECGenParameterSpec("secp256r1"))
+      val ephemeral = ephemeralKpg.generateKeyPair()
+
+      // ECDH key agreement → AES key
+      val ka = KeyAgreement.getInstance("ECDH")
+      ka.init(ephemeral.getPrivate)
+      ka.doPhase(signerPubKey, true)
+      val sharedSecret = ka.generateSecret()
+      val aesKey = new SecretKeySpec(
+        MessageDigest.getInstance("SHA-256").digest(sharedSecret), 0, 16, "AES"
       )
 
-      val body = new Array[Byte](bodyLength)
-      in.readFully(body)
+      // AES-GCM encrypt the payload
+      val iv = new Array[Byte](12)
+      new java.security.SecureRandom().nextBytes(iv)
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+      cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(128, iv))
+      val encryptedPayload = cipher.doFinal(descriptor.payload)
 
-      // Read remaining bytes as signature
+      val ephPubBytes = ephemeral.getPublic.getEncoded // X.509 encoded
+
+      // Send: nonce (32) || ephemeral_pub_key_len (2) || ephemeral_pub_key || iv (12) || encrypted_payload
+      out.write(descriptor.nonce)
+      out.writeShort(ephPubBytes.length)
+      out.write(ephPubBytes)
+      out.write(iv)
+      out.write(encryptedPayload)
+      out.flush()
+
+      // Receive: length (4 bytes big-endian) || encrypted_body || signature
+      // The response body is also encrypted with the same shared secret (different IV).
+      val responseLength = in.readInt()
+      require(
+        responseLength >= 0 && responseLength <= descriptor.maxBytes + 128,
+        s"Response length $responseLength exceeds limit",
+      )
+      val responseIv = new Array[Byte](12)
+      in.readFully(responseIv)
+      val encryptedBody = new Array[Byte](responseLength)
+      in.readFully(encryptedBody)
       val sigBytes = in.readAllBytes()
       require(sigBytes.nonEmpty, "No signature in response")
+
+      // Decrypt the response body
+      val decCipher = Cipher.getInstance("AES/GCM/NoPadding")
+      decCipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(128, responseIv))
+      val body = decCipher.doFinal(encryptedBody)
 
       // Verify signature over SHA-256(nonce || body) against accepted signer keys
       val hash = MessageDigest.getInstance("SHA-256")
