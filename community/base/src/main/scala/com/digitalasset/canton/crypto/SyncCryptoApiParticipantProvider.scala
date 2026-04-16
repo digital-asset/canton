@@ -599,7 +599,7 @@ class SynchronizerSnapshotSyncCryptoApi(
     MemberType,
     AsymmetricEncrypted[M],
   ]] = {
-    def encryptFor(keys: Map[Member, EncryptionPublicKey])(
+    def encryptForMember(keys: Map[Member, EncryptionPublicKey])(
         member: MemberType
     ): Either[(MemberType, SyncCryptoError), (MemberType, AsymmetricEncrypted[M])] = keys
       .get(member)
@@ -611,18 +611,45 @@ class SynchronizerSnapshotSyncCryptoApi(
           Seq.empty,
         )
       )
-      .flatMap(k =>
-        (if (deterministicEncryption) pureCrypto.encryptDeterministicWith(message, k)
-         else pureCrypto.encryptWith(message, k))
-          .bimap(error => member -> SyncCryptoEncryptionError(error), member -> _)
-      )
+      .flatMap { k =>
+        if (deterministicEncryption) {
+          pureCrypto.encryptDeterministicWith(message, k)
+            .bimap(error => member -> SyncCryptoEncryptionError(error), member -> _)
+        } else {
+          // Try precomputed ECDH cache first (moves ECDH off the critical path)
+          val result = (pureCrypto, crypto.pureCrypto) match {
+            case (_, jce: com.digitalasset.canton.crypto.provider.jce.JcePureCrypto)
+                if jce.ecdhPrecomputeCache != null =>
+              jce.ecdhPrecomputeCache.consume(k.fingerprint) match {
+                case Some(precomputed) =>
+                  jce.encryptWithPrecomputedEcdh(message, k, precomputed,
+                    com.digitalasset.canton.crypto.provider.jce.JceSecureRandom.random.get())
+                case None =>
+                  pureCrypto.encryptWith(message, k)
+              }
+            case _ =>
+              pureCrypto.encryptWith(message, k)
+          }
+          result.bimap(error => member -> SyncCryptoEncryptionError(error), member -> _)
+        }
+      }
 
     EitherT(
       ipsSnapshot
         .encryptionKey(members)
         .map { keys =>
+          // Register keys for background precomputation
+          (pureCrypto, crypto.pureCrypto) match {
+            case (_, jce: com.digitalasset.canton.crypto.provider.jce.JcePureCrypto)
+                if jce.ecdhPrecomputeCache != null =>
+              jce.ecdhPrecomputeCache.registerRecipients(
+                keys.values.toSeq,
+                pk => jce.javaPublicKeyForPrecompute(pk),
+              )
+            case _ => // no precompute cache available
+          }
           members
-            .traverse(encryptFor(keys))
+            .traverse(encryptForMember(keys))
             .map(_.toMap)
         }
     )
