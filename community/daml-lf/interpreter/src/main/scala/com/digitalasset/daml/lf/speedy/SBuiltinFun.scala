@@ -2587,6 +2587,92 @@ private[lf] object SBuiltinFun {
     }
   }
 
+  /** Built-in for fetchExternal: fetches data from an external TCP service
+    * and pins the cryptographically signed response to the transaction.
+    *
+    * Takes a record with fields: endpoint, payload, signerKeys, maxBytes, timeoutMs.
+    * Returns a record with fields: body, signature, signerKey, fetchedAt.
+    *
+    * See CIP-draft-external-data-pinning.
+    */
+  final case object SBUFetchExternal extends UpdateBuiltin(5) {
+    // args: endpoint(Text), payload(ByteString), signerKeys(List[ByteString]),
+    //       maxBytes(Int), timeoutMs(Int)
+    override protected def executeUpdate(
+        args: ArraySeq[SValue],
+        machine: UpdateMachine,
+    ): Control[Question.Update] = {
+      val endpoint = args(0) match {
+        case SValue.SText(s) => s
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected Text for endpoint, got $v")
+      }
+      val payload = args(1) match {
+        case SValue.SText(s) => s.getBytes("UTF-8")
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected Text for payload, got $v")
+      }
+      val signerKeys = args(2) match {
+        case SValue.SList(lst) =>
+          lst.toImmArray.toSeq.map {
+            case SValue.SText(s) =>
+              java.util.Base64.getDecoder.decode(s)
+            case v => throw SErrorCrash("SBUFetchExternal", s"expected Text in signerKeys list, got $v")
+          }
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected List for signerKeys, got $v")
+      }
+      val maxBytes = args(3) match {
+        case SValue.SInt64(n) => n.toInt
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected Int64 for maxBytes, got $v")
+      }
+      val timeoutMs = args(4) match {
+        case SValue.SInt64(n) => n.toInt
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected Int64 for timeoutMs, got $v")
+      }
+
+      // Generate nonce: SHA-256(transaction_uuid || fetch_node_index)
+      val txUuid = machine.ptx.context.info match {
+        case ctx: com.digitalasset.daml.lf.speedy.PartialTransaction.ContextInfo.Exercise =>
+          ctx.targetId.coid.getBytes("UTF-8")
+        case _ => Array.emptyByteArray
+      }
+      val fetchIndex = machine.ptx.nextNodeIdx.index
+      val sha = java.security.MessageDigest.getInstance("SHA-256")
+      sha.update(txUuid)
+      sha.update(java.nio.ByteBuffer.allocate(4).putInt(fetchIndex).array())
+      val nonce = sha.digest()
+
+      Control.Question(
+        Question.Update.NeedExternalFetch(
+          endpoint = endpoint,
+          payload = payload,
+          signerKeys = signerKeys,
+          maxBytes = maxBytes,
+          timeoutMs = timeoutMs,
+          nonce = nonce,
+          callback = { result =>
+            // Resume with the response as a Daml record
+            machine.returnValue = SValue.SRecord(
+              com.digitalasset.daml.lf.data.Ref.Identifier.assertFromString(
+                "DA.External:FetchResponse"
+              ),
+              com.digitalasset.daml.lf.data.ImmArray(
+                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("body"),
+                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signature"),
+                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signerKey"),
+                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("fetchedAt"),
+              ),
+              ArrayList(
+                SValue.SText(new String(result.body, "UTF-8")),
+                SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signature)),
+                SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signerKey)),
+                SValue.SInt64(result.fetchedAt),
+              ),
+            )
+          },
+        )
+      )
+    }
+  }
+
   private[this] def extractParties(where: String, v: SValue): TreeSet[Party] =
     v match {
       case SList(vs) =>

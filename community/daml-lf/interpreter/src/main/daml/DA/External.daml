@@ -1,0 +1,51 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | DA.External: Pinned external data fetches for Daml contracts.
+--
+-- See CIP-draft-external-data-pinning.
+--
+-- NOTE: This is a reference definition. The actual built-in is implemented
+-- in SBuiltinFun.SBUFetchExternal and wired through the Speedy compiler.
+
+module DA.External where
+
+-- | A request to fetch data from an external TCP service.
+data FetchRequest = FetchRequest
+  { endpoint    : Text        -- TCP endpoint as "host:port"
+  , payload     : Text        -- request payload (will be sent as UTF-8 bytes)
+  , signerKeys  : [Text]      -- accepted signing public keys (Base64-encoded DER)
+  , maxBytes    : Int          -- maximum response size in bytes
+  , timeoutMs   : Int          -- network timeout in milliseconds
+  }
+
+-- | A response from an external data fetch, pinned to the transaction.
+data FetchResponse = FetchResponse
+  { body       : Text          -- response payload (UTF-8 decoded)
+  , signature  : Text          -- Base64-encoded signature over SHA-256(nonce || body)
+  , signerKey  : Text          -- Base64-encoded key that signed
+  , fetchedAt  : Int           -- wall-clock time of fetch (microseconds since epoch)
+  }
+
+-- | Fetch data from an external TCP service and pin the signed response
+-- to the transaction. During submission, the submitting participant
+-- executes the TCP fetch. During validation, confirming participants
+-- verify the pinned signature without making a network call.
+--
+-- Fails if:
+--   * The TCP connection fails or times out
+--   * The response exceeds maxBytes
+--   * No accepted signer key verifies the response signature
+--
+-- Usage:
+--
+-- > choice GetPrice : Decimal
+-- >   with oracle : FetchRequest
+-- >   controller owner
+-- >   do
+-- >     resp <- fetchExternal oracle
+-- >     let price = parseDecimal (resp.body)
+-- >     pure price
+fetchExternal : FetchRequest -> Update FetchResponse
+fetchExternal req = primitive @"FetchExternal"
+  req.endpoint req.payload req.signerKeys req.maxBytes req.timeoutMs
