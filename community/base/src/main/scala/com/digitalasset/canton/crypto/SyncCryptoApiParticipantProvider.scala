@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
@@ -620,10 +621,16 @@ class SynchronizerSnapshotSyncCryptoApi(
     EitherT(
       ipsSnapshot
         .encryptionKey(members)
-        .map { keys =>
-          members
-            .traverse(encryptFor(keys))
-            .map(_.toMap)
+        .flatMap { keys =>
+          // Parallelize per-member asymmetric encryption. Each encryption is pure CPU
+          // (ECIES/RSA key wrapping) with no data dependency between members.
+          members.toList
+            .parTraverse { member =>
+              FutureUnlessShutdown.outcomeF(
+                scala.concurrent.Future(encryptFor(keys)(member))
+              )
+            }
+            .map(_.sequence.map(_.toMap))
         }
     )
   }
