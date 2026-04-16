@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
@@ -266,6 +267,7 @@ class SynchronizerCryptoClient private (
     override val timeouts: ProcessingTimeout,
     override protected val futureSupervisor: FutureSupervisor,
     override val loggerFactory: NamedLoggerFactory,
+    val cryptoEc: Option[ExecutionContext] = None,
 )(implicit override protected val executionContext: ExecutionContext)
     extends SyncCryptoClient[SynchronizerSnapshotSyncCryptoApi]
     with HasFutureSupervision
@@ -312,6 +314,7 @@ class SynchronizerCryptoClient private (
       syncCryptoSigner,
       syncCryptoVerifier,
       loggerFactory,
+      cryptoEc,
     )
 
   /** Similar to create but allows to provide a custom crypto signer. CAUTION: use only when you
@@ -328,6 +331,7 @@ class SynchronizerCryptoClient private (
       syncCryptoSignerMapper(syncCryptoSigner),
       syncCryptoVerifier,
       loggerFactory,
+      cryptoEc,
     )
 
   override def ipsSnapshot(timestamp: CantonTimestamp)(implicit
@@ -388,6 +392,7 @@ object SynchronizerCryptoClient {
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
+      cryptoEc: Option[ExecutionContext] = None,
   )(implicit
       executionContext: ExecutionContext
   ): SynchronizerCryptoClient = {
@@ -413,6 +418,7 @@ object SynchronizerCryptoClient {
       timeouts,
       futureSupervisor,
       loggerFactory.append("synchronizerId", synchronizerId.toString),
+      cryptoEc,
     )
   }
 
@@ -476,6 +482,11 @@ class SynchronizerSnapshotSyncCryptoApi(
     val syncCryptoSigner: SyncCryptoSigner,
     val syncCryptoVerifier: SyncCryptoVerifier,
     override protected val loggerFactory: NamedLoggerFactory,
+    /** Dedicated EC for CPU-bound asymmetric crypto (ECIES/ECDH). When set, encryptFor dispatches
+      * per-member encryption to this pool instead of the main EC, preventing crypto work from
+      * blocking DB callbacks and protocol orchestration.
+      */
+    cryptoEc: Option[ExecutionContext] = None,
 )(implicit ec: ExecutionContext)
     extends SyncCryptoApi
     with NamedLogging {
@@ -620,10 +631,27 @@ class SynchronizerSnapshotSyncCryptoApi(
     EitherT(
       ipsSnapshot
         .encryptionKey(members)
-        .map { keys =>
-          members
-            .traverse(encryptFor(keys))
-            .map(_.toMap)
+        .flatMap { keys =>
+          cryptoEc match {
+            case Some(cryptoPool) if !deterministicEncryption && members.sizeIs > 1 =>
+              // Dispatch per-member encryption to the dedicated crypto pool.
+              // The main EC stays free for DB callbacks and protocol orchestration.
+              implicit val cryptoEcImplicit: ExecutionContext = cryptoPool
+              members.toList
+                .parTraverse { member =>
+                  FutureUnlessShutdown.outcomeF(
+                    scala.concurrent.Future(encryptFor(keys)(member))(cryptoPool)
+                  )
+                }
+                .map(_.sequence.map(_.toMap))
+            case _ =>
+              // No dedicated crypto pool or single member — use the implicit EC
+              FutureUnlessShutdown.pure(
+                members
+                  .traverse(encryptFor(keys))
+                  .map(_.toMap)
+              )
+          }
         }
     )
   }

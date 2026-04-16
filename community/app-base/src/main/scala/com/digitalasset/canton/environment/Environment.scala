@@ -215,6 +215,22 @@ class Environment(
       maxPoolSize = config.parameters.threading.maxPoolSize,
       minRunnable = config.parameters.threading.minRunnable,
     )
+
+  /** Dedicated execution context for CPU-bound asymmetric crypto operations (ECIES, ECDH, Ed25519).
+    * Isolates crypto work from the main EC so that DB callbacks, protocol orchestration, and gRPC
+    * handlers are never blocked behind elliptic curve point multiplications.
+    *
+    * JFR profiling shows ECIES/ECDH consumes 38-43% of CPU. On the shared main EC, DB threads
+    * can't be scheduled while crypto saturates all cores, causing queueing delays that dominate
+    * end-to-end latency under load. A separate pool eliminates this contention.
+    */
+  lazy val cryptoExecutionContext: ExecutionContextIdlenessExecutorService =
+    Threading.newExecutionContext(
+      loggerFactory.threadName + "-crypto-ec",
+      noTracingLogger,
+      parallelism = numThreads,
+      executorServiceMetrics = executorServiceMetrics,
+    )
   config.parameters.threading.mutexMaxSpins.foreach { maxSpins =>
     Mutex.MaxSpins.set(maxSpins.value)
   }
