@@ -199,6 +199,9 @@ object TopologyMapping {
     case object LsuSequencerConnectionSuccessor
         extends Code("scs", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCER_CONNECTION_SUCCESSOR)
 
+    case object TemplateBoundParty
+        extends Code("tbp", v30Code.TOPOLOGY_MAPPING_CODE_TEMPLATE_BOUND_PARTY)
+
     val all: Seq[Code] = Seq(
       NamespaceDelegation,
       DecentralizedNamespaceDefinition,
@@ -215,6 +218,7 @@ object TopologyMapping {
       PartyToKeyMapping,
       LsuAnnouncement,
       LsuSequencerConnectionSuccessor,
+      TemplateBoundParty,
     )
 
     val lsuMappings: Set[Code] =
@@ -401,6 +405,8 @@ object TopologyMapping {
         LsuAnnouncement.fromProtoV30(value)
       case Mapping.SequencerConnectionSuccessor(value) =>
         LsuSequencerConnectionSuccessor.fromProtoV30(value)
+      case Mapping.TemplateBoundParty(value) =>
+        TemplateBoundPartyMapping.fromProtoV30(value)
     }
 
   /** Determines the appropriate level for the given topology mappings.

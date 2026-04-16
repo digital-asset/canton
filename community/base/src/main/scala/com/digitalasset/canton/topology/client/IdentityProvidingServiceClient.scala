@@ -8,6 +8,7 @@ import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.transaction.TemplateBoundPartyMapping
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SigningKeyUsage.matchesRelevantUsages
@@ -301,6 +302,15 @@ trait PartyTopologySnapshotClient {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]]
+
+  /** Returns the template-bound party configuration if the party is template-bound,
+    * or None if the party is a regular party with a signing key.
+    */
+  def templateBoundPartyConfig(
+      party: LfPartyId
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[TemplateBoundPartyMapping]]
 
   /** Returns the set of active participants the given party is represented by as of the snapshot
     * timestamp

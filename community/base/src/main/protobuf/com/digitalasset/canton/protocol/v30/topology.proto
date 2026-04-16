@@ -59,6 +59,7 @@ message Enums {
     TOPOLOGY_MAPPING_CODE_PARTY_TO_KEY_MAPPING = 18;
     TOPOLOGY_MAPPING_CODE_LSU_ANNOUNCEMENT = 19;
     TOPOLOGY_MAPPING_CODE_SEQUENCER_CONNECTION_SUCCESSOR = 20;
+    TOPOLOGY_MAPPING_CODE_TEMPLATE_BOUND_PARTY = 21;
   }
 
   enum ParticipantFeatureFlag {
@@ -399,6 +400,33 @@ message LsuSequencerConnectionSuccessor {
 }
 
 // [docs-entry-start: topology mapping]
+// A template-bound party whose signing key is destroyed after registration.
+// The party can only participate in transactions that exercise choices on
+// the whitelisted templates. The hosting participant auto-confirms such
+// transactions without the party's signing key.
+//
+// Enables trustless, non-custodial smart contract logic (AMMs, escrows,
+// vaults) where no human or organization controls the assets.
+//
+// UNIQUE(party)
+message TemplateBoundParty {
+  // the party whose key is destroyed
+  string party = 1;
+
+  // the participant hosting this party (performs auto-confirmation)
+  string hosting_participant_uid = 2;
+
+  // fully qualified Daml template IDs that this party is allowed to act on.
+  // any transaction where this party is signatory/controller on a choice
+  // outside this set will be rejected.
+  repeated string allowed_template_ids = 3;
+
+  // hash of the signing public key, proving a valid keypair existed at
+  // registration time. the private key is destroyed after signing this
+  // registration transaction.
+  bytes signing_key_hash = 4;
+}
+
 message TopologyMapping {
   oneof mapping {
     NamespaceDelegation namespace_delegation = 1;
@@ -423,6 +451,8 @@ message TopologyMapping {
 
     LsuAnnouncement synchronizer_upgrade_announcement = 17;
     LsuSequencerConnectionSuccessor sequencer_connection_successor = 18;
+
+    TemplateBoundParty template_bound_party = 19;
   }
   reserved 2; // was identifier_delegation
   reserved 10; // was authority_of
