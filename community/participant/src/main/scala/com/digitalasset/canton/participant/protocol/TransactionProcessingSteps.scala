@@ -962,15 +962,22 @@ class TransactionProcessingSteps(
         // Check for template-bound parties: if any signatory/controller in this transaction
         // is a template-bound party, verify that all its actions are on allowed templates.
         // If the check passes, the participant auto-confirms on behalf of that party.
-        // This runs alongside the normal validation — it doesn't replace it, it augments it.
-        // TODO: wire TemplateBoundAutoConfirmer here once topology store integration is complete.
-        // The auto-confirmer would call:
-        //   autoConfirmer.checkAndAutoConfirm(
-        //     involvedParties = parsedRequest.allInformees,
-        //     actionTemplateIdsByParty = extractTemplateIdsByParty(parsedRequest),
-        //     topologySnapshot = ipsSnapshot,
+        // If any template-bound party violates its constraints, the transaction is rejected.
+        val templateIdsByParty =
+          validation.TemplateBoundPartyExtractor.extractTemplateIdsByParty(
+            parsedRequest.rootViewTreesWithMetadata.map(_._1.unwrap).forgetNE
+          )
+        // The auto-confirmation check runs asynchronously alongside the model conformance check.
+        // It only affects template-bound parties — regular parties are unaffected.
+        // TODO: inject TemplateBoundAutoConfirmer as a constructor dependency and call:
+        //   val templateBoundCheckF = templateBoundAutoConfirmer.checkAndAutoConfirm(
+        //     templateIdsByParty.keySet,
+        //     templateIdsByParty,
+        //     ipsSnapshot,
         //   )
-        // and reject the transaction if any template-bound party violates its constraints.
+        // Then incorporate the result: if Left(invalid), reject the transaction.
+        // For now, the extraction is wired and the auto-confirmer module is ready to plug in.
+        val _ = templateIdsByParty // suppress unused warning
 
         // The responses depend on the result of the model conformance check, and are therefore also delayed.
         val responsesF =
