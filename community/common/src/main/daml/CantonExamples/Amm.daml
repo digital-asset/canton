@@ -89,7 +89,7 @@ template Pool
     reserveA   : Decimal  -- virtual reserves (actual tokens held separately)
     reserveB   : Decimal
     totalLP    : Decimal
-    feeNum     : Int      -- fee numerator (e.g. 3 for 0.3%)
+    feeNum     : Int      -- fee numerator (e.g. 997 for 0.3% fee, i.e. keep 99.7%)
     feeDen     : Int      -- fee denominator (e.g. 1000)
   where
     signatory pool
@@ -110,7 +110,6 @@ template Pool
         inputToken <- fetch inputTokenCid
         assertMsg "Wrong token symbol" (inputToken.symbol == symbolA)
         assertMsg "Wrong token issuer" (inputToken.issuer == tokenAIssuer)
-        assertMsg "minOutput must be positive" (minOutput > 0.0)
         let inputA = inputToken.amount
 
         -- Calculate output with fee
@@ -121,7 +120,7 @@ template Pool
 
         assertMsg "Insufficient output" (outputB > 0.0)
         assertMsg "Output exceeds reserves" (outputB < reserveB)
-        assertMsg "Slippage exceeded" (outputB >= minOutput)
+        assertMsg "Slippage exceeded" (minOutput <= 0.0 || outputB >= minOutput)
 
         -- Transfer input token to pool (sub-action, inherited authority)
         exercise inputTokenCid Transfer with newOwner = pool
