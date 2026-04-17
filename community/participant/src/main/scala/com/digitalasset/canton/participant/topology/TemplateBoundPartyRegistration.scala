@@ -45,6 +45,7 @@ import scala.concurrent.ExecutionContext
   *     listed, automatically create the PartyToParticipant mapping
   */
 class TemplateBoundPartyRegistration(
+    localParticipantId: ParticipantId,
     topologyManager: TopologyManager[TopologyStoreId, _],
     privateStore: CryptoPrivateStore,
     hashOps: HashOps,
@@ -88,12 +89,19 @@ class TemplateBoundPartyRegistration(
         s"Signing key $signingKeyFingerprint does not exist in the private store",
       )
 
-      // Step 2: If permissionless hosting is enabled and this is a single-participant
-      // registration, auto-allocate. Otherwise verify all participants are hosting.
-      _ <- if (permissionlessTbpHosting && hostingParticipantIds.size == 1) {
-        ensurePartyHosted(partyId, hostingParticipantIds.head, signingKeyFingerprint)
+      // Step 2: If permissionless hosting is enabled, auto-allocate on this participant.
+      // Then verify all OTHER participants are already hosting.
+      _ <- if (permissionlessTbpHosting && hostingParticipantIds.contains(localParticipantId)) {
+        ensurePartyHosted(partyId, localParticipantId, signingKeyFingerprint)
       } else {
-        verifyAllParticipantsHosting(partyId, hostingParticipantIds)
+        EitherT.rightT[FutureUnlessShutdown, String](())
+      }
+      remoteParticipants = hostingParticipantIds.filterNot(_ == localParticipantId)
+      _ <- if (remoteParticipants.nonEmpty || !permissionlessTbpHosting) {
+        val toVerify = if (permissionlessTbpHosting) remoteParticipants else hostingParticipantIds
+        verifyAllParticipantsHosting(partyId, toVerify)
+      } else {
+        EitherT.rightT[FutureUnlessShutdown, String](())
       }
 
       // Step 3: Submit the TemplateBoundPartyMapping topology transaction

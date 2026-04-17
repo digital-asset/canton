@@ -749,6 +749,7 @@ class ParticipantNodeBootstrap(
       } yield {
         val templateBoundPartyRegistration =
           new com.digitalasset.canton.participant.topology.TemplateBoundPartyRegistration(
+            localParticipantId = participantId,
             topologyManager = authorizedTopologyManager,
             privateStore = crypto.cryptoPrivateStore,
             hashOps = crypto.pureCrypto,
