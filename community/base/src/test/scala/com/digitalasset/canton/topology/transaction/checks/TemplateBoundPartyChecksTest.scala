@@ -21,7 +21,7 @@ class TemplateBoundPartyChecksTest extends AnyWordSpec with Matchers {
 
   private val mapping = TemplateBoundPartyMapping(
     partyId = partyId,
-    hostingParticipantId = participantId,
+    hostingParticipantIds = Seq(participantId),
     allowedTemplateIds = Set("com.example:AMMPool:1.0"),
     signingKeyHash = ByteString.copyFrom(Array.fill(32)(0x42.toByte)),
   )

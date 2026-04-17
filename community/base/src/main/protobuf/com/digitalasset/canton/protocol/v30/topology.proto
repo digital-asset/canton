@@ -413,8 +413,10 @@ message TemplateBoundParty {
   // the party whose key is destroyed
   string party = 1;
 
-  // the participant hosting this party (performs auto-confirmation)
-  string hosting_participant_uid = 2;
+  // participants hosting this party (each performs auto-confirmation independently).
+  // multiple participants provide liveness redundancy — if one goes down, others
+  // can still serve transactions. any single hosting participant can auto-confirm.
+  repeated string hosting_participant_uids = 2;
 
   // fully qualified Daml template IDs that this party is allowed to act on.
   // any transaction where this party is signatory/controller on a choice

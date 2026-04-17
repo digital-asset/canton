@@ -29,7 +29,7 @@ class TemplateBoundAutoConfirmerTest
 
   private val tbpConfig = TemplateBoundPartyMapping(
     partyId = partyA,
-    hostingParticipantId = participantId,
+    hostingParticipantIds = Seq(participantId),
     allowedTemplateIds = Set("com.example:AMMPool:1.0"),
     signingKeyHash = keyHash,
   )

@@ -2470,7 +2470,7 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
   */
 final case class TemplateBoundPartyMapping(
     partyId: PartyId,
-    hostingParticipantId: ParticipantId,
+    hostingParticipantIds: Seq[ParticipantId],
     allowedTemplateIds: Set[String],
     signingKeyHash: ByteString,
 ) extends TopologyMapping {
@@ -2480,7 +2480,8 @@ final case class TemplateBoundPartyMapping(
   override def namespace: Namespace = partyId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
-  override def referencedUids: Set[UniqueIdentifier] = Set(partyId.uid, hostingParticipantId.uid)
+  override def referencedUids: Set[UniqueIdentifier] =
+    Set(partyId.uid) ++ hostingParticipantIds.map(_.uid)
 
   override lazy val uniqueKey: MappingHash =
     TemplateBoundPartyMapping.uniqueKey(partyId)
@@ -2492,7 +2493,7 @@ final case class TemplateBoundPartyMapping(
   def toProto: v30.TemplateBoundParty =
     v30.TemplateBoundParty(
       party = partyId.toProtoPrimitive,
-      hostingParticipantUid = hostingParticipantId.uid.toProtoPrimitive,
+      hostingParticipantUids = hostingParticipantIds.map(_.uid.toProtoPrimitive),
       allowedTemplateIds = allowedTemplateIds.toSeq,
       signingKeyHash = signingKeyHash,
     )
@@ -2504,7 +2505,7 @@ final case class TemplateBoundPartyMapping(
 
   override protected def pretty: Pretty[TemplateBoundPartyMapping] = prettyOfClass(
     param("partyId", _.partyId),
-    param("hostingParticipantId", _.hostingParticipantId),
+    param("hostingParticipantIds", _.hostingParticipantIds.size),
     param("allowedTemplateIds", _.allowedTemplateIds.size),
   )
 
@@ -2523,13 +2524,12 @@ object TemplateBoundPartyMapping extends TopologyMappingCompanion {
   ): ParsingResult[TemplateBoundPartyMapping] =
     for {
       partyId <- PartyId.fromProtoPrimitive(proto.party, "party")
-      participantId <- TopologyMapping.participantIdFromProtoPrimitive(
-        proto.hostingParticipantUid,
-        "hosting_participant_uid",
+      participantIds <- proto.hostingParticipantUids.traverse(uid =>
+        TopologyMapping.participantIdFromProtoPrimitive(uid, "hosting_participant_uids")
       )
     } yield TemplateBoundPartyMapping(
       partyId = partyId,
-      hostingParticipantId = participantId,
+      hostingParticipantIds = participantIds,
       allowedTemplateIds = proto.allowedTemplateIds.toSet,
       signingKeyHash = proto.signingKeyHash,
     )

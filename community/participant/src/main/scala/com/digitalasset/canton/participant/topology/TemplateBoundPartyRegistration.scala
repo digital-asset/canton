@@ -65,7 +65,7 @@ class TemplateBoundPartyRegistration(
 
     val mapping = TemplateBoundPartyMapping(
       partyId = partyId,
-      hostingParticipantId = participantId,
+      hostingParticipantIds = Seq(participantId),
       allowedTemplateIds = allowedTemplateIds,
       signingKeyHash = signingKeyHash,
     )

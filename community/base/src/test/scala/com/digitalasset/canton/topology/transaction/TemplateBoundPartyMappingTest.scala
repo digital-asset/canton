@@ -17,7 +17,7 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
 
   private val mapping = TemplateBoundPartyMapping(
     partyId = partyId,
-    hostingParticipantId = participantId,
+    hostingParticipantIds = Seq(participantId),
     allowedTemplateIds = Set("com.example:AMMPool:1.0", "com.example:Token:1.0"),
     signingKeyHash = keyHash,
   )
@@ -35,9 +35,9 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
       proto.party shouldBe partyId.toProtoPrimitive
     }
 
-    "serialize participant ID correctly" in {
+    "serialize participant IDs correctly" in {
       val proto = mapping.toProto
-      proto.hostingParticipantUid shouldBe participantId.uid.toProtoPrimitive
+      proto.hostingParticipantUids shouldBe Seq(participantId.uid.toProtoPrimitive)
     }
 
     "serialize allowed template IDs" in {
@@ -116,7 +116,7 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
     "handle empty allowed template list" in {
       val proto = v30.TemplateBoundParty(
         party = partyId.toProtoPrimitive,
-        hostingParticipantUid = participantId.uid.toProtoPrimitive,
+        hostingParticipantUids = Seq(participantId.uid.toProtoPrimitive),
         allowedTemplateIds = Seq.empty,
         signingKeyHash = keyHash,
       )
@@ -128,7 +128,7 @@ class TemplateBoundPartyMappingTest extends AnyWordSpec with Matchers {
     "preserve duplicate template IDs as a set" in {
       val proto = v30.TemplateBoundParty(
         party = partyId.toProtoPrimitive,
-        hostingParticipantUid = participantId.uid.toProtoPrimitive,
+        hostingParticipantUids = Seq(participantId.uid.toProtoPrimitive),
         allowedTemplateIds = Seq("com.example:Token:1.0", "com.example:Token:1.0"),
         signingKeyHash = keyHash,
       )

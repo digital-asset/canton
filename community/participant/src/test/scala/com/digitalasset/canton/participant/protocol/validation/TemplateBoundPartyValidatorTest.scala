@@ -16,7 +16,7 @@ class TemplateBoundPartyValidatorTest extends AnyWordSpec with Matchers {
 
   private val config = TemplateBoundPartyMapping(
     partyId = partyId,
-    hostingParticipantId = participantId,
+    hostingParticipantIds = Seq(participantId),
     allowedTemplateIds = Set(
       "com.example:AMMPool:1.0",
       "com.example:Token:1.0",
