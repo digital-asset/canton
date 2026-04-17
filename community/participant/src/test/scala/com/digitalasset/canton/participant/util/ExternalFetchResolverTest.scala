@@ -187,6 +187,211 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
       }
     }
 
+    "reject a response signed by a key not in signerKeys" in {
+      val body = "price=42.50".getBytes
+
+      // Generate a DIFFERENT keypair — valid signature, but wrong key
+      val otherKpg = KeyPairGenerator.getInstance("EC")
+      otherKpg.initialize(new ECGenParameterSpec("secp256r1"))
+      val otherKeyPair = otherKpg.generateKeyPair()
+
+      val (port, serverThread) = startMockServer(
+        body,
+        digest => signData(digest, otherKeyPair.getPrivate), // signed by wrong key
+      )
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer), // only accepts testKeyPair, not otherKeyPair
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      serverThread.join(10000)
+    }
+
+    "reject a response where body was tampered after signing" in {
+      val realBody = "price=42.50".getBytes
+      val tamperedBody = "price=0.01".getBytes // attacker modifies the price
+
+      // Server signs the real body but we'll have the mock send the tampered one
+      // We need a custom mock for this
+      val server = new ServerSocket(0)
+      server.setSoTimeout(10000)
+      val port = server.getLocalPort
+      val thread = new Thread(() => {
+        try {
+          val client = server.accept()
+          val in = new DataInputStream(client.getInputStream)
+          val out = new DataOutputStream(client.getOutputStream)
+
+          val nonce = new Array[Byte](32)
+          in.readFully(nonce)
+          val ephPubLen = in.readUnsignedShort()
+          val ephPubBytes = new Array[Byte](ephPubLen)
+          in.readFully(ephPubBytes)
+          val iv = new Array[Byte](12)
+          in.readFully(iv)
+          Iterator.continually(client.getInputStream.available()).takeWhile(_ > 0).foreach(_ => in.read())
+
+          // ECDH with their ephemeral key
+          val ephPubKey = KeyFactory.getInstance("EC")
+            .generatePublic(new X509EncodedKeySpec(ephPubBytes))
+          val ka = KeyAgreement.getInstance("ECDH")
+          ka.init(testKeyPair.getPrivate)
+          ka.doPhase(ephPubKey, true)
+          val sharedSecret = ka.generateSecret()
+          val aesKey = new SecretKeySpec(
+            MessageDigest.getInstance("SHA-256").digest(sharedSecret), 0, 16, "AES"
+          )
+
+          // Sign the REAL body's digest
+          val digest = hashNonceAndBody(nonce, realBody)
+          val signature = signData(digest, testKeyPair.getPrivate)
+
+          // But encrypt and send the TAMPERED body
+          val responseIv = new Array[Byte](12)
+          new SecureRandom().nextBytes(responseIv)
+          val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+          cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(128, responseIv))
+          val encBody = cipher.doFinal(tamperedBody)
+
+          out.writeInt(encBody.length)
+          out.write(responseIv)
+          out.write(encBody)
+          out.write(signature)
+          out.flush()
+          client.close()
+          server.close()
+        } catch { case _: Exception => server.close() }
+      })
+      thread.setDaemon(true)
+      thread.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      // Signature was over realBody but response contains tamperedBody — must reject
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      thread.join(10000)
+    }
+
+    "reject a replayed response signed with a different nonce" in {
+      val body = "price=42.50".getBytes
+      val staleNonce = Array.fill(32)(0x99.toByte) // attacker replays with old nonce
+
+      // Custom mock: signs with staleNonce instead of the client's nonce
+      val server = new ServerSocket(0)
+      server.setSoTimeout(10000)
+      val port = server.getLocalPort
+      val thread = new Thread(() => {
+        try {
+          val client = server.accept()
+          val in = new DataInputStream(client.getInputStream)
+          val out = new DataOutputStream(client.getOutputStream)
+
+          // Read client's nonce (but ignore it)
+          in.readFully(new Array[Byte](32))
+          val ephPubLen = in.readUnsignedShort()
+          val ephPubBytes = new Array[Byte](ephPubLen)
+          in.readFully(ephPubBytes)
+          val iv = new Array[Byte](12)
+          in.readFully(iv)
+          Iterator.continually(client.getInputStream.available()).takeWhile(_ > 0).foreach(_ => in.read())
+
+          val ephPubKey = KeyFactory.getInstance("EC")
+            .generatePublic(new X509EncodedKeySpec(ephPubBytes))
+          val ka = KeyAgreement.getInstance("ECDH")
+          ka.init(testKeyPair.getPrivate)
+          ka.doPhase(ephPubKey, true)
+          val sharedSecret = ka.generateSecret()
+          val aesKey = new SecretKeySpec(
+            MessageDigest.getInstance("SHA-256").digest(sharedSecret), 0, 16, "AES"
+          )
+
+          // Sign with STALE nonce instead of the client's nonce
+          val digest = hashNonceAndBody(staleNonce, body)
+          val signature = signData(digest, testKeyPair.getPrivate)
+
+          val responseIv = new Array[Byte](12)
+          new SecureRandom().nextBytes(responseIv)
+          val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+          cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(128, responseIv))
+          val encBody = cipher.doFinal(body)
+
+          out.writeInt(encBody.length)
+          out.write(responseIv)
+          out.write(encBody)
+          out.write(signature)
+          out.flush()
+          client.close()
+          server.close()
+        } catch { case _: Exception => server.close() }
+      })
+      thread.setDaemon(true)
+      thread.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce, // client sends testNonce, but server signed with staleNonce
+      )
+
+      // Signature was over SHA-256(staleNonce || body) but verifier computes
+      // SHA-256(testNonce || body) — mismatch, must reject
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      thread.join(10000)
+    }
+
+    "reject an empty signature" in {
+      val body = "price=42.50".getBytes
+
+      val (port, serverThread) = startMockServer(
+        body,
+        _ => Array.empty[Byte], // empty signature
+      )
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      serverThread.join(10000)
+    }
+
     "fail when server closes connection without sending a response" in {
       val server = new ServerSocket(0)
       server.setSoTimeout(10000)
