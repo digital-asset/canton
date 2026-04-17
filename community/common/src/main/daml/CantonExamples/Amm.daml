@@ -93,7 +93,7 @@ template Pool
     feeDen     : Int      -- fee denominator (e.g. 1000)
   where
     signatory pool
-    observer tokenAIssuer, tokenBIssuer
+    observer tokenAIssuer, tokenBIssuer -- remove this to make it a dark pool
 
     ensure reserveA > 0.0 && reserveB > 0.0 && totalLP > 0.0
 
