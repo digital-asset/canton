@@ -169,6 +169,112 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
       traderTokensAfter should not be empty
     }
 
+    "regular pool operator can drain via Token.Transfer — TBP prevents this" in { implicit env =>
+      import env.*
+
+      // A regular party (NOT template-bound) can use its signing key to
+      // exercise Token.Transfer directly, draining pool assets.
+      // This is the attack that TBP prevents by destroying the key.
+      val regularPool = participant1.parties.testing.enable("regularPool")
+      val issuerR1 = participant1.parties.testing.enable("issuerR1")
+      val attacker = participant1.parties.testing.enable("attacker")
+
+      val ammPkg =
+        participant1.packages.find_by_module("Amm").headOption.value.packageId
+
+      // Create a token owned by the regular pool
+      participant1.ledger_api.commands.submit(
+        Seq(issuerR1),
+        Seq(ledger_api_utils.create(
+          ammPkg, "Amm", "Token",
+          Map("issuer" -> issuerR1, "owner" -> regularPool, "symbol" -> "USDC", "amount" -> 1000.0),
+        )),
+      )
+
+      val poolTokenCid = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(regularPool))
+        .loneElement.contractId
+
+      // The regular pool operator CAN drain the token via direct Transfer.
+      // This succeeds because the participant holds regularPool's signing key.
+      // This is the vulnerability that TBP eliminates.
+      participant1.ledger_api.commands.submit(
+        Seq(regularPool),
+        Seq(ledger_api_utils.exercise(
+          ammPkg, "Amm", "Token", "Transfer",
+          Map("newOwner" -> attacker),
+          poolTokenCid.coid,
+        )),
+      )
+
+      // The attacker now owns the token — pool is drained
+      val attackerTokens = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(attacker))
+      attackerTokens should not be empty
+
+      // With TBP, this Transfer would be REJECTED because Token is not
+      // in the pool's allowedTemplates. The key is destroyed and
+      // auto-confirmation only works for whitelisted templates.
+    }
+
+    "TBP pool CANNOT drain via Token.Transfer — template not in allowed set" in { implicit env =>
+      import env.*
+
+      // The TBP pool from the first test is still active. Try to drain it
+      // by exercising Token.Transfer directly. This must fail because
+      // Token is NOT in the pool's allowedTemplates.
+      val tbpPool = participant1.parties.testing.enable("tbpDrain")
+      val issuerD = participant1.parties.testing.enable("issuerD")
+      val attacker2 = participant1.parties.testing.enable("attacker2")
+
+      val ammPkg =
+        participant1.packages.find_by_module("Amm").headOption.value.packageId
+
+      // Register as TBP — only Pool is allowed, NOT Token
+      participant1.topology.transactions.propose(
+        TemplateBoundPartyMapping(
+          partyId = tbpPool,
+          hostingParticipantIds = Seq(participant1.id),
+          allowedTemplateIds = Set(s"$ammPkg:Amm:Pool"),
+          signingKeyHash = ByteString.copyFrom(Array.fill(32)(0x00.toByte)),
+        ),
+        store = TopologyStoreId.Authorized,
+      )
+
+      // Create a token owned by the TBP pool
+      participant1.ledger_api.commands.submit(
+        Seq(issuerD),
+        Seq(ledger_api_utils.create(
+          ammPkg, "Amm", "Token",
+          Map("issuer" -> issuerD, "owner" -> tbpPool, "symbol" -> "USDC", "amount" -> 1000.0),
+        )),
+      )
+
+      val tbpTokenCid = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(tbpPool))
+        .loneElement.contractId
+
+      // Try to drain: exercise Token.Transfer as tbpPool.
+      // This MUST fail. Token is not in the allowed template set.
+      // The auto-confirmer will reject because the root action is on Token,
+      // which is not whitelisted.
+      assertThrows[CommandFailure] {
+        participant1.ledger_api.commands.submit(
+          Seq(tbpPool),
+          Seq(ledger_api_utils.exercise(
+            ammPkg, "Amm", "Token", "Transfer",
+            Map("newOwner" -> attacker2),
+            tbpTokenCid.coid,
+          )),
+        )
+      }
+
+      // Token is still owned by the TBP pool — drain was prevented
+      val stillPoolOwned = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(tbpPool))
+      stillPoolOwned should not be empty
+    }
+
     "reject swap with excessive slippage demand" in { implicit env =>
       import env.*
 
