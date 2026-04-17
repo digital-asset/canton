@@ -333,6 +333,17 @@ class TransactionConfirmationRequestFactory(
         .leftMap[TransactionConfirmationRequestCreationError](e =>
           RecipientsCreationError(e.message)
         )
+      // Filter out template-bound parties from the informee set for encryption.
+      // TBPs are not real entities — no one reads their views. Excluding them
+      // saves ECIES encryption cost and enables true dark pools.
+      allInformees = lightTreesWithMetadata.flatMap(_.view.informees).toSet
+      templateBoundParties <- EitherT.right[TransactionConfirmationRequestCreationError](
+        allInformees.toList
+          .traverse(party =>
+            cryptoSnapshot.ipsSnapshot.templateBoundPartyConfig(party).map(party -> _)
+          )
+          .map(_.collect { case (party, Some(_)) => party }.toSet)
+      )
       viewsToKeyMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
           lightTreesWithMetadata.map {
@@ -340,7 +351,7 @@ class TransactionConfirmationRequestFactory(
               (
                 ViewHashAndRecipients(tvt.viewHash, recipients),
                 parentRecipients,
-                tvt.informees.toList,
+                tvt.informees.filterNot(templateBoundParties.contains).toList,
               )
           },
           parallel,
