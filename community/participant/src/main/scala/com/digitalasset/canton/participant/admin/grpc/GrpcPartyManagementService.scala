@@ -1082,10 +1082,28 @@ class GrpcPartyManagementService(
           .asRuntimeException()
       )
 
+    // If hosting_participant_uids is specified, use those. Otherwise default to this participant.
+    val hostingParticipantIds =
+      if (request.hostingParticipantUids.nonEmpty) {
+        request.hostingParticipantUids.map(uid =>
+          ParticipantId(
+            UniqueIdentifier
+              .fromProtoPrimitive(uid, "hosting_participant_uids")
+              .valueOr(e =>
+                throw Status.INVALID_ARGUMENT
+                  .withDescription(s"Invalid participant UID: ${e.message}")
+                  .asRuntimeException()
+              )
+          )
+        )
+      } else {
+        Seq(participantId)
+      }
+
     registration
       .register(
         partyId = partyId,
-        participantId = participantId,
+        hostingParticipantIds = hostingParticipantIds,
         allowedTemplateIds = request.allowedTemplateIds.toSet,
         signingKeyFingerprint = signingKeyFingerprint,
       )

@@ -465,7 +465,6 @@ message RegisterTemplateBoundPartyRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   // The party to register as template-bound.
-  // Must already be allocated on this participant.
   // Required
   string party_id = 1;
 
@@ -478,6 +477,13 @@ message RegisterTemplateBoundPartyRequest {
   // This key will be used to sign the topology transaction and then destroyed.
   // Required
   string signing_key_fingerprint = 3;
+
+  // UIDs of all participants that should host this TBP.
+  // Each must already have a live PartyToParticipant mapping for this party
+  // (set up independently before registration). If empty, defaults to this
+  // participant only. The key is only destroyed once all listed participants
+  // are verified as hosting the party.
+  repeated string hosting_participant_uids = 4;
 }
 
 message RegisterTemplateBoundPartyResponse {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, HashOps}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
@@ -25,20 +26,23 @@ import com.google.protobuf.ByteString
 import scala.concurrent.ExecutionContext
 
 /** Orchestrates template-bound party registration:
-  *   1. Optionally allocate the party on this participant (permissionless mode)
-  *   2. Verify signing key exists
-  *   3. Create the TemplateBoundPartyMapping
-  *   4. Submit the topology transaction (signed with the party's key)
-  *   5. Destroy the signing private key
   *
-  * After step 5, the party's signing key is permanently unavailable.
-  * The party can only act through auto-confirmation on allowed templates.
+  *   1. Verify signing key exists
+  *   2. Verify all hosting participants have live PartyToParticipant mappings
+  *      (or allocate on this participant if permissionless mode is enabled)
+  *   3. Submit the TemplateBoundPartyMapping topology transaction
+  *   4. Destroy the signing private key — point of no return
   *
-  * IMPORTANT: The key is destroyed AFTER the topology transaction is accepted.
-  * If submission fails, the key is preserved and the caller can retry.
-  * Once the transaction is accepted and the key is destroyed, the
-  * TemplateBoundPartyChecks immutability enforcement prevents any
-  * subsequent modification.
+  * Multi-participant flow:
+  *   - The caller sets up PartyToParticipant on each hosting participant
+  *     independently (standard Canton topology proposal/accept)
+  *   - Then calls register() with all participant IDs
+  *   - Registration verifies every participant is hosting before proceeding
+  *   - Key is only destroyed once the TBP mapping is accepted
+  *
+  * Single-participant permissionless flow:
+  *   - If permissionlessTbpHosting is enabled and only this participant is
+  *     listed, automatically create the PartyToParticipant mapping
   */
 class TemplateBoundPartyRegistration(
     topologyManager: TopologyManager[TopologyStoreId, _],
@@ -52,10 +56,13 @@ class TemplateBoundPartyRegistration(
 
   def register(
       partyId: PartyId,
-      participantId: ParticipantId,
+      hostingParticipantIds: Seq[ParticipantId],
       allowedTemplateIds: Set[String],
       signingKeyFingerprint: Fingerprint,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, TemplateBoundPartyMapping] = {
+
+    require(hostingParticipantIds.nonEmpty, "At least one hosting participant is required")
+
     val signingKeyHash = hashOps
       .digest(
         com.digitalasset.canton.crypto.HashPurpose.TopologyTransactionSignature,
@@ -65,7 +72,7 @@ class TemplateBoundPartyRegistration(
 
     val mapping = TemplateBoundPartyMapping(
       partyId = partyId,
-      hostingParticipantIds = Seq(participantId),
+      hostingParticipantIds = hostingParticipantIds,
       allowedTemplateIds = allowedTemplateIds,
       signingKeyHash = signingKeyHash,
     )
@@ -81,16 +88,15 @@ class TemplateBoundPartyRegistration(
         s"Signing key $signingKeyFingerprint does not exist in the private store",
       )
 
-      // Step 2: If permissionless hosting is enabled, ensure the party is allocated
-      // on this participant. The participant co-signs because this is running on
-      // its node. The party signs with its key (which will be destroyed after).
-      _ <- if (permissionlessTbpHosting) {
-        ensurePartyHosted(partyId, participantId, signingKeyFingerprint)
+      // Step 2: If permissionless hosting is enabled and this is a single-participant
+      // registration, auto-allocate. Otherwise verify all participants are hosting.
+      _ <- if (permissionlessTbpHosting && hostingParticipantIds.size == 1) {
+        ensurePartyHosted(partyId, hostingParticipantIds.head, signingKeyFingerprint)
       } else {
-        EitherT.rightT[FutureUnlessShutdown, String](())
+        verifyAllParticipantsHosting(partyId, hostingParticipantIds)
       }
 
-      // Step 3+4: Submit the topology transaction, signed with the party's key.
+      // Step 3: Submit the TemplateBoundPartyMapping topology transaction
       _ <- topologyManager
         .proposeAndAuthorize(
           op = TopologyChangeOp.Replace,
@@ -104,27 +110,64 @@ class TemplateBoundPartyRegistration(
         .leftMap(e => s"Failed to submit topology transaction: $e")
 
       _ = logger.info(
-        s"Template-bound party topology transaction accepted for $partyId. " +
+        s"Template-bound party topology transaction accepted for $partyId " +
+          s"on ${hostingParticipantIds.size} participant(s). " +
           s"Proceeding to destroy signing key $signingKeyFingerprint."
       )
 
-      // Step 5: DESTROY THE KEY — point of no return.
+      // Step 4: DESTROY THE KEY — point of no return.
       _ <- privateStore
         .removePrivateKey(signingKeyFingerprint)
         .leftMap(e => s"Failed to destroy signing key: $e")
 
       _ = logger.info(
         s"Destroyed signing key $signingKeyFingerprint for template-bound party $partyId. " +
-          s"Allowed templates: ${allowedTemplateIds.mkString(", ")}. " +
-          s"This party can now only act through auto-confirmation on these templates."
+          s"Hosting participants: ${hostingParticipantIds.mkString(", ")}. " +
+          s"Allowed templates: ${allowedTemplateIds.mkString(", ")}."
       )
     } yield mapping
   }
 
+  /** Verify that every listed participant has a live PartyToParticipant mapping
+    * for this party. If any participant is not hosting, reject before we
+    * destroy the key.
+    */
+  private def verifyAllParticipantsHosting(
+      partyId: PartyId,
+      requiredParticipants: Seq[ParticipantId],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    import com.daml.nonempty.NonEmpty
+    val ptpKey = PartyToParticipant.uniqueKey(partyId)
+    for {
+      existingTxs <- EitherT.right[String](
+        topologyManager.store
+          .findTransactionsForMapping(
+            com.digitalasset.canton.topology.processing.EffectiveTime.MaxValue,
+            NonEmpty(Set, ptpKey),
+          )
+      )
+
+      latestPtp = existingTxs
+        .flatMap(_.select[TopologyChangeOp.Replace, PartyToParticipant].map(_.mapping))
+        .maxByOption(_.participants.size)
+
+      hostedParticipantIds = latestPtp.toList.flatMap(_.participants.map(_.participantId)).toSet
+
+      missingParticipants = requiredParticipants.filterNot(hostedParticipantIds.contains)
+
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        missingParticipants.isEmpty,
+        (),
+        s"The following participants are not yet hosting party $partyId: " +
+          s"${missingParticipants.mkString(", ")}. " +
+          s"Each participant must have a live PartyToParticipant mapping before " +
+          s"the key can be destroyed. Set up hosting on each participant first.",
+      )
+    } yield ()
+  }
+
   /** Ensure the party is hosted on this participant via a PartyToParticipant mapping.
-    * If the mapping already exists, this is a no-op. If not, creates one.
-    * Both the party and participant sign (participant signs because this runs
-    * on the participant's topology manager).
+    * Used in permissionless single-participant mode.
     */
   private def ensurePartyHosted(
       partyId: PartyId,
@@ -143,8 +186,8 @@ class TemplateBoundPartyRegistration(
       .proposeAndAuthorize(
         op = TopologyChangeOp.Replace,
         mapping = partyToParticipant,
-        serial = None, // auto-determine
-        signingKeys = Seq(signingKeyFingerprint), // party's key signs; participant signs via its own key automatically
+        serial = None,
+        signingKeys = Seq(signingKeyFingerprint),
         protocolVersion = protocolVersion,
         expectFullAuthorization = true,
         waitToBecomeEffective = None,
