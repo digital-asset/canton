@@ -410,18 +410,9 @@ class DAMLe(
                 }
             case None =>
               // No resolver available — external fetches not supported in this context
-              FutureUnlessShutdown.pure(Left(EngineError(
-                com.digitalasset.daml.lf.engine.Error(
-                  com.digitalasset.daml.lf.engine.Error.Interpretation(
-                    com.digitalasset.daml.lf.engine.Error.Interpretation.Internal(
-                      "handleResult",
-                      s"External fetch not supported: no resolver configured for endpoint ${descriptor.endpoint}",
-                      None,
-                    )
-                  ),
-                  None,
-                )
-              )))
+              FutureUnlessShutdown.failed(new IllegalStateException(
+                s"External fetch not supported: no resolver configured for endpoint ${descriptor.endpoint}"
+              ))
           }
       }
     }

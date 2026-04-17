@@ -95,11 +95,9 @@ sealed trait Result[+A] extends Product with Serializable {
           externalFetches.lift(descriptor) match {
             case Some(response) => go(resume(response))
             case None =>
-              Left(Error(Error.Interpretation(Error.Interpretation.DamlException(
-                com.digitalasset.daml.lf.interpretation.Error.UnhandledException(
-                  com.digitalasset.daml.lf.data.Ref.QualifiedName.assertFromString("DA.External:FetchFailed"),
-                  com.digitalasset.daml.lf.value.Value.ValueText(s"External fetch not available for ${descriptor.endpoint}"),
-                )), None)))
+              throw new IllegalStateException(
+                s"External fetch not available for ${descriptor.endpoint}"
+              )
           }
       }
     go(this)
@@ -342,6 +340,16 @@ object Result {
                 () =>
                   resume().flatMap(x =>
                     Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
+                  ),
+              )
+            case ResultNeedExternalFetch(descriptor, resume) =>
+              ResultNeedExternalFetch(
+                descriptor,
+                response =>
+                  resume(response).flatMap(x =>
+                    Result
+                      .sequence(results_)
+                      .map(otherResults => (okResults :+ x) :++ otherResults)
                   ),
               )
           }

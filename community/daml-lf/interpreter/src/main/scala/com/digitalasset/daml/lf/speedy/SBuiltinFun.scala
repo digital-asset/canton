@@ -2630,11 +2630,11 @@ private[lf] object SBuiltinFun {
 
       // Generate nonce: SHA-256(transaction_uuid || fetch_node_index)
       val txUuid = machine.ptx.context.info match {
-        case ctx: com.digitalasset.daml.lf.speedy.PartialTransaction.ContextInfo.Exercise =>
+        case ctx: PartialTransaction.ExercisesContextInfo =>
           ctx.targetId.coid.getBytes("UTF-8")
         case _ => Array.emptyByteArray
       }
-      val fetchIndex = machine.ptx.nextNodeIdx.index
+      val fetchIndex = machine.ptx.nextNodeIdx
       val sha = java.security.MessageDigest.getInstance("SHA-256")
       sha.update(txUuid)
       sha.update(java.nio.ByteBuffer.allocate(4).putInt(fetchIndex).array())
@@ -2649,23 +2649,30 @@ private[lf] object SBuiltinFun {
           timeoutMs = timeoutMs,
           nonce = nonce,
           callback = { result =>
-            // Resume with the response as a Daml record
-            machine.returnValue = SValue.SRecord(
-              com.digitalasset.daml.lf.data.Ref.Identifier.assertFromString(
-                "DA.External:FetchResponse"
-              ),
-              com.digitalasset.daml.lf.data.ImmArray(
-                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("body"),
-                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signature"),
-                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signerKey"),
-                com.digitalasset.daml.lf.data.Ref.Name.assertFromString("fetchedAt"),
-              ),
-              ArrayList(
-                SValue.SText(new String(result.body, "UTF-8")),
-                SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signature)),
-                SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signerKey)),
-                SValue.SInt64(result.fetchedAt),
-              ),
+            // Resume the machine with the response as a Daml record.
+            // The callback is invoked by the Engine's interpretLoop after
+            // the external fetch completes. safelyContinue sets the machine's
+            // control register to the result value.
+            machine.setControl(
+              Control.Value(
+                SValue.SRecord(
+                  com.digitalasset.daml.lf.data.Ref.Identifier.assertFromString(
+                    "DA.External:FetchResponse"
+                  ),
+                  com.digitalasset.daml.lf.data.ImmArray(
+                    com.digitalasset.daml.lf.data.Ref.Name.assertFromString("body"),
+                    com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signature"),
+                    com.digitalasset.daml.lf.data.Ref.Name.assertFromString("signerKey"),
+                    com.digitalasset.daml.lf.data.Ref.Name.assertFromString("fetchedAt"),
+                  ),
+                  scala.collection.immutable.ArraySeq(
+                    SValue.SText(new String(result.body, "UTF-8")),
+                    SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signature)),
+                    SValue.SText(java.util.Base64.getEncoder.encodeToString(result.signerKey)),
+                    SValue.SInt64(result.fetchedAt),
+                  ),
+                )
+              )
             )
           },
         )

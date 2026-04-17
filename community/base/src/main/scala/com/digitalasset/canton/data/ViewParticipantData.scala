@@ -314,6 +314,7 @@ final case class ViewParticipantData private (
     actionDescription = Some(actionDescription.toProtoV31),
     rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
     salt = Some(salt.toProtoV30),
+    pinnedData = Seq.empty, // TODO: wire pinnedData field from ViewParticipantData case class
   )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -507,6 +508,7 @@ object ViewParticipantData
       resolvedKeysP,
       actionDescriptionP,
       rbContextP,
+      pinnedDataP,
     ) = dataP
 
     for {

@@ -464,6 +464,13 @@ final class StoreBackedCommandInterpreter(
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
+
+        case ResultNeedExternalFetch(descriptor, _) =>
+          // External fetch handling is done at the DAMLe/participant level,
+          // not here in the ledger API command interpreter.
+          FutureUnlessShutdown.failed(new IllegalStateException(
+            s"Unresolved external fetch for ${descriptor.endpoint}"
+          ))
       }
 
     resolveStep(result).thereafter { _ =>

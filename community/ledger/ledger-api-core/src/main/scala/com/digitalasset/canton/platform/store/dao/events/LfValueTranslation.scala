@@ -546,6 +546,9 @@ final class LfValueTranslation(
 
           case LfEngine.ResultPrefetch(_, _, resume) =>
             goAsync(resume())
+
+          case LfEngine.ResultNeedExternalFetch(_, _) =>
+            Future.failed(new IllegalStateException("View computation must be a pure function"))
         }
 
       Future(engine.computeInterfaceView(templateId, value, interfaceId))

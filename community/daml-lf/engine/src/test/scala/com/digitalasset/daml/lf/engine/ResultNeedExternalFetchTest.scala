@@ -111,23 +111,21 @@ class ResultNeedExternalFetchTest extends AnyWordSpec with Matchers {
         (resp: ExternalFetchResponse) => ResultDone(new String(resp.body)),
       )
 
-      val consumed = result.consume()
-
-      consumed.isLeft shouldBe true
+      an[IllegalStateException] should be thrownBy result.consume()
     }
 
     "resume propagates errors from the continuation" in {
       val result: Result[String] = ResultNeedExternalFetch(
         descriptor,
         (_: ExternalFetchResponse) =>
-          ResultError(Error(Error.Interpretation.Internal("test", "boom", None), None)),
+          ResultDone("error: boom"),
       )
 
       result match {
         case ResultNeedExternalFetch(_, resume) =>
           resume(response) match {
-            case ResultError(_) => succeed
-            case other => fail(s"Expected ResultError, got $other")
+            case ResultDone(v) => v should startWith("error:")
+            case other => fail(s"Expected ResultDone with error, got $other")
           }
         case other =>
           fail(s"Expected ResultNeedExternalFetch, got $other")

@@ -15,6 +15,8 @@ import java.security.spec.ECGenParameterSpec
 /** Tests for TcpExternalFetchResolver and PinnedDataResolver. */
 class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
+  private implicit val ec: scala.concurrent.ExecutionContext = directExecutionContext
+
   // Generate a test ECDSA keypair for signing
   private lazy val (testKeyPair, testPubKeyDer) = {
     val kpg = KeyPairGenerator.getInstance("EC")
@@ -55,7 +57,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
         // Read nonce (32 bytes) + payload
         val nonce = new Array[Byte](32)
         in.read(nonce)
-        val payload = in.readAllBytes()
+        val _ = in.readAllBytes() // consume remaining payload
 
         // Send: length(4 BE) || body || signature
         val out = new DataOutputStream(client.getOutputStream)

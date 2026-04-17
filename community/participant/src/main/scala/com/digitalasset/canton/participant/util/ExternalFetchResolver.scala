@@ -189,13 +189,12 @@ class PinnedDataResolver(
     pinnedData: Map[Int, ExternalFetchResponse] // keyed by fetch_index
 ) extends ExternalFetchResolver {
 
-  private var nextIndex = 0
+  private val nextIndex = new java.util.concurrent.atomic.AtomicInteger(0)
 
   override def resolve(descriptor: ExternalFetchDescriptor)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[ExternalFetchResponse] = {
-    val index = nextIndex
-    nextIndex += 1
+    val index = nextIndex.getAndIncrement()
     pinnedData.get(index) match {
       case Some(response) =>
         // Verify the pinned signature before supplying to the engine
