@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{ActionDescription, FullTransactionViewTree}
+import com.digitalasset.canton.discard.Implicits.*
 
 /** Extracts per-party template IDs from a parsed transaction request.
   *
@@ -35,7 +36,7 @@ object TemplateBoundPartyExtractor {
             builder.updateWith(party) {
               case Some(existing) => Some(existing + templateIdStr)
               case None => Some(Set(templateIdStr))
-            }
+            }.discard
           }
 
         case _: ActionDescription.CreateActionDescription =>
@@ -49,7 +50,7 @@ object TemplateBoundPartyExtractor {
               builder.updateWith(party) {
                 case Some(existing) => Some(existing + templateIdStr)
                 case None => Some(Set(templateIdStr))
-              }
+              }.discard
             }
           }
 

@@ -78,6 +78,13 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest with F
           parties: Seq[LfPartyId],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[immutable.Iterable[LfPartyId]] =
         ???
+
+      override def templateBoundPartyConfig(
+          party: LfPartyId
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[
+        com.digitalasset.canton.topology.transaction.TemplateBoundPartyMapping
+      ]] =
+        FutureUnlessShutdown.pure(None)
     }
 
     "allHaveActiveParticipants should yield correct results" in {

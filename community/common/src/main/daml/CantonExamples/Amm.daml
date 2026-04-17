@@ -192,7 +192,7 @@ template Pool
 
         -- Proportional deposit: amountB must match amountA * (reserveB/reserveA)
         let expectedB = tokenA.amount * reserveB / reserveA
-        assertMsg "Amounts not proportional" (abs (tokenB.amount - expectedB) < 0.000001)
+        assertMsg "Amounts not proportional" (absDecimal (tokenB.amount - expectedB) < 0.000001)
 
         -- Transfer tokens to pool
         exercise tokenACid Transfer with newOwner = pool
@@ -245,5 +245,5 @@ template Pool
         return (newPoolCid, outACid, outBCid)
 
 -- Helper: absolute value
-abs : Decimal -> Decimal
-abs x = if x < 0.0 then -x else x
+absDecimal : Decimal -> Decimal
+absDecimal x = if x < 0.0 then -x else x
