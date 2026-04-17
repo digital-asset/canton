@@ -12,11 +12,11 @@ module DA.External where
 
 -- | A request to fetch data from an external TCP service.
 data FetchRequest = FetchRequest
-  { endpoint    : Text        -- TCP endpoint as "host:port"
+  { endpoints   : [Text]      -- fallback chain of endpoints "host:port", tried left-to-right
   , payload     : Text        -- request payload (will be sent as UTF-8 bytes)
   , signerKeys  : [Text]      -- accepted signing public keys (Base64-encoded DER)
   , maxBytes    : Int          -- maximum response size in bytes
-  , timeoutMs   : Int          -- network timeout in milliseconds
+  , timeoutMs   : Int          -- network timeout per endpoint in milliseconds
   }
 
 -- | A response from an external data fetch, pinned to the transaction.
@@ -48,4 +48,4 @@ data FetchResponse = FetchResponse
 -- >     pure price
 fetchExternal : FetchRequest -> Update FetchResponse
 fetchExternal req = primitive @"FetchExternal"
-  req.endpoint req.payload req.signerKeys req.maxBytes req.timeoutMs
+  req.endpoints req.payload req.signerKeys req.maxBytes req.timeoutMs

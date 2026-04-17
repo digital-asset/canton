@@ -2566,7 +2566,8 @@ private[lf] object SBuiltinFun {
     // TODO: move this into the speedy compiler code
     private val mapping: Map[String, compileTime.SExpr] =
       List(
-        "ANSWER" -> SBExperimentalAnswer
+        "ANSWER" -> SBExperimentalAnswer,
+        "FetchExternal" -> SBUFetchExternal,
       ).view.map { case (name, builtin) => name -> compileTime.SEBuiltin(builtin) }.toMap
 
     def apply(name: String): compileTime.SExpr =
