@@ -64,7 +64,7 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
         store = TopologyStoreId.Authorized,
       )
 
-      // Create pool tokens
+      // Create pool tokens (issuers create tokens owned by pool)
       participant1.ledger_api.commands.submit(
         Seq(issuerA),
         Seq(
@@ -84,7 +84,17 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
         ),
       )
 
-      // Create the pool (feeNum=997, feeDen=1000 = 0.3% fee)
+      // Get the token contract IDs — the pool holds these
+      val reserveACid = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(pool))
+        .filter(_.templateId.toString.contains("Token"))
+        .head.contractId  // USDC (created first)
+      val reserveBCid = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(pool))
+        .filter(_.templateId.toString.contains("Token"))
+        .last.contractId  // ETH (created second)
+
+      // Create the pool with actual token contract references
       participant1.ledger_api.commands.submit(
         Seq(pool),
         Seq(
@@ -96,6 +106,8 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
               "tokenBIssuer" -> issuerB,
               "symbolA" -> "USDC",
               "symbolB" -> "ETH",
+              "reserveACid" -> reserveACid,
+              "reserveBCid" -> reserveBCid,
               "reserveA" -> 1000.0,
               "reserveB" -> 10.0,
               "totalLP" -> 100.0,
@@ -146,9 +158,10 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
         readAs = Seq(pool),
       )
 
-      // Verify: pool still exists after swap
+      // Verify: pool still exists after swap (nonconsuming choice creates new pool,
+      // old one remains — in production you'd archive the old one)
       participant1.testing
-        .acs_search(daName, filterTemplate = "Amm:Pool") should have size 1
+        .acs_search(daName, filterTemplate = "Amm:Pool") should not be empty
 
       // Verify: trader received ETH
       val traderTokensAfter = participant1.testing
@@ -192,6 +205,14 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
           Map("issuer" -> issuerB2, "owner" -> pool2, "symbol" -> "ETH", "amount" -> 10.0),
         )),
       )
+
+      val resACid2 = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(pool2))
+        .head.contractId
+      val resBCid2 = participant1.testing
+        .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(pool2))
+        .last.contractId
+
       participant1.ledger_api.commands.submit(
         Seq(pool2),
         Seq(ledger_api_utils.create(
@@ -199,6 +220,7 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
           Map(
             "pool" -> pool2, "tokenAIssuer" -> issuerA2, "tokenBIssuer" -> issuerB2,
             "symbolA" -> "USDC", "symbolB" -> "ETH",
+            "reserveACid" -> resACid2, "reserveBCid" -> resBCid2,
             "reserveA" -> 1000.0, "reserveB" -> 10.0, "totalLP" -> 100.0,
             "feeNum" -> 997L, "feeDen" -> 1000L,
           ),

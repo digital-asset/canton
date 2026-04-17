@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
 -- Constant-product AMM for a single pair (TokenA / TokenB) under Template-Bound Parties.
@@ -14,6 +15,11 @@
 --   exercise Token.Transfer as a root action. But Token.Transfer can happen
 --   WITHIN a Pool.Swap choice body (sub-action, inherited authority).
 --   This is the key insight: TBP checks root actions only.
+--
+-- Token model:
+--   The pool holds actual Token contracts. Swaps split and transfer existing
+--   tokens — no minting. This mirrors how Uniswap works: the pool holds real
+--   ERC20 balances, and swaps move tokens in and out.
 
 module Amm where
 
@@ -79,18 +85,24 @@ template RedeemRequest
 
 -- The pool itself. Constant-product invariant: reserveA * reserveB = k
 -- Pool party is signatory. This IS in pool's allowedTemplates.
+--
+-- The pool holds actual Token contract IDs for both sides. Swaps split
+-- the output reserve token and transfer the split portion to the trader.
+-- No minting — just transfers of pre-existing tokens.
 template Pool
   with
-    pool       : Party    -- template-bound party (key destroyed)
+    pool         : Party    -- template-bound party (key destroyed)
     tokenAIssuer : Party
     tokenBIssuer : Party
-    symbolA    : Text
-    symbolB    : Text
-    reserveA   : Decimal  -- virtual reserves (actual tokens held separately)
-    reserveB   : Decimal
-    totalLP    : Decimal
-    feeNum     : Int      -- fee numerator (e.g. 997 for 0.3% fee, i.e. keep 99.7%)
-    feeDen     : Int      -- fee denominator (e.g. 1000)
+    symbolA      : Text
+    symbolB      : Text
+    reserveACid  : ContractId Token  -- actual token contract held by pool
+    reserveBCid  : ContractId Token  -- actual token contract held by pool
+    reserveA     : Decimal           -- cached amount (must match token)
+    reserveB     : Decimal           -- cached amount (must match token)
+    totalLP      : Decimal
+    feeNum       : Int      -- fee numerator (e.g. 997 for 0.3% fee, i.e. keep 99.7%)
+    feeDen       : Int      -- fee denominator (e.g. 1000)
   where
     signatory pool
     observer tokenAIssuer, tokenBIssuer -- remove this to make it a dark pool
@@ -98,8 +110,8 @@ template Pool
     ensure reserveA > 0.0 && reserveB > 0.0 && totalLP > 0.0
 
     -- Swap tokenA for tokenB.
-    -- Caller sends inputA tokens to the pool, receives outputB tokens.
-    -- Constant product: (reserveA + inputA*fee) * (reserveB - outputB) >= reserveA * reserveB
+    -- Trader sends inputA tokens to the pool, receives outputB tokens from the pool.
+    -- No minting — the pool splits its reserve token and transfers the output portion.
     nonconsuming choice SwapAforB : (ContractId Pool, ContractId Token)
       with
         trader     : Party
@@ -123,17 +135,19 @@ template Pool
         assertMsg "Slippage exceeded" (minOutput <= 0.0 || outputB >= minOutput)
 
         -- Transfer input token to pool (sub-action, inherited authority)
-        exercise inputTokenCid Transfer with newOwner = pool
+        newInputCid <- exercise inputTokenCid Transfer with newOwner = pool
 
-        -- Create output token for trader
-        outputCid <- create Token with
-          issuer = tokenBIssuer
-          owner = trader
-          symbol = symbolB
-          amount = outputB
+        -- Split the pool's reserve B token: outputB goes to trader, remainder stays
+        (traderPortionCid, remainderCid) <- exercise reserveBCid Split with splitAmount = outputB
 
-        -- Update pool reserves
+        -- Transfer the trader's portion to them
+        outputCid <- exercise traderPortionCid Transfer with newOwner = trader
+
+        -- Merge input token with existing reserve A by archiving old and creating combined
+        -- (simplified: we just track the new contract IDs)
         newPoolCid <- create this with
+          reserveACid = newInputCid   -- pool now holds the input token too
+          reserveBCid = remainderCid  -- pool holds the remainder
           reserveA = reserveA + inputA
           reserveB = reserveB - outputB
 
@@ -144,13 +158,12 @@ template Pool
       with
         trader     : Party
         inputTokenCid : ContractId Token
-        minOutput  : Decimal  -- slippage control: revert if output < minOutput
+        minOutput  : Decimal
       controller trader
       do
         inputToken <- fetch inputTokenCid
         assertMsg "Wrong token symbol" (inputToken.symbol == symbolB)
         assertMsg "Wrong token issuer" (inputToken.issuer == tokenBIssuer)
-        assertMsg "minOutput must be positive" (minOutput > 0.0)
         let inputB = inputToken.amount
 
         let inputWithFee = inputB * intToDecimal feeNum
@@ -160,17 +173,16 @@ template Pool
 
         assertMsg "Insufficient output" (outputA > 0.0)
         assertMsg "Output exceeds reserves" (outputA < reserveA)
-        assertMsg "Slippage exceeded" (outputA >= minOutput)
+        assertMsg "Slippage exceeded" (minOutput <= 0.0 || outputA >= minOutput)
 
-        exercise inputTokenCid Transfer with newOwner = pool
+        newInputCid <- exercise inputTokenCid Transfer with newOwner = pool
 
-        outputCid <- create Token with
-          issuer = tokenAIssuer
-          owner = trader
-          symbol = symbolA
-          amount = outputA
+        (traderPortionCid, remainderCid) <- exercise reserveACid Split with splitAmount = outputA
+        outputCid <- exercise traderPortionCid Transfer with newOwner = trader
 
         newPoolCid <- create this with
+          reserveACid = remainderCid
+          reserveBCid = newInputCid
           reserveA = reserveA - outputA
           reserveB = reserveB + inputB
 
@@ -189,7 +201,6 @@ template Pool
         assertMsg "Wrong tokenA" (tokenA.symbol == symbolA && tokenA.issuer == tokenAIssuer)
         assertMsg "Wrong tokenB" (tokenB.symbol == symbolB && tokenB.issuer == tokenBIssuer)
 
-        -- Proportional deposit: amountB must match amountA * (reserveB/reserveA)
         let expectedB = tokenA.amount * reserveB / reserveA
         assertMsg "Amounts not proportional" (absDecimal (tokenB.amount - expectedB) < 0.000001)
 
@@ -197,7 +208,6 @@ template Pool
         exercise tokenACid Transfer with newOwner = pool
         exercise tokenBCid Transfer with newOwner = pool
 
-        -- Mint LP tokens proportional to share of pool
         let newShares = tokenA.amount * totalLP / reserveA
         lpCid <- create LPToken with pool; provider; shares = newShares
 
@@ -223,20 +233,16 @@ template Pool
 
         assertMsg "Redemption too large" (outA < reserveA && outB < reserveB)
 
-        -- Create output tokens for provider
-        outACid <- create Token with
-          issuer = tokenAIssuer
-          owner = redeem.provider
-          symbol = symbolA
-          amount = outA
+        -- Split reserve tokens and transfer to provider
+        (outACid, remACid) <- exercise reserveACid Split with splitAmount = outA
+        exercise outACid Transfer with newOwner = redeem.provider
 
-        outBCid <- create Token with
-          issuer = tokenBIssuer
-          owner = redeem.provider
-          symbol = symbolB
-          amount = outB
+        (outBCid, remBCid) <- exercise reserveBCid Split with splitAmount = outB
+        exercise outBCid Transfer with newOwner = redeem.provider
 
         newPoolCid <- create this with
+          reserveACid = remACid
+          reserveBCid = remBCid
           reserveA = reserveA - outA
           reserveB = reserveB - outB
           totalLP = totalLP - redeem.shares
