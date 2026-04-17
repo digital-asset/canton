@@ -104,11 +104,13 @@ template Pool
       with
         trader     : Party
         inputTokenCid : ContractId Token
+        minOutput  : Decimal  -- slippage control: revert if output < minOutput
       controller trader
       do
         inputToken <- fetch inputTokenCid
         assertMsg "Wrong token symbol" (inputToken.symbol == symbolA)
         assertMsg "Wrong token issuer" (inputToken.issuer == tokenAIssuer)
+        assertMsg "minOutput must be positive" (minOutput > 0.0)
         let inputA = inputToken.amount
 
         -- Calculate output with fee
@@ -119,6 +121,7 @@ template Pool
 
         assertMsg "Insufficient output" (outputB > 0.0)
         assertMsg "Output exceeds reserves" (outputB < reserveB)
+        assertMsg "Slippage exceeded" (outputB >= minOutput)
 
         -- Transfer input token to pool (sub-action, inherited authority)
         exercise inputTokenCid Transfer with newOwner = pool
@@ -142,11 +145,13 @@ template Pool
       with
         trader     : Party
         inputTokenCid : ContractId Token
+        minOutput  : Decimal  -- slippage control: revert if output < minOutput
       controller trader
       do
         inputToken <- fetch inputTokenCid
         assertMsg "Wrong token symbol" (inputToken.symbol == symbolB)
         assertMsg "Wrong token issuer" (inputToken.issuer == tokenBIssuer)
+        assertMsg "minOutput must be positive" (minOutput > 0.0)
         let inputB = inputToken.amount
 
         let inputWithFee = inputB * intToDecimal feeNum
@@ -156,6 +161,7 @@ template Pool
 
         assertMsg "Insufficient output" (outputA > 0.0)
         assertMsg "Output exceeds reserves" (outputA < reserveA)
+        assertMsg "Slippage exceeded" (outputA >= minOutput)
 
         exercise inputTokenCid Transfer with newOwner = pool
 
