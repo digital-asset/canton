@@ -333,17 +333,12 @@ class TransactionConfirmationRequestFactory(
         .leftMap[TransactionConfirmationRequestCreationError](e =>
           RecipientsCreationError(e.message)
         )
-      // Filter out template-bound parties from the informee set for encryption.
-      // TBPs are not real entities — no one reads their views. Excluding them
-      // saves ECIES encryption cost and enables true dark pools.
-      allInformees = lightTreesWithMetadata.flatMap(_.view.informees).toSet
-      templateBoundParties <- EitherT.right[TransactionConfirmationRequestCreationError](
-        allInformees.toList
-          .traverse(party =>
-            cryptoSnapshot.ipsSnapshot.templateBoundPartyConfig(party).map(party -> _)
-          )
-          .map(_.collect { case (party, Some(_)) => party }.toSet)
-      )
+      // NOTE: TBP parties are NOT excluded from the informee set.
+      // The hosting participant needs the encrypted view to execute the Daml
+      // engine and auto-confirm. Canton's encryption is participant-to-participant;
+      // removing the party from informees would remove the hosting participant
+      // from recipients, breaking auto-confirmation and cold standby sync.
+      // Dark pool privacy comes from the OBSERVER list, not informee exclusion.
       viewsToKeyMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
           lightTreesWithMetadata.map {
@@ -351,7 +346,7 @@ class TransactionConfirmationRequestFactory(
               (
                 ViewHashAndRecipients(tvt.viewHash, recipients),
                 parentRecipients,
-                tvt.informees.filterNot(templateBoundParties.contains).toList,
+                tvt.informees.toList,
               )
           },
           parallel,
