@@ -186,6 +186,206 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
         resolver.resolve(descriptor).futureValueUS
       }
     }
+
+    "fail when server closes connection without sending a response" in {
+      val server = new ServerSocket(0)
+      server.setSoTimeout(10000)
+      val port = server.getLocalPort
+      val thread = new Thread(() => {
+        try {
+          val client = server.accept()
+          // Read the request but close immediately without responding
+          client.getInputStream.read(new Array[Byte](32)) // read nonce
+          client.close()
+          server.close()
+        } catch { case _: Exception => server.close() }
+      })
+      thread.setDaemon(true)
+      thread.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      thread.join(10000)
+    }
+
+    "fail when server sends incomplete response (partial body)" in {
+      val server = new ServerSocket(0)
+      server.setSoTimeout(10000)
+      val port = server.getLocalPort
+      val thread = new Thread(() => {
+        try {
+          val client = server.accept()
+          val in = new DataInputStream(client.getInputStream)
+          // Read nonce + ephemeral key + iv + payload
+          in.readFully(new Array[Byte](32)) // nonce
+          val ephLen = in.readUnsignedShort()
+          in.readFully(new Array[Byte](ephLen)) // eph pub key
+          in.readFully(new Array[Byte](12)) // iv
+          Iterator.continually(client.getInputStream.available()).takeWhile(_ > 0).foreach(_ => in.read())
+
+          // Send response length claiming 1000 bytes, but only send 10
+          val out = new DataOutputStream(client.getOutputStream)
+          out.writeInt(1000) // claim 1000 bytes
+          out.write(new Array[Byte](10)) // only send 10
+          out.flush()
+          client.close()
+          server.close()
+        } catch { case _: Exception => server.close() }
+      })
+      thread.setDaemon(true)
+      thread.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      thread.join(10000)
+    }
+
+    "fail when server sends response exceeding maxBytes" in {
+      val server = new ServerSocket(0)
+      server.setSoTimeout(10000)
+      val port = server.getLocalPort
+      val thread = new Thread(() => {
+        try {
+          val client = server.accept()
+          val in = new DataInputStream(client.getInputStream)
+          in.readFully(new Array[Byte](32))
+          val ephLen = in.readUnsignedShort()
+          in.readFully(new Array[Byte](ephLen))
+          in.readFully(new Array[Byte](12))
+          Iterator.continually(client.getInputStream.available()).takeWhile(_ > 0).foreach(_ => in.read())
+
+          // Claim a response larger than maxBytes
+          val out = new DataOutputStream(client.getOutputStream)
+          out.writeInt(999999) // way over limit
+          out.flush()
+          client.close()
+          server.close()
+        } catch { case _: Exception => server.close() }
+      })
+      thread.setDaemon(true)
+      thread.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 100, // small limit
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+
+      thread.join(10000)
+    }
+
+    "fall back to second endpoint when first fails" in {
+      // First endpoint: immediately closes
+      val badServer = new ServerSocket(0)
+      badServer.setSoTimeout(10000)
+      val badPort = badServer.getLocalPort
+      val badThread = new Thread(() => {
+        try {
+          val client = badServer.accept()
+          client.close() // slam the door
+          badServer.close()
+        } catch { case _: Exception => badServer.close() }
+      })
+      badThread.setDaemon(true)
+      badThread.start()
+
+      // Second endpoint: works correctly
+      val body = "fallback_price=99.99".getBytes
+      val (goodPort, goodThread) = startMockServer(
+        body,
+        digest => signData(digest, testKeyPair.getPrivate),
+      )
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$badPort", s"localhost:$goodPort"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      // Should succeed via the second endpoint
+      val response = resolver.resolve(descriptor).futureValueUS
+      response.body shouldBe body
+
+      badThread.join(10000)
+      goodThread.join(10000)
+    }
+
+    "fail with all errors when every endpoint in the chain fails" in {
+      // Two bad endpoints: both close immediately
+      val bad1 = new ServerSocket(0)
+      bad1.setSoTimeout(10000)
+      val port1 = bad1.getLocalPort
+      val t1 = new Thread(() => {
+        try { val c = bad1.accept(); c.close(); bad1.close() }
+        catch { case _: Exception => bad1.close() }
+      })
+      t1.setDaemon(true)
+      t1.start()
+
+      val bad2 = new ServerSocket(0)
+      bad2.setSoTimeout(10000)
+      val port2 = bad2.getLocalPort
+      val t2 = new Thread(() => {
+        try { val c = bad2.accept(); c.close(); bad2.close() }
+        catch { case _: Exception => bad2.close() }
+      })
+      t2.setDaemon(true)
+      t2.start()
+
+      val resolver = new TcpExternalFetchResolver(loggerFactory)
+      val descriptor = ExternalFetchDescriptor(
+        endpoints = Seq(s"localhost:$port1", s"localhost:$port2"),
+        payload = "get_price".getBytes,
+        signerKeys = Seq(testPubKeyDer),
+        maxBytes = 4096,
+        timeoutMs = 10000,
+        nonce = testNonce,
+      )
+
+      val ex = the[Exception] thrownBy {
+        resolver.resolve(descriptor).futureValueUS
+      }
+      ex.getMessage should include("2 endpoints failed")
+
+      t1.join(10000)
+      t2.join(10000)
+    }
   }
 
   "PinnedDataResolver" should {
