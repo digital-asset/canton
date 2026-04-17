@@ -168,6 +168,56 @@ class TemplateBoundPartyRegistrationTest
       }
     }
 
+    "destroyed key cannot sign topology transactions" in {
+      val (signingKey, namespace, localParticipant, _, manager) = mkEnv()
+      val partyId = PartyId(UniqueIdentifier.tryCreate("tbp-destroyed", namespace))
+
+      val registration = new TemplateBoundPartyRegistration(
+        localParticipantId = localParticipant,
+        topologyManager = manager,
+        privateStore = crypto.cryptoPrivateStore,
+        hashOps = crypto.pureCrypto,
+        protocolVersion = testedProtocolVersion,
+        permissionlessTbpHosting = true,
+        loggerFactory = loggerFactory,
+      )
+
+      for {
+        _ <- addRootCert(manager, signingKey)
+        _ <- registration.allocate(partyId, signingKey.fingerprint).valueOrFail("allocate")
+        _ <- registration
+          .finalize(
+            partyId = partyId,
+            hostingParticipantIds = Seq(localParticipant),
+            allowedTemplateIds = Set("com.example:Pool:1.0"),
+            signingKeyFingerprint = signingKey.fingerprint,
+          )
+          .valueOrFail("finalize")
+
+        // Key is destroyed. Try to sign a new topology transaction with it.
+        // This must fail — the key no longer exists in the private store.
+        result <- manager
+          .proposeAndAuthorize(
+            TopologyChangeOp.Replace,
+            PartyToParticipant.tryCreate(
+              partyId = partyId,
+              threshold = PositiveInt.one,
+              participants = Seq(
+                HostingParticipant(localParticipant, ParticipantPermission.Submission)
+              ),
+            ),
+            serial = None,
+            signingKeys = Seq(signingKey.fingerprint),
+            protocolVersion = testedProtocolVersion,
+            expectFullAuthorization = false,
+            waitToBecomeEffective = None,
+          )
+          .value
+      } yield {
+        result.isLeft shouldBe true
+      }
+    }
+
     "templateBoundPartyConfig returns mapping from topology store" in {
       val (signingKey, namespace, localParticipant, store, manager) = mkEnv()
       val partyId = PartyId(UniqueIdentifier.tryCreate("tbp-lookup", namespace))
