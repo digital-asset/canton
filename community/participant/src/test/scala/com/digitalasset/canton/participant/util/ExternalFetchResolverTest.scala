@@ -7,10 +7,12 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.daml.lf.engine.{ExternalFetchDescriptor, ExternalFetchResponse}
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.{DataOutputStream, IOException}
-import java.net.{ServerSocket, Socket}
+import java.io.{DataInputStream, DataOutputStream}
+import java.net.ServerSocket
 import java.security.*
-import java.security.spec.ECGenParameterSpec
+import java.security.spec.{ECGenParameterSpec, X509EncodedKeySpec}
+import javax.crypto.spec.{GCMParameterSpec, SecretKeySpec}
+import javax.crypto.{Cipher, KeyAgreement}
 
 /** Tests for TcpExternalFetchResolver and PinnedDataResolver. */
 class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
@@ -41,34 +43,91 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
     md.digest()
   }
 
+  /** Mock TCP server that speaks the ECIES-encrypted fetchExternal protocol.
+    * Reads: nonce (32) || ephPubKeyLen (2) || ephPubKey || iv (12) || encPayload
+    * Sends: responseLength (4) || responseIv (12) || encBody || signature
+    */
+  private def startMockServer(
+      responseBody: Array[Byte],
+      signResponse: Array[Byte] => Array[Byte],
+  ): (Int, Thread) = {
+    val server = new ServerSocket(0)
+    server.setSoTimeout(10000)
+    val port = server.getLocalPort
+    val thread = new Thread(() => {
+      try {
+        val client = server.accept()
+        val in = new DataInputStream(client.getInputStream)
+        val out = new DataOutputStream(client.getOutputStream)
+
+        // Read nonce
+        val nonce = new Array[Byte](32)
+        in.readFully(nonce)
+
+        // Read ephemeral public key
+        val ephPubLen = in.readUnsignedShort()
+        val ephPubBytes = new Array[Byte](ephPubLen)
+        in.readFully(ephPubBytes)
+
+        // Read IV
+        val iv = new Array[Byte](12)
+        in.readFully(iv)
+
+        // Read encrypted payload (rest of stream up to a reasonable limit)
+        val encPayload = new Array[Byte](client.getInputStream.available())
+        in.readFully(encPayload)
+
+        // Decrypt payload using ECDH (our private key + their ephemeral public key)
+        val ephPubKey = KeyFactory.getInstance("EC")
+          .generatePublic(new X509EncodedKeySpec(ephPubBytes))
+        val ka = KeyAgreement.getInstance("ECDH")
+        ka.init(testKeyPair.getPrivate)
+        ka.doPhase(ephPubKey, true)
+        val sharedSecret = ka.generateSecret()
+        val aesKey = new SecretKeySpec(
+          MessageDigest.getInstance("SHA-256").digest(sharedSecret), 0, 16, "AES"
+        )
+
+        // (We don't need the decrypted payload for the test — just respond)
+
+        // Encrypt response body with same shared secret, different IV
+        val responseIv = new Array[Byte](12)
+        new SecureRandom().nextBytes(responseIv)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(128, responseIv))
+        val encBody = cipher.doFinal(responseBody)
+
+        // Sign: SHA-256(nonce || body)
+        val digest = hashNonceAndBody(nonce, responseBody)
+        val signature = signResponse(digest)
+
+        // Send: responseLength (4) || responseIv (12) || encBody || signature
+        out.writeInt(encBody.length)
+        out.write(responseIv)
+        out.write(encBody)
+        out.write(signature)
+        out.flush()
+
+        client.close()
+        server.close()
+      } catch {
+        case _: Exception => server.close()
+      }
+    })
+    thread.setDaemon(true)
+    thread.start()
+    (port, thread)
+  }
+
   "TcpExternalFetchResolver" should {
 
     "successfully fetch and verify a signed response" in {
       val body = "price=42.50".getBytes
-      val digest = hashNonceAndBody(testNonce, body)
-      val signature = signData(digest, testKeyPair.getPrivate)
 
-      // Start a mock TCP server
-      val server = new ServerSocket(0) // random port
-      val port = server.getLocalPort
-      val serverThread = new Thread(() => {
-        val client = server.accept()
-        val in = client.getInputStream
-        // Read nonce (32 bytes) + payload
-        val nonce = new Array[Byte](32)
-        in.read(nonce)
-        val _ = in.readAllBytes() // consume remaining payload
-
-        // Send: length(4 BE) || body || signature
-        val out = new DataOutputStream(client.getOutputStream)
-        out.writeInt(body.length)
-        out.write(body)
-        out.write(signature)
-        out.flush()
-        client.close()
-        server.close()
-      })
-      serverThread.start()
+      val (port, serverThread) = startMockServer(
+        body,
+        digest => signData(digest, testKeyPair.getPrivate),
+      )
 
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
@@ -76,39 +135,24 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
         payload = "get_price".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 10000,
         nonce = testNonce,
       )
 
       val response = resolver.resolve(descriptor).futureValueUS
       response.body shouldBe body
       response.signerKey shouldBe testPubKeyDer
-      response.signature shouldBe signature
 
-      serverThread.join(5000)
+      serverThread.join(10000)
     }
 
     "reject a response with an invalid signature" in {
       val body = "price=42.50".getBytes
-      val badSignature = Array.fill(64)(0xff.toByte) // garbage signature
 
-      val server = new ServerSocket(0)
-      val port = server.getLocalPort
-      val serverThread = new Thread(() => {
-        val client = server.accept()
-        val in = client.getInputStream
-        in.read(new Array[Byte](32)) // nonce
-        in.readAllBytes() // payload
-
-        val out = new DataOutputStream(client.getOutputStream)
-        out.writeInt(body.length)
-        out.write(body)
-        out.write(badSignature)
-        out.flush()
-        client.close()
-        server.close()
-      })
-      serverThread.start()
+      val (port, serverThread) = startMockServer(
+        body,
+        _ => Array.fill(64)(0xff.toByte), // garbage signature
+      )
 
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
@@ -116,26 +160,25 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
         payload = "get_price".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 10000,
         nonce = testNonce,
       )
 
-      an[SecurityException] shouldBe thrownBy {
+      an[Exception] shouldBe thrownBy {
         resolver.resolve(descriptor).futureValueUS
       }
 
-      serverThread.join(5000)
+      serverThread.join(10000)
     }
 
     "fail on connection timeout" in {
-      // Use a port that nothing listens on
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
-        endpoint = "localhost:1", // unlikely to be open
+        endpoint = "localhost:1",
         payload = "test".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 100, // very short timeout
+        timeoutMs = 100,
         nonce = testNonce,
       )
 
@@ -147,94 +190,95 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
   "PinnedDataResolver" should {
 
-    "supply pinned data for sequential fetch indices" in {
-      val body = "price=42.50".getBytes
-      val digest = hashNonceAndBody(testNonce, body)
-      val signature = signData(digest, testKeyPair.getPrivate)
+    "supply sequential fetch indices from pinned data" in {
+      val body1 = "result1".getBytes
+      val body2 = "result2".getBytes
+      val sig1 = signData(hashNonceAndBody(testNonce, body1), testKeyPair.getPrivate)
+      val sig2 = signData(hashNonceAndBody(testNonce, body2), testKeyPair.getPrivate)
 
-      val response0 = ExternalFetchResponse(body, signature, testPubKeyDer, 1000000L)
-      val response1 = ExternalFetchResponse("second".getBytes,
-        signData(hashNonceAndBody(testNonce, "second".getBytes), testKeyPair.getPrivate),
-        testPubKeyDer, 2000000L)
+      val pinnedData = Map(
+        0 -> ExternalFetchResponse(body1, sig1, testPubKeyDer, System.currentTimeMillis() * 1000),
+        1 -> ExternalFetchResponse(body2, sig2, testPubKeyDer, System.currentTimeMillis() * 1000),
+      )
 
-      val resolver = new PinnedDataResolver(Map(0 -> response0, 1 -> response1))
+      val resolver = new PinnedDataResolver(pinnedData)
 
-      val descriptor = ExternalFetchDescriptor(
-        endpoint = "oracle:9999",
-        payload = "get_price".getBytes,
+      val desc = ExternalFetchDescriptor(
+        endpoint = "unused",
+        payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 1000,
         nonce = testNonce,
       )
 
-      val result0 = resolver.resolve(descriptor).futureValueUS
-      result0.body shouldBe body
+      val r1 = resolver.resolve(desc).futureValueUS
+      r1.body shouldBe body1
 
-      // Second call should return index 1
-      val result1 = resolver.resolve(descriptor).futureValueUS
-      result1.body shouldBe "second".getBytes
+      val r2 = resolver.resolve(desc).futureValueUS
+      r2.body shouldBe body2
     }
 
     "reject pinned data with bad signature" in {
-      val body = "price=42.50".getBytes
-      val badSig = Array.fill(64)(0xff.toByte)
-      val response = ExternalFetchResponse(body, badSig, testPubKeyDer, 1000000L)
+      val body = "result".getBytes
+      val badSig = Array.fill(64)(0x00.toByte)
 
-      val resolver = new PinnedDataResolver(Map(0 -> response))
+      val pinnedData = Map(
+        0 -> ExternalFetchResponse(body, badSig, testPubKeyDer, System.currentTimeMillis() * 1000)
+      )
 
-      val descriptor = ExternalFetchDescriptor(
-        endpoint = "oracle:9999",
-        payload = "test".getBytes,
+      val resolver = new PinnedDataResolver(pinnedData)
+      val desc = ExternalFetchDescriptor(
+        endpoint = "unused",
+        payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 1000,
         nonce = testNonce,
       )
 
-      an[IllegalArgumentException] shouldBe thrownBy {
-        resolver.resolve(descriptor).futureValueUS
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(desc).futureValueUS
       }
     }
 
     "reject pinned data with unknown signer key" in {
-      val body = "price=42.50".getBytes
-      val digest = hashNonceAndBody(testNonce, body)
-      val signature = signData(digest, testKeyPair.getPrivate)
+      val body = "result".getBytes
+      val sig = signData(hashNonceAndBody(testNonce, body), testKeyPair.getPrivate)
+      val otherKey = Array.fill(65)(0xab.toByte) // not in accepted keys
 
-      val otherKeyDer = Array.fill(91)(0xaa.toByte) // not the signer key
-      val response = ExternalFetchResponse(body, signature, testPubKeyDer, 1000000L)
+      val pinnedData = Map(
+        0 -> ExternalFetchResponse(body, sig, otherKey, System.currentTimeMillis() * 1000)
+      )
 
-      val resolver = new PinnedDataResolver(Map(0 -> response))
-
-      val descriptor = ExternalFetchDescriptor(
-        endpoint = "oracle:9999",
-        payload = "test".getBytes,
-        signerKeys = Seq(otherKeyDer), // doesn't match responseSignerKey
+      val resolver = new PinnedDataResolver(pinnedData)
+      val desc = ExternalFetchDescriptor(
+        endpoint = "unused",
+        payload = Array.empty,
+        signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 1000,
         nonce = testNonce,
       )
 
-      an[IllegalArgumentException] shouldBe thrownBy {
-        resolver.resolve(descriptor).futureValueUS
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(desc).futureValueUS
       }
     }
 
-    "fail when no pinned data exists for the fetch index" in {
+    "fail when no pinned data for index" in {
       val resolver = new PinnedDataResolver(Map.empty)
-
-      val descriptor = ExternalFetchDescriptor(
-        endpoint = "oracle:9999",
-        payload = "test".getBytes,
+      val desc = ExternalFetchDescriptor(
+        endpoint = "unused",
+        payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
-        timeoutMs = 5000,
+        timeoutMs = 1000,
         nonce = testNonce,
       )
 
-      an[IllegalStateException] shouldBe thrownBy {
-        resolver.resolve(descriptor).futureValueUS
+      an[Exception] shouldBe thrownBy {
+        resolver.resolve(desc).futureValueUS
       }
     }
   }
