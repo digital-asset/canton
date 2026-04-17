@@ -169,6 +169,134 @@ sealed trait AmmIntegrationTest extends CommunityIntegrationTest with SharedEnvi
       traderTokensAfter should not be empty
     }
 
+    "composability: Router calls Pool.SwapAforB as sub-action — Router NOT in allowedTemplates" in {
+      implicit env =>
+        import env.*
+
+        // The pool from the first test is still active.
+        // Create a Router contract — Router is NOT in the pool's allowedTemplates.
+        // The swap via Router should still work because Router.RouteSwap is the
+        // root action (controlled by trader, not pool), and Pool.SwapAforB is a
+        // sub-action with inherited authority.
+
+        val router = participant1.parties.testing.enable("router")
+        val traderR = participant1.parties.testing.enable("traderR")
+        val issuerR = participant1.parties.testing.enable("issuerR")
+        val poolR = participant1.parties.testing.enable("poolR")
+
+        val ammPkg =
+          participant1.packages.find_by_module("Amm").headOption.value.packageId
+
+        // Register poolR as TBP — only Pool is allowed, NOT Router
+        participant1.topology.transactions.propose(
+          TemplateBoundPartyMapping(
+            partyId = poolR,
+            hostingParticipantIds = Seq(participant1.id),
+            allowedTemplateIds = Set(
+              s"$ammPkg:Amm:Pool",
+              s"$ammPkg:Amm:LPToken",
+              s"$ammPkg:Amm:RedeemRequest",
+            ),
+            signingKeyHash = ByteString.copyFrom(Array.fill(32)(0x00.toByte)),
+          ),
+          store = TopologyStoreId.Authorized,
+        )
+
+        // Create pool tokens
+        val issuerB = participant1.parties.testing.enable("issuerRB")
+        participant1.ledger_api.commands.submit(
+          Seq(issuerR),
+          Seq(ledger_api_utils.create(
+            ammPkg, "Amm", "Token",
+            Map("issuer" -> issuerR, "owner" -> poolR, "symbol" -> "USDC", "amount" -> 1000.0),
+          )),
+        )
+        participant1.ledger_api.commands.submit(
+          Seq(issuerB),
+          Seq(ledger_api_utils.create(
+            ammPkg, "Amm", "Token",
+            Map("issuer" -> issuerB, "owner" -> poolR, "symbol" -> "ETH", "amount" -> 10.0),
+          )),
+        )
+
+        val resACid = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(poolR))
+          .head.contractId
+        val resBCid = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(poolR))
+          .last.contractId
+
+        participant1.ledger_api.commands.submit(
+          Seq(poolR),
+          Seq(ledger_api_utils.create(
+            ammPkg, "Amm", "Pool",
+            Map(
+              "pool" -> poolR, "tokenAIssuer" -> issuerR, "tokenBIssuer" -> issuerB,
+              "symbolA" -> "USDC", "symbolB" -> "ETH",
+              "reserveACid" -> resACid, "reserveBCid" -> resBCid,
+              "reserveA" -> 1000.0, "reserveB" -> 10.0, "totalLP" -> 100.0,
+              "feeNum" -> 997L, "feeDen" -> 1000L,
+            ),
+          )),
+        )
+
+        val poolCidR = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Pool", filterStakeholder = Some(poolR))
+          .loneElement.contractId
+
+        // Create the Router contract
+        participant1.ledger_api.commands.submit(
+          Seq(router),
+          Seq(ledger_api_utils.create(
+            ammPkg, "Amm", "Router",
+            Map("operator" -> router),
+          )),
+        )
+
+        val routerCid = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Router")
+          .loneElement.contractId
+
+        // Create trader's USDC
+        participant1.ledger_api.commands.submit(
+          Seq(issuerR),
+          Seq(ledger_api_utils.create(
+            ammPkg, "Amm", "Token",
+            Map("issuer" -> issuerR, "owner" -> traderR, "symbol" -> "USDC", "amount" -> 100.0),
+          )),
+        )
+
+        val traderTokenCid = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(traderR))
+          .loneElement.contractId
+
+        // THE COMPOSABILITY TEST: exercise Router.RouteSwap.
+        // Router is NOT in poolR's allowedTemplates.
+        // Root action = Router.RouteSwap (controlled by trader, not pool)
+        // Sub-action = Pool.SwapAforB (inherited authority)
+        // Pool is auto-confirmed because it's TBP and the extractor only
+        // sees root actions — pool isn't an actor on the root action.
+        participant1.ledger_api.commands.submit(
+          Seq(traderR),
+          Seq(ledger_api_utils.exercise(
+            ammPkg, "Amm", "Router", "RouteSwap",
+            Map(
+              "trader" -> traderR,
+              "poolCid" -> poolCidR,
+              "inputTokenCid" -> traderTokenCid,
+              "minOutput" -> 0.0,
+            ),
+            routerCid.coid,
+          )),
+          readAs = Seq(poolR, router),
+        )
+
+        // Verify: trader received ETH via the router
+        val traderTokensAfter = participant1.testing
+          .acs_search(daName, filterTemplate = "Amm:Token", filterStakeholder = Some(traderR))
+        traderTokensAfter should not be empty
+    }
+
     "regular pool operator can drain via Token.Transfer — TBP prevents this" in { implicit env =>
       import env.*
 

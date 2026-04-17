@@ -249,6 +249,28 @@ template Pool
 
         return (newPoolCid, outACid, outBCid)
 
+-- A Router contract that composes with the AMM pool via sub-actions.
+-- Router is NOT in the pool's allowedTemplates. This tests that
+-- composability works: the router's choice is the root action, the
+-- pool exercise is a sub-action with inherited authority.
+template Router
+  with
+    operator : Party
+  where
+    signatory operator
+
+    -- Route a swap through a pool. The root action is Router.RouteSwap,
+    -- NOT Pool.SwapAforB. The pool exercise is a sub-action.
+    nonconsuming choice RouteSwap : (ContractId Pool, ContractId Token)
+      with
+        trader       : Party
+        poolCid      : ContractId Pool
+        inputTokenCid : ContractId Token
+        minOutput    : Decimal
+      controller trader
+      do
+        exercise poolCid SwapAforB with trader; inputTokenCid; minOutput
+
 -- Helper: absolute value
 absDecimal : Decimal -> Decimal
 absDecimal x = if x < 0.0 then -x else x
