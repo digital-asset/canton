@@ -464,6 +464,17 @@ final class StoreBackedCommandInterpreter(
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
+
+        case ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
+          val externalCallResult = storedResult
+            .map[Either[ExternalCallError, String]](Right(_))
+            .getOrElse(Left(ExternalCallError(501, "External calls not supported", None)))
+          resolveStep(
+            Tracked.value(
+              metrics.execution.engineRunning,
+              trackSyncExecution(interpretationTimeNanos)(resume(externalCallResult)),
+            )
+          )
       }
 
     resolveStep(result).thereafter { _ =>

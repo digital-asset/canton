@@ -546,6 +546,15 @@ final class LfValueTranslation(
 
           case LfEngine.ResultPrefetch(_, _, resume) =>
             goAsync(resume())
+
+          case LfEngine.ResultNeedExternalCall(_, _, _, _, storedResult, resume) =>
+            storedResult match {
+              case Some(result) => goAsync(resume(Right(result)))
+              case None =>
+                Future.failed(
+                  new IllegalStateException("External call result not available during view computation")
+                )
+            }
         }
 
       Future(engine.computeInterfaceView(templateId, value, interfaceId))
