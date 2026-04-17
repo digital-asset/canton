@@ -1052,9 +1052,46 @@ class GrpcPartyManagementService(
       request.waitForActivationTimeout,
     )(ledgerEnd, synchronizerIds)
 
-  override def registerTemplateBoundParty(
-      request: v30.RegisterTemplateBoundPartyRequest
-  ): Future[v30.RegisterTemplateBoundPartyResponse] = {
+  override def allocateTemplateBoundParty(
+      request: v30.AllocateTemplateBoundPartyRequest
+  ): Future[v30.AllocateTemplateBoundPartyResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val registration = templateBoundPartyRegistrationO.getOrElse(
+      throw Status.UNIMPLEMENTED
+        .withDescription("Template-bound party registration is not configured on this participant")
+        .asRuntimeException()
+    )
+
+    val partyId = PartyId
+      .fromProtoPrimitive(request.partyId, "party_id")
+      .valueOr(e =>
+        throw Status.INVALID_ARGUMENT.withDescription(e.message).asRuntimeException()
+      )
+
+    val signingKeyFingerprint = Fingerprint
+      .fromProtoPrimitive(request.signingKeyFingerprint)
+      .valueOr(e =>
+        throw Status.INVALID_ARGUMENT
+          .withDescription(s"Invalid signing_key_fingerprint: ${e.message}")
+          .asRuntimeException()
+      )
+
+    registration
+      .allocate(partyId, signingKeyFingerprint)
+      .valueOr(e => throw Status.INTERNAL.withDescription(e).asRuntimeException())
+      .map(pid =>
+        v30.AllocateTemplateBoundPartyResponse(
+          partyId = partyId.toProtoPrimitive,
+          participantUid = pid.uid.toProtoPrimitive,
+        )
+      )
+      .onShutdown(throw Status.ABORTED.withDescription("Shutting down").asRuntimeException())
+  }
+
+  override def finalizeTemplateBoundParty(
+      request: v30.FinalizeTemplateBoundPartyRequest
+  ): Future[v30.FinalizeTemplateBoundPartyResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val registration = templateBoundPartyRegistrationO.getOrElse(
@@ -1074,6 +1111,11 @@ class GrpcPartyManagementService(
         .withDescription("allowed_template_ids must not be empty")
         .asRuntimeException()
 
+    if (request.hostingParticipantUids.isEmpty)
+      throw Status.INVALID_ARGUMENT
+        .withDescription("hosting_participant_uids must not be empty")
+        .asRuntimeException()
+
     val signingKeyFingerprint = Fingerprint
       .fromProtoPrimitive(request.signingKeyFingerprint)
       .valueOr(e =>
@@ -1082,26 +1124,20 @@ class GrpcPartyManagementService(
           .asRuntimeException()
       )
 
-    // If hosting_participant_uids is specified, use those. Otherwise default to this participant.
-    val hostingParticipantIds =
-      if (request.hostingParticipantUids.nonEmpty) {
-        request.hostingParticipantUids.map(uid =>
-          ParticipantId(
-            UniqueIdentifier
-              .fromProtoPrimitive(uid, "hosting_participant_uids")
-              .valueOr(e =>
-                throw Status.INVALID_ARGUMENT
-                  .withDescription(s"Invalid participant UID: ${e.message}")
-                  .asRuntimeException()
-              )
+    val hostingParticipantIds = request.hostingParticipantUids.map(uid =>
+      ParticipantId(
+        UniqueIdentifier
+          .fromProtoPrimitive(uid, "hosting_participant_uids")
+          .valueOr(e =>
+            throw Status.INVALID_ARGUMENT
+              .withDescription(s"Invalid participant UID: ${e.message}")
+              .asRuntimeException()
           )
-        )
-      } else {
-        Seq(participantId)
-      }
+      )
+    )
 
     registration
-      .register(
+      .finalize(
         partyId = partyId,
         hostingParticipantIds = hostingParticipantIds,
         allowedTemplateIds = request.allowedTemplateIds.toSet,
@@ -1109,9 +1145,10 @@ class GrpcPartyManagementService(
       )
       .valueOr(e => throw Status.INTERNAL.withDescription(e).asRuntimeException())
       .map(mapping =>
-        v30.RegisterTemplateBoundPartyResponse(
+        v30.FinalizeTemplateBoundPartyResponse(
           partyId = mapping.partyId.toProtoPrimitive,
           keyDestroyed = true,
+          hostingParticipantCount = mapping.hostingParticipantIds.size,
         )
       )
       .onShutdown(throw Status.ABORTED.withDescription("Shutting down").asRuntimeException())

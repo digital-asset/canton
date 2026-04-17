@@ -104,20 +104,32 @@ service PartyManagementService {
   // - The participant must be connected to the requested synchronizer.
   rpc ClearPartyOnboardingFlag(ClearPartyOnboardingFlagRequest) returns (ClearPartyOnboardingFlagResponse);
 
-  // Register a template-bound party.
+  // Allocate a template-bound party on this participant.
   //
-  // Creates a TemplateBoundPartyMapping topology transaction that locks the party
-  // to a fixed set of allowed Daml templates, then destroys the party's signing key.
-  // After registration, the hosting participant auto-confirms transactions where the
-  // party acts, provided all actions are on allowed templates.
+  // Creates the PartyToParticipant mapping for this participant. Call this on
+  // each participant that should host the TBP. If permissionless-tbp-hosting
+  // is enabled, no prior approval is needed. If not, the standard topology
+  // proposal/accept flow applies.
   //
-  // This operation is irreversible: the signing key is permanently destroyed and the
-  // allowed template set is immutable.
+  // This is step 1 of the TBP registration flow. Call on each participant,
+  // then call FinalizeTemplateBoundParty on the node with the signing key.
+  //
+  // Idempotent: safe to call multiple times.
+  rpc AllocateTemplateBoundParty(AllocateTemplateBoundPartyRequest) returns (AllocateTemplateBoundPartyResponse);
+
+  // Finalize a template-bound party registration.
+  //
+  // Verifies all hosting participants have live PartyToParticipant mappings,
+  // submits the TemplateBoundPartyMapping topology transaction, then
+  // PERMANENTLY DESTROYS the party's signing key.
+  //
+  // This operation is irreversible. Call only after all participants are
+  // confirmed hosting via AllocateTemplateBoundParty or manual topology setup.
   //
   // Prerequisites:
-  // - The party must already be allocated on this participant.
-  // - The party must have a signing key.
-  rpc RegisterTemplateBoundParty(RegisterTemplateBoundPartyRequest) returns (RegisterTemplateBoundPartyResponse);
+  // - The signing key must exist on this participant.
+  // - All listed hosting participants must have a live PartyToParticipant.
+  rpc FinalizeTemplateBoundParty(FinalizeTemplateBoundPartyRequest) returns (FinalizeTemplateBoundPartyResponse);
 }
 
 message AddPartyAsyncRequest {
@@ -461,10 +473,30 @@ message ClearPartyOnboardingFlagResponse {
   optional google.protobuf.Timestamp earliest_retry_timestamp = 2;
 }
 
-message RegisterTemplateBoundPartyRequest {
+message AllocateTemplateBoundPartyRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
-  // The party to register as template-bound.
+  // The party to allocate on this participant.
+  // Required
+  string party_id = 1;
+
+  // Fingerprint of the party's signing key (used to co-sign the PartyToParticipant).
+  // Required
+  string signing_key_fingerprint = 2;
+}
+
+message AllocateTemplateBoundPartyResponse {
+  // The party ID that was allocated.
+  string party_id = 1;
+
+  // The participant UID that is now hosting the party.
+  string participant_uid = 2;
+}
+
+message FinalizeTemplateBoundPartyRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The party to finalize as template-bound.
   // Required
   string party_id = 1;
 
@@ -474,22 +506,23 @@ message RegisterTemplateBoundPartyRequest {
   repeated string allowed_template_ids = 2;
 
   // Fingerprint of the party's signing key.
-  // This key will be used to sign the topology transaction and then destroyed.
+  // This key will be used to sign the topology transaction and then DESTROYED.
   // Required
   string signing_key_fingerprint = 3;
 
   // UIDs of all participants that should host this TBP.
-  // Each must already have a live PartyToParticipant mapping for this party
-  // (set up independently before registration). If empty, defaults to this
-  // participant only. The key is only destroyed once all listed participants
-  // are verified as hosting the party.
+  // Each must already have a live PartyToParticipant mapping.
+  // Required (at least one)
   repeated string hosting_participant_uids = 4;
 }
 
-message RegisterTemplateBoundPartyResponse {
+message FinalizeTemplateBoundPartyResponse {
   // The party ID that was registered as template-bound.
   string party_id = 1;
 
   // Whether the signing key was successfully destroyed.
   bool key_destroyed = 2;
+
+  // Number of hosting participants verified.
+  int32 hosting_participant_count = 3;
 }

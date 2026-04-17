@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, HashOps}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
@@ -25,24 +24,22 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
 
-/** Orchestrates template-bound party registration:
+/** Two-phase template-bound party registration.
   *
-  *   1. Verify signing key exists
-  *   2. Verify all hosting participants have live PartyToParticipant mappings
-  *      (or allocate on this participant if permissionless mode is enabled)
-  *   3. Submit the TemplateBoundPartyMapping topology transaction
-  *   4. Destroy the signing private key — point of no return
+  * Phase 1 (allocate): Called on each hosting participant independently.
+  *   Creates the PartyToParticipant mapping. Each participant can be
+  *   permissionless (auto-allocate) or permissioned (standard proposal/accept).
   *
-  * Multi-participant flow:
-  *   - The caller sets up PartyToParticipant on each hosting participant
-  *     independently (standard Canton topology proposal/accept)
-  *   - Then calls register() with all participant IDs
-  *   - Registration verifies every participant is hosting before proceeding
-  *   - Key is only destroyed once the TBP mapping is accepted
+  * Phase 2 (finalize): Called once, on the node holding the signing key.
+  *   Verifies all participants are hosting, submits the TemplateBoundPartyMapping,
+  *   and destroys the signing key.
   *
-  * Single-participant permissionless flow:
-  *   - If permissionlessTbpHosting is enabled and only this participant is
-  *     listed, automatically create the PartyToParticipant mapping
+  * Example multicloud flow:
+  *   1. allocate(partyId, keyFp) on participant A (permissionless) — instant
+  *   2. allocate(partyId, keyFp) on participant B (permissionless) — instant
+  *   3. Manual proposal/accept on participant C (permissioned)
+  *   4. Manual proposal/accept on participant D (permissioned)
+  *   5. finalize(partyId, [A,B,C,D], templates, keyFp) on A — verify, submit, destroy
   */
 class TemplateBoundPartyRegistration(
     localParticipantId: ParticipantId,
@@ -55,7 +52,64 @@ class TemplateBoundPartyRegistration(
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
-  def register(
+  /** Phase 1: Allocate the party on this participant.
+    *
+    * Creates a PartyToParticipant mapping. If permissionlessTbpHosting is
+    * enabled, this succeeds immediately. Otherwise falls through to the
+    * standard topology authorization (caller must have appropriate keys).
+    *
+    * Idempotent: safe to call multiple times.
+    */
+  def allocate(
+      partyId: PartyId,
+      signingKeyFingerprint: Fingerprint,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, ParticipantId] = {
+    if (!permissionlessTbpHosting) {
+      EitherT.leftT[FutureUnlessShutdown, ParticipantId](
+        s"Permissionless TBP hosting is not enabled on participant $localParticipantId. " +
+          s"Use the standard topology proposal/accept flow to allocate the party."
+      )
+    } else {
+      val partyToParticipant = PartyToParticipant.tryCreate(
+        partyId = partyId,
+        threshold = PositiveInt.one,
+        participants = Seq(
+          HostingParticipant(localParticipantId, ParticipantPermission.Confirmation)
+        ),
+      )
+
+      topologyManager
+        .proposeAndAuthorize(
+          op = TopologyChangeOp.Replace,
+          mapping = partyToParticipant,
+          serial = None,
+          signingKeys = Seq(signingKeyFingerprint),
+          protocolVersion = protocolVersion,
+          expectFullAuthorization = true,
+          waitToBecomeEffective = None,
+        )
+        .bimap(
+          e => s"Failed to allocate party on participant: $e",
+          _ => {
+            logger.info(
+              s"Allocated template-bound party $partyId on participant $localParticipantId"
+            )
+            localParticipantId
+          },
+        )
+    }
+  }
+
+  /** Phase 2: Finalize the TBP registration.
+    *
+    * Verifies all hosting participants have live PartyToParticipant mappings,
+    * submits the TemplateBoundPartyMapping topology transaction, and
+    * DESTROYS the signing key.
+    *
+    * Call only after all participants are confirmed hosting.
+    * This is the point of no return.
+    */
+  def finalize(
       partyId: PartyId,
       hostingParticipantIds: Seq[ParticipantId],
       allowedTemplateIds: Set[String],
@@ -89,20 +143,8 @@ class TemplateBoundPartyRegistration(
         s"Signing key $signingKeyFingerprint does not exist in the private store",
       )
 
-      // Step 2: If permissionless hosting is enabled, auto-allocate on this participant.
-      // Then verify all OTHER participants are already hosting.
-      _ <- if (permissionlessTbpHosting && hostingParticipantIds.contains(localParticipantId)) {
-        ensurePartyHosted(partyId, localParticipantId, signingKeyFingerprint)
-      } else {
-        EitherT.rightT[FutureUnlessShutdown, String](())
-      }
-      remoteParticipants = hostingParticipantIds.filterNot(_ == localParticipantId)
-      _ <- if (remoteParticipants.nonEmpty || !permissionlessTbpHosting) {
-        val toVerify = if (permissionlessTbpHosting) remoteParticipants else hostingParticipantIds
-        verifyAllParticipantsHosting(partyId, toVerify)
-      } else {
-        EitherT.rightT[FutureUnlessShutdown, String](())
-      }
+      // Step 2: Verify ALL participants are hosting this party
+      _ <- verifyAllParticipantsHosting(partyId, hostingParticipantIds)
 
       // Step 3: Submit the TemplateBoundPartyMapping topology transaction
       _ <- topologyManager
@@ -136,10 +178,6 @@ class TemplateBoundPartyRegistration(
     } yield mapping
   }
 
-  /** Verify that every listed participant has a live PartyToParticipant mapping
-    * for this party. If any participant is not hosting, reject before we
-    * destroy the key.
-    */
   private def verifyAllParticipantsHosting(
       partyId: PartyId,
       requiredParticipants: Seq[ParticipantId],
@@ -169,40 +207,9 @@ class TemplateBoundPartyRegistration(
         s"The following participants are not yet hosting party $partyId: " +
           s"${missingParticipants.mkString(", ")}. " +
           s"Each participant must have a live PartyToParticipant mapping before " +
-          s"the key can be destroyed. Set up hosting on each participant first.",
+          s"the key can be destroyed. Call AllocateTemplateBoundParty on each " +
+          s"participant first, or use the standard topology proposal/accept flow.",
       )
     } yield ()
-  }
-
-  /** Ensure the party is hosted on this participant via a PartyToParticipant mapping.
-    * Used in permissionless single-participant mode.
-    */
-  private def ensurePartyHosted(
-      partyId: PartyId,
-      participantId: ParticipantId,
-      signingKeyFingerprint: Fingerprint,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val partyToParticipant = PartyToParticipant.tryCreate(
-      partyId = partyId,
-      threshold = PositiveInt.one,
-      participants = Seq(
-        HostingParticipant(participantId, ParticipantPermission.Confirmation)
-      ),
-    )
-
-    topologyManager
-      .proposeAndAuthorize(
-        op = TopologyChangeOp.Replace,
-        mapping = partyToParticipant,
-        serial = None,
-        signingKeys = Seq(signingKeyFingerprint),
-        protocolVersion = protocolVersion,
-        expectFullAuthorization = true,
-        waitToBecomeEffective = None,
-      )
-      .bimap(
-        e => s"Failed to allocate party on participant: $e",
-        _ => (),
-      )
   }
 }
