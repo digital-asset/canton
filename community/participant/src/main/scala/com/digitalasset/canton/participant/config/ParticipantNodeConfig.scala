@@ -154,8 +154,18 @@ object ParticipantNodeConfig {
   object DeprecatedImplicits extends ParticipantNodeConfigDeprecationsImplicits
 }
 
-/** Participant features configuration */
-final case class ParticipantFeaturesConfig()
+/** Participant features configuration
+  *
+  * @param permissionlessTbpHosting
+  *   When enabled, the participant automatically co-signs PartyToParticipant
+  *   proposals from any party that wants to be hosted here as a template-bound
+  *   party. This makes the participant an open compute platform — anyone can
+  *   deploy a TBP without prior approval. The participant cannot touch TBP
+  *   assets (key is destroyed) so permissionless hosting carries no custody risk.
+  */
+final case class ParticipantFeaturesConfig(
+    permissionlessTbpHosting: Boolean = false,
+)
 
 /** Configuration to connect the console to a participant running remotely.
   *

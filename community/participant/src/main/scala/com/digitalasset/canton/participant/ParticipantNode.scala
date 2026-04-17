@@ -753,6 +753,7 @@ class ParticipantNodeBootstrap(
             privateStore = crypto.cryptoPrivateStore,
             hashOps = crypto.pureCrypto,
             protocolVersion = ProtocolVersion.latest,
+            permissionlessTbpHosting = config.features.permissionlessTbpHosting,
             loggerFactory = loggerFactory,
           )
 
