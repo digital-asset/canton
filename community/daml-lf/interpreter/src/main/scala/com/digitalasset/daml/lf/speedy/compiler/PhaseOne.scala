@@ -386,6 +386,8 @@ private[lf] final class PhaseOne(
       case BCoerceContractId => compileIdentity(env)
       case BTextMapEmpty => SEValue.EmptyTextMap
       case BGenMapEmpty => SEValue.EmptyGenMap
+      case BExternalCall =>
+        throw CompilationError("BExternalCall is not supported by the interpreter on this branch")
 
       case _ =>
         SEBuiltin(bf match {
@@ -495,7 +497,7 @@ private[lf] final class PhaseOne(
           case BTypeRepTyConName => SBTypeRepTyConName
 
           // Implemented using SExpr
-          case BCoerceContractId | BTextMapEmpty | BGenMapEmpty =>
+          case BCoerceContractId | BTextMapEmpty | BGenMapEmpty | BExternalCall =>
             throw CompilationError(s"unexpected $bf")
 
           case BAnyExceptionMessage => SBAnyExceptionMessage
