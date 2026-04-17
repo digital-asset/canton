@@ -774,7 +774,7 @@ class Engine(
               }
 
             case Question.Update.NeedExternalFetch(
-                  endpoint,
+                  endpoints,
                   payload,
                   signerKeys,
                   maxBytes,
@@ -783,7 +783,7 @@ class Engine(
                   callback,
                 ) =>
               ResultNeedExternalFetch(
-                ExternalFetchDescriptor(endpoint, payload, signerKeys, maxBytes, timeoutMs, nonce),
+                ExternalFetchDescriptor(endpoints, payload, signerKeys, maxBytes, timeoutMs, nonce),
                 { (response: ExternalFetchResponse) =>
                   callback(Question.Update.ExternalFetchResult(
                     response.body,

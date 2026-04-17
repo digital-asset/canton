@@ -411,7 +411,7 @@ class DAMLe(
             case None =>
               // No resolver available — external fetches not supported in this context
               FutureUnlessShutdown.failed(new IllegalStateException(
-                s"External fetch not supported: no resolver configured for endpoint ${descriptor.endpoint}"
+                s"External fetch not supported: no resolver configured for endpoint ${descriptor.endpoints.mkString(", ")}"
               ))
           }
       }

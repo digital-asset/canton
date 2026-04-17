@@ -11,7 +11,7 @@ import org.scalatest.wordspec.AnyWordSpec
 class ResultNeedExternalFetchTest extends AnyWordSpec with Matchers {
 
   private val descriptor = ExternalFetchDescriptor(
-    endpoint = "oracle.example.com:9999",
+    endpoints = Seq("oracle.example.com:9999"),
     payload = "get_price".getBytes,
     signerKeys = Seq("key1".getBytes),
     maxBytes = 1024,
@@ -68,7 +68,7 @@ class ResultNeedExternalFetchTest extends AnyWordSpec with Matchers {
 
       result match {
         case ResultNeedExternalFetch(desc, resume) =>
-          desc.endpoint shouldBe "oracle.example.com:9999"
+          desc.endpoints shouldBe Seq("oracle.example.com:9999")
           resume(response) shouldBe ResultDone(5)
         case other =>
           fail(s"Expected ResultNeedExternalFetch, got $other")
@@ -83,7 +83,7 @@ class ResultNeedExternalFetchTest extends AnyWordSpec with Matchers {
 
       result match {
         case ResultNeedExternalFetch(desc, _) =>
-          desc.endpoint shouldBe "oracle.example.com:9999"
+          desc.endpoints shouldBe Seq("oracle.example.com:9999")
           desc.maxBytes shouldBe 1024
           desc.timeoutMs shouldBe 5000
           desc.nonce.length shouldBe 32
@@ -99,7 +99,7 @@ class ResultNeedExternalFetchTest extends AnyWordSpec with Matchers {
       )
 
       val consumed = result.consume(
-        externalFetches = { case d if d.endpoint == "oracle.example.com:9999" => response },
+        externalFetches = { case d if d.endpoints.contains("oracle.example.com:9999") => response },
       )
 
       consumed shouldBe Right("42.50")

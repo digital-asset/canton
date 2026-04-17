@@ -2596,15 +2596,20 @@ private[lf] object SBuiltinFun {
     * See CIP-draft-external-data-pinning.
     */
   final case object SBUFetchExternal extends UpdateBuiltin(5) {
-    // args: endpoint(Text), payload(ByteString), signerKeys(List[ByteString]),
+    // args: endpoints(List[Text]), payload(ByteString), signerKeys(List[ByteString]),
     //       maxBytes(Int), timeoutMs(Int)
     override protected def executeUpdate(
         args: ArraySeq[SValue],
         machine: UpdateMachine,
     ): Control[Question.Update] = {
-      val endpoint = args(0) match {
-        case SValue.SText(s) => s
-        case v => throw SErrorCrash("SBUFetchExternal", s"expected Text for endpoint, got $v")
+      val endpoints = args(0) match {
+        case SValue.SList(lst) =>
+          lst.toImmArray.toSeq.map {
+            case SValue.SText(s) => s
+            case v => throw SErrorCrash("SBUFetchExternal", s"expected Text in endpoints list, got $v")
+          }
+        case SValue.SText(s) => Seq(s) // single endpoint for backwards compat
+        case v => throw SErrorCrash("SBUFetchExternal", s"expected List or Text for endpoints, got $v")
       }
       val payload = args(1) match {
         case SValue.SText(s) => s.getBytes("UTF-8")
@@ -2642,7 +2647,7 @@ private[lf] object SBuiltinFun {
 
       Control.Question(
         Question.Update.NeedExternalFetch(
-          endpoint = endpoint,
+          endpoints = endpoints,
           payload = payload,
           signerKeys = signerKeys,
           maxBytes = maxBytes,

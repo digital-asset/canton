@@ -469,7 +469,7 @@ final class StoreBackedCommandInterpreter(
           // External fetch handling is done at the DAMLe/participant level,
           // not here in the ledger API command interpreter.
           FutureUnlessShutdown.failed(new IllegalStateException(
-            s"Unresolved external fetch for ${descriptor.endpoint}"
+            s"Unresolved external fetch for ${descriptor.endpoints.mkString(", ")}"
           ))
       }
 

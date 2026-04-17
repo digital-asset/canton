@@ -46,12 +46,43 @@ class TcpExternalFetchResolver(
       traceContext: TraceContext
   ): FutureUnlessShutdown[ExternalFetchResponse] =
     FutureUnlessShutdown.outcomeF(scala.concurrent.Future {
-      executeFetch(descriptor)
+      tryEndpoints(descriptor, descriptor.endpoints.toList, errors = Nil)
     })
 
-  private def executeFetch(descriptor: ExternalFetchDescriptor): ExternalFetchResponse = {
-    val parts = descriptor.endpoint.split(":", 2)
-    require(parts.length == 2, s"Invalid endpoint format: ${descriptor.endpoint}, expected host:port")
+  /** Try endpoints left-to-right. First success wins. If all fail, throw with all errors. */
+  @scala.annotation.tailrec
+  private def tryEndpoints(
+      descriptor: ExternalFetchDescriptor,
+      remaining: List[String],
+      errors: List[(String, Throwable)],
+  ): ExternalFetchResponse =
+    remaining match {
+      case Nil =>
+        val msg = errors.map { case (ep, ex) => s"  $ep: ${ex.getMessage}" }.mkString("\n")
+        throw new java.io.IOException(
+          s"All ${descriptor.endpoints.size} endpoints failed:\n$msg"
+        )
+      case endpoint :: rest =>
+        try {
+          logger.debug(s"Trying endpoint $endpoint (${rest.size} fallbacks remaining)")(
+            com.digitalasset.canton.tracing.TraceContext.empty
+          )
+          executeFetchFromEndpoint(descriptor, endpoint)
+        } catch {
+          case ex: Exception =>
+            logger.info(s"Endpoint $endpoint failed: ${ex.getMessage}, trying next")(
+              com.digitalasset.canton.tracing.TraceContext.empty
+            )
+            tryEndpoints(descriptor, rest, errors :+ (endpoint -> ex))
+        }
+    }
+
+  private def executeFetchFromEndpoint(
+      descriptor: ExternalFetchDescriptor,
+      endpoint: String,
+  ): ExternalFetchResponse = {
+    val parts = endpoint.split(":", 2)
+    require(parts.length == 2, s"Invalid endpoint format: $endpoint, expected host:port")
     val host = parts(0)
     val port = parts(1).toInt
 
@@ -166,7 +197,7 @@ class TcpExternalFetchResolver(
         .find(_._2)
         .getOrElse(
           throw new SecurityException(
-            s"No accepted signer key verified the response signature for ${descriptor.endpoint}"
+            s"No accepted signer key verified the response signature for ${descriptor.endpoints.mkString(", ")}"
           )
         )
 

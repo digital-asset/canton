@@ -131,7 +131,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
-        endpoint = s"localhost:$port",
+        endpoints = Seq(s"localhost:$port"),
         payload = "get_price".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -156,7 +156,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
-        endpoint = s"localhost:$port",
+        endpoints = Seq(s"localhost:$port"),
         payload = "get_price".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -174,7 +174,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
     "fail on connection timeout" in {
       val resolver = new TcpExternalFetchResolver(loggerFactory)
       val descriptor = ExternalFetchDescriptor(
-        endpoint = "localhost:1",
+        endpoints = Seq("localhost:1"),
         payload = "test".getBytes,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -204,7 +204,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
       val resolver = new PinnedDataResolver(pinnedData)
 
       val desc = ExternalFetchDescriptor(
-        endpoint = "unused",
+        endpoints = Seq("unused"),
         payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -229,7 +229,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
       val resolver = new PinnedDataResolver(pinnedData)
       val desc = ExternalFetchDescriptor(
-        endpoint = "unused",
+        endpoints = Seq("unused"),
         payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -253,7 +253,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
 
       val resolver = new PinnedDataResolver(pinnedData)
       val desc = ExternalFetchDescriptor(
-        endpoint = "unused",
+        endpoints = Seq("unused"),
         payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,
@@ -269,7 +269,7 @@ class ExternalFetchResolverTest extends AnyWordSpec with BaseTest {
     "fail when no pinned data for index" in {
       val resolver = new PinnedDataResolver(Map.empty)
       val desc = ExternalFetchDescriptor(
-        endpoint = "unused",
+        endpoints = Seq("unused"),
         payload = Array.empty,
         signerKeys = Seq(testPubKeyDer),
         maxBytes = 4096,

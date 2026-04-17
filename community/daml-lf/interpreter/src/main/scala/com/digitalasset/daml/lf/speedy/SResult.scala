@@ -56,7 +56,7 @@ object Question {
       * See CIP-draft-external-data-pinning.
       */
     final case class NeedExternalFetch(
-        endpoint: String, // TCP endpoint "host:port"
+        endpoints: Seq[String], // fallback chain of endpoints "host:port", tried left-to-right
         payload: Array[Byte], // request payload
         signerKeys: Seq[Array[Byte]], // accepted signing public keys (DER)
         maxBytes: Int,

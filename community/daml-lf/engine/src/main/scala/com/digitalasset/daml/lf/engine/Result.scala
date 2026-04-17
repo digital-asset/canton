@@ -96,7 +96,7 @@ sealed trait Result[+A] extends Product with Serializable {
             case Some(response) => go(resume(response))
             case None =>
               throw new IllegalStateException(
-                s"External fetch not available for ${descriptor.endpoint}"
+                s"External fetch not available for ${descriptor.endpoints.mkString(", ")}"
               )
           }
       }
@@ -217,11 +217,11 @@ final case class ResultPrefetch[A](
 
 /** Descriptor for an external data fetch request (CIP-draft-external-data-pinning). */
 final case class ExternalFetchDescriptor(
-    endpoint: String, // TCP endpoint as "host:port"
+    endpoints: Seq[String], // fallback chain of endpoints "host:port", tried left-to-right
     payload: Array[Byte], // request payload
     signerKeys: Seq[Array[Byte]], // accepted signing public keys (DER-encoded)
     maxBytes: Int, // maximum response size
-    timeoutMs: Int, // network timeout
+    timeoutMs: Int, // network timeout per endpoint
     nonce: Array[Byte], // 32-byte transaction-bound nonce
 )
 
