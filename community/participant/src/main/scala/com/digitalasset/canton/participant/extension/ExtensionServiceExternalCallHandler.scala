@@ -26,9 +26,10 @@ class ExtensionServiceExternalCallHandler(
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExternalCallError, String]] = {
     extensionServiceManager
-      .handleExternalCall(extensionId, functionId, configHash, input, mode)
+      .handleExternalCall(extensionId, functionId, configHash, input, mode, commandId)
       .map(_.left.map { extensionError =>
         ExternalCallError(
           statusCode = extensionError.statusCode,

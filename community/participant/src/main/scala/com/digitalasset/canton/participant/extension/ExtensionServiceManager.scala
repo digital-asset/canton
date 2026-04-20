@@ -87,6 +87,7 @@ class ExtensionServiceManager(
     * @param configHash Configuration hash (hex) for version validation
     * @param input Input data (hex)
     * @param mode Execution mode ("submission" or "validation")
+    * @param commandId Command ID from the submitting client
     * @return Either an error or the response body (hex)
     */
   def handleExternalCall(
@@ -95,10 +96,11 @@ class ExtensionServiceManager(
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] = {
     clients.get(extensionId) match {
       case Some(client) =>
-        client.call(functionId, configHash, input, mode)
+        client.call(functionId, configHash, input, mode, commandId)
       case None =>
         FutureUnlessShutdown.pure(Left(ExtensionCallError(
           statusCode = 404,
@@ -171,6 +173,7 @@ private class EchoExtensionServiceClient(override val extensionId: String)
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] = {
     // Echo mode: return input as output
     FutureUnlessShutdown.pure(Right(input))

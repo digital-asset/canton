@@ -556,7 +556,7 @@ final class StoreBackedCommandInterpreter(
             case None =>
               // Make actual external call during submission
               externalCallHandler
-                .handleExternalCall(extensionId, functionId, configHash, input, "submission")
+                .handleExternalCall(extensionId, functionId, configHash, input, "submission", commands.commandId.unwrap)
                 .flatMap { result =>
                   resolveStep(
                     Tracked.value(

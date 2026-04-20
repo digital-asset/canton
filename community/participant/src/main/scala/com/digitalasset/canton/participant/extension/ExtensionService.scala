@@ -61,6 +61,7 @@ trait ExtensionServiceClient {
     * @param configHash Configuration hash (hex) for version validation
     * @param input Input data (hex)
     * @param mode Execution mode ("submission" or "validation")
+    * @param commandId Command ID from the submitting client (for binding signatures to submissions)
     * @return Either an error or the response body (hex)
     */
   def call(
@@ -68,6 +69,7 @@ trait ExtensionServiceClient {
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]]
 
   /** Get the declared config hash for a function, if declared.
