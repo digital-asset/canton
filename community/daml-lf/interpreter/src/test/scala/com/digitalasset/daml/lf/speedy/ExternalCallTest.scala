@@ -43,11 +43,21 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
         choice Call (self) (arg: Unit) : Text,
           controllers Cons @Party [M:T {party} this] (Nil @Party)
           to EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
+
+        choice CallInTry (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to try @Text
+            (EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff")
+          catch e -> Some @(Update Text) (upure @Text "fallback");
       };
 
       val run : Party -> Update Text = \(party: Party) ->
         ubind cid: ContractId M:T <- create @M:T M:T { party = party }
         in exercise @M:T Call cid ();
+
+      val runInTry : Party -> Update Text = \(party: Party) ->
+        ubind cid: ContractId M:T <- create @M:T M:T { party = party }
+        in exercise @M:T CallInTry cid ();
     }
   """)
 
@@ -57,6 +67,49 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
         pkgs,
         transactionSeed,
         SEApp(pkgs.compiler.unsafeCompile(e"M:run"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      var questions = 0
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+            questions += 1
+            extensionId shouldBe "ext"
+            functionId shouldBe "fun"
+            configHash shouldBe "0a0b"
+            input shouldBe "c0ff"
+            callback(Right("beef"))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      result shouldBe Right(SText("beef"))
+      questions shouldBe 1
+
+      inside(machine.finish) { case Right(commit) =>
+        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+        exerciseNodes should have size 1
+        exerciseNodes.head.externalCallResults shouldBe ImmArray(
+          ExternalCallResult(
+            extensionId = "ext",
+            functionId = "fun",
+            config = Bytes.assertFromString("0a0b"),
+            input = Bytes.assertFromString("c0ff"),
+            output = Bytes.assertFromString("beef"),
+          )
+        )
+      }
+    }
+
+    "record the result on the enclosing exercise node when called inside try/catch" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:runInTry"), ArraySeq(SParty(alice))),
         Set(alice),
         MachineLogger(),
       )
