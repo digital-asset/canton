@@ -412,6 +412,13 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
       }
     }
 
+    "infer the proper type for EXTERNAL_CALL in 2.dev" in {
+      val envForDev = mkEnv(LV.v2_dev)
+
+      envForDev.typeOfTopExpr(parseExpr(LV.v2_dev, """(( EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff" ))""")) shouldBe
+        T"(( Update Text ))"
+    }
+
     "handle variable scope properly" in {
 
       val testCases = Table(
@@ -1929,9 +1936,10 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
 
   }
 
-  private[this] val env = {
-    val pkg =
-      p"""
+  private[this] def mkEnv(languageVersion: LV) = {
+    val pkg = parsePackage(
+      languageVersion,
+      """
        metadata ( 'pkg' : '1.0.0' )
 
        module Mod {
@@ -1997,12 +2005,23 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
          exception E = { message \(e: Mod:E) -> Mod:E {message} e };
 
        }
-     """
+     """,
+    )
     Typing.Env(
-      LV.defaultLfVersion,
+      languageVersion,
       PackageInterface(Map(defaultPackageId -> pkg)),
       Context.None,
     )
   }
+
+  private[this] def parsePackage(languageVersion: LV, source: String): Package =
+    new SyntaxHelper(StringContext(source))
+      .p[this.type]()(parserParameters.copy(languageVersion = languageVersion))
+
+  private[this] def parseExpr(languageVersion: LV, source: String): Expr =
+    new SyntaxHelper(StringContext(source))
+      .e[this.type]()(parserParameters.copy(languageVersion = languageVersion))
+
+  private[this] val env = mkEnv(LV.defaultLfVersion)
 
 }
