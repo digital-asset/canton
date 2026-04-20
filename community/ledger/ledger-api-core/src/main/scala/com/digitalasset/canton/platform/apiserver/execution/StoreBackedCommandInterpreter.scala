@@ -446,7 +446,14 @@ final class StoreBackedCommandInterpreter(
 
         case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
           externalCallHandler
-            .handleExternalCall(extensionId, functionId, configHash, input, "submission")
+            .handleExternalCall(
+              extensionId,
+              functionId,
+              configHash,
+              input,
+              "submission",
+              commands.commandId.unwrap,
+            )
             .flatMap { result =>
               resolveStep(
                 Tracked.value(

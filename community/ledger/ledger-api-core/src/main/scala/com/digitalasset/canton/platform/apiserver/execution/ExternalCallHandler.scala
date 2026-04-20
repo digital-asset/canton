@@ -18,6 +18,7 @@ trait ExternalCallHandler {
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExternalCallError, String]]
 }
 
@@ -29,6 +30,7 @@ object ExternalCallHandler {
         configHash: String,
         input: String,
         mode: String,
+        commandId: String,
     )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExternalCallError, String]] =
       FutureUnlessShutdown.pure(Left(ExternalCallError(501, "External calls not supported", None)))
   }

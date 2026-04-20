@@ -447,7 +447,7 @@ class DAMLe(
                 s"Confirmer re-executing external call for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex"
               )
               handler
-                .handleExternalCall(extensionId, functionId, configHash, input, "validation")
+                .handleExternalCall(extensionId, functionId, configHash, input, "validation", "validation")
                 .flatMap {
                   case Right(output) =>
                     val storedOutput = storedExternalCallResults

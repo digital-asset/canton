@@ -47,7 +47,7 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
       handler should not be a[ExtensionServiceExternalCallHandler]
 
       handler
-        .handleExternalCall("any-ext", "any-func", "00000000", "deadbeef", "submission")
+        .handleExternalCall("any-ext", "any-func", "00000000", "deadbeef", "submission", "test-command-id")
         .failOnShutdown
         .map { result =>
           result.isLeft shouldBe true
@@ -63,7 +63,7 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
 
       val inputHex = "deadbeef"
       handler
-        .handleExternalCall("echo-ext", "echo", "00000000", inputHex, "submission")
+        .handleExternalCall("echo-ext", "echo", "00000000", inputHex, "submission", "test-command-id")
         .failOnShutdown
         .map { result =>
           result shouldBe Right(inputHex)
@@ -75,7 +75,7 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
       val handler = new ExtensionServiceExternalCallHandler(manager)
 
       handler
-        .handleExternalCall("unknown-ext", "test-func", "00000000", "deadbeef", "submission")
+        .handleExternalCall("unknown-ext", "test-func", "00000000", "deadbeef", "submission", "test-command-id")
         .failOnShutdown
         .map { result =>
           result.isLeft shouldBe true
@@ -92,7 +92,7 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
       val handler = new ExtensionServiceExternalCallHandler(manager)
 
       handler
-        .handleExternalCall("any-ext", "any-func", "00000000", "deadbeef", "validation")
+        .handleExternalCall("any-ext", "any-func", "00000000", "deadbeef", "validation", "test-command-id")
         .failOnShutdown
         .map { result =>
           result.isLeft shouldBe true
@@ -109,8 +109,8 @@ class ExtensionServiceExternalCallHandlerTest extends AsyncWordSpec with BaseTes
       val inputHex = "cafebabe"
 
       for {
-        submissionResult <- handler.handleExternalCall("test-ext", "func", "00000000", inputHex, "submission").failOnShutdown
-        validationResult <- handler.handleExternalCall("test-ext", "func", "00000000", inputHex, "validation").failOnShutdown
+        submissionResult <- handler.handleExternalCall("test-ext", "func", "00000000", inputHex, "submission", "cmd-submit").failOnShutdown
+        validationResult <- handler.handleExternalCall("test-ext", "func", "00000000", inputHex, "validation", "cmd-validate").failOnShutdown
       } yield {
         submissionResult shouldBe Right(inputHex)
         validationResult shouldBe Right(inputHex)

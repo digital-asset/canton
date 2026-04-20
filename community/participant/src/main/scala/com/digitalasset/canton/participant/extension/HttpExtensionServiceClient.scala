@@ -68,11 +68,12 @@ class HttpExtensionServiceClient(
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] =
     FutureUnlessShutdown.outcomeF {
       Future {
         blocking {
-          callWithRetry(functionId, configHash, input, mode)
+          callWithRetry(functionId, configHash, input, mode, commandId)
         }
       }
     }
@@ -139,6 +140,7 @@ class HttpExtensionServiceClient(
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): Either[ExtensionCallError, String] = {
     val deadlineMs = System.currentTimeMillis() + config.maxTotalTimeout.underlying.toMillis
 
@@ -164,7 +166,7 @@ class HttpExtensionServiceClient(
         )
         Left(finalError)
       } else {
-        val result = singleCall(functionId, configHash, input, mode)
+        val result = singleCall(functionId, configHash, input, mode, commandId)
 
         result match {
           case Right(response) =>
@@ -212,6 +214,7 @@ class HttpExtensionServiceClient(
       configHash: String,
       input: String,
       mode: String,
+      commandId: String,
   )(implicit tc: TraceContext): Either[ExtensionCallError, String] = {
     val requestId = generateRequestId()
 
@@ -224,6 +227,7 @@ class HttpExtensionServiceClient(
         .header("X-Daml-External-Function-Id", functionId)
         .header("X-Daml-External-Config-Hash", configHash)
         .header("X-Daml-External-Mode", mode)
+        .header("X-Daml-External-Command-Id", commandId)
         .header(config.requestIdHeader, requestId)
 
       jwtToken.foreach { token =>
