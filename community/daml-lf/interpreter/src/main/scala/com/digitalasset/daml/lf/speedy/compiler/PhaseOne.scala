@@ -387,7 +387,7 @@ private[lf] final class PhaseOne(
       case BTextMapEmpty => SEValue.EmptyTextMap
       case BGenMapEmpty => SEValue.EmptyGenMap
       case BExternalCall =>
-        throw CompilationError("BExternalCall is not supported by the interpreter on this branch")
+        throw CompilationError("EXTERNAL_CALL is not yet supported by the interpreter")
 
       case _ =>
         SEBuiltin(bf match {
