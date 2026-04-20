@@ -10,6 +10,29 @@ import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedThinContractInstance}
 import com.digitalasset.daml.lf.value._
 
+/** Result of an external call made during contract execution.
+  *
+  * External calls are deterministic function calls to extension services
+  * that are recorded in the transaction for replay during validation.
+  *
+  * @param extensionId Identifier of the configured extension
+  * @param functionId Function identifier within the extension
+  * @param config Extension configuration (binary)
+  * @param input Input data (binary)
+  * @param output Output data (binary)
+  */
+final case class ExternalCallResult(
+    extensionId: String,
+    functionId: String,
+    config: data.Bytes,
+    input: data.Bytes,
+    output: data.Bytes,
+)
+
+object ExternalCallResult {
+  val Empty: ImmArray[ExternalCallResult] = ImmArray.Empty
+}
+
 /** Generic transaction node type for both update transactions and the
   * transaction graph.
   */
@@ -194,6 +217,7 @@ object Node {
       exerciseResult: Option[Value],
       keyOpt: Option[GlobalKeyWithMaintainers],
       override val byKey: Boolean,
+      externalCallResults: ImmArray[ExternalCallResult],
       // For the sake of consistency between types with a version field, keep this field the last.
       override val version: SerializationVersion,
   ) extends Action

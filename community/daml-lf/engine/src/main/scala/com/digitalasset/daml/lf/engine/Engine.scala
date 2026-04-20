@@ -772,6 +772,22 @@ class Engine(
                     )
                   )
               }
+
+            case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+              ResultNeedExternalCall(
+                extensionId,
+                functionId,
+                configHash,
+                input,
+                storedResult = None, // During initial interpretation, no stored result
+                { (result: Either[ExternalCallError, String]) =>
+                  val speedyResult = result.left.map(e =>
+                    Question.Update.ExternalCallError(e.statusCode, e.message, e.requestId)
+                  )
+                  callback(speedyResult)
+                  interpretLoop(machine, time, submissionInfo)
+                },
+              )
           }
 
         case SResultInterruption =>
