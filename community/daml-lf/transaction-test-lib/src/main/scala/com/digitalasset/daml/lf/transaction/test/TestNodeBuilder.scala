@@ -109,6 +109,7 @@ trait TestNodeBuilder {
       exerciseResult = result,
       keyOpt = contract.keyOpt,
       byKey = byKey,
+      externalCallResults = ImmArray.empty,
       version = contractSerializationVersion(contract),
     )
 

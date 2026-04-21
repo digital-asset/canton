@@ -439,7 +439,7 @@ sealed abstract class HasTxNodes[Tx] {
   final def inputContracts[Cid2 >: ContractId]: Set[Cid2] = {
 
     fold(Set.empty[Cid2]) {
-      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) if !localContractIds.contains(coid)=>
+      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) if !localContractIds.contains(coid)=>
         acc + coid
       case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))  if !localContractIds.contains(coid)=>
         acc + coid

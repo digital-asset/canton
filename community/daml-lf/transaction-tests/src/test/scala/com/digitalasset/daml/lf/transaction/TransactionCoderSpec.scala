@@ -14,6 +14,7 @@ import com.digitalasset.daml.lf.transaction.TransactionCoderSpec.{
   adjustStakeholders,
   bytesGen,
   dummyPackageName,
+  externalCallResult,
   makePartyFresh,
   normalizeCreate,
   normalizeExe,
@@ -121,6 +122,23 @@ final class TransactionCoderSpec
             )
         TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
           (NodeId(0), normalizedNode)
+        )
+      }
+    }
+
+    "reject Node.Exercise with external call results" in {
+      forAll(danglingRefExerciseNodeGen) { exerciseNode =>
+        val normalizedNode = normalizeExe(exerciseNode).copy(
+          version = SerializationVersion.VDev,
+          externalCallResults = ImmArray(externalCallResult()),
+        )
+
+        TransactionCoder.internal.encodeNode(
+          enclosingVersion = SerializationVersion.VDev,
+          nodeId = NodeId(0),
+          node = normalizedNode,
+        ) shouldBe Left(
+          EncodeError("external call results are not supported by transaction encoding")
         )
       }
     }
@@ -646,6 +664,44 @@ final class TransactionCoderSpec
         TransactionCoder.internal.decodeNode(txVersion, encoded) shouldBe a[Left[?, ?]]
       }
     }
+
+    "reject exercise nodes with external call results" in {
+      forAll(danglingRefExerciseNodeGen) { exerciseNode =>
+        val normalizedNode = normalizeExe(exerciseNode).copy(
+          version = SerializationVersion.VDev,
+          externalCallResults = ImmArray.Empty,
+        )
+
+        val Right(encoded) = TransactionCoder.internal
+          .encodeNode(
+            enclosingVersion = SerializationVersion.VDev,
+            nodeId = NodeId(0),
+            node = normalizedNode,
+          )
+
+        val withExternalCallResultsBuilder = encoded.toBuilder
+        withExternalCallResultsBuilder
+          .getExerciseBuilder
+          .addExternalCallResults(
+            proto.ExternalCallResult
+              .newBuilder()
+              .setExtensionId("ext")
+              .setFunctionId("fn")
+              .setConfig(ByteString.copyFromUtf8("cfg"))
+              .setInput(ByteString.copyFromUtf8("in"))
+              .setOutput(ByteString.copyFromUtf8("out"))
+              .build()
+          )
+        val withExternalCallResults = withExternalCallResultsBuilder.build()
+
+        TransactionCoder.internal.decodeNode(
+          SerializationVersion.VDev,
+          withExternalCallResults,
+        ) shouldBe Left(
+          DecodeError("external call results are not supported by transaction decoding")
+        )
+      }
+    }
   }
 
   "toOrderPartySet" should {
@@ -801,12 +857,22 @@ private object TransactionCoderSpec {
         case otherwise => otherwise
       },
       keyOpt = exe.keyOpt.map(normalizeKey(_, exe.version)),
+      externalCallResults = ImmArray.Empty,
       byKey =
         if (exe.version >= SerializationVersion.minContractKeys)
           exe.byKey
         else false,
     )
   }
+
+  private def externalCallResult() =
+    ExternalCallResult(
+      extensionId = "ext",
+      functionId = "fn",
+      config = data.Bytes.fromByteArray(Array[Byte](1, 2, 3)),
+      input = data.Bytes.fromByteArray(Array[Byte](4, 5, 6)),
+      output = data.Bytes.fromByteArray(Array[Byte](7, 8, 9)),
+    )
 
   private def normalizeKey(
       key: GlobalKeyWithMaintainers,

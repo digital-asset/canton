@@ -122,6 +122,7 @@ object ActionDescription {
             exerciseResult,
             _key,
             byKey,
+            _externalCallResults,
             version,
           ) =>
         for {
