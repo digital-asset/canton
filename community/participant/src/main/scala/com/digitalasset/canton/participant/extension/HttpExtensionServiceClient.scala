@@ -213,7 +213,7 @@ class HttpExtensionServiceClient(
         .header("X-Daml-External-Function-Id", functionId)
         .header("X-Daml-External-Config-Hash", configHash)
         .header("X-Daml-External-Mode", mode)
-        .header("X-Daml-External-Command-Id", commandId)
+        .header("X-Daml-External-Submission-Id", commandId)
         .header(config.requestIdHeader, requestId)
 
       jwtToken.foreach { token =>
