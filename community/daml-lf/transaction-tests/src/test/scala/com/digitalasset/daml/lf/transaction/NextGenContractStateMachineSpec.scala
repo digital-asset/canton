@@ -429,6 +429,7 @@ class NextGenContractStateMachineSpec
       exerciseResult = None,
       keyOpt = toOptKeyWithMaintainers(key),
       byKey = byKey,
+      externalCallResults = ImmArray.empty,
       version = txVersion,
     )
 

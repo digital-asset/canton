@@ -410,6 +410,7 @@ private[lf] object CostModel {
             exerciseResult,
             keyOpt,
             byKey,
+            _,
             version,
           ) =>
         1 + costOfContractId(targetCoid) +
