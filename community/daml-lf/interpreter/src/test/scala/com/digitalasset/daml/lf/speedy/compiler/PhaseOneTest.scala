@@ -121,7 +121,7 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         ("ulookupbykey", ulookupbykey),
         ("uembed", uembed),
         ("utrycatchV1A", utrycatchV1A),
-        ("utrycatchV2B", utrycatchV1B),
+        ("utrycatchV1B", utrycatchV1B),
         ("structUpd1", structUpd1),
         ("structUpd2", structUpd2),
         ("recCon1", recCon1),
