@@ -408,6 +408,8 @@ private[topology] object LsuChaos extends TopologyOperationsCompanion {
     "FAILED_TO_CONNECT_TO_SEQUENCERS_TRANSIENT",
     // Traffic transfer is scheduled on the wall clock, leaving sequencer a bit behind, it will retry with this error
     "SEQUENCER_LSU_NOT_AT_UPGRADE_TIME_OR_BEYOND",
+    // With sequencing sanity testing, other messages will be dropped with this error
+    "SEQUENCER_SUBMISSION_AFTER_UPGRADE_TIME",
   )
 
   override def acceptableNonRetryableLogEntries: Seq[String] = Seq(

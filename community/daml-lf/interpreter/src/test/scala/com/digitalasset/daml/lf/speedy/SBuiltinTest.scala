@@ -8,17 +8,17 @@ import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.daml.crypto.MessageSignaturePrototypeUtil
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SValue.{SValue => _, _}
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SValue.{SValue as _, *}
 import com.digitalasset.daml.lf.speedy.Speedy.Machine
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction._
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -1667,7 +1667,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       inside {
         val cid = ContractId.V1(Hash.hashPrivateKey("abc"))
         val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
-          version = txVersion,
+          version = SerializationVersion.V1,
           packageName = pkg.pkgName,
           template = t"Mod:FailingPrecondition".asInstanceOf[Ast.TTyCon].tycon,
           arg = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
@@ -2133,7 +2133,6 @@ final class SBuiltinTestHelpers {
         }
     """
 
-  val txVersion = SerializationVersion.assign(pkg.languageVersion)
   val pkgName = Ref.PackageName.assertFromString("-sbuiltin-test-")
 
   val compiledPackages: PureCompiledPackages =

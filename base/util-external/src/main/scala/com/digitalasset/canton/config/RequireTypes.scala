@@ -336,6 +336,46 @@ object RequireTypes {
     }
   }
 
+  final case class DoubleGreaterEqual1 private (override val value: Double)
+      extends RefinedNumeric[Double] {
+    override implicit def num: Numeric[Double] = Numeric.DoubleIsFractional
+  }
+
+  object DoubleGreaterEqual1 {
+    def tryCreate(t: Double): DoubleGreaterEqual1 =
+      create(t).valueOr(err => throw new IllegalArgumentException(err.message))
+
+    def create(
+        value: Double
+    ): Either[InvariantViolation, DoubleGreaterEqual1] =
+      Either.cond(
+        value >= 1.0,
+        DoubleGreaterEqual1(value),
+        InvariantViolation(
+          s"Received  $value < 1 as argument, but we require a value greter or equal to 1."
+        ),
+      )
+
+    implicit def doubleGreaterThanEqual1Reader[T]: ConfigReader[DoubleGreaterEqual1] =
+      ConfigReader.fromString[DoubleGreaterEqual1] { str =>
+        def err(message: String) =
+          CannotConvert(str, NonNegativeNumeric.getClass.getName, message)
+
+        Numeric[Double]
+          .parseString(str)
+          .toRight[FailureReason](err("Cannot convert `str` to numeric"))
+          .flatMap(n => Either.cond(n >= 1, tryCreate(n), LessThan1Value(n)))
+      }
+
+    implicit def doubleGreaterThanEqual1Writer[T]: ConfigWriter[DoubleGreaterEqual1] =
+      ConfigWriter.toString(x => x.unwrap.toString)
+
+    final case class LessThan1Value[T](t: T) extends FailureReason {
+      override def description: String =
+        s"The value you gave for this configuration setting ($t) was less than one, but we require a value >= 1 for this configuration setting"
+    }
+  }
+
   final case class ExistingFile private (private val file: File) {
     def unwrap: File = file
     require(file.exists(), s"Unable to create ExistingFile as non-existing file $file was given.")

@@ -212,6 +212,8 @@ message GetTrafficStateForMemberRequest {
   // Member for which to get the traffic state
   string member = 1;
   // Timestamp at which to to get the traffic state
+  // In LSU and disaster recovery scenarios may return a traffic state for a different (later, upgrade or recovery)
+  // timestamp if the requested timestamp is not available on the recovered synchronizer or after LSU.
   int64 timestamp = 2;
 }
 

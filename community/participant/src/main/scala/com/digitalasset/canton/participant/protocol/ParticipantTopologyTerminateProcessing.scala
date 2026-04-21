@@ -155,10 +155,8 @@ class ParticipantTopologyTerminateProcessing(
         PartyId.fromLfParty(lfParty) match {
           case Left(err) =>
             // permission.getClass.getSimpleName will print "Onboarding", "Added", or "Revoked$"
-            ErrorUtil.internalError(
-              new IllegalArgumentException(
-                s"Failed to parse PartyId from $lfParty during '${permission.getClass.getSimpleName}' event. Reason: $err"
-              )
+            ErrorUtil.invalidState(
+              s"Failed to parse PartyId from $lfParty during '${permission.getClass.getSimpleName}' event: $err"
             )
 
           case Right(partyId) =>

@@ -12,9 +12,17 @@
 package com.digitalasset.daml.lf
 package language
 
-import com.digitalasset.daml.lf.language.LanguageVersion.Feature
+import com.digitalasset.daml.lf.language.LanguageVersion.{Feature, Major, Minor}
+
+import scala.annotation.nowarn
 
 trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
+  val allStableLegacyLfVersions: List[LanguageVersion] =
+    List(6, 7, 8, 11, 12, 13, 14, 15, 17).map(i => LanguageVersion(Major.V1, Minor.Stable(i)))
+  val List(v1_6, v1_7, v1_8, v1_11, v1_12, v1_13, v1_14, v1_15, v1_17) =
+    allStableLegacyLfVersions: @nowarn("msg=match may not be exhaustive")
+  val v1_dev: LanguageVersion = LanguageVersion(Major.V1, Minor.Dev)
+  val allLegacyLfVersions: List[LanguageVersion] = allStableLegacyLfVersions.appended(v1_dev)
 
   // TODO (FEATURE): Remove this hardcoded object once V1 features are also generated
   object LegacyFeatures {

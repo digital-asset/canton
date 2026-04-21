@@ -28,6 +28,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  UpdateServiceConfig,
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
@@ -250,6 +251,7 @@ final case class LedgerApiServerConfig(
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
     partyManagementService: PartyManagementServiceConfig = PartyManagementServiceConfig(),
     packageService: PackageServiceConfig = PackageServiceConfig(),
+    updateService: UpdateServiceConfig = UpdateServiceConfig(),
     stateService: StateServiceConfig = StateServiceConfig(),
     managementServiceTimeout: config.NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
@@ -292,7 +294,6 @@ object LedgerApiServerConfig {
       maxUsedHeapSpacePercentage = 100,
       minFreeHeapSpaceBytes = 0,
     )
-
 }
 
 /** Optional ledger api time service configuration for demo and testing only */

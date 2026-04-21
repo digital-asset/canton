@@ -103,9 +103,9 @@ private[lsu] trait LsuBase
       psid: PhysicalSynchronizerId,
       synchronizerOwners: Set[InstanceReference],
       hasTrafficControl: Boolean = true,
+      reconciliationInterval: config.PositiveDurationSeconds =
+        config.PositiveDurationSeconds.ofSeconds(1),
   ): Unit = {
-    val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
-
     synchronizerOwners.foreach(
       _.topology.synchronizer_parameters.propose_update(
         psid,

@@ -598,13 +598,10 @@ abstract class AcsCommitmentScalabilityTestBase(
       logger.debug(s"The $testAcsSize contracts should be loaded into P1 and P2")
       eventually() {
         jfrPhase("check-loaded-acs-size") {
-          // query with overriding the default limitation, which was 1000
           participant1.ledger_api.state.acs
-            .of_all(limit = PositiveInt.MaxValue)
-            .size shouldEqual testAcsSize.value
+            .count() shouldEqual testAcsSize.value
           participant2.ledger_api.state.acs
-            .of_all(limit = PositiveInt.MaxValue)
-            .size shouldEqual testAcsSize.value
+            .count() shouldEqual testAcsSize.value
         }
       }
 
@@ -776,10 +773,8 @@ abstract class AcsCommitmentScalabilityTestMismatch(
       logger.debug("P1 should have the new Iou contract, so one more contract in their ACS than P2")
       eventually() {
         participant1.ledger_api.state.acs
-          .of_all(limit = PositiveInt.MaxValue)
-          .size - 1 shouldEqual participant2.ledger_api.state.acs
-          .of_all(limit = PositiveInt.MaxValue)
-          .size
+          .count() - 1 shouldEqual participant2.ledger_api.state.acs
+          .count()
       }
 
       // Now that we purged and verified it, let's store the missing contract for further checks

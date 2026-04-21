@@ -342,6 +342,12 @@ trait ParticipantTestContext extends UserManagementTestContext {
       begin: Long = referenceOffset,
   ): Future[GetUpdatesRequest]
 
+  def getUpdatesPageRequest(
+      transactionFormat: TransactionFormat,
+      begin: Long = referenceOffset,
+      pageSize: Int,
+  ): Future[GetUpdatesPageRequest]
+
   def getTransactionsRequestWithEnd(
       transactionFormat: TransactionFormat,
       begin: Long = referenceOffset,
@@ -358,11 +364,10 @@ trait ParticipantTestContext extends UserManagementTestContext {
       descendingOrder: Boolean = false,
   ): GetUpdatesRequest
 
-  /** Non-managed version of
-    * [[transactionsWithVariants(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdatesRequest):*]],
-    * use this only if you need to tweak the request (i.e. to test low-level details)
-    */
-  def transactionsWithVariants(request: GetUpdatesRequest): Future[Vector[Transaction]]
+  def transactionsWithVariants(
+      request: GetUpdatesRequest,
+      clue: Option[String] = None,
+  ): Future[Vector[Transaction]]
 
   def transactionsByTemplateId(
       templateId: Identifier,
@@ -372,6 +377,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def transactionsByTemplateIdWithVariants(
       templateId: Identifier,
       parties: Option[Seq[Party]],
+      clue: Option[String] = None,
   ): Future[Vector[Transaction]]
 
   /** Non-managed version of
@@ -379,6 +385,16 @@ trait ParticipantTestContext extends UserManagementTestContext {
     * this only if you need to tweak the request (i.e. to test low-level details)
     */
   def transactions(request: GetUpdatesRequest): Future[Vector[Transaction]]
+
+  def transactionsSinglePage(request: GetUpdatesPageRequest): Future[Vector[Transaction]]
+
+  def getUpdatesPageRaw(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse]
+
+  /** Repeatably fetch pages until the last one and concatenate results. */
+  def transactionsAllPages(
+      request: GetUpdatesPageRequest,
+      previousPageEnd: Option[Long],
+  ): Future[Vector[GetUpdateResponse]]
 
   /** Managed version of
     * [[transactions(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdatesRequest):*]], use
@@ -388,6 +404,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
 
   def transactionsWithVariants(
       transactionShape: TransactionShape,
+      clue: Option[String],
       parties: Party*
   ): Future[Vector[Transaction]]
 

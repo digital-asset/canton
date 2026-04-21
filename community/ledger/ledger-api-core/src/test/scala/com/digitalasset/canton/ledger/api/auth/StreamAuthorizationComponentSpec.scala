@@ -279,6 +279,8 @@ class StreamAuthorizationComponentSpec
           request: GetUpdateByIdRequest
       ): Future[GetUpdateResponse] = notSupported
 
+      def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+        notSupported
     }
     val grpcServerPort = UniquePortGenerator.next
     val authorizedTransactionServiceOwner =

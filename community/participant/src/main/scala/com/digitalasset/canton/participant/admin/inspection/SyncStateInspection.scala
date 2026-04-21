@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.{
   CantonTimestampSecond,
   Offset,
 }
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
@@ -79,7 +80,8 @@ import com.google.common.annotations.VisibleForTesting
 import java.time.Instant
 import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.DurationInt
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 trait JournalGarbageCollectorControl {
   def disable(synchronizerId: PhysicalSynchronizerId)(implicit
@@ -905,6 +907,30 @@ final class SyncStateInspection(
           .moveLedgerEndBackToScratch()
       )
       .onShutdown(throw new RuntimeException("onlyForTestingMoveLedgerEndBackToScratch"))
+
+  @VisibleForTesting
+  def lockPruning()(implicit traceContext: TraceContext): () => Unit = {
+    val release = Promise[Unit]()
+    timeouts.inspection
+      .awaitUS(functionFullName) {
+        participantNodePersistentState.value.ledgerApiStore
+          .lockPruning(
+            releaseLock = release,
+            timeout = 1.minute,
+          )
+          .map { released => () =>
+            {
+              release.trySuccess(()).discard
+              timeouts.inspection
+                .awaitUS(functionFullName)(released)
+                .onShutdown(
+                  throw new RuntimeException("onlyForTestingLockPruningWaitingForReleased")
+                )
+            }
+          }
+      }
+      .onShutdown(throw new RuntimeException("onlyForTestingLockPruningWaitingForLocked"))
+  }
 
   def lastSynchronizerOffset(
       synchronizerId: SynchronizerId

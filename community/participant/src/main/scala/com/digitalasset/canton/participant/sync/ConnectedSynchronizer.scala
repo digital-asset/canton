@@ -922,11 +922,7 @@ class ConnectedSynchronizer(
               None
 
             case (Left(error), _) =>
-              ErrorUtil.internalError(
-                new IllegalArgumentException(
-                  s"Failed to parse PartyId from ${pending.key}: $error"
-                )
-              )
+              ErrorUtil.invalidState(s"Failed to parse PartyId from ${pending.key}: $error")
           }
         }
 
@@ -1174,6 +1170,7 @@ class ConnectedSynchronizer(
           assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
+          topologyManager,
           ephemeral.timeTracker, // need to close time tracker before synchronizer handle, as it might otherwise send messages
           synchronizerHandle,
           ephemeral,

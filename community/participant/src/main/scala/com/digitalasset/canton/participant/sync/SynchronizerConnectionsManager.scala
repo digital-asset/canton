@@ -191,7 +191,7 @@ private[sync] class SynchronizerConnectionsManager(
           connectSynchronizer = ConnectSynchronizer.Connect,
           /*
           After LSU, the likelihood of a failure of the first connection attempt is higher than
-          with normal connects. Sequencers might not be ready yet and/or be hammered with request.
+          with normal connects. Sequencers might not be ready yet and/or be hammered with requests.
           Hence, we decrease the level from WARN to INFO.
            */
           logLevelFailureInitialAttempt = Level.INFO,
@@ -1649,7 +1649,9 @@ object SynchronizerConnectionsManager {
 
     def get(psid: PhysicalSynchronizerId): Option[ConnectedSynchronizer] = connected.get(psid)
     def get(lsid: SynchronizerId): Option[ConnectedSynchronizer] =
-      Option(lsidToPsid.get(lsid)).flatMap(connected.get)
+      lock.exclusive {
+        Option(lsidToPsid.get(lsid)).flatMap(connected.get)
+      }
 
     override def getAcsInspection(synchronizerId: SynchronizerId): Option[AcsInspection] =
       get(synchronizerId).map(_.persistent.acsInspection)

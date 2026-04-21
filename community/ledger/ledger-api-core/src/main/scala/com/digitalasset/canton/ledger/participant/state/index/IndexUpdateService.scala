@@ -3,9 +3,14 @@
 
 package com.digitalasset.canton.ledger.participant.state.index
 
-import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
+import com.daml.ledger.api.v2.update_service.{
+  GetUpdateResponse,
+  GetUpdatesPageResponse,
+  GetUpdatesResponse,
+}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.UpdateFormat
+import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import org.apache.pekko.NotUsed
@@ -22,6 +27,7 @@ trait IndexUpdateService extends LedgerEndService {
       endAt: Option[Offset],
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
+      skipPruningChecks: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed]
 
   def getUpdateBy(
@@ -32,4 +38,10 @@ trait IndexUpdateService extends LedgerEndService {
   def latestPrunedOffset()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Offset]]
+
+  def updatesPage(
+      getUpdatesPageRequest: GetUpdatesPageRequest
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[GetUpdatesPageResponse]
 }

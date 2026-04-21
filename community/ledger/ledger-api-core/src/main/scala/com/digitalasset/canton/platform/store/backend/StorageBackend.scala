@@ -479,6 +479,8 @@ trait EventStorageBackend {
   def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit
+
+  def lockExclusivelyPruningProcessingTable(connection: Connection): Unit
 }
 
 object EventStorageBackend {

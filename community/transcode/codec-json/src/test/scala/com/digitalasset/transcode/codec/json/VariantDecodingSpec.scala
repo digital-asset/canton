@@ -3,7 +3,7 @@
 
 package com.digitalasset.transcode.codec.json
 
-import com.digitalasset.transcode.schema.{DynamicValue, Identifier, VariantConName, *}
+import com.digitalasset.transcode.schema.*
 import com.digitalasset.transcode.utils.codecspec.CodecCommonSpec
 import com.digitalasset.transcode.{Codec, IncorrectVariantRepresentationException}
 import ujson.Value

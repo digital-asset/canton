@@ -47,10 +47,10 @@ object ValidationErrors {
       .Reject()
       .asGrpcError
 
-  def invalidPageToken(
+  def invalidAcsPageToken(
       message: String
   )(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =
-    RequestValidationErrors.InvalidPageToken
+    RequestValidationErrors.InvalidAcsPageToken
       .Reject(message)
       .asGrpcError
 }

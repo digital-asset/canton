@@ -50,6 +50,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         endAt = Some(rangeEnd),
         updateFormat = updateFormat(LedgerEffects),
         descendingOrder = true,
+        skipPruningChecks = false,
       )
       val updates = updatesStream.runWith(Sink.seq).futureValue
       updates.flatMap(
@@ -69,6 +70,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         endAt = Some(rangeEnd),
         updateFormat = updateFormat(LedgerEffects),
         descendingOrder = true,
+        skipPruningChecks = false,
       )
       val updates = updatesStream.runWith(Sink.seq).futureValue
       updates.map(
@@ -100,6 +102,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
           )
         ),
         descendingOrder = true,
+        skipPruningChecks = false,
       )
 
       val updates = updatesStream.runWith(Sink.seq).futureValue
@@ -148,6 +151,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
           )
         ),
         descendingOrder = true,
+        skipPruningChecks = false,
       )
 
       val updates = updatesStream.runWith(Sink.seq).futureValue
@@ -212,6 +216,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
             ),
           ),
         descendingOrder = true,
+        skipPruningChecks = false,
       )
 
       val updates = updatesStream.runWith(Sink.seq).futureValue

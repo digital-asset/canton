@@ -13,7 +13,7 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.plugins.PostgresDumpRestore
 import com.digitalasset.canton.integration.tests.manual.DataContinuityTest.*
-import com.digitalasset.canton.integration.util.EntitySyntax
+import com.digitalasset.canton.integration.util.{EntitySyntax, MultiSynchronizerFeatureFlag}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.nio.file.Files
@@ -44,7 +44,7 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
         withNewProtocolVersion(env, pv) { implicit newEnv =>
           import newEnv.*
 
-          new NetworkBootstrapper(S1M1).bootstrap()
+          new NetworkBootstrapper(updateNetworkTopologyDescription(S1M1, pv)).bootstrap()
           noDumpFilesOfConfiguredVersionExist(
             Seq[LocalInstanceReference](participant1, participant2, sequencer1, mediator1),
             pv,
@@ -54,6 +54,10 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
           // run a series of operations for some initial data to act upon
           nodes.local.start()
           participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+
+          // Check that the synchronizer is running with the expected protocol version
+          sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe pv
+
           participants.all.dars.upload(CantonExamplesPath)
           val alice = participant1.parties.enable(
             "Alice"
@@ -101,7 +105,7 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
         withNewProtocolVersion(env, pv) { implicit newEnv =>
           import newEnv.*
 
-          new NetworkBootstrapper(S1M1).bootstrap()
+          new NetworkBootstrapper(updateNetworkTopologyDescription(S1M1, pv)).bootstrap()
           noDumpFilesOfConfiguredVersionExist(
             Seq[LocalInstanceReference](participant1, participant2, sequencer1, mediator1),
             pv,
@@ -111,6 +115,9 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
           // run a series of operations for some initial data to act upon
           nodes.local.start()
           participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+
+          // Check that the synchronizer is running with the expected protocol version
+          sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe pv
           val (p1_count, p2_count) = setupBongTest
           dumpStateOfConfiguredVersion(
             Seq(sequencer1),
@@ -176,19 +183,25 @@ trait CreateSynchronizerChangeDataContinuityDumps
             logger.info("Running bootstraps")
 
             new NetworkBootstrapper(
-              NetworkTopologyDescription(
-                daName,
-                sequencers = Seq(sequencer1),
-                mediators = Seq(mediator1),
-                synchronizerOwners = Seq(sequencer1),
-                synchronizerThreshold = PositiveInt.one,
+              updateNetworkTopologyDescription(
+                NetworkTopologyDescription(
+                  daName,
+                  sequencers = Seq(sequencer1),
+                  mediators = Seq(mediator1),
+                  synchronizerOwners = Seq(sequencer1),
+                  synchronizerThreshold = PositiveInt.one,
+                ),
+                pv,
               ),
-              NetworkTopologyDescription(
-                acmeName,
-                sequencers = Seq(sequencer2),
-                mediators = Seq(mediator2),
-                synchronizerOwners = Seq(sequencer2),
-                synchronizerThreshold = PositiveInt.one,
+              updateNetworkTopologyDescription(
+                NetworkTopologyDescription(
+                  acmeName,
+                  sequencers = Seq(sequencer2),
+                  mediators = Seq(mediator2),
+                  synchronizerOwners = Seq(sequencer2),
+                  synchronizerThreshold = PositiveInt.one,
+                ),
+                pv,
               ),
             ).bootstrap()
 
@@ -196,6 +209,12 @@ trait CreateSynchronizerChangeDataContinuityDumps
             setUp(newEnv)
             setupTopology(Alice, Bank, Painter)
             participants.foreach(_.testing.fetch_synchronizer_times())
+
+            MultiSynchronizerFeatureFlag.enable(participants, iouSynchronizerId)
+            MultiSynchronizerFeatureFlag.enable(Seq(P4, P5), paintSynchronizerId)
+
+            // Check that the synchronizer is running with the expected protocol version
+            sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe pv
 
             logDebugInformation(logger)
             clue("Creating new DB dumps as no dump files for current version where found") {

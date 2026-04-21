@@ -691,8 +691,7 @@ class CantonSyncService(
       synchronizerId: SynchronizerId
   ): Option[PhysicalSynchronizerId] =
     connectedSynchronizersLookup
-      .get(synchronizerId)
-      .map(_.synchronizerHandle.psid)
+      .psidFor(synchronizerId)
 
   override def allocateParty(
       partyId: PartyId,
@@ -724,8 +723,7 @@ class CantonSyncService(
     val specifiedSynchronizer =
       synchronizerIdO.map(lsid =>
         connectedSynchronizersLookup
-          .get(lsid)
-          .map(_.psid)
+          .psidFor(lsid)
           .toRight(
             SubmissionResult.SynchronousError(
               SyncServiceInjectionError.NotConnectedToSynchronizer

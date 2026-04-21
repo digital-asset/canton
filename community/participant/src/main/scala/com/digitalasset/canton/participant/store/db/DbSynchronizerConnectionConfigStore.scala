@@ -352,7 +352,9 @@ class DbSynchronizerConnectionConfigStore private[store] (
       case _ =>
         EitherT.liftF[DBIO, Error, Unit](
           DBIOAction.failed(
-            new IllegalStateException(s"Updated more than 1 row for connection configs: $nrRows")
+            new IllegalStateException(
+              s"Attempted to update more than 1 row for connection configs: $nrRows"
+            )
           )
         )
     }

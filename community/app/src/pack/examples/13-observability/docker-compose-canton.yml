@@ -10,6 +10,8 @@ networks:
 volumes:
   postgres:
     name: daml_observability_postgres
+  logs:
+    name: daml_observability_logs
 
 services:
 
@@ -41,6 +43,9 @@ services:
       # Participant ledger APIs
       - 10011:10011
       - 10021:10021
+      # Participant HTTP (JSON) Ledger APIs
+      - 10013:10013
+      - 10023:10023
       # Participant admin APIs
       - 10012:10012
       - 10022:10022
@@ -62,7 +67,7 @@ services:
       # Prometheus exporter
       - 19090:19090
     environment:
-      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx8G"
+      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx6G"
       OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: exponential_bucket_histogram
     command:
       - "daemon"
@@ -80,11 +85,11 @@ services:
       - logs:/var/log/promtail
     healthcheck:
       # Requires grpcurl and jq in image
-      test: "grpcurl --plaintext localhost:10012 com.digitalasset.canton.health.admin.v0.StatusService.Status | jq -e '.success | select(.active)'"
+      test: "grpcurl --plaintext localhost:10012 com.digitalasset.canton.admin.participant.v30.ParticipantStatusService/ParticipantStatus | jq -e '.status.commonStatus.active == true'"
       interval: 10s
-      timeout: 1s
-      retries: 3
-      start_period: 30s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,7 +109,7 @@ services:
       # Prometheus exporter
       - 19091:19091
     environment:
-      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx8G"
+      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx2G"
       OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: exponential_bucket_histogram
     command:
       - "daemon"
@@ -112,7 +117,7 @@ services:
       - "--log-level-canton=${LOG_LEVEL:-DEBUG}"
       - "--log-level-stdout=${LOG_LEVEL:-DEBUG}"
       #      - "--log-encoder=json"
-      - "--log-file-name=/var/log/promtail/canton.log"
+      - "--log-file-name=/var/log/promtail/sequencer4.log"
       - "--config=/canton/config/sequencer4.conf"
       - "--bootstrap=/canton/config/separate-sequencer.canton"
     volumes:
@@ -122,11 +127,11 @@ services:
       - logs:/var/log/promtail
     healthcheck:
       # Requires grpcurl and jq in image
-      test: "grpcurl --plaintext localhost:10012 com.digitalasset.canton.health.admin.v0.StatusService.Status | jq -e '.success | select(.active)'"
+      test: "grpcurl --plaintext localhost:4432 com.digitalasset.canton.admin.sequencer.v30.SequencerStatusService/SequencerStatus | jq -e '.status.commonStatus.active == true'"
       interval: 10s
-      timeout: 1s
-      retries: 3
-      start_period: 30s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,7 +148,7 @@ services:
       # Prometheus exporter
       - 19092:19092
     environment:
-      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx8G"
+      JDK_JAVA_OPTIONS: "-XX:+ExitOnOutOfMemoryError -Xmx2G"
       OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: exponential_bucket_histogram
     command:
       - "daemon"
@@ -151,7 +156,7 @@ services:
       - "--log-level-canton=${LOG_LEVEL:-DEBUG}"
       - "--log-level-stdout=${LOG_LEVEL:-DEBUG}"
       #      - "--log-encoder=json"
-      - "--log-file-name=/var/log/promtail/canton.log"
+      - "--log-file-name=/var/log/promtail/sequencer5.log"
       - "--config=/canton/config/sequencer5.conf"
       - "--bootstrap=/canton/config/separate-sequencer.canton"
     volumes:
@@ -161,14 +166,21 @@ services:
       - logs:/var/log/promtail
     healthcheck:
       # Requires grpcurl and jq in image
-      test: "grpcurl --plaintext localhost:10012 com.digitalasset.canton.health.admin.v0.StatusService.Status | jq -e '.success | select(.active)'"
+      test: "grpcurl --plaintext localhost:4442 com.digitalasset.canton.admin.sequencer.v30.SequencerStatusService/SequencerStatus | jq -e '.status.commonStatus.active == true'"
       interval: 10s
-      timeout: 1s
-      retries: 3
-      start_period: 30s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.72.0
+    container_name: daml_observability_jaeger
+    ports:
+      - 16686:16686
+      - 4317:4317
 
   console:
     image: ${CANTON_IMAGE}:${CANTON_VERSION}

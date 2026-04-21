@@ -43,6 +43,14 @@ service UpdateService {
   // Lookup an update by its ID.
   // If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
   rpc GetUpdateById(GetUpdateByIdRequest) returns (GetUpdateResponse);
+
+  // Read a page of ledger's filtered updates. It returns the event types in accordance with
+  // the specified contents and filters.
+  // Additionally, the selection criteria for individual events depends on the transaction shape chosen.
+  //
+  // - ACS delta: an event is included only if the requesting party is a stakeholder.
+  // - ledger effects: an event is included if the requesting party is a witness.
+  rpc GetUpdatesPage(GetUpdatesPageRequest) returns (GetUpdatesPageResponse);
 }
 
 message GetUpdatesRequest {
@@ -128,4 +136,79 @@ message GetUpdateResponse {
     Reassignment reassignment = 2;
     TopologyTransaction topology_transaction = 3;
   }
+}
+
+message GetUpdatesPageRequest {
+  // Exclusive lower bound offset of the requested ledger section (non-negative integer).
+  // The response page will only contain updates whose offset is strictly greater than this.
+  // If set to zero or not defined, the lower bound is set to the actual pruning offset or to the beginning of the
+  // ledger if the participant was not pruned yet.
+  // If set to positive and the ledger has been pruned, this parameter must be greater or equal than the pruning offset.
+  //
+  // Optional
+  optional int64 begin_offset_exclusive = 1;
+
+  // Inclusive upper bound offset of the requested ledger section.
+  // If specified the response will only contain updates whose offset is less than or equal to this.
+  // If not specified response will only contain updates whose offset is less than the current ledger-end.
+  //
+  // Optional
+  optional int64 end_offset_inclusive = 2;
+
+  // The result page will contain the first max_page_size Updates of all matching updates.
+  // The server may reject queries with max_page_size above server specified limits.
+  // If not specified, the default max_page_size is determined by the server.
+  //
+  // Optional
+  optional int32 max_page_size = 3;
+
+  // Required
+  UpdateFormat update_format = 4;
+
+  //If set, the page will populate the elements in descending order starting from the end_offset_inclusive.
+  //
+  // Optional
+  bool descending_order = 5;
+
+  // To get the next page of updates, the ``page_token`` should be set to the
+  // ``next_page_token`` of the last ``GetUpdatesPageResponse``.
+  // To achieve correct paging: subsequent requests must
+  //
+  // - be executed on the same participant with the same version of canton,
+  // - have the same begin_offset_exclusive,
+  // - have the same end_offset_inclusive,
+  // - have the same update_format and
+  // - have the same descending_order.
+  //
+  // If not specified, the first page of updates will be returned.
+  //
+  // Optional: can be empty
+  optional bytes page_token = 6;
+}
+
+message GetUpdatesPageResponse {
+  // The first max_page_size updates that match the filter in the request.
+  // In case descending_order was selected, the order of the updates is in reversed offset order.
+  //
+  // Optional: can be empty
+  repeated GetUpdateResponse updates = 1;
+
+  // Represents the lower bound of this page.
+  //
+  // Required
+  int64 lowest_page_offset_exclusive = 2;
+
+  // Represents the upper bound of the page.
+  //
+  // Required
+  int64 highest_page_offset_inclusive = 3;
+
+  // If the value is not populated, this is the last page.
+  // If the value is populated, this token can be used to get the next page.
+  // If the original ``GetFirstUpdatePageRequest`` end_offset_inclusive was not specified and the request uses
+  // ascending order, then this token will always be populated, so you can use it to "tail" the ledger by
+  // repeatedly polling with the new page token returned.
+  //
+  // Optional: can be empty
+  optional bytes next_page_token = 4;
 }

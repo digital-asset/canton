@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.mediator.admin.v30.VerdictResult.{
@@ -215,6 +216,7 @@ final class LsuMediatorVerdictsUnconfirmedAndConfirmedIntegrationTest
           environment.simClock.value.advance(Duration.ofSeconds(1))
           participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
         }
+        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
         // Failed due to lack of confirmation response within timeout
         unconfirmedSubmissionF.failed.value.value.toOption.value shouldBe a[CommandFailure]
@@ -304,6 +306,7 @@ final class LsuMediatorVerdictsSilentSynchronizerIntegrationTest
             environment.simClock.foreach(_.advance(Duration.ofSeconds(1)))
             participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
           }
+          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
         }
 
         withClue(

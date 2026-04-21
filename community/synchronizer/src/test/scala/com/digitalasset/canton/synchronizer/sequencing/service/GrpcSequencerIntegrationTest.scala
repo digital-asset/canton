@@ -70,6 +70,7 @@ import com.digitalasset.canton.sequencing.client.pool.GrpcSequencerConnectionPoo
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolConfig
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
@@ -562,6 +563,20 @@ class GrpcSequencerIntegrationTest
           }
 
         env.spinUpSequencer(service2, sequencer2ConnectService, port2)
+
+        // We need an event in the event store otherwise the factory will skip the traffic state call
+        val now = clock.now
+        val dummyEvent = SequencedEventWithTraceContext(
+          SignedContent(
+            SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
+            SymbolicCrypto.emptySignature,
+            None,
+            testedProtocolVersion,
+          )
+        )(
+          TraceContext.empty
+        )
+        sequencedEventStore.store(Seq(dummyEvent))(traceContext, closeContext).futureValueUS
 
         env.loggerFactory.assertLogs(
           SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerClientFactory]

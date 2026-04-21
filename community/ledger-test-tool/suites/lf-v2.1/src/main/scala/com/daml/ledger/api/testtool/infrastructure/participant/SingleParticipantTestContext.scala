@@ -849,6 +849,27 @@ final class SingleParticipantTestContext private[participant] (
     )
   }
 
+  override def getUpdatesPageRequest(
+      transactionFormat: TransactionFormat,
+      begin: Long,
+      pageSize: Int,
+  ): Future[GetUpdatesPageRequest] = currentEnd().map { end =>
+    GetUpdatesPageRequest(
+      beginOffsetExclusive = Some(begin),
+      endOffsetInclusive = Some(end),
+      maxPageSize = Some(pageSize),
+      updateFormat = Some(
+        UpdateFormat(
+          includeTransactions = Some(transactionFormat),
+          includeReassignments = None,
+          includeTopologyEvents = None,
+        )
+      ),
+      descendingOrder = false,
+      pageToken = None,
+    )
+  }
+
   override def getTransactionsRequestWithEnd(
       transactionFormat: TransactionFormat,
       begin: Long = referenceOffset,
@@ -920,48 +941,94 @@ final class SingleParticipantTestContext private[participant] (
   @SuppressWarnings(
     Array("com.digitalasset.canton.FutureTraverse")
   ) // We started all those futures in variants declaration.
-  private def transactionsWithVariants[Res](
+  private def transactionsWithVariants(
       request: GetUpdatesRequest,
-      service: (GetUpdatesRequest, StreamObserver[Res]) => Unit,
-  ): Future[Vector[Res]] = {
+      service: (GetUpdatesRequest, StreamObserver[GetUpdatesResponse]) => Unit,
+      clue: Option[String],
+  ): Future[Vector[GetUpdatesResponse]] = {
     require(request.endInclusive.isDefined)
     require(!request.descendingOrder)
-    val variants: Seq[(String, Future[Vector[Res]])] = Seq(
-      "ascending" -> new StreamConsumer[Res](service(request.update(_.descendingOrder := false), _))
+    val pagedRequest = GetUpdatesPageRequest(
+      beginOffsetExclusive = Some(request.beginExclusive),
+      endOffsetInclusive = request.endInclusive,
+      maxPageSize = Some(1),
+      updateFormat = request.updateFormat,
+      descendingOrder = false,
+      pageToken = None,
+    )
+    val variants: Seq[(String, Future[Vector[GetUpdatesResponse]])] = Seq(
+      "ascending" -> new StreamConsumer[GetUpdatesResponse](
+        service(request.update(_.descendingOrder := false), _)
+      )
         .all(),
-      "descending" -> new StreamConsumer[Res](service(request.update(_.descendingOrder := true), _))
+      "descending" -> new StreamConsumer[GetUpdatesResponse](
+        service(request.update(_.descendingOrder := true), _)
+      )
         .all()
         .map(_.reverse),
+      "1 elem page ascending" -> transactionsAllPages(
+        pagedRequest,
+        pagedRequest.beginOffsetExclusive,
+      ).map(_.map(getUpdateResponseToGetUpdatesResponse)),
+      "3 elem page ascending" -> transactionsAllPages(
+        pagedRequest.withMaxPageSize(3),
+        pagedRequest.beginOffsetExclusive,
+      ).map(_.map(getUpdateResponseToGetUpdatesResponse)),
+      "1 elem page descending" -> transactionsAllPages(
+        pagedRequest.withDescendingOrder(true),
+        pagedRequest.endOffsetInclusive,
+      ).map(_.map(getUpdateResponseToGetUpdatesResponse).reverse),
+      "3 elem page descending" -> transactionsAllPages(
+        pagedRequest.withDescendingOrder(true).withMaxPageSize(3),
+        pagedRequest.endOffsetInclusive,
+      ).map(_.map(getUpdateResponseToGetUpdatesResponse).reverse),
     )
 
-    evaluateVariants(variants)
+    evaluateVariants(variants, clue)
   }
 
   private def evaluateVariants[Res](
-      variants: Seq[(String, Future[Vector[Res]])]
+      variants: Seq[(String, Future[Vector[Res]])],
+      clue: Option[String] = None,
   ): Future[Vector[Res]] =
     for {
       results <- MonadUtil.sequentialTraverse(variants.map { case (name, variant) =>
         (
           name,
           variant.recoverWith(ex =>
-            Future.failed(new SingleParticipantTestContext.VariantFailedException(name, ex))
+            Future.failed(new SingleParticipantTestContext.VariantFailedException(name, ex, clue))
           ),
         )
       }) { case (name, taggedResult) => taggedResult.map((name, _)) }
-      matchingResult <- checkIfResultsMatch(results)
+      matchingResult <- checkIfResultsMatch(results, clue)
     } yield matchingResult
 
-  private def checkIfResultsMatch[T](results: Seq[(String, T)]): Future[T] = results match {
-    case Seq() => Future.failed(new IllegalArgumentException("Empty result seq"))
-    case (_, v) +: tail if tail.forall(_._2 == v) => Future.successful(v)
-    case _ => Future.failed(new SingleParticipantTestContext.ResultMismatchException(results))
-  }
+  private def getUpdateResponseToGetUpdatesResponse(
+      getUpdateResponse: GetUpdateResponse
+  ): GetUpdatesResponse =
+    getUpdateResponse.update match {
+      case GetUpdateResponse.Update.Empty => GetUpdatesResponse(GetUpdatesResponse.Update.Empty)
+      case GetUpdateResponse.Update.Transaction(value) =>
+        GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(value))
+      case GetUpdateResponse.Update.Reassignment(value) =>
+        GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(value))
+      case GetUpdateResponse.Update.TopologyTransaction(value) =>
+        GetUpdatesResponse(GetUpdatesResponse.Update.TopologyTransaction(value))
+    }
+
+  private def checkIfResultsMatch[T](results: Seq[(String, T)], clue: Option[String]): Future[T] =
+    results match {
+      case Seq() => Future.failed(new IllegalArgumentException("Empty result seq"))
+      case (_, v) +: tail if tail.forall(_._2 == v) => Future.successful(v)
+      case _ =>
+        Future.failed(new SingleParticipantTestContext.ResultMismatchException(results, clue))
+    }
 
   override def transactionsWithVariants(
-      request: GetUpdatesRequest
+      request: GetUpdatesRequest,
+      clue: Option[String] = None,
   ): Future[Vector[Transaction]] =
-    transactionsWithVariants(request, services.update.getUpdates)
+    transactionsWithVariants(request, services.update.getUpdates, clue)
       .map(_.flatMap(_.update.transaction))
 
   override def transactionsByTemplateId(
@@ -974,9 +1041,10 @@ final class SingleParticipantTestContext private[participant] (
   override def transactionsByTemplateIdWithVariants(
       templateId: Identifier,
       parties: Option[Seq[Party]],
+      clue: Option[String] = None,
   ): Future[Vector[Transaction]] =
     getTransactionsRequest(transactionFormat(parties, Seq(templateId)))
-      .flatMap(transactionsWithVariants)
+      .flatMap(transactionsWithVariants(_, clue))
 
   override def transactions(
       request: GetUpdatesRequest
@@ -995,12 +1063,13 @@ final class SingleParticipantTestContext private[participant] (
 
   override def transactionsWithVariants(
       transactionShape: TransactionShape,
+      clue: Option[String],
       parties: Party*
   ): Future[Vector[Transaction]] =
     getTransactionsRequest(
       transactionFormat =
         transactionFormat(Some(parties), transactionShape = transactionShape, verbose = true)
-    ).flatMap(transactionsWithVariants)
+    ).flatMap(transactionsWithVariants(_, clue))
 
   override def transactions(
       take: Int,
@@ -1699,12 +1768,55 @@ final class SingleParticipantTestContext private[participant] (
     NonNegativeFiniteDuration.tryCreate(
       features.offsetCheckpoint.getMaxOffsetCheckpointEmissionDelay.asJava
     )
+
+  override def transactionsSinglePage(request: GetUpdatesPageRequest): Future[Vector[Transaction]] =
+    services.update.getUpdatesPage(request).map(_.updates.flatMap(_.update.transaction).toVector)
+
+  override def getUpdatesPageRaw(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+    services.update.getUpdatesPage(request)
+
+  override def transactionsAllPages(
+      request: GetUpdatesPageRequest,
+      endOfPreviousPage: Option[Long],
+  ): Future[Vector[GetUpdateResponse]] =
+    services.update.getUpdatesPage(request).flatMap { response =>
+      val stepResult = response.updates.toVector
+      if (
+        endOfPreviousPage.forall(end =>
+          if (request.descendingOrder) {
+            response.highestPageOffsetInclusive == end
+          } else {
+            response.lowestPageOffsetExclusive == end
+          }
+        )
+      ) {
+        response.nextPageToken match {
+          case Some(value) =>
+            transactionsAllPages(
+              request.withPageToken(value),
+              Some(if (request.descendingOrder) {
+                response.lowestPageOffsetExclusive
+              } else {
+                response.highestPageOffsetInclusive
+              }),
+            ).map(stepResult ++ _)
+          case None => Future.successful(stepResult)
+        }
+      } else {
+        Future.failed(
+          new IllegalStateException(
+            s"Ranges by subsequent pages are not continuous, end of previous page: $endOfPreviousPage, range of the next ${request.beginOffsetExclusive}, ${request.endOffsetInclusive}"
+          )
+        )
+      }
+    }
 }
 
 object SingleParticipantTestContext {
-  final class ResultMismatchException[T](results: Seq[(String, T)]) extends RuntimeException {
+  final class ResultMismatchException[T](results: Seq[(String, T)], clue: Option[String])
+      extends RuntimeException {
     override def getMessage: String =
-      s"Results do not match expected results: ${results
+      s"Results ${clue.fold("")(str => s" with clue  $str")} do not match expected results: ${results
           .groupBy(_._2)
           .map { case (key, value) =>
             (value.map(_._1), key)
@@ -1712,8 +1824,10 @@ object SingleParticipantTestContext {
           .toVector}"
   }
 
-  final class VariantFailedException(variantName: String, cause: Throwable)
+  final class VariantFailedException(variantName: String, cause: Throwable, clue: Option[String])
       extends RuntimeException(cause) {
-    override def getMessage: String = s"Variant: $variantName failed: $cause"
+    override def getMessage: String =
+      s"Variant: $variantName ${clue.fold("")(str => s" with clue  $str")}${clue
+          .fold("")(str => s" with clue  $str")} failed: $cause"
   }
 }

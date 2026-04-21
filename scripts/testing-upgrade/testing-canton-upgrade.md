@@ -116,7 +116,7 @@ The part `proposals=(s/o/q)=690/678/41` indicates statistics for the proposal:
 
 You can also check that the number of contracts of the ACS is growing:
 ```
-participant1.ledger_api.acs.of_all().size
+participant1.ledger_api.acs.count()
 res7: Int = 1000
 ```
 
@@ -188,7 +188,7 @@ participant1.health.ping(participant2)
 
 Note that you can check that the previously created contracts are still in the ACS:
 ```
-participant1.ledger_api.acs.of_all().size
+participant1.ledger_api.acs.count()
 res7: Int = 1000
 ```
 

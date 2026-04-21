@@ -62,19 +62,8 @@ sealed trait ConfirmationRequestSessionKeyStore {
 
   private[canton] def saveSessionKeysInfo(
       toSave: Map[RecipientGroup, SessionKeyInfo]
-  ): Unit = {
+  ): Unit =
     sessionKeysCacheRecipients.putAll(toSave)
-    // Pre-populate the decryption cache so that when this participant acts as a
-    // confirmer for its own submission, the ECIES decrypt is a cache hit.
-    // Without this, the submitter encrypts session key randomness for each recipient
-    // and then the confirmer path decrypts the same bytes — a redundant ECIES operation.
-    toSave.values.foreach { info =>
-      val plainRandomness = info.sessionKeyAndReference.randomness
-      info.encryptedSessionKeys.foreach { encrypted =>
-        sessionKeysCacheDecryptions.put(encrypted, plainRandomness)
-      }
-    }
-  }
 
   private[canton] def getSessionKeyRandomnessIfPresent(
       encryptedRandomness: AsymmetricEncrypted[SecureRandomness]

@@ -737,6 +737,7 @@ class ParticipantNodeBootstrap(
                 sync = sync,
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
+                updateServiceConfig = arguments.config.ledgerApi.updateService,
               )
             ),
           loggerFactory = loggerFactory,

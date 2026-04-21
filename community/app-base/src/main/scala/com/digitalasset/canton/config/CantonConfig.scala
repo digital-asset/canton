@@ -70,6 +70,7 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  UpdateServiceConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -1017,6 +1018,9 @@ object CantonConfig {
     lazy implicit final val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
 
+    lazy implicit final val updateServiceConfigReader: ConfigReader[UpdateServiceConfig] =
+      deriveReader[UpdateServiceConfig]
+
     lazy implicit final val stateServiceConfigReader: ConfigReader[StateServiceConfig] =
       deriveReader[StateServiceConfig]
 
@@ -1862,6 +1866,8 @@ object CantonConfig {
     }
     lazy implicit final val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
       deriveWriter[RateLimitingConfig]
+    lazy implicit final val updateServiceConfigWriter: ConfigWriter[UpdateServiceConfig] =
+      deriveWriter[UpdateServiceConfig]
     lazy implicit final val stateServiceConfigWriter: ConfigWriter[StateServiceConfig] =
       deriveWriter[StateServiceConfig]
     lazy implicit final val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] = {

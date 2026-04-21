@@ -7,14 +7,14 @@ package transaction
 
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref.{Party, Identifier, PackageName}
-import com.digitalasset.daml.lf.transaction.{TransactionOuterClass => proto}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName, Party}
+import com.digitalasset.daml.lf.transaction.TransactionOuterClass as proto
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.ValueCoder.{EncodeError, DecodeError}
+import com.digitalasset.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.google.protobuf
-import com.google.protobuf.{Message, ByteString}
-import org.scalacheck.{Gen, Arbitrary}
+import com.google.protobuf.{ByteString, Message}
+import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,7 +22,7 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import collection.immutable.TreeSet
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class TransactionCoderSpec
     extends AnyWordSpec
@@ -45,10 +45,13 @@ class TransactionCoderSpec
   "encode-decode" should {
 
     "do Node.Create" in {
-      forAll(malformedCreateNodeGen(), versionInIncreasingOrder()) {
-        case (createNode, (nodeVersion, txVersion)) =>
+      forAll( for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        createNode <- malformedCreateNodeGenWithVersion(nodeVersion)
+      } yield (createNode, txVersion)) {
+        case (createNode, txVersion) =>
           try {
-            val versionedNode = normalizeCreate(createNode.updateVersion(nodeVersion))
+            val versionedNode = normalizeCreate(createNode)
             val Right(encodedNode) = TransactionCoder.internal.encodeNode(
               enclosingVersion = txVersion,
               nodeId = NodeId(0),
@@ -68,9 +71,12 @@ class TransactionCoderSpec
     }
 
     "do Node.Fetch" in {
-      forAll(fetchNodeGen, versionInIncreasingOrder()) {
-        case (fetchNode, (nodeVersion, txVersion)) =>
-          val versionedNode = normalizeFetch(fetchNode.updateVersion(nodeVersion))
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        fetchNode <- fetchNodeGenWithVersion(nodeVersion)
+      } yield (fetchNode, txVersion)) {
+        case (fetchNode, txVersion) =>
+          val versionedNode = normalizeFetch(fetchNode)
           val encodedNode =
             TransactionCoder.internal
               .encodeNode(
@@ -87,9 +93,12 @@ class TransactionCoderSpec
     }
 
     "do Node.Exercise" in {
-      forAll(danglingRefExerciseNodeGen, versionInIncreasingOrder()) {
-        case (exerciseNode, (nodeVersion, txVersion)) =>
-          val normalizedNode = normalizeExe(exerciseNode.updateVersion(nodeVersion))
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        exerciseNode <- danglingRefExerciseNodeGenWithVersion(nodeVersion)
+      } yield (exerciseNode, txVersion)) {
+        case (exerciseNode, txVersion) =>
+          val normalizedNode = normalizeExe(exerciseNode)
           val Right(encodedNode) =
             TransactionCoder.internal
               .encodeNode(
@@ -122,20 +131,23 @@ class TransactionCoderSpec
     }
 
     "do Node.QueryByKey" in {
-      forAll(queryByKeyNodeGen, versionInIncreasingOrder()) {
-        case (queryByKeyNode, (nodeVersion, txVersion)) =>
-          val versionedNode = normalizeQueryByKey(queryByKeyNode.updateVersion(nodeVersion))
-          val Right(encodedNode) =
-            TransactionCoder.internal
-              .encodeNode(
-                enclosingVersion = txVersion,
-                nodeId = NodeId(0),
-                node = versionedNode,
-              )
-          TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
-            (NodeId(0), versionedNode)
-          )
-      }
+      forAll(for {
+        (nodeVersion, txVersion)  <- versionInIncreasingOrder(versions = List(SerializationVersion.V2, SerializationVersion.VDev))
+        queryByKeyNode <- queryByKeyNodeGenWithVersion(nodeVersion)
+      } yield (nodeVersion, txVersion, queryByKeyNode)) {
+        case (nodeVersion, txVersion, queryByKeyNode) =>
+            val versionedNode = normalizeQueryByKey(queryByKeyNode.updateVersion(nodeVersion))
+            val Right(encodedNode) =
+              TransactionCoder.internal
+                .encodeNode(
+                  enclosingVersion = txVersion,
+                  nodeId = NodeId(0),
+                  node = versionedNode,
+                )
+            TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
+              (NodeId(0), versionedNode)
+            )
+        }
     }
 
     "do transactions" in

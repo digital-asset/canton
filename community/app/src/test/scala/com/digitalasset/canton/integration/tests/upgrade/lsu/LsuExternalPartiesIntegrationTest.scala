@@ -90,7 +90,7 @@ final class LsuExternalPartiesIntegrationTest extends LsuBase {
         Optional.of(iou.id.contractId),
       )
 
-      participant3.ledger_api.state.acs.of_all() shouldBe empty
+      participant3.ledger_api.state.acs.count() shouldEqual 0
       // Submission is done on P3, not hosting anybody
       participant3.ledger_api.javaapi.commands
         .submit(

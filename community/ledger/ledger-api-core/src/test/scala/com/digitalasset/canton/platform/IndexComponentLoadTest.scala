@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform
 
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.{
@@ -19,6 +20,8 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.indexer.IndexerConfig
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
@@ -91,31 +94,175 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
     activeTxsPerPass = 2,
   )
 
+  it should "10% CN NFR with ACHS enabled (zero survival region)" ignore {
+    val achsConfig = AchsConfig(
+      validAtDistanceTarget = NonNegativeLong.tryCreate(40000L),
+      lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(0L),
+      aggregationThreshold = 10000L,
+    )
+    restartIndexer(config =
+      IndexerConfig(
+        achsConfig = Some(achsConfig)
+      )
+    )
+    cnNFRIngestionFixture(
+      passes = 432,
+      actionName = "ingesting with ACHS maintenance (zero survival region)",
+    )
+
+    // Restart to default indexer to not impact other tests
+    restartIndexer()
+  }
+
+  it should "10% CN NFR with ACHS enabled (big survival region)" ignore {
+    val achsConfig = AchsConfig(
+      validAtDistanceTarget = NonNegativeLong.tryCreate(40000L),
+      // the distance between a contract's creation and archival (if archived) in event sequential ids is (txsCreatedThenArchived + txsCreatedNotArchived) * txSize = 2023 * 5 = 10115
+      lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(20000L),
+      aggregationThreshold = 10000L,
+    )
+    restartIndexer(config =
+      IndexerConfig(
+        achsConfig = Some(achsConfig)
+      )
+    )
+    cnNFRIngestionFixture(
+      passes = 432,
+      actionName = "ingesting with ACHS maintenance (big survival region)",
+    )
+
+    // Restart to default indexer to not impact other tests
+    restartIndexer()
+  }
+
   it should "Fetch ACS" ignore TraceContext.withNewTraceContext("ACS fetch") {
     implicit traceContext =>
-      val ledgerEndOffset = index.currentLedgerEnd().futureValue
-      implicit val loggingContextWithTrace: LoggingContextWithTrace =
-        LoggingContextWithTrace(loggerFactory)
-      logger.warn("start fetching acs...")
-      val startTime = System.currentTimeMillis()
-      index
-        .getActiveContracts(
-          eventFormat = eventFormat(dsoParty),
-          activeAt = ledgerEndOffset,
-          rangeInfo = AcsRangeInfo.empty,
-        )
-        .zipWithIndex
-        .runWith(Sink.last)
-        .map { case (last, lastIndex) =>
-          val totalMillis = System.currentTimeMillis() - startTime
-          logger.warn(
-            s"finished fetching acs in ${seconds(totalMillis)} s, ${lastIndex + 1} active contracts returned."
+      fetchAcs()
+  }
+
+  it should "Fetch ACS with ACHS" ignore TraceContext.withNewTraceContext("ACS fetch with ACHS") {
+    implicit traceContext =>
+      restartIndexer(
+        config = IndexerConfig(
+          achsConfig = Some(
+            AchsConfig(
+              validAtDistanceTarget = NonNegativeLong.tryCreate(40000L),
+              lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(20000L),
+            )
           )
-          logger.warn(s"last active contract acs: $last")
-        }
-        .futureValue(
-          PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
         )
+      )
+      fetchAcs()
+
+      // Restart to default indexer to not impact other tests
+      restartIndexer()
+  }
+
+  it should "Measure ACHS rendering time during initialization with small survival region" ignore {
+    measureAchsInitializationTime(
+      regionName = "small",
+      achsConfig = AchsConfig(
+        validAtDistanceTarget = NonNegativeLong.tryCreate(200000L),
+        lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(0L),
+      ),
+    )
+  }
+
+  it should "Measure ACHS rendering time during initialization with big survival region" ignore {
+    measureAchsInitializationTime(
+      regionName = "big",
+      achsConfig = AchsConfig(
+        validAtDistanceTarget = NonNegativeLong.tryCreate(200000L),
+        lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(100000L),
+      ),
+    )
+  }
+
+  private def measureAchsInitializationTime(regionName: String, achsConfig: AchsConfig): Unit = {
+    // Step 1: Clear any existing ACHS state by restarting without ACHS
+    restartIndexer(config = IndexerConfig(achsConfig = None))
+
+    // Step 2: Measure baseline restart time without ACHS (no rendering work)
+    logger.warn("Measuring baseline restart time without ACHS...")
+    val baselineStart = System.currentTimeMillis()
+    restartIndexer(config = IndexerConfig(achsConfig = None))
+    val baselineTime = System.currentTimeMillis() - baselineStart
+    logger.warn(s"Baseline restart (no ACHS) completed in ${seconds(baselineTime)} s")
+
+    val lastEventSeqIdBefore = getLastEventSeqId
+    logger.warn(s"Last event sequential ID before enabling ACHS: $lastEventSeqIdBefore")
+
+    val achsSizeBefore = getAchsSize
+    val achsStateRows = getAchsStateRowCount
+    achsSizeBefore shouldBe 0L
+    achsStateRows shouldBe 0L
+
+    // Step 3: Enable ACHS and measure rendering time
+    logger.warn(
+      s"Enabling ACHS with $regionName survival region (validAtDistance=${achsConfig.validAtDistanceTarget}, " +
+        s"lastPopulatedDistance=${achsConfig.lastPopulatedDistanceTarget})..."
+    )
+    val renderStart = System.currentTimeMillis()
+    restartIndexer(config = IndexerConfig(achsConfig = Some(achsConfig)))
+    val renderTime = System.currentTimeMillis() - renderStart
+    val renderOverhead = renderTime - baselineTime
+    logger.warn(
+      s"ACHS rendering with $regionName survival region completed in ${seconds(renderTime)} s " +
+        s"(rendering overhead: ${seconds(renderOverhead)} s)"
+    )
+
+    // Log and verify ACHS state after rendering
+    logAchsState()
+    val achsSize = getAchsSize
+    val (achsValidAt, achsLastPopulated, achsLastRemoved) = getAchsState
+
+    val initAggThreshold = AchsConfig.DefaultInitAggregationThreshold
+
+    val removeTarget = lastEventSeqIdBefore - achsConfig.validAtDistanceTarget.unwrap
+    val populateTarget = removeTarget - achsConfig.lastPopulatedDistanceTarget.unwrap
+
+    achsValidAt shouldBe achsLastRemoved
+
+    // Pointers should be within [target - threshold, target] due to aggregation rounding
+    achsLastRemoved should be <= removeTarget
+    achsLastRemoved should be >= (removeTarget - initAggThreshold).max(0L)
+    achsLastPopulated should be <= populateTarget.max(0L)
+    achsLastPopulated should be >= (populateTarget - initAggThreshold).max(0L)
+
+    achsSize should be > 0L
+
+    // Summary
+    logger.warn(s"=== ACHS Rendering Time Summary (${regionName.capitalize} Survival) ===")
+    logger.warn(s"Baseline restart (no ACHS): ${seconds(baselineTime)} s")
+    logger.warn(
+      s"${regionName.capitalize} survival region rendering: ${seconds(renderOverhead)} s (total: ${seconds(renderTime)} s, ACHS size: $achsSize)"
+    )
+  }
+
+  private def fetchAcs()(implicit traceContext: TraceContext): Unit = {
+    val ledgerEndOffset = index.currentLedgerEnd().futureValue
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)
+    logger.warn("start fetching acs...")
+    val startTime = System.currentTimeMillis()
+    index
+      .getActiveContracts(
+        eventFormat = eventFormat(dsoParty),
+        activeAt = ledgerEndOffset,
+        rangeInfo = AcsRangeInfo.empty,
+      )
+      .zipWithIndex
+      .runWith(Sink.last)
+      .map { case (last, lastIndex) =>
+        val totalMillis = System.currentTimeMillis() - startTime
+        logger.warn(
+          s"finished fetching acs in ${seconds(totalMillis)} s, ${lastIndex + 1} active contracts returned."
+        )
+        logger.warn(s"last active contract acs: $last")
+      }
+      .futureValue(
+        PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
+      )
   }
 
   private def seconds(milliseconds: Long): String = {
@@ -171,6 +318,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       txsPerPass: Int = 2023,
       activeTxsPerPass: Int = 23,
       yesIReallyWantToRunIt: Boolean = false,
+      actionName: String = "ingesting",
   ): Unit = {
     val nextRecordTime: () => CantonTimestamp = nextRecordTimeFactory()
     def ingestionIteration(): Unit = {
@@ -198,7 +346,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
         )
       val allUpdateSize = allUpdates.size
       logger.warn(s"prepared $allUpdateSize updates")
-      indexUpdates(allUpdates)
+      indexUpdates(allUpdates, actionName = actionName)
     }
 
     (1 to 1).foreach { i =>
@@ -268,7 +416,10 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       )
   }
 
-  private def indexUpdates(updates: Vector[(Update, Vector[ContractInstance])]): Unit = {
+  private def indexUpdates(
+      updates: Vector[(Update, Vector[ContractInstance])],
+      actionName: String = "ingesting",
+  ): Unit = {
     val startTime = System.currentTimeMillis
     val updatesWithIds = fillUpdatesWithInternalContractIds(updates)
     val ledgerEndLongBefore = index.currentLedgerEnd().futureValue.map(_.positive).getOrElse(0L)
@@ -276,7 +427,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       updates = updatesWithIds,
       parallelism = 1,
       process = ingestUpdateAsync,
-      action = "ingesting",
+      action = actionName,
       sink = Sink.ignore,
       waitingMessage = ", waiting for all to be indexed...",
       endCheck = () =>
@@ -288,6 +439,21 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
     ).discard
     val timeSpan = seconds(System.currentTimeMillis - startTime)
     logger.warn(s"Ingestion cycle completed in $timeSpan seconds")
+    logAchsState()
+  }
+
+  private def logAchsState(): Unit = {
+    val achsStateRows = getAchsStateRowCount
+    if (achsStateRows > 0) {
+      val lastEventSeqId = getLastEventSeqId
+      val achsSize = getAchsSize
+      val (achsValidAt, achsLastPopulated, achsLastRemoved) = getAchsState
+      logger.warn(
+        s"ACHS state: lastEventSequentialId=$lastEventSeqId, size=$achsSize, validAt=$achsValidAt, lastPopulated=$achsLastPopulated, lastRemoved=$achsLastRemoved"
+      )
+    } else {
+      logger.warn("ACHS state: not initialized (no rows in lapi_achs_state)")
+    }
   }
 
   private def fillUpdatesWithInternalContractIds(
@@ -296,7 +462,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
     withReporter[(Update, Vector[ContractInstance]), Update, Seq[Update]](
       updates = updates,
       parallelism = 100,
-      process = storeContracts.tupled,
+      process = (storeContracts _).tupled,
       action = "storing contracts of updates",
       sink = Sink.seq,
     ).toVector

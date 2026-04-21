@@ -217,5 +217,5 @@ check_pr_skip_ci:
   steps:
     - run:
         name: Check whether build should be aborted due to `skip ci` label on PR
-        command: .circleci/abort-if-skip-ci.sh
+        command: .ci/nix-exec ./scripts/ci/abort-if-skip-ci.sh
 
