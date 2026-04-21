@@ -152,7 +152,7 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
 
     "contains all builtins " in {
       forEvery(
-        Table("version", LanguageVersion.allLfVersions.filter(LanguageVersion.v2_dev < _)*)
+        Table("version", LanguageVersion.allLfVersions*)
       ) { version =>
         // Construct the file path dynamically using the helper and the version
         val darFile =

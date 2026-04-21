@@ -386,6 +386,10 @@ private[lf] final class PhaseOne(
       case BCoerceContractId => compileIdentity(env)
       case BTextMapEmpty => SEValue.EmptyTextMap
       case BGenMapEmpty => SEValue.EmptyGenMap
+      // BExternalCall exists in LF, but not in the interpreter yet.
+      // Keep this match exhaustive until execution support is added.
+      case BExternalCall =>
+        throw CompilationError("EXTERNAL_CALL is not yet supported by the interpreter")
 
       case _ =>
         SEBuiltin(bf match {
@@ -495,7 +499,7 @@ private[lf] final class PhaseOne(
           case BTypeRepTyConName => SBTypeRepTyConName
 
           // Implemented using SExpr
-          case BCoerceContractId | BTextMapEmpty | BGenMapEmpty =>
+          case BCoerceContractId | BTextMapEmpty | BGenMapEmpty | BExternalCall =>
             throw CompilationError(s"unexpected $bf")
 
           case BAnyExceptionMessage => SBAnyExceptionMessage
