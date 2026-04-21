@@ -476,6 +476,7 @@ object Hash {
             exerciseResult,
             keyOpt,
             byKey,
+            _,
             version,
           ) =>
         if (choiceAuthorizers.nonEmpty)

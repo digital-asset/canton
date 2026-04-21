@@ -202,6 +202,7 @@ private class NodeBuilderV1(
           exerciseResult,
           keyOpt,
           byKey,
+          _,
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)

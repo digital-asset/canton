@@ -108,6 +108,7 @@ final class GeneratorsInteractiveSubmission(
           choiceAuthorizers = None,
           chosenValue = normalizeValue(node.chosenValue),
           exerciseResult = node.exerciseResult.map(normalizeValue),
+          externalCallResults = ImmArray.Empty,
         )
         .asInstanceOf[N]
     case node: Node.Fetch =>

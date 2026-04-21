@@ -323,6 +323,12 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           case None =>
             Right(())
         }
+        _ <-
+          Either.cond(
+            node.externalCallResults.isEmpty,
+            (),
+            EncodeError("external call results are not supported by transaction encoding"),
+          )
       } yield builder.build()
     }
 
@@ -536,6 +542,12 @@ class TransactionCoder(allowNullCharacters: Boolean) {
             Left(DecodeError(s"Exercise Authorizer not supported by version $nodeVersion"))
           else
             toPartySet(msg.getAuthorizersList).map(Some(_))
+        _ <-
+          Either.cond(
+            msg.getExternalCallResultsCount == 0,
+            (),
+            DecodeError("external call results are not supported by transaction decoding"),
+          )
       } yield Node.Exercise(
         targetCoid = fetch.coid,
         packageName = fetch.packageName,
@@ -553,6 +565,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         exerciseResult = result,
         keyOpt = fetch.keyOpt,
         byKey = fetch.byKey,
+        externalCallResults = ExternalCallResult.Empty,
         version = fetch.version,
       )
     }
