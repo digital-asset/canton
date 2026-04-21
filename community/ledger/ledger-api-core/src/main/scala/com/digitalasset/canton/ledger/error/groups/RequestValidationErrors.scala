@@ -251,6 +251,20 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
         )
   }
 
+  @Explanation("Pruning in progress.")
+  @Resolution(
+    "Only one pruning operation is allowed to execute at a given time. Please try pruning later."
+  )
+  object ParticipantPruningInProgress
+      extends ErrorCode(
+        id = "PARTICIPANT_PRUNING_IN_PROGRESS",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject()(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(cause = "Pruning in progress. Please try later.")
+  }
+
   @Explanation(
     "This rejection is given when a read request tries to access data after the ledger end"
   )
@@ -427,15 +441,36 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   }
 
   @Explanation(
+    """This error is emitted when a submitted ledger API page request contains a next page token which cannot be verified.
+      |When an GetUpdatesPage request is made with a next page token, the token must be taken from a valid
+      |GetUpdatesPageResponse and used with the same EventFormat settings, the same begin, end and with the same Canton participant
+      |running the same Canton version. These tokens are not intended to be stored and used much later under different circumstances."""
+  )
+  @Resolution("Inspect the reason given and correct your application.")
+  object InvalidUpdatesPageToken
+      extends ErrorCode(
+        id = "INVALID_UPDATE_PAGE_TOKEN",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(message: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = "The submitted command contains an invalid continuation token. Tokens used in GetUpdatesPage requests must " +
+            "be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, the same " +
+            s"begin and end with the same Canton participant running the same Canton version. $message"
+        )
+  }
+
+  @Explanation(
     """This error is emitted when a submitted ledger API command contains a page token which cannot be verified.
       |When an ACS page request is made with a page token, the token must be taken from a valid
       |GetActiveContractsPageResponse and used with the same EventFormat settings, with the same Canton participant
       |running the same Canton version. These tokens are not intended to be stored and used much later under different circumstances."""
   )
   @Resolution("Inspect the reason given and correct your application.")
-  object InvalidPageToken
+  object InvalidAcsPageToken
       extends ErrorCode(
-        id = "INVALID_PAGE_TOKEN",
+        id = "INVALID_ACS_PAGE_TOKEN",
         ErrorCategory.InvalidIndependentOfSystemState,
       ) {
     final case class Reject(message: String)(implicit

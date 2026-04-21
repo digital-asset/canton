@@ -141,7 +141,7 @@ class ProtocolProcessorTest
     Set(
       MediatorGroup(
         NonNegativeInt.zero,
-        Seq(DefaultTestIdentities.daMediator),
+        NonEmpty(Seq, DefaultTestIdentities.daMediator),
         Seq(),
         PositiveInt.one,
       )
@@ -289,6 +289,7 @@ class ProtocolProcessorTest
         crypto.crypto,
         IndexedPhysicalSynchronizer.tryCreate(psid, 1),
         defaultStaticSynchronizerParameters,
+        predecessor = None,
         loggerFactory,
         timeouts,
         futureSupervisor,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.util.retry
 
 import cats.Eval
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.ExponentialBackoffConfig
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -493,6 +494,30 @@ final case class Backoff(
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration =
     jitter(initialDelay, delay, nextCount)
+}
+
+object Backoff {
+  def fromConfig(
+      logger: TracedLogger,
+      hasSynchronizeWithClosing: HasSynchronizeWithClosing,
+      config: ExponentialBackoffConfig,
+      operationName: String,
+      longDescription: String = "",
+      actionable: Option[String] = None,
+      retryLogLevel: Option[Level] = None,
+      suspendRetries: Eval[FiniteDuration] = Eval.now(Duration.Zero),
+  )(implicit jitter: Jitter = Jitter.full(config.maxDelay.unwrap)): Backoff = Backoff(
+    logger,
+    hasSynchronizeWithClosing,
+    config.maxRetries,
+    config.initialDelay.underlying,
+    config.maxDelay.unwrap,
+    operationName,
+    longDescription,
+    actionable,
+    retryLogLevel,
+    suspendRetries,
+  )(jitter)
 }
 
 /** A retry policy in which the failure determines the way a future should be retried. The partial

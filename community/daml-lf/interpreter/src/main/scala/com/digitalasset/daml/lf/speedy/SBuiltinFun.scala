@@ -1445,10 +1445,8 @@ private[lf] object SBuiltinFun {
         templateId,
         templateArg,
       ) { contract =>
-        val templateVersion = machine.tmplId2TxVersion(templateId)
         val pkgName = machine.tmplId2PackageName(templateId)
-        val interfaceVersion = interfaceId.map(machine.tmplId2TxVersion)
-        val exerciseVersion = interfaceVersion.fold(templateVersion)(_.max(templateVersion))
+        val exerciseVersion = machine.assignSerializationVersion(hasKey = contract.keyOpt.isDefined)
         val chosenValue = args(0).toNormalizedValue
         val controllers = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(2))
         machine.enforceChoiceControllersLimit(
@@ -1982,7 +1980,7 @@ private[lf] object SBuiltinFun {
           templateId,
           templateArg,
         ) { contract =>
-          val version = machine.tmplId2TxVersion(templateId)
+          val version = machine.assignSerializationVersion(hasKey = contract.keyOpt.isDefined)
           machine.ptx.insertFetch(
             coid = coid,
             contract = contract,
@@ -2077,7 +2075,7 @@ private[lf] object SBuiltinFun {
           optLocation = machine.getLastLocation,
           key = cachedKey,
           result = result,
-          keyVersion = machine.tmplId2TxVersion(templateId),
+          keyVersion = machine.assignSerializationVersion(hasKey = true),
         )
         Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
       }
@@ -2102,7 +2100,7 @@ private[lf] object SBuiltinFun {
           optLocation = machine.getLastLocation,
           key = cachedKey,
           result = result,
-          keyVersion = machine.tmplId2TxVersion(templateId),
+          keyVersion = machine.assignSerializationVersion(hasKey = true),
         )
         machine.metrics.incrCount[TxNodeCount]()
         Control.Value(
@@ -2119,7 +2117,6 @@ private[lf] object SBuiltinFun {
           key: CachedKey,
       ): Either[IE, Unit] =
         machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
-
     }
   }
 
@@ -2649,7 +2646,7 @@ private[lf] object SBuiltinFun {
     SBuiltinFun.SBStructCon(contractInfoPositionStruct)
 
   private def extractContractInfo(
-      tmplId2TxVersion: TypeConId => SerializationVersion,
+      assignSerializationVersion: Boolean => SerializationVersion,
       tmplId2PackageName: TypeConId => PackageName,
       contractInfoStruct: SValue,
   ): ContractInfo = {
@@ -2663,7 +2660,6 @@ private[lf] object SBuiltinFun {
               s"Invalid contract info struct: $v",
             )
         }
-        val version = tmplId2TxVersion(templateId)
         val pkgName = tmplId2PackageName(templateId)
         val mbKey = vals(contractInfoStructKeyIdx) match {
           case SOptional(mbKey) =>
@@ -2677,7 +2673,7 @@ private[lf] object SBuiltinFun {
             )
         }
         ContractInfo(
-          version = version,
+          version = assignSerializationVersion(mbKey.isDefined),
           packageName = pkgName,
           templateId = templateId,
           value = vals(contractInfoStructArgIdx),
@@ -3093,7 +3089,7 @@ private[lf] object SBuiltinFun {
     executeExpression(machine, if (allowCatchingContractInfoErrors) e else SEPreventCatch(e)) {
       contractInfoStruct =>
         val contract = extractContractInfo(
-          machine.tmplId2TxVersion,
+          machine.assignSerializationVersion,
           machine.tmplId2PackageName,
           contractInfoStruct,
         )

@@ -69,7 +69,6 @@ final class FlywayChecksumsTest extends AnyWordSpec {
         )
 
     val stableReleasedVersions = ReleaseUtils.previousSupportedStableReleases
-      .map(_.releaseVersion)
       .map { case ReleaseVersion(major, minor, _, _) => s"$major.$minor" }
 
     val missingSqlChecksumFiles =

@@ -7,14 +7,30 @@ package transaction
 
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref.{Party, Identifier, PackageName}
-import com.digitalasset.daml.lf.transaction.{TransactionOuterClass => proto}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName, Party}
+import com.digitalasset.daml.lf.transaction.TransactionCoderSpec.{
+  absCid,
+  addUnknownField,
+  adjustStakeholders,
+  bytesGen,
+  dummyPackageName,
+  makePartyFresh,
+  normalizeCreate,
+  normalizeExe,
+  normalizeFetch,
+  normalizeNode,
+  normalizeQueryByKey,
+  updateVersion,
+  versionInIncreasingOrder,
+  versionInStrictIncreasingOrder,
+}
+import com.digitalasset.daml.lf.transaction.TransactionOuterClass as proto
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.ValueCoder.{EncodeError, DecodeError}
+import com.digitalasset.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.google.protobuf
-import com.google.protobuf.{Message, ByteString}
-import org.scalacheck.{Gen, Arbitrary}
+import com.google.protobuf.{ByteString, Message}
+import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,9 +38,9 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import collection.immutable.TreeSet
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
-class TransactionCoderSpec
+final class TransactionCoderSpec
     extends AnyWordSpec
     with Matchers
     with Inside
@@ -34,72 +50,78 @@ class TransactionCoderSpec
   // TODO https://github.com/digital-asset/daml/issues/18457
   // Tests that messages with unknown field are rejected
 
-  import com.digitalasset.daml.lf.value.test.ValueGenerators._
+  import com.digitalasset.daml.lf.value.test.ValueGenerators.*
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
     PropertyCheckConfiguration(minSuccessful = 1000, sizeRange = 10)
 
   private[this] val serializationVersions =
-    Table("serialization version", SerializationVersion.All: _*)
+    Table("serialization version", SerializationVersion.All*)
 
   "encode-decode" should {
 
     "do Node.Create" in {
-      forAll(malformedCreateNodeGen(), versionInIncreasingOrder()) {
-        case (createNode, (nodeVersion, txVersion)) =>
-          try {
-            val versionedNode = normalizeCreate(createNode.updateVersion(nodeVersion))
-            val Right(encodedNode) = TransactionCoder.internal.encodeNode(
-              enclosingVersion = txVersion,
-              nodeId = NodeId(0),
-              node = versionedNode,
-            )
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        createNode <- malformedCreateNodeGenWithVersion(nodeVersion)
+      } yield (createNode, txVersion)) { case (createNode, txVersion) =>
+        try {
+          val versionedNode = normalizeCreate(createNode)
+          val Right(encodedNode) = TransactionCoder.internal.encodeNode(
+            enclosingVersion = txVersion,
+            nodeId = NodeId(0),
+            node = versionedNode,
+          )
 
-            TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
-              (NodeId(0), versionedNode)
-            )
-          } catch {
-            case scala.util.control.NonFatal(e) =>
-              val x = e.getStackTrace
-              x.foreach(x => println(x.toString))
-              throw e
-          }
+          TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
+            (NodeId(0), versionedNode)
+          )
+        } catch {
+          case scala.util.control.NonFatal(e) =>
+            val x = e.getStackTrace
+            x.foreach(x => println(x.toString))
+            throw e
+        }
       }
     }
 
     "do Node.Fetch" in {
-      forAll(fetchNodeGen, versionInIncreasingOrder()) {
-        case (fetchNode, (nodeVersion, txVersion)) =>
-          val versionedNode = normalizeFetch(fetchNode.updateVersion(nodeVersion))
-          val encodedNode =
-            TransactionCoder.internal
-              .encodeNode(
-                enclosingVersion = txVersion,
-                nodeId = NodeId(0),
-                node = versionedNode,
-              )
-              .toOption
-              .get
-          TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
-            (NodeId(0), versionedNode)
-          )
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        fetchNode <- fetchNodeGenWithVersion(nodeVersion)
+      } yield (fetchNode, txVersion)) { case (fetchNode, txVersion) =>
+        val versionedNode = normalizeFetch(fetchNode)
+        val encodedNode =
+          TransactionCoder.internal
+            .encodeNode(
+              enclosingVersion = txVersion,
+              nodeId = NodeId(0),
+              node = versionedNode,
+            )
+            .toOption
+            .get
+        TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
+          (NodeId(0), versionedNode)
+        )
       }
     }
 
     "do Node.Exercise" in {
-      forAll(danglingRefExerciseNodeGen, versionInIncreasingOrder()) {
-        case (exerciseNode, (nodeVersion, txVersion)) =>
-          val normalizedNode = normalizeExe(exerciseNode.updateVersion(nodeVersion))
-          val Right(encodedNode) =
-            TransactionCoder.internal
-              .encodeNode(
-                enclosingVersion = txVersion,
-                nodeId = NodeId(0),
-                node = normalizedNode,
-              )
-          TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
-            (NodeId(0), normalizedNode)
-          )
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder()
+        exerciseNode <- danglingRefExerciseNodeGenWithVersion(nodeVersion)
+      } yield (exerciseNode, txVersion)) { case (exerciseNode, txVersion) =>
+        val normalizedNode = normalizeExe(exerciseNode)
+        val Right(encodedNode) =
+          TransactionCoder.internal
+            .encodeNode(
+              enclosingVersion = txVersion,
+              nodeId = NodeId(0),
+              node = normalizedNode,
+            )
+        TransactionCoder.internal.decodeNode(txVersion, encodedNode) shouldBe Right(
+          (NodeId(0), normalizedNode)
+        )
       }
     }
 
@@ -122,8 +144,13 @@ class TransactionCoderSpec
     }
 
     "do Node.QueryByKey" in {
-      forAll(queryByKeyNodeGen, versionInIncreasingOrder()) {
-        case (queryByKeyNode, (nodeVersion, txVersion)) =>
+      forAll(for {
+        (nodeVersion, txVersion) <- versionInIncreasingOrder(versions =
+          List(SerializationVersion.V2, SerializationVersion.VDev)
+        )
+        queryByKeyNode <- queryByKeyNodeGenWithVersion(nodeVersion)
+      } yield (nodeVersion, txVersion, queryByKeyNode)) {
+        case (nodeVersion, txVersion, queryByKeyNode) =>
           val versionedNode = normalizeQueryByKey(queryByKeyNode.updateVersion(nodeVersion))
           val Right(encodedNode) =
             TransactionCoder.internal
@@ -247,7 +274,7 @@ class TransactionCoderSpec
 
       val gen = for {
         ver <- versionInIncreasingOrder(SerializationVersion.All)
-        (nodeVersion, txVersion) = ver
+        (nodeVersion, _) = ver
         node <- danglingRefGenActionNodeWithVersion(nodeVersion)
       } yield (ver, node)
 
@@ -283,7 +310,7 @@ class TransactionCoderSpec
             node = normalizedNode,
           )
 
-        TransactionCoder.internal.decodeNode(v1, encoded) shouldBe a[Left[_, _]]
+        TransactionCoder.internal.decodeNode(v1, encoded) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -303,7 +330,7 @@ class TransactionCoderSpec
         minSuccessful(5),
       ) { (version, bytes1, bytes2) =>
         val encoded = TransactionCoder.encodeVersioned(version, bytes1)
-        TransactionCoder.decodeVersioned(encoded concat bytes2) shouldBe a[Left[_, _]]
+        TransactionCoder.decodeVersioned(encoded concat bytes2) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -480,7 +507,7 @@ class TransactionCoderSpec
             CreationTime.CreatedAt(time),
             data.Bytes.fromByteString(salt),
           )
-          val nonMaintainerSignatories = (instance.nonMaintainerSignatories + party)
+          val nonMaintainerSignatories = instance.nonMaintainerSignatories + party
           val maintainers = TreeSet.from(key.maintainers + party)
           val protoKey = hackKeyProto(
             create.version,
@@ -602,7 +629,7 @@ class TransactionCoderSpec
 
       val gen = for {
         ver <- versionInStrictIncreasingOrder(SerializationVersion.All)
-        (txVersion, nodeVersion) = ver
+        (_, nodeVersion) = ver
         node <- danglingRefGenActionNodeWithVersion(nodeVersion)
       } yield (ver, node)
 
@@ -616,7 +643,7 @@ class TransactionCoderSpec
             node = normalizedNode,
           )
 
-        TransactionCoder.internal.decodeNode(txVersion, encoded) shouldBe a[Left[_, _]]
+        TransactionCoder.internal.decodeNode(txVersion, encoded) shouldBe a[Left[?, ?]]
       }
     }
   }
@@ -653,7 +680,7 @@ class TransactionCoderSpec
         val nonSortedParties =
           Iterator.iterate(parties)(shuffle(_)).filterNot(_ == sortedParties).next()
         val proto = toProto(nonSortedParties)
-        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[_, _]]
+        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -661,40 +688,14 @@ class TransactionCoderSpec
       forAll(party, Gen.listOf(party)) { (party, parties) =>
         val partiesWithDuplicate = (party :: party :: parties).sorted
         val proto = toProto(partiesWithDuplicate)
-        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[_, _]]
+        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[?, ?]]
       }
     }
   }
 
-  def withoutExerciseResult(gn: Node): Node =
-    gn match {
-      case ne: Node.Exercise => ne.copy(exerciseResult = None)
-      case _ => gn
-    }
-  def withoutContractKeyInExercise(gn: Node): Node =
-    gn match {
-      case ne: Node.Exercise => ne.copy(keyOpt = None)
-      case _ => gn
-    }
-  def withoutMaintainersInExercise(gn: Node): Node =
-    gn match {
-      case ne: Node.Exercise =>
-        ne.copy(keyOpt = ne.keyOpt.map(_.copy(maintainers = Set.empty)))
-      case _ => gn
-    }
+}
 
-  def withoutChoiceObservers(gn: Node): Node =
-    gn match {
-      case ne: Node.Exercise =>
-        ne.copy(choiceObservers = Set.empty)
-      case _ => gn
-    }
-
-  def hasChoiceObserves(tx: Transaction): Boolean =
-    tx.nodes.values.exists {
-      case ne: Node.Exercise => ne.choiceObservers.nonEmpty
-      case _ => false
-    }
+private object TransactionCoderSpec {
 
   private def absCid(s: String): ContractId =
     ContractId.V1(Hash.hashPrivateKey(s))
@@ -726,7 +727,7 @@ class TransactionCoderSpec
       .listOf(Arbitrary.arbByte.arbitrary)
       .map(x => ByteString.copyFrom(x.toArray))
 
-  private[this] def normalizeNode(node: Node) =
+  private def normalizeNode(node: Node) =
     node match {
       case rb: Node.Rollback => rb // nothing to normalize
       case exe: Node.Exercise => normalizeExe(exe)
@@ -735,7 +736,7 @@ class TransactionCoderSpec
       case queryByKey: Node.QueryByKey => normalizeQueryByKey(queryByKey)
     }
 
-  private[this] def adjustStakeholders(create: Node.Create) = {
+  private def adjustStakeholders(create: Node.Create) = {
     val maintainers = create.keyOpt.fold(Set.empty[Party])(_.maintainers)
     val signatories = create.signatories | maintainers
     val stakeholders = create.stakeholders | signatories
@@ -745,14 +746,14 @@ class TransactionCoderSpec
     )
   }
 
-  private[this] def makePartyFresh(party: Party, create: Node.Create): Party = {
+  private def makePartyFresh(party: Party, create: Node.Create): Party = {
     val contractParties = create.stakeholders ++ create.keyOpt.fold(Set.empty[Party])(_.maintainers)
     Iterator.iterate(party)(p => Party.assertFromString(p + "_")).filterNot(contractParties).next()
   }
 
-  private[this] val dummyPackageName = PackageName.assertFromString("package-name")
+  private val dummyPackageName = PackageName.assertFromString("package-name")
 
-  private[this] def normalizeCreate(
+  private def normalizeCreate(
       create: Node.Create
   ): Node.Create = {
     val maintainers = create.keyOpt.fold(Set.empty[Party])(_.maintainers)
@@ -768,7 +769,7 @@ class TransactionCoderSpec
     )
   }
 
-  private[this] def normalizeFetch(fetch: Node.Fetch) = {
+  private def normalizeFetch(fetch: Node.Fetch) = {
     val maintainers = fetch.keyOpt.fold(Set.empty[Party])(_.maintainers)
     val signatories = fetch.signatories ++ maintainers
     val stakeholders = fetch.stakeholders ++ signatories
@@ -783,7 +784,7 @@ class TransactionCoderSpec
     )
   }
 
-  private[this] def normalizeExe(exe: Node.Exercise) = {
+  private def normalizeExe(exe: Node.Exercise) = {
     val maintainers = exe.keyOpt.fold(Set.empty[Party])(_.maintainers)
     val signatories = exe.signatories ++ maintainers
     val stakeholders = exe.stakeholders ++ signatories
@@ -807,7 +808,7 @@ class TransactionCoderSpec
     )
   }
 
-  private[this] def normalizeKey(
+  private def normalizeKey(
       key: GlobalKeyWithMaintainers,
       version: SerializationVersion,
   ) =
@@ -820,12 +821,12 @@ class TransactionCoderSpec
       )
     )
 
-  private[this] def normalizeQueryByKey(queryByKey: Node.QueryByKey): Node.QueryByKey =
+  private def normalizeQueryByKey(queryByKey: Node.QueryByKey): Node.QueryByKey =
     queryByKey.copy(
-      key = normalizeKey(queryByKey.key, queryByKey.version),
+      key = normalizeKey(queryByKey.key, queryByKey.version)
     )
 
-  private[this] def normalize(
+  private def normalize(
       value0: Value,
       version: SerializationVersion,
   ): Value = Util.assertNormalizeValue(value0, version)
@@ -838,7 +839,7 @@ class TransactionCoderSpec
     case node: Node.Rollback => node
   }
 
-  def addUnknownField(
+  private def addUnknownField(
       builder: Message.Builder,
       i: Int,
       content: ByteString,

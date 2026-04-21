@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.http.json.v2
 
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.http.json.JsHealthService
 import com.digitalasset.canton.http.json.v2.JsSchema.X_ONE_OF
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.apiserver.services.VersionFile
 import com.softwaremill.quicklens.*
 import monocle.macros.syntax.lens.*
 import org.semver4j.Semver
@@ -376,7 +376,7 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
 
   def createStaticDocs(protoInfo: ProtoInfo): ApiDocs =
     createDocs(
-      VersionFile.readVersion().getOrElse("unknown"),
+      BuildInfo.version,
       staticDocumentationEndpoints,
       protoInfo,
     )

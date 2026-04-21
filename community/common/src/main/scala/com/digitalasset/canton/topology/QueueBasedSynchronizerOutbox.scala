@@ -303,9 +303,9 @@ class QueueBasedSynchronizerOutbox(
         .Backoff(
           logger,
           this,
-          topologyConfig.topologyTransactionObservationTimeout.retries(1.second),
-          1.second,
-          10.seconds,
+          maxRetries = topologyConfig.topologyTransactionObservationTimeout.retries(1.second),
+          initialDelay = 1.second,
+          maxDelay = 10.seconds,
           "push topology transaction",
         )
         .unlessShutdown(

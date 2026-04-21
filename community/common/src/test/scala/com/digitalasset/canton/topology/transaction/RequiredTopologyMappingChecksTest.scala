@@ -71,6 +71,7 @@ private[transaction] abstract class BaseTopologyMappingChecksTest[T <: TopologyM
     val store =
       new InMemoryTopologyStore(
         SynchronizerStore(DefaultTestIdentities.physicalSynchronizerId),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,

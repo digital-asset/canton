@@ -12,8 +12,8 @@ sealed trait LsuError extends Product with Serializable with CantonBaseError
 object LsuError extends LsuErrorGroup {
 
   // TODO(#26113) – Ensure all non-retryable errors have a corresponding error here
-  @Explanation("TODO(#31526)")
-  @Resolution("TODO(#31526)")
+  @Explanation("TODO(#26113)")
+  @Resolution("TODO(#26113)")
   object FailedLsu
       extends ErrorCode(
         id = "FAILED_LSU",

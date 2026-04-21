@@ -28,6 +28,7 @@ private[platform] trait LedgerDaoUpdateReader {
       endInclusive: Offset,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
+      skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed]

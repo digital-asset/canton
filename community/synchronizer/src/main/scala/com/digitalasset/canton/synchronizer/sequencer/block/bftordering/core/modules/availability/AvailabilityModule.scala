@@ -305,6 +305,9 @@ final class AvailabilityModule[E <: Env[E]](
         logger.debug(
           s"$actingOnMessageType: persisted local batches ${batches.map(_._1)}, now signing"
         )
+        // TODO(#31102): currently we preserve the invariant that the disseminator signs (i.e., adds its own ack)
+        //  before disseminating further, even though this is not necessary for correctness, so dissemination
+        //  latency could be further optimized by dropping this invariant.
         signLocalBatchesAndContinue(batches)
 
       case Availability.LocalDissemination.RemoteBatchStored(
@@ -325,7 +328,7 @@ final class AvailabilityModule[E <: Env[E]](
         signRemoteBatchAndContinue(batchId, epochNumber, from)
 
       case LocalDissemination.LocalBatchesStoredSigned(batches) =>
-        disseminateLocalBatches(actingOnMessageType, batches)
+        processJustSignedBatches(actingOnMessageType, batches)
 
       case LocalDissemination.RemoteBatchStoredSigned(batchId, from, signature) =>
         logger.debug(s"$actingOnMessageType: signed $batchId from $from, sending ACK")
@@ -410,7 +413,7 @@ final class AvailabilityModule[E <: Env[E]](
     }
   }
 
-  private def disseminateLocalBatches(
+  private def processJustSignedBatches(
       actingOnMessageType: => String,
       batches: Seq[Availability.LocalDissemination.LocalBatchStoredSigned],
   )(implicit
@@ -418,7 +421,7 @@ final class AvailabilityModule[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit = {
     logger.debug(
-      s"$actingOnMessageType: local batches ${batches.map(_.batchId)} ready to disseminate"
+      s"$actingOnMessageType: local batches ${batches.map(_.batchId)} signed"
     )
 
     batches.foreach {
@@ -450,37 +453,67 @@ final class AvailabilityModule[E <: Env[E]](
                 // The local ack is missing if we check dissemination after re-signing, so we need to add it
                 _.addAck(AvailabilityAck(thisNode, signature))
               )
-          val reviewedProgress =
+          val (reviewedProgress, changedMembership, needsReSigning) =
             // When freshly (re-)signed, review the progress again by taking into account
-            //  the most recent membership (which could have changed during the signing process).
+            //  the most recent membership (which could have changed during the signing process,
+            //  potentially even requiring re-signing).
             //  Also, a freshly signed batch could be already complete, and in particular
             //  this happens with F == 0, as the local node's `AvailabilityAck` already
             //  constitutes a weak quorum (F + 1) by itself.
-            if (signingMembership != activeMembership)
-              progress.changeMembership(activeMembership)
-            else
-              progress.update()
-          logger.debug(s"$actingOnMessageType: progress of stored and signed $batchId is $progress")
+            if (signingMembership != activeMembership) {
+              val newProgress = progress.changeMembership(activeMembership)
+              val needsReSigning = newProgress.needsSigning
+              if (needsReSigning)
+                fetchBatchesAndThenSelfSend(Seq(tracedBatchId))(
+                  // Will trigger signing and then further dissemination
+                  Availability.LocalDissemination.LocalBatchesStored(_)
+                )
+              (newProgress, true, needsReSigning)
+            } else {
+              (progress.update(), true, false)
+            }
+          logger.debug(
+            s"$actingOnMessageType: progress of stored and signed $batchId is $reviewedProgress " +
+              s"(changed membership = $changedMembership, needs re-signing = $needsReSigning)"
+          )
           setProgress(actingOnMessageType, batchId, reviewedProgress)
         }
         // Disseminate [further] if needed
         disseminationProtocolState.disseminationProgress
           .get(batchId)
           .foreach { progress =>
-            val nodesToBeSentBatch = progress.sendBatchTo
-            locally {
-              implicit val traceContext: TraceContext = tracedBatchId.traceContext
-              multicast(
-                message = Availability.RemoteDissemination.RemoteBatch
-                  .create(batchId, batch, from = thisNode),
-                nodes = nodesToBeSentBatch,
+            if (progress.needsSigning) {
+              // TODO(#31102): currently we preserve the invariant that the disseminator signs (i.e., adds its own ack)
+              //  before disseminating further, even though this is not necessary for correctness, so dissemination
+              //  latency could be further optimized by dropping this invariant.
+              logger.debug(
+                s"$actingOnMessageType: will complete re-signing before being disseminated further as needed"
               )
+            } else {
+              val nodesToBeSentBatch = progress.sendBatchTo
+              if (nodesToBeSentBatch.isEmpty) {
+                logger.debug(
+                  s"$actingOnMessageType: $batchId has already been sent to all nodes, not disseminating further"
+                )
+              } else {
+                logger.debug(
+                  s"$actingOnMessageType: disseminating $batchId to ${nodesToBeSentBatch.mkString(", ")}"
+                )
+                locally {
+                  implicit val traceContext: TraceContext = tracedBatchId.traceContext
+                  multicast(
+                    message = Availability.RemoteDissemination.RemoteBatch
+                      .create(batchId, batch, from = thisNode),
+                    nodes = nodesToBeSentBatch,
+                  )
+                }
+                setProgress(
+                  actingOnMessageType,
+                  batchId,
+                  progress.addSends(nodesToBeSentBatch),
+                )
+              }
             }
-            setProgress(
-              actingOnMessageType,
-              batchId,
-              progress.addSends(nodesToBeSentBatch),
-            )
           }
         // Storing and signing a batch can make it ready for ordering if F == 0
         attemptSatisfyingProposalRequestIfNotWaitingForDelayedResponse(actingOnMessageType)
@@ -649,28 +682,41 @@ final class AvailabilityModule[E <: Env[E]](
       topologyChangedSinceLastProposalRequest = false
     }
 
-    val currentTime = clock.now
     // if we have enough batches ready to reach the max batches per proposal, we just respond
     // otherwise we delay the response a bit to allow more batches to become ready
-    val reachedMaxBatchesPerProposal = {
-      val numberOfAvailableBatches = disseminationProtocolState.disseminationCompleteView.size
-      newNextToBeProvidedToConsensus.maxBatchesPerProposal.exists(_ <= numberOfAvailableBatches)
-    }
-    disseminationProtocolState.lastProposalRequestTime.map(previousTime =>
-      (currentTime - previousTime).toScala
-    ) match {
+    val maxBatcherPerProposal = newNextToBeProvidedToConsensus.maxBatchesPerProposal
+    val numberOfAvailableBatches = disseminationProtocolState.disseminationCompleteView.size
+    val reachedMaxBatchesPerProposal = maxBatcherPerProposal.exists(_ <= numberOfAvailableBatches)
+    val minProposalCreationDelay = config.availabilityMinProposalCreationDelay
+    val currentTime = clock.now
+    val lastBlockDurationO =
+      disseminationProtocolState.lastProposalRequestTime.map(previousTime =>
+        (currentTime - previousTime).toScala
+      )
+    lastBlockDurationO match {
       case Some(lastBlockDuration)
-          if ((lastBlockDuration < config.availabilityMinProposalCreationDelay) && !reachedMaxBatchesPerProposal) =>
+          if (lastBlockDuration < minProposalCreationDelay) && !reachedMaxBatchesPerProposal =>
         // but we only delay the response if the time to complete the last block was below
         // the configured max proposal creation delay.
         // And the delay will be the difference between the two durations.
+        logger.debug(
+          s"$actingOnMessageType: delaying attempt to satisfy proposal request " +
+            s"(last block duration = $lastBlockDuration < $minProposalCreationDelay)"
+        )
         proposeResponseCancellableEvent = Some(
           context.delayedEvent(
-            delay = config.availabilityMinProposalCreationDelay - lastBlockDuration,
+            delay = minProposalCreationDelay - lastBlockDuration,
             Availability.DelayedProposalResponse,
           )
         )
       case _ =>
+        logger.debug(
+          s"$actingOnMessageType: attempting to satisfy proposal request immediately " +
+            s"(last block duration = $lastBlockDurationO, " +
+            s"minimum proposal creation delay = $minProposalCreationDelay, " +
+            s"maximum batches per proposal = $maxBatcherPerProposal, " +
+            s"number of available batches = $numberOfAvailableBatches)"
+        )
         attemptSatisfyingProposalRequest(
           shortType(actingOnMessageType),
           notifyConsensusIfNoReadyBatches = true,
@@ -680,6 +726,7 @@ final class AvailabilityModule[E <: Env[E]](
     // the maximum between this timestamp and the previous (lastProposalRequestTime + availabilityMaxProposalCreationDelay).
     // That would guarantee no overlapping intervals.
     // TODO(#27806): consider alternative interval implementation
+    logger.debug(s"$actingOnMessageType: recording last proposal request time as $currentTime")
     disseminationProtocolState.lastProposalRequestTime = Some(currentTime)
   }
 
@@ -706,9 +753,12 @@ final class AvailabilityModule[E <: Env[E]](
           s"using outdated topology with activation time $newTopologyActivationTime, dropping"
       )
     } else {
-      logger.debug(s"$actingOnMessageType: updating active ordering topology to $newMembership")
-      if (newMembership.orderingTopology != activeMembership.orderingTopology)
+      if (newMembership.orderingTopology != activeMembership.orderingTopology) {
+        logger.debug(s"$actingOnMessageType: updating active ordering topology to $newMembership")
         topologyChangedSinceLastProposalRequest = true
+      } else {
+        logger.debug(s"$actingOnMessageType: active ordering topology unchanged ($newMembership)")
+      }
       activeMembership = newMembership
       activeCryptoProvider = newCryptoProvider
       messageAuthorizer = newMembership.orderingTopology
@@ -856,16 +906,30 @@ final class AvailabilityModule[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit =
     proposeResponseCancellableEvent match {
-      case None => attemptSatisfyingProposalRequest(actingOnMessageType)
+      case None =>
+        logger.debug(
+          s"$actingOnMessageType: proposal delay running, attempting to satisfy a proposal request immediately"
+        )
+        attemptSatisfyingProposalRequest(actingOnMessageType)
       case Some(cancellable) =>
-        val reachedMaxBatchesReady =
-          disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal.exists(
-            _ <= disseminationProtocolState.disseminationCompleteView.size
-          )
+        val maxBatchesPerProposal =
+          disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal
+        val batchesReadyToPropose = disseminationProtocolState.disseminationCompleteView.size
+        val reachedMaxBatchesReady = maxBatchesPerProposal.exists(_ <= batchesReadyToPropose)
         if (reachedMaxBatchesReady) {
+          logger.debug(
+            s"$actingOnMessageType: the proposal delay is running but reached maximum batches per proposal " +
+              s"($maxBatchesPerProposal), so cancelling it attempting to satisfy a proposal request immediately"
+          )
           cancellable.cancel().discard
           proposeResponseCancellableEvent = None
           attemptSatisfyingProposalRequest(actingOnMessageType)
+        } else {
+          logger.debug(
+            s"$actingOnMessageType: the proposal delay is not running and haven't reached maximum batches per proposal " +
+              s"(ready: $batchesReadyToPropose, max: $maxBatchesPerProposal), " +
+              "so not attempting to satisfy a proposal request yet"
+          )
         }
     }
 
@@ -1432,23 +1496,22 @@ final class AvailabilityModule[E <: Env[E]](
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
   ): Unit =
-    if (nodes.nonEmpty)
-      pipeToSelf(
-        activeCryptoProvider.signMessage(
-          message,
-          AuthenticatedMessageType.BftSignedAvailabilityMessage,
-        )
-      )(
-        handleFailure(s"Can't sign message $message") { signedMessage =>
-          dependencies.p2pNetworkOut.asyncSend(
-            P2PNetworkOut.Multicast(
-              P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(signedMessage),
-              nodes,
-            )
-          )
-          Availability.NoOp
-        }
+    pipeToSelf(
+      activeCryptoProvider.signMessage(
+        message,
+        AuthenticatedMessageType.BftSignedAvailabilityMessage,
       )
+    )(
+      handleFailure(s"Can't sign message $message") { signedMessage =>
+        dependencies.p2pNetworkOut.asyncSend(
+          P2PNetworkOut.Multicast(
+            P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(signedMessage),
+            nodes,
+          )
+        )
+        Availability.NoOp
+      }
+    )
 
   private def validateBatch(
       batchId: BatchId,

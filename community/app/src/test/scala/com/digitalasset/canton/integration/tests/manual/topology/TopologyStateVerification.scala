@@ -253,6 +253,7 @@ class TopologyStateVerification(
         TopologyStoreId.TemporaryStore(String185.tryCreate(replayName)),
         storage,
         indexedStringStore,
+        predecessor = None,
         staticSynchronizerParameters.protocolVersion,
         timeouts,
         BatchingConfig(),

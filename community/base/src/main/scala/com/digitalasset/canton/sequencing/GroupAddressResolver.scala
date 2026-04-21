@@ -68,7 +68,7 @@ object GroupAddressResolver {
           topologyOrSequencingSnapshot
             .sequencerGroup()
             .map(
-              _.map(group => (group.active ++ group.passive).toSet[Member])
+              _.map(group => (group.active.forgetNE ++ group.passive).toSet[Member])
                 .getOrElse(Set.empty[Member])
             )
       } yield sequencers
@@ -107,8 +107,8 @@ object GroupAddressResolver {
   ): Map[GroupRecipient, Set[Member]] =
     groups
       .map(group =>
-        MediatorGroupRecipient(group.index) -> (group.active ++ group.passive)
-          .toSet[Member]
+        MediatorGroupRecipient(group.index) ->
+          (group.active.forgetNE ++ group.passive).toSet[Member]
       )
       .toMap
 }

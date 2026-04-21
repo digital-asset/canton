@@ -68,7 +68,7 @@ class SequencerReaderTest
   private val topologyClientMember = SequencerId(synchronizerId.uid)
   private val crypto = TestingTopology(
     sequencerGroup = SequencerGroup(
-      active = Seq(SequencerId(synchronizerId.uid)),
+      active = NonEmpty(Seq, SequencerId(synchronizerId.uid)),
       passive = Seq.empty,
       threshold = PositiveInt.one,
     ),

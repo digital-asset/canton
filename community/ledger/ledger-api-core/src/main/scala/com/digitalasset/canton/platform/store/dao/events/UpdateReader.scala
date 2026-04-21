@@ -83,6 +83,7 @@ private[dao] final class UpdateReader(
       endInclusive: Offset,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
+      skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
@@ -93,6 +94,7 @@ private[dao] final class UpdateReader(
             queryRange = queryRange,
             internalUpdateFormat = internalUpdateFormat,
             descendingOrder = descendingOrder,
+            skipPruningChecks = skipPruningChecks,
           )
         )
     Source

@@ -792,7 +792,7 @@ fileComments:
           fieldComments:
             participant_id: |-
               Identifier of the participant, which SHOULD be globally unique.
-              Must be a valid LedgerString (as describe in ``value.proto``).
+              Must be a valid ParticipantIdStrings (as describe in ``value.proto``).
 
               Required
       GetPartiesRequest:
@@ -4750,6 +4750,74 @@ fileComments:
             transaction: ''
             reassignment: ''
             topology_transaction: ''
+      GetUpdatesPageRequest:
+        message:
+          comments: null
+          fieldComments:
+            descending_order: |-
+              If set, the page will populate the elements in descending order starting from the end_offset_inclusive.
+
+               Optional
+            page_token: |-
+              To get the next page of updates, the ``page_token`` should be set to the
+              ``next_page_token`` of the last ``GetUpdatesPageResponse``.
+              To achieve correct paging: subsequent requests must
+
+              - be executed on the same participant with the same version of canton,
+              - have the same begin_offset_exclusive,
+              - have the same end_offset_inclusive,
+              - have the same update_format and
+              - have the same descending_order.
+
+              If not specified, the first page of updates will be returned.
+
+              Optional: can be empty
+            end_offset_inclusive: |-
+              Inclusive upper bound offset of the requested ledger section.
+              If specified the response will only contain updates whose offset is less than or equal to this.
+              If not specified response will only contain updates whose offset is less than the current ledger-end.
+
+              Optional
+            begin_offset_exclusive: |-
+              Exclusive lower bound offset of the requested ledger section (non-negative integer).
+              The response page will only contain updates whose offset is strictly greater than this.
+              If set to zero or not defined, the lower bound is set to the actual pruning offset or to the beginning of the
+              ledger if the participant was not pruned yet.
+              If set to positive and the ledger has been pruned, this parameter must be greater or equal than the pruning offset.
+
+              Optional
+            max_page_size: |-
+              The result page will contain the first max_page_size Updates of all matching updates.
+              The server may reject queries with max_page_size above server specified limits.
+              If not specified, the default max_page_size is determined by the server.
+
+              Optional
+            update_format: Required
+      GetUpdatesPageResponse:
+        message:
+          comments: null
+          fieldComments:
+            updates: |-
+              The first max_page_size updates that match the filter in the request.
+              In case descending_order was selected, the order of the updates is in reversed offset order.
+
+              Optional: can be empty
+            lowest_page_offset_exclusive: |-
+              Represents the lower bound of this page.
+
+              Required
+            highest_page_offset_inclusive: |-
+              Represents the upper bound of the page.
+
+              Required
+            next_page_token: |-
+              If the value is not populated, this is the last page.
+              If the value is populated, this token can be used to get the next page.
+              If the original ``GetFirstUpdatePageRequest`` end_offset_inclusive was not specified and the request uses
+              ascending order, then this token will always be populated, so you can use it to "tail" the ledger by
+              repeatedly polling with the new page token returned.
+
+              Optional: can be empty
       GetUpdatesRequest:
         message:
           comments: null
@@ -4799,6 +4867,8 @@ fileComments:
               transaction: ''
               reassignment: ''
               topology_transaction: ''
+      GetUpdatesPageRequest: {}
+      GetUpdatesPageResponse: {}
       GetUpdatesRequest: {}
       GetUpdatesResponse:
         update:
@@ -4830,6 +4900,14 @@ fileComments:
         comments: |-
           Lookup an update by its ID.
           If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+      - name: GetUpdatesPage
+        comments: |-
+          Read a page of ledger's filtered updates. It returns the event types in accordance with
+          the specified contents and filters.
+          Additionally, the selection criteria for individual events depends on the transaction shape chosen.
+
+          - ACS delta: an event is included only if the requesting party is a stakeholder.
+          - ledger effects: an event is included if the requesting party is a witness.
   version_service.proto:
     messages:
       FeaturesDescriptor:

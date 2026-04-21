@@ -22,7 +22,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.TimedIndexService
-import com.digitalasset.canton.platform.config.IndexServiceConfig
+import com.digitalasset.canton.platform.config.{IndexServiceConfig, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner.GetPackagePreferenceForViewsUpgrading
 import com.digitalasset.canton.platform.store.backend.common.MismatchException
 import com.digitalasset.canton.platform.store.cache.*
@@ -46,6 +46,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutorService, Future}
@@ -72,6 +73,8 @@ final class IndexServiceOwner(
     commandExecutionContext: ExecutionContextExecutorService,
     participantContractStore: LedgerApiContractStore,
     pruningOffsetService: PruningOffsetService,
+    materializer: Materializer,
+    updateServiceConfig: UpdateServiceConfig,
 ) extends ResourceOwner[IndexService]
     with NamedLogging {
   private val initializationRetryDelay = 100.millis
@@ -130,6 +133,10 @@ final class IndexServiceOwner(
         loggerFactory = loggerFactory,
         idleStreamOffsetCheckpointTimeout = config.idleStreamOffsetCheckpointTimeout,
         getPreferredPackages = getPackagePreference,
+        materializer = materializer,
+        executionContext = commandExecutionContext,
+        pruningOffsetService = pruningOffsetService,
+        updateServiceConfig = updateServiceConfig,
       )
     } yield new TimedIndexService(indexService, metrics)
   }

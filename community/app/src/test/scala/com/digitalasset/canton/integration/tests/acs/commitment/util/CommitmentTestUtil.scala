@@ -5,8 +5,12 @@ package com.digitalasset.canton.integration.tests.acs.commitment.util
 
 import com.daml.ledger.javaapi.data.Contract
 import com.daml.ledger.javaapi.data.codegen.{Contract as ContractWithId, ContractId}
+import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Inspection.{
+  SynchronizerTimeRange,
+  TimeRange,
+}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalParticipantReference
+import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.examples.java.iou.Iou
@@ -16,6 +20,7 @@ import com.digitalasset.canton.integration.tests.acs.commitment.util.ContractsAn
   IouCommitmentWithContracts,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.ReceivedCmtState
 import com.digitalasset.canton.participant.pruning.{
   AcsCommitmentProcessor,
   CommitmentContractMetadata,
@@ -147,7 +152,6 @@ trait CommitmentTestUtil
 
   protected def deployOnTwoParticipantsAndCheckContract(
       synchronizerId: SynchronizerId,
-      iouContract: AtomicReference[Iou.Contract],
       firstParticipant: LocalParticipantReference,
       secondParticipant: LocalParticipantReference,
       observers: Seq[LocalParticipantReference] = Seq.empty,
@@ -164,8 +168,6 @@ trait CommitmentTestUtil
         secondParticipant.adminParty,
         observers = observers.toList.map(_.adminParty),
       )
-
-    iouContract.set(iou)
 
     logger.info(s"Waiting for the participants to see the contract in their ACS")
     eventually() {
@@ -375,6 +377,55 @@ trait CommitmentTestUtil
     nextTick
   }
 
+  protected def awaitNextTick(
+      participant: LocalParticipantReference,
+      counterparticipant: ParticipantReference,
+  )(implicit env: TestConsoleEnvironment, intervalDuration: IntervalDuration): CommitmentPeriod = {
+    import env.*
+    val simClock = environment.simClock.value
+
+    val tick1 = tickAfter(simClock.uniqueTime())
+    simClock.advanceTo(tick1.forgetRefinement.immediateSuccessor)
+    // Await the synchronizer time. Internally this will trigger a fetch of the synchronizer time.
+    participant.testing.await_synchronizer_time(daId, tick1.forgetRefinement.immediateSuccessor)
+
+    val p1Computed = eventually() {
+      val p1Computed = participant.commitments.computed(
+        daName,
+        tick1.toInstant.minusMillis(1),
+        tick1.toInstant,
+        Some(counterparticipant.id),
+      )
+      p1Computed should have size 1L
+      p1Computed
+    }
+
+    val (period, _participant, commitment) = p1Computed.loneElement
+    period
+  }
+
+  protected def checkReceivedCommitment(
+      period: CommitmentPeriod,
+      participant: ParticipantReference,
+      synchronizer: SynchronizerId,
+      state: ReceivedCmtState,
+      expected: Int = 1,
+  ): Unit =
+    eventually() {
+      val timeRange =
+        TimeRange(period.fromExclusive.forgetRefinement, period.toInclusive.forgetRefinement)
+      val receivedCommitments = participant.commitments.lookup_received_acs_commitments(
+        synchronizerTimeRanges = Seq(SynchronizerTimeRange(synchronizer, Some(timeRange))),
+        counterParticipants = Seq.empty,
+        commitmentState = Seq.empty,
+        verboseMode = false,
+      )
+
+      val receivedCommitmentsOnSynchronizer = receivedCommitments.get(synchronizer).value
+      receivedCommitmentsOnSynchronizer.size should be >= expected
+      forAll(receivedCommitmentsOnSynchronizer)(_.state shouldBe state)
+    }
+
   protected def tickBeforeOrAt(
       timestamp: CantonTimestamp
   )(implicit duration: IntervalDuration): CantonTimestampSecond =
@@ -438,8 +489,6 @@ trait CommitmentTestUtil
   ): IouCommitmentWithContracts = {
     import env.*
 
-    val iouContract = new AtomicReference[Iou.Contract]
-
     val simClock = environment.simClock.value
     simClock.advanceTo(simClock.uniqueTime().immediateSuccessor)
 
@@ -447,7 +496,6 @@ trait CommitmentTestUtil
       (1 to nContracts.value).map(_ =>
         deployOnTwoParticipantsAndCheckContract(
           synchronizerId,
-          iouContract,
           firstParticipant,
           secondParticipant,
         )

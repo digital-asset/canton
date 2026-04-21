@@ -67,6 +67,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
   def mk(
       store: InMemoryTopologyStore[TopologyStoreId] = new InMemoryTopologyStore(
         SynchronizerStore(Factory.physicalSynchronizerId1),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,
@@ -402,6 +403,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory.appendUnnamedKey("TestName", "multidnd"),
             timeouts,
@@ -584,6 +586,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -748,6 +751,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -912,6 +916,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -1001,6 +1006,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -1124,6 +1130,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -1157,6 +1164,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -1203,6 +1211,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         val store =
           new InMemoryTopologyStore(
             TopologyStoreId.AuthorizedStore,
+            predecessor = None,
             testedProtocolVersion,
             loggerFactory,
             timeouts,
@@ -1290,6 +1299,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
       val store =
         new InMemoryTopologyStore(
           TopologyStoreId.AuthorizedStore,
+          predecessor = None,
           testedProtocolVersion,
           loggerFactory,
           timeouts,
@@ -1362,6 +1372,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
       val store =
         new InMemoryTopologyStore(
           TopologyStoreId.AuthorizedStore,
+          predecessor = None,
           testedProtocolVersion,
           loggerFactory,
           timeouts,
@@ -1445,6 +1456,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
       val store =
         new InMemoryTopologyStore(
           TopologyStoreId.AuthorizedStore,
+          predecessor = None,
           testedProtocolVersion,
           loggerFactory,
           timeouts,

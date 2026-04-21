@@ -50,16 +50,17 @@ object ValueGenerators {
   def unscaledNumGen: Gen[Numeric] =
     Gen.oneOf(Numeric.Scale.values).flatMap(numGen)
 
-  val moduleSegmentGen: Gen[String] = for {
+  private val moduleSegmentGen: Gen[String] = for {
     n <- Gen.choose(1, 100)
     name <- Gen.listOfN(n, Gen.alphaChar)
   } yield name.mkString.capitalize
-  val moduleGen: Gen[ModuleName] = for {
+
+  private val moduleGen: Gen[ModuleName] = for {
     n <- Gen.choose(1, 10)
     segments <- Gen.listOfN(n, moduleSegmentGen)
   } yield ModuleName.assertFromSegments(segments)
 
-  val dottedNameSegmentGen: Gen[String] = for {
+  private val dottedNameSegmentGen: Gen[String] = for {
     ch <- Gen.alphaLowerChar
     n <- Gen.choose(0, 99)
     name <- Gen.listOfN(n, Gen.alphaChar)
@@ -69,7 +70,7 @@ object ValueGenerators {
     segments <- Gen.listOfN(n, dottedNameSegmentGen)
   } yield DottedName.assertFromSegments(segments)
 
-  val pkgNameGen: Gen[PackageName] =
+  private val pkgNameGen: Gen[PackageName] =
     for {
       n <- Gen.choose(1, 64)
       pkgName <- Gen
@@ -116,8 +117,16 @@ object ValueGenerators {
       .chooseNum(Time.Timestamp.MinValue.micros, Time.Timestamp.MaxValue.micros)
       .map(Time.Timestamp.assertFromLong)
 
-  // generate a variant with arbitrary value
-  def variantGen: Gen[ValueVariant] =
+  // Public zero-arg generators to main source compatibility other test code
+  def variantGen: Gen[ValueVariant] = internalVariantGen(allowContractIds = true)
+  def recordGen: Gen[ValueRecord] = internalRecordGen(allowContractIds = true)
+  def valueOptionalGen: Gen[ValueOptional] = internalValueOptionalGen(allowContractIds = true)
+  def valueListGen: Gen[ValueList] = internalValueListGen(allowContractIds = true)
+  def valueTextMapGen: Gen[ValueTextMap] = internalValueTextMapGen(allowContractIds = true)
+  def valueGenMapGen: Gen[ValueGenMap] = internalValueGenMapGen(allowContractIds = true)
+
+  // Internal boolean-aware generators for recursive routing whether ContractId generation is permissible
+  private def internalVariantGen(allowContractIds: Boolean): Gen[ValueVariant] =
     for {
       id <- idGen
       variantName <- nameGen
@@ -127,10 +136,10 @@ object ValueGenerators {
           if (withoutLabels) (_: Identifier) => None
           else (variantId: Identifier) => Some(variantId)
         )
-      value <- valueGen()
+      value <- valueGen(allowContractIds)
     } yield ValueVariant(toOption(id), variantName, value)
 
-  def recordGen: Gen[ValueRecord] =
+  private def internalRecordGen(allowContractIds: Boolean): Gen[ValueRecord] =
     for {
       id <- idGen
       toOption <- Gen
@@ -141,29 +150,29 @@ object ValueGenerators {
         )
       labelledValues <- Gen.listOf(
         nameGen.flatMap(label =>
-          valueGen().map(x => if (label.isEmpty) (None, x) else (Some(label), x))
+          valueGen(allowContractIds).map(x => if (label.isEmpty) (None, x) else (Some(label), x))
         )
       )
     } yield ValueRecord(toOption(id), labelledValues.to(ImmArray))
 
-  def valueOptionalGen: Gen[ValueOptional] =
-    Gen.option(valueGen()).map(v => ValueOptional(v))
+  private def internalValueOptionalGen(allowContractIds: Boolean): Gen[ValueOptional] =
+    Gen.option(valueGen(allowContractIds)).map(v => ValueOptional(v))
 
-  def valueListGen: Gen[ValueList] =
+  private def internalValueListGen(allowContractIds: Boolean): Gen[ValueList] =
     for {
-      values <- Gen.listOf(valueGen())
+      values <- Gen.listOf(valueGen(allowContractIds))
     } yield ValueList(values.to(FrontStack))
 
-  def valueTextMapGen: Gen[ValueTextMap] =
+  private def internalValueTextMapGen(allowContractIds: Boolean): Gen[ValueTextMap] =
     for {
       list <- Gen.listOf(for {
-        k <- Gen.asciiPrintableStr; v <- valueGen()
+        k <- Gen.asciiPrintableStr; v <- valueGen(allowContractIds)
       } yield k -> v)
     } yield ValueTextMap(SortedLookupList(Map(list*)))
 
-  def valueGenMapGen: Gen[ValueGenMap] =
+  private def internalValueGenMapGen(allowContractIds: Boolean): Gen[ValueGenMap] =
     Gen
-      .listOf(Gen.zip(valueGen(), valueGen()))
+      .listOf(Gen.zip(valueGen(allowContractIds), valueGen(allowContractIds)))
       .map(list => ValueGenMap(list.distinctBy(_._1).to(ImmArray)))
 
   private val genHash: Gen[crypto.Hash] =
@@ -224,61 +233,70 @@ object ValueGenerators {
     // Always use the same suffix as each suffix defines its own universe of comparable prefixes.
     ContractId.V2.assertBuild(cid.local, Bytes.assertFromString("00"))
 
-  def unsuffixedCidGen: Gen[ContractId] = coidGen.map(unsuffixCid)
-  def globalAbsoluteCidGen: Gen[ContractId] =
+  private def unsuffixedCidGen: Gen[ContractId] = coidGen.map(unsuffixCid)
+
+  private def globalAbsoluteCidGen: Gen[ContractId] =
     Gen.zip(coidGen, arbitrary[Byte]).map { case (cid, suffixByte) =>
       globalAbsoluteCid(cid, Bytes.fromByteArray(Array(suffixByte)))
     }
-  def relativeCidGen: Gen[ContractId] = cidV2Gen.map(relativeCid)
+
+  private def relativeCidGen: Gen[ContractId] = cidV2Gen.map(relativeCid)
 
   def coidGen: Gen[ContractId] = Gen.oneOf(cidV1Gen, cidV2Gen)
 
   def coidValueGen: Gen[ValueContractId] =
     coidGen.map(ValueContractId(_))
 
-  private def nestedGen = Gen.oneOf(
-    valueListGen,
-    variantGen,
-    recordGen,
-    valueOptionalGen,
-    valueGenMapGen,
+  private def internalNestedGen(allowContractIds: Boolean) = Gen.oneOf(
+    internalValueListGen(allowContractIds),
+    internalVariantGen(allowContractIds),
+    internalRecordGen(allowContractIds),
+    internalValueOptionalGen(allowContractIds),
+    internalValueGenMapGen(allowContractIds),
   )
 
-  private def flatGen = Gen.oneOf(
-    dateGen.map(ValueDate.apply),
-    Gen.alphaStr.map(ValueText.apply),
-    unscaledNumGen.map(ValueNumeric.apply),
-    arbitrary[Long].map(ValueInt64.apply),
-    Gen.alphaStr.map(ValueText.apply),
-    timestampGen.map(ValueTimestamp.apply),
-    coidValueGen,
-    party.map(ValueParty.apply),
-    Gen.oneOf(ValueTrue, ValueFalse),
-    Gen.const(ValueUnit),
-  )
+  private def flatGen(allowContractIds: Boolean): Gen[Value] = {
+    val g1 = dateGen.map(ValueDate.apply)
+    val g2 = Gen.alphaStr.map(ValueText.apply)
+    val g3 = unscaledNumGen.map(ValueNumeric.apply)
+    val g4 = arbitrary[Long].map(ValueInt64.apply)
+    val g5 = Gen.alphaStr.map(ValueText.apply)
+    val g6 = timestampGen.map(ValueTimestamp.apply)
+    val g7 = party.map(ValueParty.apply)
+    val g8 = Gen.oneOf(ValueTrue, ValueFalse)
+    val g9 = Gen.const(ValueUnit)
 
-  def valueGen(nested: => Gen[Value] = nestedGen): Gen[Value] = Gen.lzy {
-    Gen.sized { size =>
-      for {
-        s <- Gen.choose(0, size)
-        value <-
-          if (s < 1) flatGen
-          else
-            Gen.frequency(
-              5 -> flatGen,
-              1 -> Gen.resize(size / (s + 1), nested),
-            )
-      } yield value
+    if (allowContractIds) {
+      Gen.oneOf(coidValueGen, g1, g2, g3, g4, g5, g6, g7, g8, g9)
+    } else {
+      Gen.oneOf(g1, g2, g3, g4, g5, g6, g7, g8, g9)
     }
   }
 
+  def valueGen(allowContractIds: Boolean = true): Gen[Value] =
+    internalValueGen(allowContractIds, internalNestedGen(allowContractIds))
+
+  def valueGen(allowContractIds: Boolean, nested: => Gen[Value]): Gen[Value] =
+    internalValueGen(allowContractIds, nested)
+
+  private def internalValueGen(allowContractIds: Boolean, nested: => Gen[Value]): Gen[Value] =
+    Gen.lzy {
+      Gen.sized { size =>
+        for {
+          s <- Gen.choose(0, size)
+          value <-
+            if (s < 1) flatGen(allowContractIds)
+            else
+              Gen.frequency(
+                5 -> flatGen(allowContractIds),
+                1 -> Gen.resize(size / (s + 1), nested),
+              )
+        } yield value
+      }
+    }
+
   private val simpleChars =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ".toVector
-
-  def simpleStr: Gen[PackageId] =
-    Gen
-      .nonEmptyListOf(Gen.oneOf(simpleChars))
-      .map(s => PackageId.assertFromString(s.mkString))
 
   def party: Gen[Party] =
     Gen
@@ -294,21 +312,15 @@ object ValueGenerators {
 
   private[lf] val genMaybeEmptyParties: Gen[Set[Party]] = Gen.listOf(party).map(_.toSet)
 
-  val genNonEmptyParties: Gen[Set[Party]] = ^(party, genMaybeEmptyParties)((hd, tl) => tl + hd)
-
-  val versionedContractInstanceGen: Gen[Value.VersionedThinContractInstance] =
-    for {
-      template <- idGen
-      arg <- versionedValueGen
-      pkgName <- pkgNameGen
-    } yield arg.map(Value.ThinContractInstance(pkgName, template, _))
+  private val genNonEmptyParties: Gen[Set[Party]] =
+    ^(party, genMaybeEmptyParties)((hd, tl) => tl + hd)
 
   def keyWithMaintainersGen(
       templateId: TypeConId,
       packageName: PackageName,
   ): Gen[GlobalKeyWithMaintainers] =
     for {
-      key <- valueGen()
+      key <- valueGen(allowContractIds = false)
       maintainers <- genNonEmptyParties
       gkey = GlobalKey
         .build(
@@ -468,27 +480,25 @@ object ValueGenerators {
       version = version,
     )
 
-  val queryByKeyNodeGen: Gen[Node.QueryByKey] =
-    for {
-      version <- SerializationVersionGen()
-      node <- queryByKeyNodeGenWithVersion(version)
-    } yield node
-
   def queryByKeyNodeGenWithVersion(version: SerializationVersion): Gen[Node.QueryByKey] =
-    for {
-      pkgName <- pkgNameGen
-      templateId <- idGen
-      key <- keyWithMaintainersGen(templateId, pkgName)
-      contractIds <- Gen.listOf(coidGen).map(_.toVector)
-      exhaustive <- Gen.oneOf(true, contractIds.isEmpty)
-    } yield Node.QueryByKey(
-      packageName = pkgName,
-      templateId = templateId,
-      exhaustive = exhaustive,
-      key = key,
-      result = contractIds,
-      version = version,
-    )
+    if (version < SerializationVersion.minContractKeys) {
+      Gen.fail[Node.QueryByKey]
+    } else {
+      for {
+        pkgName <- pkgNameGen
+        templateId <- idGen
+        key <- keyWithMaintainersGen(templateId, pkgName)
+        contractIds <- Gen.listOf(coidGen).map(_.toVector)
+        exhaustive <- Gen.oneOf(true, contractIds.isEmpty)
+      } yield Node.QueryByKey(
+        packageName = pkgName,
+        templateId = templateId,
+        exhaustive = exhaustive,
+        key = key,
+        result = contractIds,
+        version = version,
+      )
+    }
 
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
     * `malformedGenTransaction` should they be incorporated into a transaction.
@@ -554,18 +564,23 @@ object ValueGenerators {
       roots <- Gen.listOf(Arbitrary.arbInt.arbitrary.map(NodeId(_)))
     } yield Transaction(nodes.toMap, roots.to(ImmArray))
 
+  val noDanglingRefGenTransaction: Gen[Transaction] =
+    for {
+      version <- SerializationVersionGen()
+      tx <- noDanglingRefGenTransaction(version)
+    } yield tx
+
   /*
    * Create a transaction without no dangling nodeId.
    *
-   *  Data expect nodeId are still generated completely randomly so for
-   *  fetch and exercise nodes, if the contract_id is relative, the
-   *  associated invariants will probably fail; a create node with that ID
-   *  may not exist, and even if it does, the stakeholders and signatories
-   *  may not match up.
+   * Data expect nodeId are still generated completely randomly so for
+   * fetch and exercise nodes, if the contract_id is relative, the
+   * associated invariants will probably fail; a create node with that ID
+   * may not exist, and even if it does, the stakeholders and signatories
+   * may not match up.
    *
    */
-
-  val noDanglingRefGenTransaction: Gen[Transaction] = {
+  def noDanglingRefGenTransaction(version: SerializationVersion): Gen[Transaction] = {
 
     def nonDanglingRefNodeGen(
         maxDepth: Int,
@@ -582,7 +597,7 @@ object ValueGenerators {
             rollbackFreq -> danglingRefRollbackNodeGen,
             1 -> malformedCreateNodeGen(),
             2 -> fetchNodeGen,
-            1 -> queryByKeyNodeGen,
+            1 -> queryByKeyNodeGenWithVersion(version),
           )
           nodeWithChildren <- node match {
             case node: Node.Exercise =>

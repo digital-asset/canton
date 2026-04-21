@@ -939,8 +939,9 @@ private[lf] object Speedy {
       envBase = 0
     }
 
-    final def tmplId2TxVersion(tmplId: TypeConId): SerializationVersion =
-      Machine.tmplId2TxVersion(compiledPackages.pkgInterface, tmplId)
+    // For now takes a hasKey: Boolean
+    final def assignSerializationVersion(hasKey: Boolean): SerializationVersion =
+      Machine.assignSerializationVersion(hasKey)
 
     final def tmplId2PackageName(tmplId: TypeConId): PackageName =
       Machine.tmplId2PackageName(compiledPackages.pkgInterface, tmplId)
@@ -1367,8 +1368,8 @@ private[lf] object Speedy {
       fromPureSExpr(compiledPackages, expr, MachineLogger(), iterationsBetweenInterruptions)
         .runPure()
 
-    def tmplId2TxVersion(pkgInterface: PackageInterface, tmplId: TypeConId): SerializationVersion =
-      SerializationVersion.assign(pkgInterface.packageLanguageVersion(tmplId.packageId))
+    def assignSerializationVersion(hasKey: Boolean): SerializationVersion =
+      SerializationVersion.assign(hasKey)
 
     def tmplId2PackageName(
         pkgInterface: PackageInterface,

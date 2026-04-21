@@ -23,7 +23,7 @@ GNU_SED=$(find_gnu_tool "sed" "gsed")
 
 # If an error happens in daml code then com.daml.lf.InternalError.log may be called. This will often
 # Output a line that only contains 'root cause' with the exception text on the line below. This
-# function joins joins these lines together to allow more specific pattern matching. 
+# function joins joins these lines together to allow more specific pattern matching.
 join_daml_error_lines() {
   # In addition to joining the lines if an ascii colour code is present remove it
   "$GNU_SED" '/ERROR c.daml.lf - root cause$/{N;s/\n/:/;s/\x1b[^m]*m//g;}'

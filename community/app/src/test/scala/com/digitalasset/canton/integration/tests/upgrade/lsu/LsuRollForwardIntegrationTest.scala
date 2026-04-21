@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricQualification
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.{
   CommandFailure,
   InstanceReference,
@@ -27,7 +27,9 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{ConfigTransforms, *}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.sequencing.traffic.TrafficStateController
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuSequencingBoundsOverride,
   SequencerNodeConfig,
@@ -35,9 +37,10 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{HasExecutionContext, UniquePortGenerator}
+import com.digitalasset.canton.{HasExecutionContext, UniquePortGenerator, config}
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
+import org.slf4j.event.Level
 
 import java.time.Duration
 import scala.annotation.nowarn
@@ -89,7 +92,10 @@ Flow to guarantee time monotonicity:
       canton.sequencers.sequencer.parameters.lsu-repair.lsu-sequencing-bounds-override
  */
 @nowarn("msg=dead code")
-abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionContext {
+abstract class LsuRollForwardIntegrationTest
+    extends LsuBase
+    with LsuTrafficManagement
+    with HasExecutionContext {
 
   override protected def testName: String =
     s"lsu-roll-forward-" + (if (isOnline) "online" else "offline")
@@ -101,6 +107,12 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
     * [[com.digitalasset.canton.participant.sync.OnlineManualLogicalSynchronizerUpgrade]]
     */
   def isOnline: Boolean
+
+  /** Default tests have very frequent commitments (every 1s) interfering with testing a particular
+    * arrangement of S2 sequencer and participant last seen timestamps. This is overridden in
+    * [[com.digitalasset.canton.participant.sync.OfflineManualNoAcsLogicalSynchronizerUpgrade]]
+    */
+  def disableAcsCommitments: Boolean = false
 
   registerPlugin(
     new UseBftSequencer(
@@ -132,8 +144,10 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
       upgradeTime = maxSequencingTime.plusSeconds(1).plusSeconds(30),
     )
 
-  // Sequencing time of the latest topology message on the broken synchronizer
+  // Sequencing time of the latest topology message on the broken synchronizer (reaches participants)
   private var lastTopologyActivityS2: CantonTimestamp = _
+  // Sequencing time of the time proof (only observed by sequencers), it is set up to be > lastTopologyActivityS2
+  private var lastSequencerObservedTimeS2: CantonTimestamp = _
 
   override protected lazy val upgradeTime: CantonTimestamp = throw new IllegalAccessException(
     "Use upgradeTime1 and upgradeTime2 instead"
@@ -207,9 +221,20 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
           synchronizerConnectionConfig(Seq(sequencer1, sequencer2), 2)
         )
 
-        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
+        setDefaultsDynamicSynchronizerParameters(
+          psid = daId,
+          synchronizerOwners = synchronizerOwners1,
+          reconciliationInterval = if (disableAcsCommitments) {
+            config.PositiveDurationSeconds.ofDays(365)
+          } else {
+            config.PositiveDurationSeconds.ofSeconds(1)
+          },
+        )
 
         participants.all.dars.upload(CantonExamplesPath)
+
+        updateBalanceForMember(participant2, PositiveLong.tryCreate(250_000L), sequencer1)
+
         participant1.health.ping(participant2)
         participant1.health.ping(participant3)
       }
@@ -278,6 +303,18 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
         .context
         .sequenced
         .pipe(CantonTimestamp.assertFromInstant)
+
+      environment.simClock.value.advanceTo(lastTopologyActivityS2.plusSeconds(1))
+
+      // move the time ahead
+      lastSequencerObservedTimeS2 =
+        sequencer3.underlying.value.sequencer.timeTracker.fetchTimeProof().futureValueUS.timestamp
+      // need to move time on both sequencers past `lastSequencerObservedTimeS2`, otherwise
+      // sequencer4 may stall on sequencer_lsu_state call
+      sequencer4.underlying.value.sequencer.timeTracker.fetchTimeProof().futureValueUS.timestamp
+
+      logger.info(s"Last topology activity on the broken synchronizer: $lastTopologyActivityS2")
+      logger.info(s"Last time proof observed on sequencer: $lastSequencerObservedTimeS2")
     }
 
     "prepare nodes of the recovery synchronizer (S3)" in { implicit env =>
@@ -336,7 +373,7 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
       migrateSynchronizerNodes(
         fixture2,
         ignorePsidCheck = true,
-        sequencerLsuStateTsOverride = Some(lastTopologyActivityS2),
+        sequencerLsuStateTsOverride = Some(lastSequencerObservedTimeS2),
       )
     }
 
@@ -377,7 +414,7 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
     "Traffic can bet set on the new synchronizer" in { _ =>
       transferTraffic(
         Some(fixture2),
-        trafficTsOverride = Some(lastTopologyActivityS2),
+        trafficTsOverride = Some(lastSequencerObservedTimeS2),
       )
     }
 
@@ -437,14 +474,33 @@ abstract class LsuRollForwardIntegrationTest extends LsuBase with HasExecutionCo
 
         val upgradeTime2 = cleanSynchronizerIndex(participant2).recordTime
 
-        participant2.synchronizers.perform_manual_lsu(
-          currentPsid = fixture2.currentPsid,
-          successorPsid = fixture2.newPsid,
-          upgradeTime = Option.when(isOnline)(upgradeTime2),
-          sequencerSuccessors = Map(
-            sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection],
-            sequencer2.id -> sequencer6.sequencerConnection.transformInto[GrpcConnection],
+        loggerFactory.assertEventuallyLogsSeq(
+          SuppressionRule.Level(Level.DEBUG) && SuppressionRule
+            .forLogger[TrafficStateController] && SuppressionRule.LoggerNameContains(
+            s"participant=participant2"
+          )
+        )(
+          participant2.synchronizers.perform_manual_lsu(
+            currentPsid = fixture2.currentPsid,
+            successorPsid = fixture2.newPsid,
+            upgradeTime = Option.when(isOnline)(upgradeTime2),
+            sequencerSuccessors = Map(
+              sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection],
+              sequencer2.id -> sequencer6.sequencerConnection.transformInto[GrpcConnection],
+            ),
           ),
+          logs => {
+            val trafficInitLog = logs.find(
+              _.message.contains("Initializing TrafficStateController for member PAR::participant2")
+            )
+            trafficInitLog shouldBe defined
+            val extraTrafficLimitPattern = "(?s).+extraTrafficLimit = (\\d+).+".r
+            val extraTrafficLimit = trafficInitLog.value.message match {
+              case extraTrafficLimitPattern(limit) => limit.toLong
+              case x => fail(s"Could not extract extraTrafficLimit from log message: $x")
+            }
+            extraTrafficLimit shouldBe 250000L
+          },
         )
     }
 
@@ -567,4 +623,9 @@ final class LsuOnlineRollForwardIntegrationTest extends LsuRollForwardIntegratio
 
 final class LsuOfflineRollForwardIntegrationTest extends LsuRollForwardIntegrationTest {
   override def isOnline: Boolean = false
+}
+
+final class OfflineManualNoAcsLogicalSynchronizerUpgrade extends LsuRollForwardIntegrationTest {
+  override def isOnline: Boolean = false
+  override def disableAcsCommitments: Boolean = true
 }

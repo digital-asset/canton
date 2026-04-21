@@ -193,6 +193,7 @@ final class UnassignmentProcessingStepsTest
     SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
     IndexedPhysicalSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
     defaultStaticSynchronizerParameters,
+    predecessor = None,
     loggerFactory,
     timeouts,
     futureSupervisor,

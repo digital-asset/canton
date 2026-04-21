@@ -328,6 +328,7 @@ class SequencerNodeBootstrap(
           SynchronizerStore(synchronizerId),
           storage,
           indexedStringStore,
+          predecessor = None,
           synchronizerId.protocolVersion,
           timeouts,
           parameters.batchingConfig,
@@ -870,7 +871,8 @@ class SequencerNodeBootstrap(
             topologyConfig = config.topology,
             store = synchronizerTopologyStore,
             outboxQueue = new SynchronizerOutboxQueue(timeouts, synchronizerLoggerFactory),
-            dispatchQueueBackpressureLimit = parameters.dispatchQueueBackpressureLimit,
+            dispatchQueueBackpressureLimit =
+              parameters.topologyConfig.dispatchQueueBackpressureLimit,
             disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
             exitOnFatalFailures = parameters.exitOnFatalFailures,
             timeouts = timeouts,

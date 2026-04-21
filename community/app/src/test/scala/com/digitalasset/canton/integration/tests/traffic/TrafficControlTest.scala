@@ -312,10 +312,14 @@ trait TrafficControlTest
         participant4.synchronizers.reconnect_local(daName)
         // At this point it's the first time P4 ever connects the synchronizer, before it ever received any event from it
         // Still check that it initializes its traffic state correctly
-        participant4.traffic_control
-          .traffic_state(synchronizer1Id)
-          .extraTrafficPurchased
-          .value shouldBe topUpAmount
+        // eventually because the participant needs to receive the traffic purchased event from the sequencer before
+        // it is aware of its new traffic state
+        eventually() {
+          participant4.traffic_control
+            .traffic_state(synchronizer1Id)
+            .extraTrafficPurchased
+            .value shouldBe topUpAmount
+        }
 
         // Make some topology change that will be broadcast to P4 to make sure it receives an event from the sequencer
         val newMaxRequestSize =

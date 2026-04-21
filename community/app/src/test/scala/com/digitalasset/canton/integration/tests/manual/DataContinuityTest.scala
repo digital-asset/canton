@@ -420,6 +420,9 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
             Seq(updateNetworkTopologyDescription(S1M1, protocolVersion)),
             dumpDirectory.localDownloadPath,
           )
+
+          // Check that the synchronizer is running with the expected protocol version
+          sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe protocolVersion
           val alice = participant1.parties.list(filterParty = "Alice").headOption.value.party
           val bob = participant1.parties.list(filterParty = "Bob").headOption.value.party
           actOnCycleData(alice)
@@ -491,6 +494,9 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
             Seq(updateNetworkTopologyDescription(S1M1, protocolVersion)),
             dumpDirectory.localDownloadPath,
           )
+          // Check that the synchronizer is running with the expected protocol version
+          sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe protocolVersion
+
           // initialize needed state - sadly unable to decouple this from implementation details of the workflow
           val p1_count = grabCounts(daName, participant1)
           val p2_count = grabCounts(daName, participant2)
@@ -531,6 +537,14 @@ trait SynchronizerChangeDataContinuityTestSetup
         cfg
           .focus(_.monitoring.logging.delayLoggingThreshold)
           .replace(config.NonNegativeFiniteDuration.ofDays(100))
+      )
+      // Flake prevention: Disable ACS commitment catch-ups by setting an arbitrarily long interval.
+      // This prevents a multi-second `DbAcsCommitmentStore.markPeriod` database freeze after a data dump restore,
+      // which can cause ping assertions between participants to time out.
+      .addConfigTransform(
+        ConfigTransforms.updateCommitmentCheckpointInterval(
+          config.PositiveDurationSeconds.ofDays(10 * 365)
+        )
       )
       .addConfigTransform(
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory)
@@ -652,6 +666,8 @@ trait SynchronizerChangeDataContinuityTest extends SynchronizerChangeDataContinu
               S1M1_S1M1.map(updateNetworkTopologyDescription(_, protocolVersion)),
               dumpDirectory.localDownloadPath,
             )
+            // Check that the synchronizer is running with the expected protocol version
+            sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe protocolVersion
 
             MultiSynchronizerFeatureFlag.enable(participants, iouSynchronizerId)
             MultiSynchronizerFeatureFlag.enable(Seq(P4, P5), paintSynchronizerId)

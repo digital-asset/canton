@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencing.service
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
@@ -28,6 +29,7 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.{
   VerifyActiveRequest,
   VerifyActiveResponse,
 }
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.synchronizer.service.HandshakeValidator
@@ -48,6 +50,7 @@ import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidati
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.chaining.*
 import scala.util.{Failure, Success}
 
 /** Sequencer connect service on gRPC
@@ -61,6 +64,7 @@ class GrpcSequencerConnectService(
     clock: Clock,
     lsuSequencingBounds: Option[LsuSequencingBounds],
     sanitizePublicErrorMessages: Boolean,
+    metrics: SequencerMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends proto.SequencerConnectServiceGrpc.SequencerConnectService
@@ -126,7 +130,15 @@ class GrpcSequencerConnectService(
     )
   }
 
-  override def handshake(request: HandshakeRequest): Future[HandshakeResponse] =
+  override def handshake(request: HandshakeRequest): Future[HandshakeResponse] = {
+
+    def reportHandshakeStatus(result: Either[Status, Unit]): Unit = {
+      val member = IdentityContextHelper.getCurrentStoredMember.fold("unknown")(_.toProtoPrimitive)
+      val status = result.fold(_ => "failure", _ => "success")
+
+      metrics.publicApi.handshakes.mark()(MetricsContext("member" -> member, "status" -> status))
+    }
+
     mapErrorEither(
       HandshakeValidator
         .clientIsCompatible(
@@ -134,14 +146,16 @@ class GrpcSequencerConnectService(
           request.clientProtocolVersions,
           request.minimumProtocolVersion,
         )
-        .map(_ =>
+        .tap(reportHandshakeStatus)
+        .map { _ =>
           HandshakeResponse(
             serverProtocolVersion.toProtoPrimitive,
             HandshakeResponse.Value
               .Success(SequencerConnect.HandshakeResponse.Success()),
           )
-        )
+        }
     )
+  }
 
   override def registerOnboardingTopologyTransactions(
       request: SequencerConnect.RegisterOnboardingTopologyTransactionsRequest

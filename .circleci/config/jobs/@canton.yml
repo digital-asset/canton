@@ -96,11 +96,11 @@ assembly_ledger_api_test_tool:
     # Generate ledger-api-test-tool jars.
     - package:
         cmd: "ledger-test-tool-2-dev/assembly"
-        location: "community/ledger-test-tool/tool/lf-v2.dev/target/scala-2.13"
+        location: "community/ledger-test-tool/lf-v2.dev/target/scala-2.13"
         artifact_suffix: ".jar"
     - package:
         cmd: "ledger-test-tool-2-1/assembly"
-        location: "community/ledger-test-tool/tool/lf-v2.1/target/scala-2.13"
+        location: "community/ledger-test-tool/lf-v2.1/target/scala-2.13"
         artifact_suffix: ".jar"
     - cleanup_build_job
 

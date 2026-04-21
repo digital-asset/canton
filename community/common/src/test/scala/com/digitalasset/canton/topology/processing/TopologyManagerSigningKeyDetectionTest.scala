@@ -32,6 +32,7 @@ class TopologyManagerSigningKeyDetectionTest
       new TopologyManagerSigningKeyDetection(
         new InMemoryTopologyStore(
           SynchronizerStore(Factory.physicalSynchronizerId1),
+          predecessor = None,
           testedProtocolVersion,
           loggerFactory,
           timeouts,

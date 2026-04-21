@@ -131,7 +131,7 @@ Additionally:
 Firstly, configure the version of `sbt` that is used by IntelliJ:
 * Go to "IntelliJ IDEA" | Settings, search for "sbt".
   * Set the maximum heap size to at least 8000M.
-  * Make sure to use the sbt shell for project reloads and builds.
+  * Check both "project reload" and "builds" in sbt shell section.
 
 Next, also configure the version of `sbt` that you can invoke from the command line:
 * Make sure to configure the JVM heap size to at least 8G.
@@ -153,7 +153,7 @@ On failure, double-check your [IntelliJ IDEA settings](#intellij-idea-configurat
 Next, go to View | Tool Windows | sbt shell.
 Run, the commands `compile`, `format`, `unidoc`, `bundle`.
 
-Finally, run the following integration tests from within IntelliJ:
+Finally, run the following integration tests from within IntelliJ (cntl+n(Linux) / cmd+o(Mac) and insert test name in search box):
 
 - `SimplestPingIntegrationTestInMemory`
 - `SimplestPingBftOrderingIntegrationTestH2`

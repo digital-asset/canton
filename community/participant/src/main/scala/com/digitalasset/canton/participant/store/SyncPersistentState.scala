@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
+import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -161,6 +162,7 @@ object PhysicalSyncPersistentState {
       staticSynchronizerParameters: StaticSynchronizerParameters,
       crypto: SynchronizerCrypto,
       parameters: ParticipantNodeParameters,
+      predecessor: Option[SynchronizerPredecessor],
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
   )(implicit ec: ExecutionContext): PhysicalSyncPersistentState =
@@ -170,6 +172,7 @@ object PhysicalSyncPersistentState {
           crypto,
           physicalSynchronizerIdx,
           staticSynchronizerParameters,
+          predecessor,
           loggerFactory,
           parameters.processingTimeouts,
           futureSupervisor,
@@ -182,6 +185,7 @@ object PhysicalSyncPersistentState {
           db,
           crypto,
           parameters,
+          predecessor,
           loggerFactory,
           futureSupervisor,
         )

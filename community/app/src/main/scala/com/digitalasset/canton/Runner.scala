@@ -20,6 +20,24 @@ import scala.util.control.NonFatal
 trait Runner extends NamedLogging {
 
   def run(environment: Environment): Unit
+
+  // TODO(#24954): Convert to using declarative api, when it becomes available
+  def uploadDar(environment: Environment)(darPath: String): Unit = {
+    val consoleEnvironment = environment.createConsole()
+    consoleEnvironment.participants.local
+      .flatMap(_.underlying)
+      .foreach(p =>
+        consoleEnvironment.run {
+          consoleEnvironment.grpcLedgerCommandRunner
+            .runCommand(
+              "upload-dar",
+              LedgerApiCommands.PackageManagementService.UploadDarFile(darPath, None),
+              p.config.clientLedgerApi,
+              Some(p.adminTokenDispenser.getCurrentToken.secret),
+            )
+        }
+      )
+  }
 }
 
 class ServerRunner(
@@ -32,24 +50,6 @@ class ServerRunner(
 
   def run(environment: Environment): Unit =
     try {
-      // TODO(#24954): Convert to using declarative api, when it becomes available
-      def uploadDar(darPath: String): Unit = {
-        val consoleEnvironment = environment.createConsole()
-        consoleEnvironment.participants.local
-          .flatMap(_.underlying)
-          .foreach(p =>
-            consoleEnvironment.run {
-              consoleEnvironment.grpcLedgerCommandRunner
-                .runCommand(
-                  "upload-dar",
-                  LedgerApiCommands.PackageManagementService.UploadDarFile(darPath, None),
-                  p.config.clientLedgerApi,
-                  Some(p.adminTokenDispenser.getCurrentToken.secret),
-                )
-            }
-          )
-      }
-
       def start(): Unit =
         environment
           .startAll() match {
@@ -69,7 +69,7 @@ class ServerRunner(
         }
 
       bootstrapScript.fold(start())(startWithBootstrap)
-      dars.foreach(uploadDar)
+      dars.foreach(uploadDar(environment))
       if (exitAfterBootstrap) sys.exit(0)
     } catch {
       case ex: Throwable =>
@@ -84,12 +84,21 @@ class ConsoleInteractiveRunner(
     bootstrapScript: Option[CantonScript],
     postScriptCallback: => Unit,
     override val loggerFactory: NamedLoggerFactory,
+    dars: Seq[String] = Seq.empty,
 ) extends Runner {
   def run(environment: Environment): Unit = {
     val success =
       try {
         val consoleEnvironment = environment.createConsole()
-        InteractiveConsole(consoleEnvironment, noTty, bootstrapScript, logger, postScriptCallback)
+        InteractiveConsole(
+          consoleEnvironment,
+          noTty,
+          bootstrapScript,
+          logger, {
+            dars.foreach(uploadDar(environment))
+            postScriptCallback
+          },
+        )
       } catch {
         case NonFatal(_) => false
       }

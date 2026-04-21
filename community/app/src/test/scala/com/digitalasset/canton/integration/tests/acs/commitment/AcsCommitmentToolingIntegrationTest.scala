@@ -75,7 +75,6 @@ trait AcsCommitmentToolingIntegrationTest
     with CommitmentTestUtil
     with HasProgrammableSequencer {
 
-  private val iouContract = new AtomicReference[Iou.Contract]
   private val interval: JDuration = JDuration.ofSeconds(5)
   private implicit val intervalDuration: IntervalDuration = IntervalDuration(interval)
   private val minObservationDuration1 = NonNegativeFiniteDuration.tryOfHours(1)
@@ -980,12 +979,9 @@ trait AcsCommitmentToolingIntegrationTest
           participant1.health.ping(participant2, synchronizerId = Some(acmeId))
 
           logger.info("Create three contracts on synchronizer acme")
-          val c1 =
-            deployOnTwoParticipantsAndCheckContract(acmeId, iouContract, participant1, participant2)
-          val c2 =
-            deployOnTwoParticipantsAndCheckContract(acmeId, iouContract, participant1, participant2)
-          val c3 =
-            deployOnTwoParticipantsAndCheckContract(acmeId, iouContract, participant1, participant2)
+          val c1 = deployOnTwoParticipantsAndCheckContract(acmeId, participant1, participant2)
+          val c2 = deployOnTwoParticipantsAndCheckContract(acmeId, participant1, participant2)
+          val c3 = deployOnTwoParticipantsAndCheckContract(acmeId, participant1, participant2)
           val createdCidsAcme = Seq(c1, c2, c3)
 
           logger.info(

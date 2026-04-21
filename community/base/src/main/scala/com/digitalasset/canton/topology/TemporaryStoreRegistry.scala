@@ -43,6 +43,7 @@ class TemporaryStoreRegistry(
 
     lazy val store = new InMemoryTopologyStore(
       storeId,
+      predecessor = None,
       protocolVersion,
       loggerFactoryWithStore,
       timeouts,

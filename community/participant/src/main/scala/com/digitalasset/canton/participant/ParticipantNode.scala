@@ -583,11 +583,12 @@ class ParticipantNodeBootstrap(
         )
 
         sequencerInfoLoader = new SequencerInfoLoader(
+          participantId,
           parameters.processingTimeouts,
           config.sequencerClient.clientChannelParams(parameters.tracing.propagation),
           ProtocolVersionCompatibility.supportedProtocols(parameters),
           parameters.protocolConfig.minimumProtocolVersion,
-          parameters.protocolConfig.dontWarnOnDeprecatedPV,
+          dontWarnOnDeprecatedPV = parameters.protocolConfig.dontWarnOnDeprecatedPV,
           loggerFactory,
         )
 
@@ -604,7 +605,7 @@ class ParticipantNodeBootstrap(
           recordSequencerInteractions,
           replaySequencerConfig,
           mutablePackageMetadataView,
-          arguments.metrics.connectedSynchronizerMetrics,
+          arguments.metrics,
           futureSupervisor,
           loggerFactory,
         )
@@ -704,7 +705,11 @@ class ParticipantNodeBootstrap(
         _ <-
           if (sync.isActive()) sync.finishLSUs() else EitherT.pure[FutureUnlessShutdown, String](())
 
-        _ = if (sync.isActive()) sync.attemptPendingLsuOperations()
+        // Run asynchronously
+        _ = if (sync.isActive()) {
+          sync.attemptPendingLsuOperations()
+          sync.setLsuStatusMetrics()
+        }
 
         _ = {
           connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)
@@ -737,6 +742,7 @@ class ParticipantNodeBootstrap(
                 sync = sync,
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
+                updateServiceConfig = arguments.config.ledgerApi.updateService,
               )
             ),
           loggerFactory = loggerFactory,

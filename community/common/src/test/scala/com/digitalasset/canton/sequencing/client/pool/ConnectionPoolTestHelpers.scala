@@ -52,6 +52,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
   Member,
   Namespace,
   ParticipantId,
@@ -751,10 +752,12 @@ protected object ConnectionPoolTestHelpers {
     ): SequencerConnectionStub = connection match {
       case grpcConnection: GrpcConnection =>
         new GrpcSequencerConnectionStub(
+          DefaultTestIdentities.participant1,
           grpcConnection,
           testResponses.apiSvcFactory,
           testResponses.sequencerConnectSvcFactory,
           metricsContext,
+          loggerFactory,
         )
 
       case _ => throw new IllegalStateException(s"Connection type not supported: $connection")

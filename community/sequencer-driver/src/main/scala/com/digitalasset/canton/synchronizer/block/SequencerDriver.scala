@@ -126,6 +126,9 @@ trait SequencerDriverFactory {
   *
   * Several [[com.digitalasset.canton.synchronizer.block.RawLedgerBlock.RawBlockEvent.Send]] events
   * may have the same timestamp or go backwards, as long as they remain close to real-world time.
+  *
+  * An implementation must not rely on its output being final, as reordering and timestamp changes
+  * are possible post-ordering.
   */
 trait SequencerDriver extends AutoCloseable {
 

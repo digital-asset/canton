@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss
 
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BlockNumber,
@@ -17,7 +18,7 @@ final case class EpochInfo(
     startBlockNumber: BlockNumber,
     length: EpochLength,
     topologyActivationTime: TopologyActivationTime,
-) extends {
+) extends PrettyPrinting {
 
   def relativeBlockIndex(blockNumber: BlockNumber): Int =
     (blockNumber - startBlockNumber).toInt
@@ -37,6 +38,14 @@ final case class EpochInfo(
     BlockNumber(startBlockNumber + length)
 
   def lastBlockNumber: BlockNumber = BlockNumber(startBlockNumber + length - 1)
+
+  override protected def pretty: Pretty[EpochInfo] =
+    prettyOfClass(
+      param("number", _.number),
+      param("startBlockNumber", _.startBlockNumber),
+      param("length", _.length),
+      param("topologyActivationTime", _.topologyActivationTime.value),
+    )
 }
 
 object EpochInfo {

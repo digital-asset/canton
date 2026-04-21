@@ -20,7 +20,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
   TemplateId,
 }
-import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
@@ -600,7 +599,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
-@RollbackTest
 class OnlinePartyReplicationNegotiationTestPostgres extends OnlinePartyReplicationNegotiationTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

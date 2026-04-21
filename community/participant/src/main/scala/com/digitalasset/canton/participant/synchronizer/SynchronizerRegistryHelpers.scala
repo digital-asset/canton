@@ -29,7 +29,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{
   PackageDependencyResolverImpl,
@@ -93,7 +93,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
       topologyDispatcher: ParticipantTopologyDispatcher,
       packageMetadataView: PackageMetadataView,
-      metrics: SynchronizerAlias => ConnectedSynchronizerMetrics,
+      metrics: ParticipantMetrics,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SynchronizerHandle] = {
@@ -109,12 +109,14 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         .lookupOrCreatePersistentState(
           psid,
           sequencerAggregatedInfo.staticSynchronizerParameters,
+          synchronizerPredecessor,
         )
 
       _ <- SynchronizerRegistryHelpers.copyTopologyStateFromLocalPredecessorIfNeeded(
         synchronizerPredecessor,
         persistentState,
         syncPersistentStateManager,
+        metrics,
       )
 
       // check and issue the synchronizer trust certificate
@@ -223,7 +225,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
                   config.copy(recordingConfig = updateMemberRecordingPath(config.recordingConfig))
                 )
             ),
-            metrics(config.synchronizerAlias).sequencerClient,
+            metrics.connectedSynchronizerMetrics(config.synchronizerAlias).sequencerClient,
             participantNodeParameters.loggingConfig,
             participantNodeParameters.exitOnFatalFailures,
             synchronizerLoggerFactory,
@@ -447,12 +449,13 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Boolean] =
     client
-      .isActive(participantId, waitForActive = waitForActive)
+      .isActive(waitForActive = waitForActive)
       .leftMap(SynchronizerRegistryHelpers.toSynchronizerRegistryError(synchronizerAlias))
 
   private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
     (synchronizerAlias: SynchronizerAlias, config: SequencerConnection) =>
       SequencerConnectClient(
+        participantId,
         synchronizerAlias,
         config,
         participantNodeParameters.processingTimeouts,
@@ -505,6 +508,7 @@ object SynchronizerRegistryHelpers {
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       persistentState: SyncPersistentState,
       syncPersistentStateManager: SyncPersistentStateManager,
+      metrics: ParticipantMetrics,
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
@@ -512,6 +516,7 @@ object SynchronizerRegistryHelpers {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val predecessorSyncStateO = synchronizerPredecessor
       .flatMap(pre => syncPersistentStateManager.get(pre.psid).map(pre -> _))
+
     EitherT.right(
       predecessorSyncStateO
         .traverse_ { case (predecessor, predecessorSyncState) =>
@@ -525,6 +530,10 @@ object SynchronizerRegistryHelpers {
                   predecessorSyncState.topologyStore
                 )
                 .flatMap(_ => persistentState.connectivityStatusStore.setTopologyInitialized())
+            )
+            _ = metrics.setLsuStatus(
+              ParticipantMetrics.LsuStatus.LocalCopyDone,
+              persistentState.psid,
             )
           } yield ()
         }

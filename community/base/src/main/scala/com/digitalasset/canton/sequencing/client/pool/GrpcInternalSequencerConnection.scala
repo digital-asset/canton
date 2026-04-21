@@ -492,6 +492,7 @@ object GrpcInternalSequencerConnection {
 }
 
 class GrpcInternalSequencerConnectionFactory(
+    member: Member,
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
     params: ClientChannelParams,
@@ -511,7 +512,7 @@ class GrpcInternalSequencerConnectionFactory(
       clientProtocolVersions,
       minimumProtocolVersion,
       params,
-      stubFactory = new SequencerConnectionStubFactoryImpl(loggerFactory),
+      stubFactory = new SequencerConnectionStubFactoryImpl(member, loggerFactory),
       metrics,
       metricsContext,
       futureSupervisor,

@@ -23,10 +23,9 @@ import java.time.Duration
 
 import UpgradingBaseTest.Syntax.*
 
-class PackagePreferenceQueryIntegrationTest
+final class PackagePreferenceQueryIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment
-    with UpgradingBaseTest.WhenPV {
+    with SharedEnvironment {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseBftSequencer(

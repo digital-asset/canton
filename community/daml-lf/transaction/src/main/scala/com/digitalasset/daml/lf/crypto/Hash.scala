@@ -930,13 +930,15 @@ object Hash {
 
   private[crypto] object Purpose {
     val Testing = new Purpose(1)
-    val ContractKey = new Purpose(2)
+    val LegacyContractKey = new Purpose(2)
+    val NextGenContractKey = new Purpose(9)
     val MaintainerContractKeyUUID = new Purpose(4)
     val PrivateKey = new Purpose(3)
     val ThinContractInstance = new Purpose(5)
     val ChangeId = new Purpose(6)
     val TransactionHash = new Purpose(7)
     val MetadataHash = new Purpose(8)
+    // next available id: 10
   }
 
   private[crypto] class Version private (val id: Byte)
@@ -1000,7 +1002,7 @@ object Hash {
       packageName: Ref.PackageName,
       key: Value,
   ): Hash = {
-    val hashBuilder = builder(Purpose.ContractKey, noCid2String, upgradeFriendly = true)
+    val hashBuilder = builder(Purpose.LegacyContractKey, noCid2String, upgradeFriendly = true)
     hashBuilder
       .addQualifiedName(templateId.qualifiedName)
       .addString(packageName)

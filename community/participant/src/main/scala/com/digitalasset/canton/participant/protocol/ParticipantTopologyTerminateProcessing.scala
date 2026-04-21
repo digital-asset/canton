@@ -24,6 +24,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
@@ -67,6 +68,7 @@ class ParticipantTopologyTerminateProcessing(
       String,
       Unit,
     ],
+    metrics: ParticipantMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends topology.processing.TerminateProcessing
     with NamedLogging {
@@ -155,10 +157,8 @@ class ParticipantTopologyTerminateProcessing(
         PartyId.fromLfParty(lfParty) match {
           case Left(err) =>
             // permission.getClass.getSimpleName will print "Onboarding", "Added", or "Revoked$"
-            ErrorUtil.internalError(
-              new IllegalArgumentException(
-                s"Failed to parse PartyId from $lfParty during '${permission.getClass.getSimpleName}' event. Reason: $err"
-              )
+            ErrorUtil.invalidState(
+              s"Failed to parse PartyId from $lfParty during '${permission.getClass.getSimpleName}' event: $err"
             )
 
           case Right(partyId) =>
@@ -258,6 +258,8 @@ class ParticipantTopologyTerminateProcessing(
 
     recordOrderPublisher.setSuccessor(Some(successor))
 
+    metrics.setLsuStatus(ParticipantMetrics.LsuStatus.LsuAnnounced, successor.psid)
+
     EitherTUtil.doNotAwaitUS(
       retrieveAndStoreMissingSequencerIds(traceContext),
       s"retrieve and store missing sequencer ids for $psid",
@@ -265,7 +267,7 @@ class ParticipantTopologyTerminateProcessing(
     )
   }
 
-  override def notifyUpgradeCancellation()(implicit
+  override def notifyUpgradeCancellation(successor: SynchronizerSuccessor)(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[Unit] = {
@@ -274,6 +276,8 @@ class ParticipantTopologyTerminateProcessing(
     )
 
     recordOrderPublisher.setSuccessor(None)
+
+    metrics.resetLsuStatus(successor.psid)
 
     pendingLsuOperationsStore.delete(
       psid,

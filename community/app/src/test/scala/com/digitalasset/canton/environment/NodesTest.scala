@@ -19,7 +19,6 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -68,7 +67,7 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future, Promise}
 
 class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContext {
-  val clock = new SimClock(loggerFactory = loggerFactory)
+  private val clock = new SimClock(loggerFactory = loggerFactory)
   trait TestNode extends CantonNode
   case class TestNodeConfig()
       extends LocalNodeConfig
@@ -117,7 +116,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       startupMemoryCheckConfig: StartupMemoryCheckConfig = StartupMemoryCheckConfig(
         ReportingLevel.Warn
       ),
-      dispatchQueueBackpressureLimit: NonNegativeInt = NonNegativeInt.two,
+      topologyConfig: TopologyConfig = TopologyConfig(),
       sanitizePublicErrorMessages: Boolean = false,
   ) extends CantonNodeParameters
 

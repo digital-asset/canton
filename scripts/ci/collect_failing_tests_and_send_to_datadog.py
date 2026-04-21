@@ -6,8 +6,11 @@ import re
 import sys
 import subprocess
 import datetime
+import tempfile
 from pathlib import Path
 import json
+import urllib.request
+from unittest.mock import patch
 
 metric_short_version = "canton.failed_test_grouped"
 
@@ -27,7 +30,7 @@ branches_to_report = {
 hub_cmd = ["hub"]
 gh_cmd = ["gh"]
 
-branch = os.environ['CIRCLE_BRANCH']
+branch = os.environ.get('CIRCLE_BRANCH', '')
 
 # replace GITHUB_TOKEN with GITHUB_FLAKY_TEST_TOKEN, which also is permitted to use the project scope.
 # this is required to use the gh command to unarchive/restore issues
@@ -45,7 +48,7 @@ def report_issues_to_hub():
 def iterate_through_test_reports():
     failing_tests: Set[str] = set()
     for entry in Path('./test-reports').rglob("*.xml"):
-        if entry.name.endswith(".xml") and entry.is_file():
+        if entry.is_file():
             process_test_report(entry, failing_tests)
     return failing_tests
 
@@ -61,7 +64,7 @@ def process_test_report(path: Path, failing_tests: Set[str]):
         contains_error = any([childchild.tag == 'error' for childchild in child])
         if contains_fail or contains_error:
             # Example value: LedgerAPIParticipantPruningTestPostgres
-            test_name = child.attrib['classname'].split('.')[-1]
+            test_name = child.attrib.get('classname', child.attrib.get('name', 'unknown')).split('.')[-1]
             print(f"Found failing test '{test_name}'")
             failing_tests.add(test_name)
     return failing_tests
@@ -75,13 +78,14 @@ def check_for_log_failures(failing_tests_result: Set[str]):
             failure = compute_single_log_failure(lines)
 
     if failure:
-        failure = failure[:100]
         print(f"Reporting following failure to datadog: '{failure}'")
         failing_tests_result.add(failure)
 
     return failing_tests_result
 
 def compute_single_log_failure(lines: list[str]):
+    if not lines:
+        return None
     failures = []
     for line in lines:
         failure = None
@@ -110,12 +114,12 @@ def compute_single_log_failure(lines: list[str]):
         return errors[-1]
     return failures[-1]
 
-# Datadog only accepts unicode characters in their tag names
-def remove_non_unicode_characters(test_name: str):
+# Datadog only accepts ASCII characters in their tag names
+def remove_non_ascii_characters(test_name: str):
     chars = []
     for char in test_name:
         if ord(char) >= 128:
-            print(f"Non-unicode character {char} found in test named {test_name}. Converting to '_'")
+            print(f"Non-ASCII character {char} found in test named {test_name}. Converting to '_'")
             char = '_'
         chars.append(char)
     return ''.join(chars)
@@ -135,7 +139,7 @@ def remove_everything_after_first_slash(test_name: str) -> str:
 
 
 def format_test_name(test_name: str):
-    test_name = remove_everything_after_first_slash(remove_non_unicode_characters(test_name))
+    test_name = remove_everything_after_first_slash(remove_non_ascii_characters(test_name))
     if len(test_name) > 200:
         print(f"Truncating {test_name} to 200 characters.")
     return test_name[:200]
@@ -150,7 +154,7 @@ def report_to_datadog(metric_name: str, test_name: str):
     }
     initialize(**options)
     send_args = {
-        'metric': f'{metric_name}',
+        'metric': metric_name,
         'type': 'count',
         'points': 1,
         'tags': [f"name:{format_test_name(test_name)}",
@@ -161,10 +165,12 @@ def report_to_datadog(metric_name: str, test_name: str):
                  ]
     }
     resp = api.Metric.send(**send_args)
-    if resp != {'status': 'ok'}:
+    if resp.get('status') != 'ok':
         print(f"Received error response while reporting test '{test_name}': \n {resp}")
         resp2 = api.Metric.send(**send_args)
-        print(f"Received following response upon retrying: \n {resp2} ")
+        if resp2.get('status') != 'ok':
+            raise Exception(f"Failed to report test '{test_name}' to Datadog after retry: {resp2}")
+        print(f"Received following response upon retrying: \n {resp2}")
 
 def hub_report_issue(issue: str):
     formatted = format_test_name(issue)
@@ -180,12 +186,12 @@ def hub_report_issue(issue: str):
     search_result_json = json.loads(result.stdout)
 
     # let's look for the exact title in the search result
-    for issue in search_result_json["data"]["search"]["nodes"]:
-        if issue["title"] == title:
-            idx = issue["number"]
-            body = issue["body"]
+    for result in search_result_json["data"]["search"]["nodes"]:
+        if result["title"] == title:
+            idx = result["number"]
+            body = result["body"]
             # look at the projects the issue is linked to
-            for project_relation in issue["projectItems"]["nodes"]:
+            for project_relation in result["projectItems"]["nodes"]:
 
                 # only extract data for the ticket if the linked project matches the flaky test project
                 if project_relation["project"]["id"] == flaky_test_project:
@@ -224,9 +230,18 @@ def hub_report_issue(issue: str):
     else:
         hub_create_issue(title)
 
+def hub_create_issue_table_header():
+    return "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+
 def hub_create_issue_line():
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return f"{date_str} job:{os.environ['CIRCLE_JOB']} node_index:{os.environ['CIRCLE_NODE_INDEX']} url:{os.environ['CIRCLE_BUILD_URL']}"
+    commit_hash = os.environ.get('CIRCLE_SHA1', 'unknown')
+    commit_url = f"https://github.com/DACH-NY/canton/commit/{commit_hash}"
+    build_url = os.environ['CIRCLE_BUILD_URL']
+    build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
+    job = os.environ['CIRCLE_JOB']
+    node_index = os.environ['CIRCLE_NODE_INDEX']
+    return f"| {date_str} | {job} | {node_index} | [{build_number}]({build_url}) | [{commit_hash[:8]}]({commit_url}) |"
 
 def gh_assign_release_line(idx: str, project_item_id: str):
     release_line_value = branches_to_report.get(branch, None)
@@ -249,11 +264,14 @@ def check_result(result):
         print(f"stdout was {result.stdout}")
         raise Exception("hub command failed")
 
-def hub_cmd_with_input(cmd, input):
-    with open("message.txt", "w") as f:
-        f.write(input)
-        f.close()
-        result = subprocess.run(hub_cmd + cmd + ["-F", "message.txt"], capture_output=True, text=True)
+def hub_cmd_with_input(cmd, body):
+    fd, path = tempfile.mkstemp(suffix='.txt')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(body)
+        result = subprocess.run(hub_cmd + cmd + ["-F", path], capture_output=True, text=True)
+    finally:
+        os.unlink(path)
     check_result(result)
     return result
 
@@ -262,15 +280,52 @@ def hub_create_issue(title: str):
 
 This issue was created automatically by the CI system. Please fix the test before closing the issue.
 
+{hub_create_issue_table_header()}
 {hub_create_issue_line()}
     """
     result = hub_cmd_with_input(["issue", "create", "-M", hub_milestone], msg)
     print(f"Created issue: {result.stdout}")
 
+def notify_slack_user(user_id: str, message: str):
+    """Send a direct message to a Slack user via the Slack API using SLACK_BOT_TOKEN."""
+    token = os.environ.get("SLACK_ACCESS_TOKEN", "")
+    if not token:
+        print(f"SLACK_ACCESS_TOKEN is not set. Skipping Slack notification to {user_id}.")
+        return
+    payload = json.dumps({"channel": user_id, "text": message}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://slack.com/api/chat.postMessage",
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if not body.get("ok"):
+                print(f"Slack API error when notifying {user_id}: {body.get('error')}")
+            else:
+                print(f"Slack notification sent to {user_id}.")
+    except Exception as e:
+        print(f"Failed to send Slack notification to {user_id}: {e}")
+
+
 def hub_update_issue(idx: str, title: str, body: str):
+    header = "| Date | Job | Node | Build | Commit |"
+    if header not in body:
+        body = body + "\n" + hub_create_issue_table_header()
+    commit_hash = os.environ.get('CIRCLE_SHA1', 'unknown')
+    duplicate_commit = commit_hash != 'unknown' and f"commit/{commit_hash}" in body
     msg = title + "\n\n" + body + "\n" + hub_create_issue_line()
     hub_cmd_with_input(["issue", "update",  "-s", "open", f"{idx}"], msg)
     print(f"Updated issue: {idx} for {title}")
+    if duplicate_commit:
+        issue_url = f"https://github.com/DACH-NY/canton/issues/{idx}"
+        slack_alert_user = os.environ.get('FLAKY_TEST_SLACK_ALERT_USER', 'U0AHRL04HPV')
+        notify_slack_user(
+            slack_alert_user,
+            f"The flaky test with issue <{issue_url}|#{idx}> ({title}) has already failed at least twice on the commit `{commit_hash[:8]}`. Please take a look at it asap.",
+        )
 
 def gh_unarchive_issue(idx: str, project_item_id: str):
     result = subprocess.run(gh_cmd + ["api", "graphql", "-F", "query=@scripts/ci/unarchiveIssue.graphql", "-F", f"issue={project_item_id}", "-F", f"project={flaky_test_project}"], capture_output=True, text=True, env=gh_flaky_test_env)
@@ -279,7 +334,106 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
 
 def self_test():
     test_compute_single_log_failure()
+    test_hub_create_issue_line()
+    test_hub_update_issue_old_format()
+    test_hub_update_issue_new_format()
+    test_hub_update_issue_duplicate_commit_triggers_slack()
     print("All self-checks passed")
+
+def test_hub_create_issue_line():
+    env = {
+        'CIRCLE_JOB': 'test_with_java17',
+        'CIRCLE_NODE_INDEX': '5',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/3196076',
+        'CIRCLE_SHA1': 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    }
+    with patch.dict(os.environ, env, clear=False):
+        header = hub_create_issue_table_header()
+        assert '| Date | Job | Node | Build | Commit |' in header, f"Missing header in: {header}"
+        line = hub_create_issue_line()
+        assert '| test_with_java17 |' in line, f"Missing job in: {line}"
+        assert '| 5 |' in line, f"Missing node_index in: {line}"
+        assert '[3196076](https://circleci.com/gh/DACH-NY/canton/3196076)' in line, f"Missing build link in: {line}"
+        assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
+
+def test_hub_update_issue_old_format():
+    # Old issues have flat-text lines with no table header — the header must be injected before the new row
+    old_body = (
+        "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
+        "2026-04-14 12:05:05 job:test node_index:1 url:https://circleci.com/gh/DACH-NY/canton/1234\n"
+        "2026-04-14 13:00:00 job:sequential_test node_index:3 url:https://circleci.com/gh/DACH-NY/canton/5678"
+    )
+    env = {
+        'CIRCLE_SHA1': 'unknown_hash',
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.hub_cmd_with_input') as mock_hub, \
+         patch(f'{__name__}.notify_slack_user'):
+        hub_update_issue("42", "Flaky test", old_body)
+        mock_hub.assert_called_once()
+        msg = mock_hub.call_args[0][1]
+        header = "| Date | Job | Node | Build | Commit |"
+        assert header in msg, f"Table header was not injected into old-format body: {msg}"
+        assert msg.count(header) == 1, "Table header must appear exactly once"
+
+def test_hub_update_issue_new_format():
+    # New issues already have the table header — the new row is simply appended, no duplicate header
+    new_body = (
+        "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n"
+        "| 2026-04-14 12:05:05 | test | 1 | [link](https://circleci.com/gh/DACH-NY/canton/1234) | [a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2) |"
+    )
+    env = {
+        'CIRCLE_SHA1': 'unknown_hash',
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.hub_cmd_with_input') as mock_hub, \
+         patch(f'{__name__}.notify_slack_user'):
+        hub_update_issue("42", "Flaky test", new_body)
+        mock_hub.assert_called_once()
+        msg = mock_hub.call_args[0][1]
+        header = "| Date | Job | Node | Build | Commit |"
+        assert msg.count(header) == 1, f"Table header must appear exactly once in updated body: {msg}"
+
+def test_hub_update_issue_duplicate_commit_triggers_slack():
+    env = {
+        'CIRCLE_SHA1': 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+    body_with_existing_commit = (
+        "This issue was created automatically by the CI system.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n"
+        "| 2026-04-14 12:05:05 | test | 1 | [link](https://circleci.com/gh/DACH-NY/canton/1234) | [a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2) |"
+    )
+    body_without_existing_commit = (
+        "This issue was created automatically by the CI system.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n"
+        "| 2026-04-14 12:05:05 | test | 1 | [link](https://circleci.com/gh/DACH-NY/canton/1234) | [deadbeef](https://github.com/DACH-NY/canton/commit/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef) |"
+    )
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.hub_cmd_with_input'), \
+         patch(f'{__name__}.notify_slack_user') as mock_notify:
+
+        # duplicate commit present: Slack notification must fire
+        hub_update_issue("42", "Flaky test", body_with_existing_commit)
+        mock_notify.assert_called_once()
+        args = mock_notify.call_args[0]
+        assert "42" in args[1], f"Expected issue number in Slack message, got: {args[1]}"
+        assert "a1b2c3d4" in args[1], f"Expected commit hash in Slack message, got: {args[1]}"
+
+        mock_notify.reset_mock()
+
+        # no duplicate commit: Slack notification must NOT fire
+        hub_update_issue("42", "Flaky test", body_without_existing_commit)
+        mock_notify.assert_not_called()
 
 def test_compute_single_log_failure():
     # Logs
@@ -316,7 +470,14 @@ def test_compute_single_log_failure():
     assert actual == expected, f"Expected '{expected}', got '{actual}'"
 
 if __name__ == "__main__":
-    self_test()
+    env_before = dict(os.environ)
+    try:
+        self_test()
+    finally:
+        env_after = dict(os.environ)
+        if env_before != env_after:
+            leaked = {k: (env_before.get(k), env_after.get(k)) for k in env_before.keys() | env_after.keys() if env_before.get(k) != env_after.get(k)}
+            raise RuntimeError(f"self_test() polluted os.environ (before -> after): {leaked}")
     if len(sys.argv) == 2:
         failure_name = sys.argv[1]
         print(f"Reporting following CI failure as a failed test to datadog: {failure_name}")
@@ -324,9 +485,9 @@ if __name__ == "__main__":
         if report_issues_to_hub():
             hub_report_issue(failure_name)
     else:
-        print("Starting to iterate through generated test reports")
+        print("Starting to iterate through generated test reports.")
         failing_tests = iterate_through_test_reports()
-        print("Now checking if any log problems were found")
+        print("Now checking if any log problems were found.")
         failing_tests = check_for_log_failures(failing_tests)
         failing_tests_num = len(failing_tests)
         print(
@@ -336,19 +497,19 @@ if __name__ == "__main__":
         print(f"Starting to report failed tests to datadog")
         for test_name in failing_tests:
             report_to_datadog(metric_short_version, test_name)
-        print("Finished reporting failed tests to datadog")
+        print("Finished reporting failed tests to datadog.")
 
         # sometimes a fundamental problem would lead to a large number of issues being reported, in that case we limit
         failing_tests_max = 20
 
         if failing_tests_num > 0 and report_issues_to_hub():
             if failing_tests_num > failing_tests_max:
-                print(f"Found too many failed tests {failing_tests_num}, only report {failing_tests_max}")
+                print(f"Found too many failed tests {failing_tests_num}, only report {failing_tests_max}.")
             else:
                 print(f"Reporting {failing_tests_num} failed tests to github")
 
             for test_name in list(failing_tests)[:failing_tests_max]:
                 hub_report_issue(test_name)
 
-            print(f"Finished updating github issues")
+            print(f"Finished updating github issues.")
 

@@ -187,6 +187,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
       TopologyConfig.forTesting,
       new InMemoryTopologyStore(
         TopologyStoreId.AuthorizedStore,
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,
@@ -206,6 +207,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
       TopologyConfig.forTesting,
       new InMemoryTopologyStore(
         TopologyStoreId.TemporaryStore.tryCreate("test"),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,
@@ -228,6 +230,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
       TopologyConfig.forTesting,
       new InMemoryTopologyStore(
         TopologyStoreId.SynchronizerStore(Factory.physicalSynchronizerId1),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,

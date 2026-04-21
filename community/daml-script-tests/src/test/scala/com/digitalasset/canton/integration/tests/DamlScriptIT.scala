@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
@@ -24,7 +23,7 @@ import io.circe.*
 import io.circe.parser.*
 import monocle.macros.syntax.lens.*
 import org.apache.commons.io.FileUtils
-import org.scalatest.{Args, Assertion, BeforeAndAfterAllConfigMap, ConfigMap, Status}
+import org.scalatest.{Args, Assertion, BeforeAndAfterAll, Status}
 
 import java.nio.file.*
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -32,7 +31,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 abstract class DamlScriptIT(langVersion: LanguageVersion)
     extends CommunityIntegrationTest
     with SharedEnvironment
-    with BeforeAndAfterAllConfigMap {
+    with BeforeAndAfterAll {
   self: EnvironmentSetup =>
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
@@ -47,7 +46,8 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
   protected def projectName: String
 
   protected var damlProjectDir: Path = _
-  var env: Seq[(String, String)] = _
+
+  private var env: Seq[(String, String)] = _
 
   private val darFileUploaded: AtomicBoolean = new AtomicBoolean(false)
 
@@ -60,36 +60,8 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
 
   private var scalatestFilteredScriptIdsToIgnore: List[String] = List.empty
 
-  final override def beforeAll(configMap: ConfigMap): Unit = {
-    super.beforeAll(configMap)
-    def getEnv(name: String, default: String) =
-      configMap.getOptional[String](name) match {
-        case Some(value) =>
-          // on CI we should get the value from the configMap
-          value
-        case None =>
-          logger.warn(s"Using default value for $name: $default.")
-          default
-      }
-    env = Seq(
-      "DAML_VERSION" -> getEnv("damlVersion", BuildInfo.damlLibrariesVersion),
-      "DPM_REGISTRY" -> getEnv("dpmRegistry", "europe-docker.pkg.dev/da-images/public-unstable"),
-    )
-
-    Option(getClass.getResource(s"/daml/$projectName")) match {
-      case Some(in) =>
-        damlProjectDir = Files.createTempDirectory(s"test_${getClass.getSimpleName}_")
-        if (debug) println(s"Saving daml project to $damlProjectDir")
-        FileUtils.copyDirectory(Paths.get(in.toURI).toFile, damlProjectDir.toFile)
-        // compile the project
-        val _ = run(cmd = List("dpm", "build", "--output", projectName + ".dar"))
-      case None =>
-        throw new java.lang.Error("could not find daml project in resources: " + projectName)
-    }
-  }
-
-  final override def afterAll(configMap: ConfigMap): Unit = {
-    super.afterAll(configMap)
+  final override def afterAll(): Unit = {
+    super.afterAll()
     if (!debug)
       FileUtils.deleteDirectory(damlProjectDir.toFile)
   }
@@ -179,6 +151,83 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
           stdout,
           stderr,
           s"failed to parse script output: ${err.getMessage}",
+        )
+    }
+  }
+
+  /** As a side effect, creates a temporary copy of the source daml project which is used for dpm
+    * based builds.
+    *
+    * @return
+    *   path to daml project containing our source files
+    */
+  private def setDamlProjectDir(): Path =
+    Option(getClass.getResource(s"/daml/$projectName")) match {
+      case Some(in) =>
+        damlProjectDir = Files.createTempDirectory(s"test_${getClass.getSimpleName}_")
+        if (debug) println(s"Saving daml project to $damlProjectDir")
+        Paths.get(in.toURI)
+      case None =>
+        throw new java.lang.Error("could not find daml project in resources: " + projectName)
+    }
+
+  private def setEnv(): Unit = {
+    def getEnv(name: String, default: String): String =
+      sys.props.get(name) match {
+        case Some(value) =>
+          // on CI we should get the value from the configMap
+          value
+        case None =>
+          logger.warn(s"Using default value for $name: $default.")
+          default
+      }
+
+    env = Seq(
+      "DAML_VERSION" -> getEnv("damlVersion", BuildInfo.damlLibrariesVersion),
+      "DPM_REGISTRY" -> getEnv("dpmRegistry", "europe-docker.pkg.dev/da-images/public-unstable"),
+    )
+  }
+
+  private def buildDamlScriptProject(
+      projectName: String,
+      projectDir: Path,
+      buildDir: Path,
+  ): Unit = {
+    FileUtils.copyDirectory(projectDir.toFile, buildDir.toFile)
+    // compile the project
+    val _ = run(cmd = List("dpm", "build", "--output", projectName + ".dar"))
+  }
+
+  def listDamlScriptIds(projectName: String): List[String] = {
+    setEnv()
+    val currentDir = setDamlProjectDir()
+    buildDamlScriptProject(projectName, currentDir, damlProjectDir)
+
+    val outputFile = Files.createTempFile(
+      damlProjectDir,
+      s"$projectName-script-ids",
+      ".json",
+    )
+    val cmd = List(
+      List("dpm", "script"),
+      List("--dar", projectName + ".dar"),
+      List("--list-scripts-json", outputFile.toString),
+    ).flatten
+    val (stdout, stderr) = run(cmd, ignoreExitCode = true)
+    val resultOrErr = for {
+      output <- scala.util.Try(Files.readString(outputFile)).toEither
+      json <- parse(output)
+      result <- json.as[List[String]]
+    } yield result
+    resultOrErr match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        scriptError(
+          cmd,
+          stdout,
+          stderr,
+          s"failed to parse list script Id output: ${err.getMessage}",
         )
     }
   }
@@ -317,7 +366,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
             if (debug) println(s"script $scriptId is broken")
             succeed
           case None =>
-            fail(s"script $scriptId was expected to be broken but it succeeded")
+            fail(s"script $scriptId was expected to be broken but the test passed")
         }
     }
 
@@ -344,9 +393,8 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
   def testGivenScriptId(testScriptId: String)(env: FixtureParam): Assertion = {
     import env.participant1
 
-    val ignoredTests = expectedResults.collect {
-      case (id, ExpectedResult.Ignored) => id
-      case (id, ExpectedResult.Broken(_)) => id
+    val ignoredTests = expectedResults.collect { case (id, ExpectedResult.Ignored) =>
+      id
     }.toList
 
     if (ignoredTests.contains(testScriptId)) {
@@ -356,6 +404,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
       val isolatedTests = expectedResults.collect {
         case (id, ExpectedResult.Success(_, logAssertions*)) if logAssertions.nonEmpty => id
         case (id, ExpectedResult.Failure(_, logAssertions*)) if logAssertions.nonEmpty => id
+        case (id, result @ ExpectedResult.Broken(_)) if result.logAssertions.nonEmpty => id
       }.toList
       val testsToIgnore = ignoredTests ++ isolatedTests
       val expectedResult = expectedResults.get(testScriptId)
@@ -403,72 +452,7 @@ class DamlScriptPV34LF22IT extends DamlScriptIT(LanguageVersion.v2_2) {
   override lazy val projectName = "ScriptLF22Tests"
   override lazy val protocolVersionForTesting = ProtocolVersion.v34
 
-  // TODO (#30398): replace the following with the results of a call to `dpm script --list`
-  override protected val scriptIdsToTest: List[String] = List(
-    "ActionTest:testFilterA",
-    "AuthEvalOrder:t1_create_success",
-    "AuthEvalOrder:t2_create_badlyAuthorized",
-    "AuthEvalOrder:t3_createViaExerice_success",
-    "AuthEvalOrder:t4_createViaExerice_badlyAuthorized",
-    "AuthFailure:t1_CreateMissingAuthorization",
-    "AuthFailure:t3_FetchMissingAuthorization",
-    "AuthFailure:t5_ExerciseMissingAuthorization",
-    "AuthorizedDivulgence:test_authorizedFetch",
-    "AuthorizedDivulgence:test_divulgeChoiceTargetContractId",
-    "AuthorizedDivulgence:test_noDivulgenceForFetch",
-    "AuthorizedDivulgence:test_noDivulgenceOfCreateArguments",
-    "BasicTests:test_createAndFetch",
-    "BasicTests:test_doubleLetTest",
-    "BasicTests:test_exponentiation",
-    "BasicTests:test_failedAuths",
-    "BasicTests:test_getTimeTest",
-    "BasicTests:test_letTest",
-    "BasicTests:test_listMatchTest",
-    "BasicTests:test_mustFails",
-    "BasicTests:test_payoutTest",
-    "BasicTests:test_screateAndExercise",
-    "BasicTests:test_screateAndExerciseComposit",
-    "BasicTests:test_sgetTimeTest",
-    "BasicTests:test_testXyzTest",
-    "BasicTests:test_typeWithParameters",
-    "ChoiceShadowing:test1",
-    "CoerceContractId:test",
-    "Conjunction:main",
-    "ConjunctionChoices:demo",
-    "ConsumingTests:main",
-    "CreateAndExercise:main",
-    "DamlScriptTrySubmit:authorizationError",
-    "DamlScriptTrySubmit:failureStatusError",
-    "DamlScriptTrySubmit:wronglyTypedContract",
-    "EqContractId:main",
-    "ExceptionSemantics:handledArithmeticError",
-    "ExceptionSemantics:handledUserException",
-    "ExceptionSemantics:uncaughtArithmeticError",
-    "ExceptionSemantics:uncaughtUserException",
-    "ExceptionSemantics:unhandledArithmeticError",
-    "ExceptionSemantics:unhandledUserException",
-    "ExceptionSemantics:tryContext",
-    "ExceptionSemantics:rollbackArchive",
-    "ExceptionSemantics:rollbackConsumingExercise",
-    "ExceptionSemantics:rollbackCreate",
-    "FailedFetch:fetchNonStakeholder",
-    "Interface:main",
-    "InterfaceArchive:main",
-    "Iou12:main",
-    "LargeTransaction:largeListAsAChoiceArgTest",
-    "LargeTransaction:largeTransactionWithManyContractsTest",
-    "LargeTransaction:largeTransactionWithOneContractTest",
-    "LargeTransaction:listSizeTest",
-    "LargeTransaction:rangeOfIntsToListContainerTest",
-    "LargeTransaction:rangeOfIntsToListTest",
-    "LargeTransaction:rangeTest",
-    "LedgerTestException:test",
-    "LfInterfaces:run",
-    "MoreChoiceObserverDivulgence:test",
-    "Self:main",
-    "Self2:main",
-    "TransientFailure:testBio",
-  )
+  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -564,125 +548,7 @@ abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScript
 
   override lazy val protocolVersionForTesting = ProtocolVersion.v35
 
-  // TODO (#30398): replace the following with the results of a call to `dpm script --list`
-  override protected val scriptIdsToTest: List[String] = List(
-    "ActionTest:testFilterA",
-    "AuthEvalOrder:t1_create_success",
-    "AuthEvalOrder:t2_create_badlyAuthorized",
-    "AuthEvalOrder:t3_createViaExerice_success",
-    "AuthEvalOrder:t4_createViaExerice_badlyAuthorized",
-    "AuthFailure:t1_CreateMissingAuthorization",
-    "AuthFailureWithKeys:t2_MaintainersNotSubsetOfSignatories",
-    "AuthFailure:t3_FetchMissingAuthorization",
-    "AuthFailureWithKeys:t4_LookupByKeyMissingAuthorization",
-    "AuthFailure:t5_ExerciseMissingAuthorization",
-    "AuthorizedDivulgence:test_authorizedFetch",
-    "AuthorizedDivulgence:test_divulgeChoiceTargetContractId",
-    "AuthorizedDivulgence:test_noDivulgenceForFetch",
-    "AuthorizedDivulgence:test_noDivulgenceOfCreateArguments",
-    "BasicTests:test_createAndFetch",
-    "BasicTests:test_doubleLetTest",
-    "BasicTests:test_exponentiation",
-    "BasicTests:test_failedAuths",
-    "BasicTests:test_getTimeTest",
-    "BasicTests:test_letTest",
-    "BasicTests:test_listMatchTest",
-    "BasicTests:test_mustFails",
-    "BasicTests:test_payoutTest",
-    "BasicTests:test_screateAndExercise",
-    "BasicTests:test_screateAndExerciseComposit",
-    "BasicTests:test_sgetTimeTest",
-    "BasicTests:test_testXyzTest",
-    "BasicTests:test_typeWithParameters",
-    "ChoiceShadowing:test1",
-    "CoerceContractId:test",
-    "Conjunction:main",
-    "ConjunctionChoices:demo",
-    "ConsumedContractKey:testFetchFromConsumingChoice",
-    "ConsumedContractKey:testFetchKeyFromConsumingChoice",
-    "ConsumedContractKey:testLookupKeyFromConsumingChoice",
-    "ConsumingTests:main",
-    "ContractIdInContractKeySkipCheck:createCmdCrashes",
-    "ContractIdInContractKeySkipCheck:createCrashes",
-    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes",
-    "ContractIdInContractKeySkipCheck:exerciseCrashes",
-    "ContractIdInContractKeySkipCheck:fetchCrashes",
-    "ContractIdInContractKeySkipCheck:lookupCrashes",
-    "ContractIdInContractKeySkipCheck:queryCrashes",
-    "ContractKeyNotEffective:fetchByKeyMustFail",
-    "ContractKeyNotVisible:aScript",
-    "ContractKeyNotVisible:blindLookup",
-    "ContractKeyNotVisible:divulgeeLookup",
-    "ContractKeyNotVisible:localFetch",
-    "ContractKeyNotVisible:localLookup",
-    "ContractKeys:test",
-    "CreateAndExercise:main",
-    "DamlScriptTrySubmit:authorizationError",
-    "DamlScriptTrySubmitWithKeys:authorizationError",
-    "DamlScriptTrySubmitWithKeys:contractKeyNotFound",
-    "DamlScriptTrySubmitWithKeys:contractNotActive",
-    "DamlScriptTrySubmitWithKeys:createEmptyContractKeyMaintainers",
-    "DamlScriptTrySubmitWithKeys:duplicateContractKey",
-    "DamlScriptTrySubmit:failureStatusError",
-    "DamlScriptTrySubmitWithKeys:fetchEmptyContractKeyMaintainers",
-    "DamlScriptTrySubmitWithKeys:truncatedError",
-    "DamlScriptTrySubmit:wronglyTypedContract",
-    "DamlScriptTrySubmitWithKeys:wronglyTypedContract",
-    "EmptyContractKeyMaintainers:createCmdNoMaintainer",
-    "EmptyContractKeyMaintainers:createNoMaintainer",
-    "EmptyContractKeyMaintainers:fetchNoMaintainer",
-    "EmptyContractKeyMaintainers:lookupNoMaintainer",
-    "EmptyContractKeyMaintainers:queryNoMaintainer",
-    "EqContractId:main",
-    "ExceptionAndContractKey:testCreate",
-    "ExceptionAndContractKey:testLookup",
-    "ExceptionSemanticsWithKeys:divulgence",
-    "ExceptionSemanticsWithKeys:duplicateKey",
-    "ExceptionSemantics:handledArithmeticError",
-    "ExceptionSemantics:handledUserException",
-    "ExceptionSemanticsWithKeys:tryContext",
-    "ExceptionSemantics:uncaughtArithmeticError",
-    "ExceptionSemantics:uncaughtUserException",
-    "ExceptionSemantics:unhandledArithmeticError",
-    "ExceptionSemantics:unhandledUserException",
-    "ExceptionSemanticsWithKeys:rollbackArchive",
-    "ExceptionSemanticsWithKeys:rollbackConsumingExercise",
-    "ExceptionSemanticsWithKeys:rollbackCreate",
-    "FailedFetch:fetchNonStakeholder",
-    "FetchByKey:failLedger",
-    "FetchByKey:failSpeedy",
-    "FetchByKey:mustFail",
-    "Interface:main",
-    "InterfaceArchive:main",
-    "Iou12:main",
-    "KeyNotVisibleStakeholders:blindFetch",
-    "KeyNotVisibleStakeholders:blindLookup",
-    "KeyNotVisibleStakeholders:divulgeeFetch",
-    "KeyNotVisibleStakeholders:divulgeeLookup",
-    "LargeTransaction:largeListAsAChoiceArgTest",
-    "LargeTransaction:largeTransactionWithManyContractsTest",
-    "LargeTransaction:largeTransactionWithOneContractTest",
-    "LargeTransaction:listSizeTest",
-    "LargeTransaction:rangeOfIntsToListContainerTest",
-    "LargeTransaction:rangeOfIntsToListTest",
-    "LargeTransaction:rangeTest",
-    "LedgerTestException:test",
-    "LFContractKeys:lookupTest",
-    "LfInterfaces:run",
-    "LfStableContractKeys:run",
-    "LfStableContractKeyThroughExercises:run",
-    "MoreChoiceObserverDivulgence:test",
-    "NUCKTests:useAllOperations",
-    "NUCKTests:createMultiple",
-    "NUCKTests:exerciseByMultiple",
-    "NUCKTests:lookupNByKeyMultiple",
-    "NUCKTests:queryNByKeyMultiple",
-    "NUCKTests:queryNByKeyUnauthorized",
-    "NUCKTests:exerciseByKeyWithInvisibleButDisclosedKey",
-    "Self:main",
-    "Self2:main",
-    "TransientFailure:testBio",
-  )
+  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -863,8 +729,6 @@ class DamlScriptPV35LF23IT extends DamlScriptPV35IT(LanguageVersion.v2_3) {
   )
 }
 
-@NuckTest
-@RollbackTest
 class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
@@ -872,119 +736,7 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   override lazy val projectName = "ScriptDevTests"
   override lazy val protocolVersionForTesting = ProtocolVersion.dev
 
-  // TODO (#30398): replace the following with the results of a call to `dpm script --list`
-  override protected val scriptIdsToTest: List[String] = List(
-    "ActionTest:testFilterA",
-    "AuthEvalOrder:t1_create_success",
-    "AuthEvalOrder:t2_create_badlyAuthorized",
-    "AuthEvalOrder:t3_createViaExerice_success",
-    "AuthEvalOrder:t4_createViaExerice_badlyAuthorized",
-    "AuthFailure:t1_CreateMissingAuthorization",
-    "AuthFailureWithKeys:t2_MaintainersNotSubsetOfSignatories",
-    "AuthFailure:t3_FetchMissingAuthorization",
-    "AuthFailureWithKeys:t4_LookupByKeyMissingAuthorization",
-    "AuthFailure:t5_ExerciseMissingAuthorization",
-    "AuthorizedDivulgence:test_authorizedFetch",
-    "AuthorizedDivulgence:test_divulgeChoiceTargetContractId",
-    "AuthorizedDivulgence:test_noDivulgenceForFetch",
-    "AuthorizedDivulgence:test_noDivulgenceOfCreateArguments",
-    "BasicTests:test_createAndFetch",
-    "BasicTests:test_doubleLetTest",
-    "BasicTests:test_exponentiation",
-    "BasicTests:test_failedAuths",
-    "BasicTests:test_getTimeTest",
-    "BasicTests:test_letTest",
-    "BasicTests:test_listMatchTest",
-    "BasicTests:test_mustFails",
-    "BasicTests:test_payoutTest",
-    "BasicTests:test_screateAndExercise",
-    "BasicTests:test_screateAndExerciseComposit",
-    "BasicTests:test_sgetTimeTest",
-    "BasicTests:test_testXyzTest",
-    "BasicTests:test_typeWithParameters",
-    "ChoiceShadowing:test1",
-    "CoerceContractId:test",
-    "Conjunction:main",
-    "ConjunctionChoices:demo",
-    "ConsumedContractKey:testFetchFromConsumingChoice",
-    "ConsumedContractKey:testFetchKeyFromConsumingChoice",
-    "ConsumedContractKey:testLookupKeyFromConsumingChoice",
-    "ConsumingTests:main",
-    "ContractIdInContractKeySkipCheck:createCmdCrashes",
-    "ContractIdInContractKeySkipCheck:createCrashes",
-    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes",
-    "ContractIdInContractKeySkipCheck:exerciseCrashes",
-    "ContractIdInContractKeySkipCheck:fetchCrashes",
-    "ContractIdInContractKeySkipCheck:lookupCrashes",
-    "ContractIdInContractKeySkipCheck:queryCrashes",
-    "ContractKeyNotEffective:fetchByKeyMustFail",
-    "ContractKeyNotVisible:aScript",
-    "ContractKeyNotVisible:blindLookup",
-    "ContractKeyNotVisible:divulgeeLookup",
-    "ContractKeyNotVisible:localFetch",
-    "ContractKeyNotVisible:localLookup",
-    "ContractKeys:test",
-    "CreateAndExercise:main",
-    "DamlScriptTrySubmit:authorizationError",
-    "DamlScriptTrySubmitWithKeys:authorizationError",
-    "DamlScriptTrySubmitWithKeys:contractKeyNotFound",
-    "DamlScriptTrySubmitWithKeys:contractNotActive",
-    "DamlScriptTrySubmitWithKeys:createEmptyContractKeyMaintainers",
-    "DamlScriptTrySubmitWithKeys:devError",
-    "DamlScriptTrySubmitWithKeys:duplicateContractKey",
-    "DamlScriptTrySubmit:failureStatusError",
-    "DamlScriptTrySubmitWithKeys:fetchEmptyContractKeyMaintainers",
-    "DamlScriptTrySubmitWithKeys:truncatedError",
-    "DamlScriptTrySubmit:wronglyTypedContract",
-    "DamlScriptTrySubmitWithKeys:wronglyTypedContract",
-    "EmptyContractKeyMaintainers:createCmdNoMaintainer",
-    "EmptyContractKeyMaintainers:createNoMaintainer",
-    "EmptyContractKeyMaintainers:fetchNoMaintainer",
-    "EmptyContractKeyMaintainers:lookupNoMaintainer",
-    "EmptyContractKeyMaintainers:queryNoMaintainer",
-    "EqContractId:main",
-    "ExceptionAndContractKey:testCreate",
-    "ExceptionAndContractKey:testLookup",
-    "ExceptionSemanticsWithKeys:divulgence",
-    "ExceptionSemanticsWithKeys:duplicateKey",
-    "ExceptionSemantics:handledArithmeticError",
-    "ExceptionSemantics:handledUserException",
-    "ExceptionSemanticsWithKeys:tryContext",
-    "ExceptionSemantics:uncaughtArithmeticError",
-    "ExceptionSemantics:uncaughtUserException",
-    "ExceptionSemantics:unhandledArithmeticError",
-    "ExceptionSemantics:unhandledUserException",
-    "ExceptionSemanticsWithKeys:rollbackArchive",
-    "ExceptionSemanticsWithKeys:rollbackConsumingExercise",
-    "ExceptionSemanticsWithKeys:rollbackCreate",
-    "FailedFetch:fetchNonStakeholder",
-    "FetchByKey:failLedger",
-    "FetchByKey:failSpeedy",
-    "FetchByKey:mustFail",
-    "Interface:main",
-    "InterfaceArchive:main",
-    "Iou12:main",
-    "KeyNotVisibleStakeholders:blindFetch",
-    "KeyNotVisibleStakeholders:blindLookup",
-    "KeyNotVisibleStakeholders:divulgeeFetch",
-    "KeyNotVisibleStakeholders:divulgeeLookup",
-    "LargeTransaction:largeListAsAChoiceArgTest",
-    "LargeTransaction:largeTransactionWithManyContractsTest",
-    "LargeTransaction:largeTransactionWithOneContractTest",
-    "LargeTransaction:listSizeTest",
-    "LargeTransaction:rangeOfIntsToListContainerTest",
-    "LargeTransaction:rangeOfIntsToListTest",
-    "LargeTransaction:rangeTest",
-    "LedgerTestException:test",
-    "LFContractKeys:lookupTest",
-    "LfInterfaces:run",
-    "LfStableContractKeys:run",
-    "LfStableContractKeyThroughExercises:run",
-    "MoreChoiceObserverDivulgence:test",
-    "Self:main",
-    "Self2:main",
-    "TransientFailure:testBio",
-  )
+  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -1110,9 +862,7 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
     "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
     "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
     "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:queryCrashes" ->
-      // should have failed but it succeeds (tracked by https://github.com/digital-asset/daml/issues/17554)
-      Broken(contractIDsNotSupported),
+    "ContractIdInContractKeySkipCheck:queryCrashes" -> contractIDsNotSupported,
     "ContractKeyNotEffective:fetchByKeyMustFail" -> Failure(
       "Setting time backwards is not allowed"
     ),
@@ -1147,6 +897,13 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
     "LFContractKeys:lookupTest" -> Ignored,
     "LfStableContractKeyThroughExercises:run" -> Ignored,
     "LfStableContractKeys:run" -> Ignored,
+    "NUCKTests:useAllOperations" -> Success(),
+    "NUCKTests:createMultiple" -> Success(),
+    "NUCKTests:exerciseByMultiple" -> Success(),
+    "NUCKTests:lookupNByKeyMultiple" -> Success(),
+    "NUCKTests:queryNByKeyMultiple" -> Success(),
+    "NUCKTests:queryNByKeyUnauthorized" -> Success(),
+    "NUCKTests:exerciseByKeyWithInvisibleButDisclosedKey" -> Success(),
   )
 
   // scriptIdsToTest needs to be defined in order for individual tests to be defined
@@ -1188,7 +945,10 @@ object DamlScriptIT {
         Failure(errorMsgPattern, logAssertions ++ additionalLogAssertions: _*)
     }
 
-    final case class Broken(result: Either[Failure, Success]) extends ExpectedResult
+    final case class Broken(result: Either[Failure, Success]) extends ExpectedResult {
+      override val logAssertions: Seq[LogEntry => Assertion] =
+        result.fold(_.logAssertions, _.logAssertions)
+    }
 
     object Broken {
       def apply(success: Success): Broken = Broken(Right(success))

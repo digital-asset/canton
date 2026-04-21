@@ -4,8 +4,7 @@
 package com.digitalasset.canton.crypto.kms
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.KmsConfig
-import com.digitalasset.canton.config.KmsConfig.ExponentialBackoffConfig
+import com.digitalasset.canton.config.{ExponentialBackoffConfig, KmsConfig}
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{
   EncryptionAlgoSpec,
   EncryptionKeySpec,

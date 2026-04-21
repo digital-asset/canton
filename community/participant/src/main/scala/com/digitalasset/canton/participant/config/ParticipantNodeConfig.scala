@@ -28,6 +28,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  UpdateServiceConfig,
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
@@ -250,6 +251,7 @@ final case class LedgerApiServerConfig(
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
     partyManagementService: PartyManagementServiceConfig = PartyManagementServiceConfig(),
     packageService: PackageServiceConfig = PackageServiceConfig(),
+    updateService: UpdateServiceConfig = UpdateServiceConfig(),
     stateService: StateServiceConfig = StateServiceConfig(),
     managementServiceTimeout: config.NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
@@ -292,7 +294,6 @@ object LedgerApiServerConfig {
       maxUsedHeapSpacePercentage = 100,
       minFreeHeapSpaceBytes = 0,
     )
-
 }
 
 /** Optional ledger api time service configuration for demo and testing only */
@@ -419,8 +420,6 @@ final case class ParticipantNodeParameterConfig(
     packageMetadataView: PackageMetadataViewConfig = PackageMetadataViewConfig(),
     commandProgressTracker: CommandProgressTrackerConfig = CommandProgressTrackerConfig(),
     alphaOnlinePartyReplicationSupport: Option[AlphaOnlinePartyReplicationConfig] = None,
-    // TODO(#25344): check whether this should be removed
-    automaticallyPerformLsu: Boolean = true,
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
@@ -434,7 +433,33 @@ final case class ParticipantNodeParameterConfig(
     autoSyncProtocolFeatureFlags: Boolean = true,
     alphaMultiSynchronizerSupport: Boolean = false,
     commitAfterFailedActivenessCheck: Boolean = false,
+    lsu: LsuConfig = LsuConfig(),
 ) extends LocalNodeParametersConfig
+
+/** Config for LSU.
+  *
+  * @param automaticallyPerformLsu
+  *   Whether to automatically perform LSU. Default is true.
+  * @param lsuRetry
+  *   Config for the retries of the LSU operation. Retries are done aggressively.
+  * @param handshakeRetry
+  *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
+  *   handshake runs as a non-urgent background task.
+  */
+final case class LsuConfig(
+    // TODO(#25344): check whether this should be removed
+    automaticallyPerformLsu: Boolean = true,
+    lsuRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofMillis(200),
+      maxDelay = config.NonNegativeDuration.ofSeconds(5),
+      maxRetries = Int.MaxValue,
+    ),
+    handshakeRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofMinutes(1),
+      maxDelay = config.NonNegativeDuration.ofMinutes(5),
+      maxRetries = Int.MaxValue,
+    ),
+)
 
 /** Parameters for the participant node's stores
   *

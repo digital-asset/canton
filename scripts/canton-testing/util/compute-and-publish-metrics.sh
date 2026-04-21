@@ -40,13 +40,12 @@ print-bytes() {
 }
 
 cat > "$SLACK_METRICS_FILE" <<EOI
-*Performance test '$CURRENT_JOB_NAME' at $HOSTNAME:*
+*Performance test \`$CURRENT_JOB_NAME\` at $HOSTNAME*
 
-Last commit:
+*Last commit*
 \`\`\`
 $(git log -1 --pretty="%an %ci commit %h%n%D%n%s")
 \`\`\`
-
 Log location: \`$LOGS_DIR\`
 
 EOI

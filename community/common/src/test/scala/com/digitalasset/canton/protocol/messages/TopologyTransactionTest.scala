@@ -36,7 +36,7 @@ class TopologyTransactionTest
   private val crypto =
     TestingTopology(sequencerGroup =
       SequencerGroup(
-        active = Seq(SequencerId(synchronizerId.uid)),
+        active = NonEmpty(Seq, SequencerId(synchronizerId.uid)),
         passive = Seq.empty,
         threshold = PositiveInt.one,
       )

@@ -130,7 +130,7 @@ class ReferenceConfigExampleIntegrationTest
       participant.config.adminApi.tls should not be empty
       participant.config.ledgerApi.tls should not be empty
       participant.health.status.trySuccess.active shouldBe true
-      participant.ledger_api.state.acs.of_all() shouldBe empty
+      participant.ledger_api.state.acs.count() shouldEqual 0
     }
   }
 

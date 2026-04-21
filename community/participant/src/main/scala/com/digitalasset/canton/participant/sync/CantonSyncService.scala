@@ -691,8 +691,7 @@ class CantonSyncService(
       synchronizerId: SynchronizerId
   ): Option[PhysicalSynchronizerId] =
     connectedSynchronizersLookup
-      .get(synchronizerId)
-      .map(_.synchronizerHandle.psid)
+      .psidFor(synchronizerId)
 
   override def allocateParty(
       partyId: PartyId,
@@ -724,8 +723,7 @@ class CantonSyncService(
     val specifiedSynchronizer =
       synchronizerIdO.map(lsid =>
         connectedSynchronizersLookup
-          .get(lsid)
-          .map(_.psid)
+          .psidFor(lsid)
           .toRight(
             SubmissionResult.SynchronousError(
               SyncServiceInjectionError.NotConnectedToSynchronizer
@@ -1175,22 +1173,82 @@ class CantonSyncService(
   }
 
   /** All pending LSU operations (handshake and/or topology copy) are resumed. They are done in
-    * parallel and we don't wait on the result.
+    * parallel, and we don't wait on the result.
     */
   def attemptPendingLsuOperations()(implicit traceContext: TraceContext): Unit = {
     val resF: FutureUnlessShutdown[Unit] = pendingLsuOperationsStore
       .getAll(PendingLsuOperation.operationName)
-      .map(_.foreach { pending =>
+      .map(_.foreach { pendingOperation =>
         EitherTUtil.doNotAwaitUS(
-          connectionsManager.resumePendingLsuOperation(pending.operation.successorPsid),
-          message = s"Failed to resume pending LSU operation for ${pending.operation.successorPsid}",
+          connectionsManager.resumePendingLsuOperation(pendingOperation),
+          message =
+            s"Failed to perform pending LSU operation for ${pendingOperation.operation.successorPsid}",
         )
       })
 
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
       future = resF,
-      failureMessage = "Failed to resume pending LSU operations",
+      failureMessage = "Failed to get the list of pending LSU operations",
     )
+  }
+
+  /** Set the values for the LSU status metrics after a restart.
+    */
+  def setLsuStatusMetrics()(implicit traceContext: TraceContext): Unit = {
+    import ParticipantMetrics.LsuStatus.*
+
+    val topologyLookup = new TopologyLookup(
+      clock = clock,
+      topologyConfig = parameters.topologyConfig,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      topologyManagerO = lookupTopologyManager _,
+      psidLookup = activePsidForLsid _,
+      topologyClientO = lookupTopologyClient,
+      syncPersistentStateO = syncPersistentStateManager.get,
+      loggerFactory = loggerFactory,
+    )
+
+    def getLsuAnnounced(
+        state: SyncPersistentState
+    ): EitherT[FutureUnlessShutdown, String, Option[SynchronizerSuccessor]] = for {
+      snapshot <- topologyLookup
+        .maybeOfflineApproximateSnapshot(state.psid)
+        .leftMap(err => s"Unable to get topology snapshot for ${state.psid}: $err")
+
+      announcedLsu <- EitherT.liftF(snapshot.announcedLsu())
+    } yield announcedLsu.map { case (successor, _) => successor }
+
+    def getSequencerSuccessorsKnown(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+      synchronizerConnectionConfigStore
+        .get(successor.psid)
+        .fold(_ => None, _ => Some(SequencerSuccessorsKnown))
+
+    def getHandshakeDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+      syncPersistentStateManager.get(successor.psid).map(_ => HandshakeDone)
+
+    def isLsuDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+      synchronizerConnectionConfigStore
+        .get(successor.psid)
+        .fold(_ => None, config => Option.when(config.status.isActive)(LsuDone))
+
+    syncPersistentStateManager.getAll.values.foreach { persistentState =>
+      val resET = getLsuAnnounced(persistentState).map {
+        case Some(successor) =>
+          val lsuStatus = Seq(
+            getSequencerSuccessorsKnown(successor),
+            getHandshakeDone(successor),
+            isLsuDone(successor),
+          ).maxOption.flatten.getOrElse(LsuAnnounced)
+
+          metrics.setLsuStatus(lsuStatus, successor.psid)
+
+        case None => () // nothing to do
+      }
+
+      EitherTUtil.doNotAwaitUS(resET, s"Set LSU metrics for ${persistentState.psid}")
+    }
+
   }
 
   /* Verify that specified synchronizer has inactive status and prune synchronizer stores.
@@ -1277,13 +1335,16 @@ class CantonSyncService(
     *
     * @param psid
     *   the physical synchronizer id of the synchronizer.
+    * @param isLsu
+    *   True if the handshake is part of LSU
     */
   def performPureHandshake(
-      psid: PhysicalSynchronizerId
+      psid: PhysicalSynchronizerId,
+      isLsu: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    connectionsManager.performPureHandshake(psid).map(_ => ())
+    connectionsManager.performPureHandshake(psid, isLsu = isLsu).map(_ => ())
 
   /** Disconnect the given synchronizer from the sync service. */
   def disconnectSynchronizer(

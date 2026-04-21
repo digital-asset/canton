@@ -51,6 +51,11 @@ final class UpdateServiceAuthorization(
         RequiredClaims.updateFormatClaims[GetUpdateByIdRequest]
       )*
     )(request)
+
+  def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+    authorizer.rpc(service.getUpdatesPage)(
+      request.updateFormat.toList.flatMap(RequiredClaims.updateFormatClaims[GetUpdatesPageRequest])*
+    )(request)
 }
 
 object UpdateServiceAuthorization {

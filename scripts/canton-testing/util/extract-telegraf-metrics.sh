@@ -90,7 +90,8 @@ $DATADOG_METRIC_PREFIX.disk.usage-per-tx=$DISK_USAGE_PER_TX
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Disk usage: $(print-bytes "$DISK_USAGE_PER_TX")/root node
+*Resources*
+• Disk usage: *$(print-bytes "$DISK_USAGE_PER_TX")/root node*
 EOI
 
 ### Disk io per transaction
@@ -114,7 +115,7 @@ $DATADOG_METRIC_PREFIX.disk.write-bytes-per-tx=$DISK_WRITE_BYTES_PER_TX
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Disk io: $(print-bytes "$DISK_READ_BYTES_PER_TX") read/root node, $(print-bytes "$DISK_WRITE_BYTES_PER_TX") written/root node
+• Disk io: *$(print-bytes "$DISK_READ_BYTES_PER_TX") read/root node*, *$(print-bytes "$DISK_WRITE_BYTES_PER_TX") written/root node*
 EOI
 
 ### Network io per transaction
@@ -150,11 +151,10 @@ $DATADOG_METRIC_PREFIX.network.synchronizers-postgres.bytes-sent-per-tx=$SYNCHRO
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Network io:
-- Ledger api: $(print-bytes "$P1_LEDGER_API_BYTES_RECV_PER_TX") received/root node, $(print-bytes "$P1_LEDGER_API_BYTES_SENT_PER_TX") sent/root node
-- Public api: $(print-bytes "$DA_PUBLIC_API_BYTES_RECV_PER_TX") received/root node, $(print-bytes "$DA_PUBLIC_API_BYTES_SENT_PER_TX") sent/root node
-- Participant database connections: $(print-bytes "$PARTICIPANT_POSTGRES_BYTES_RECV_PER_TX") received/root node, $(print-bytes "$PARTICIPANT_POSTGRES_BYTES_SENT_PER_TX") sent/root node
-- Synchronizer database connections: $(print-bytes "$SYNCHRONIZER_POSTGRES_BYTES_RECV_PER_TX") received/root node, $(print-bytes "$SYNCHRONIZER_POSTGRES_BYTES_SENT_PER_TX") sent/root node
+• Network io (ledger api): *$(print-bytes "$P1_LEDGER_API_BYTES_RECV_PER_TX") received/root node*, *$(print-bytes "$P1_LEDGER_API_BYTES_SENT_PER_TX") sent/root node*
+• Network io (public api): *$(print-bytes "$DA_PUBLIC_API_BYTES_RECV_PER_TX") received/root node*, *$(print-bytes "$DA_PUBLIC_API_BYTES_SENT_PER_TX") sent/root node*
+• Network io (participant database): *$(print-bytes "$PARTICIPANT_POSTGRES_BYTES_RECV_PER_TX") received/root node*, *$(print-bytes "$PARTICIPANT_POSTGRES_BYTES_SENT_PER_TX") sent/root node*
+• Network io (synchronizer database): *$(print-bytes "$SYNCHRONIZER_POSTGRES_BYTES_RECV_PER_TX") received/root node*, *$(print-bytes "$SYNCHRONIZER_POSTGRES_BYTES_SENT_PER_TX") sent/root node*
 
 EOI
 
@@ -173,7 +173,7 @@ EOI
 CPU_USAGE_INT=${CPU_USAGE%.*}
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-CPU usage: $CPU_USAGE_INT%
+• CPU usage: *$CPU_USAGE_INT%*
 EOI
 
 ### Memory
@@ -193,7 +193,7 @@ $DATADOG_METRIC_PREFIX.memory-usage=$MEMORY_USAGE
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Memory usage: $(print-bytes "$MEMORY_USAGE")
+• Memory usage: *$(print-bytes "$MEMORY_USAGE")*
 EOI
 
 ### Threads
@@ -211,6 +211,6 @@ $DATADOG_METRIC_PREFIX.threads=$THREADS
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Number of threads: $THREADS
+• Threads: *$THREADS*
 
 EOI

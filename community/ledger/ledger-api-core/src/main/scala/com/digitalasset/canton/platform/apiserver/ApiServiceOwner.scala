@@ -40,6 +40,7 @@ import com.digitalasset.canton.platform.config.{
   PackageServiceConfig,
   PartyManagementServiceConfig,
   StateServiceConfig,
+  UpdateServiceConfig,
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -105,6 +106,7 @@ object ApiServiceOwner {
       partyManagementServiceConfig: PartyManagementServiceConfig =
         ApiServiceOwner.DefaultPartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig = ApiServiceOwner.DefaultPackageServiceConfig,
+      updateServiceConfig: UpdateServiceConfig,
       stateServiceConfig: StateServiceConfig,
       loggerFactory: NamedLoggerFactory,
       contractAuthenticator: ContractAuthenticatorFn,
@@ -201,6 +203,7 @@ object ApiServiceOwner {
         userManagementServiceConfig = userManagement,
         partyManagementServiceConfig = partyManagementServiceConfig,
         packageServiceConfig = packageServiceConfig,
+        updateServiceConfig = updateServiceConfig,
         stateServiceConfig = stateServiceConfig,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractAuthenticator,

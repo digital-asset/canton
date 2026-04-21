@@ -14,6 +14,7 @@ import sbt.Keys.{update, *}
 import sbt.Tests.{Group, SubProcess}
 import sbt.{File, *}
 import sbt.internal.util.ManagedLogger
+import sbt.io.NothingFilter
 import sbt.nio.Keys.*
 import sbtassembly.AssemblyPlugin.autoImport.*
 import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
@@ -687,9 +688,6 @@ object BuildCommon {
       `ledger-api-string-interning-benchmark`,
       `conformance-testing`,
       `ledger-api-bench-tool`,
-      `ledger-test-tool-suites-2-1`,
-      `ledger-test-tool-suites-2-3`,
-      `ledger-test-tool-suites-2-dev`,
       `ledger-test-tool-2-1`,
       `ledger-test-tool-2-3`,
       `ledger-test-tool-2-dev`,
@@ -973,7 +971,6 @@ object BuildCommon {
         `magnolify-addon` % "compile->compile",
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
         `slick-fork`,
-        `scalatest-addon` % "compile->test",
         `kms-driver-api`,
       )
       .settings(
@@ -1100,6 +1097,7 @@ object BuildCommon {
         `wartremover-extension` % "test->test",
         `mock-kms-driver` % "test->test",
         DamlProjects.`bindings-java`,
+        `scalatest-addon` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1132,7 +1130,7 @@ object BuildCommon {
             "com.digitalasset.canton.examples",
           )
         ),
-        organization := "com.digitalasset.canton",
+        organization := "com.daml",
         publish / skip := false,
         addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
@@ -1396,11 +1394,16 @@ object BuildCommon {
         libraryDependencies ++= Seq(
         ),
         excludeTranscodeConflictingDependencies,
-        Test / testOptions += Tests.Argument(
-          TestFrameworks.ScalaTest,
-          s"-DdamlVersion=${Dependencies.daml_libraries_version}",
-          s"-DdpmRegistry=${Dependencies.dpm_registry}",
-        ),
+        Test / testOptions += Tests.Setup { () =>
+          // daml-script-tests needs to receive a ConfigMap in its test suite constructors. Due to bugs in the implementation
+          // of org.scalatest.ConfigMapWrapperSuite, this is not currently possible, hence we explicitly set damlVersion and
+          // dpmRegistry using system properties.
+          // Ref:
+          // - https://github.com/scalatest/scalatest/issues/1704
+          // - https://github.com/scalatest/scalatest/pull/600
+          System.setProperty("damlVersion", Dependencies.daml_libraries_version)
+          System.setProperty("dpmRegistry", Dependencies.dpm_registry)
+        },
       )
 
     lazy val `performance-driver` = project
@@ -1435,7 +1438,11 @@ object BuildCommon {
 
     lazy val performance = project
       .in(file("performance"))
-      .dependsOn(`performance-driver`, `community-app` % "compile->compile;test->test")
+      .dependsOn(
+        `performance-driver`,
+        `community-app` % "compile->compile;test->test",
+        `scalatest-addon`,
+      )
       .settings(sharedCantonCommunitySettings, excludeTranscodeConflictingDependencies)
 
     lazy val `kms-driver-api` = project
@@ -1449,6 +1456,7 @@ object BuildCommon {
           slf4j_api,
           opentelemetry_api,
         ),
+        organization := "com.daml",
         publish / skip := false,
       )
 
@@ -1595,7 +1603,7 @@ object BuildCommon {
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
         coverageEnabled := false,
-        organization := "com.digitalasset.canton",
+        organization := "com.daml",
         publish / skip := false,
       )
 
@@ -1608,6 +1616,7 @@ object BuildCommon {
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
         coverageEnabled := false,
+        organization := "com.daml",
         publish / skip := false,
       )
 
@@ -1636,7 +1645,11 @@ object BuildCommon {
 
     lazy val `wartremover-annotations` = project
       .in(file("community/lib/wartremover-annotations"))
-      .settings(sharedCommunitySettings, publish / skip := false)
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        publish / skip := false,
+      )
 
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))
@@ -1656,7 +1669,6 @@ object BuildCommon {
           scalacheck,
           scalatest % Test,
         ),
-        publish / skip := false,
       )
 
     lazy val `scalatest-addon` = project
@@ -1666,7 +1678,6 @@ object BuildCommon {
         libraryDependencies += scalatest,
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
-        publish / skip := false,
       )
 
     lazy val `base-errors` = project
@@ -2215,14 +2226,10 @@ object BuildCommon {
         ),
       )
 
-    def ledgerTestToolSuitesProject(
-        lfVersion: String,
-        darsProject: Project,
-        additionalSetting: Def.SettingsDefinition*
-    ): Project =
+    def ledgerTestToolProject(lfVersion: String, darsProject: Project): Project =
       Project(
-        s"ledger-test-tool-suites-$lfVersion".replace('.', '-'),
-        file(s"community/ledger-test-tool/suites/lf-v$lfVersion"),
+        s"ledger-test-tool-$lfVersion".replace('.', '-'),
+        file(s"community/ledger-test-tool/lf-v$lfVersion"),
       )
         .dependsOn(
           DamlProjects.`bindings-java`,
@@ -2245,62 +2252,20 @@ object BuildCommon {
             tapir_sttp_client,
           ),
           excludeTranscodeConflictingDependencies,
-          compileOrder := CompileOrder.JavaThenScala,
-          Def.settings(additionalSetting.toSeq*),
-          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
-          Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
+          scalacOptions += "-Ytasty-reader",
           scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
-          // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
-          if (lfVersion == "2.1")
-            Seq(
-              Compile / unmanagedSources / excludeFilter := "*NamesSpec.scala" || ((_: File).getAbsolutePath
-                .contains("v2_dev")) || ((_: File).getAbsolutePath
-                .contains("v2_3"))
-            )
-          else Seq.empty,
-        )
-
-    lazy val `ledger-test-tool-suites-2-1` =
-      ledgerTestToolSuitesProject("2.1", `ledger-common-dars-lf-v2-1`)
-    lazy val `ledger-test-tool-suites-2-3` =
-      ledgerTestToolSuitesProject(
-        "2.3",
-        `ledger-common-dars-lf-v2-3`,
-        // Suites sources are identical between test tool versions
-        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
-        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
-        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
-      )
-    lazy val `ledger-test-tool-suites-2-dev` =
-      ledgerTestToolSuitesProject(
-        "2.dev",
-        `ledger-common-dars-lf-v2-dev`,
-        // Suites sources are identical between test tool versions
-        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
-        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories ++= Seq(
-          baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
-          baseDirectory.value / ".." / "lf-v2.3" / "src" / "main",
-        ),
-        Test / unmanagedSourceDirectories ++= Seq(
-          baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
-          baseDirectory.value / ".." / "lf-v2.3" / "src" / "test",
-        ),
-      )
-
-    def ledgerTestToolProject(lfVersion: String, ledgerTestToolSuites: Project): Project =
-      Project(
-        s"ledger-test-tool-$lfVersion".replace('.', '-'),
-        file(s"community/ledger-test-tool/tool/lf-v$lfVersion"),
-      ).dependsOn(ledgerTestToolSuites)
-        .enablePlugins(DamlPlugin)
-        .settings(
-          compileOrder := CompileOrder.JavaThenScala,
-          sharedCantonCommunitySettings,
-          excludeTranscodeConflictingDependencies,
-          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
+          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src" / "main" / "scala",
           Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
+          Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src" / "test" / "scala",
+          Compile / unmanagedSources / excludeFilter := {
+            lfVersion match {
+              case "2.1" =>
+                (f: File) =>
+                  f.getAbsolutePath.contains("v2_3") || f.getAbsolutePath.contains("v2_dev")
+              case "2.3" => (_: File).getAbsolutePath.contains("v2_dev")
+              case _ => NothingFilter
+            }
+          },
           // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
           assembly / logLevel := Level.Info,
           assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
@@ -2316,18 +2281,16 @@ object BuildCommon {
           },
         )
 
-    lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-test-tool-suites-2-1`)
-    lazy val `ledger-test-tool-2-3` = ledgerTestToolProject("2.3", `ledger-test-tool-suites-2-3`)
+    lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-common-dars-lf-v2-1`)
+    lazy val `ledger-test-tool-2-3` = ledgerTestToolProject("2.3", `ledger-common-dars-lf-v2-3`)
     lazy val `ledger-test-tool-2-dev` =
-      ledgerTestToolProject("2.dev", `ledger-test-tool-suites-2-dev`)
+      ledgerTestToolProject("2.dev", `ledger-common-dars-lf-v2-dev`)
 
     lazy val `conformance-testing` = project
       .in(file("community/conformance-testing"))
       .dependsOn(
         `community-app` % "compile->compile;test->test",
         `ledger-test-tool-2-1` % Test,
-        `ledger-test-tool-2-3` % Test,
-        `ledger-test-tool-2-dev` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -2711,7 +2674,6 @@ object BuildCommon {
           scalatestScalacheck,
           scalaz_core,
         ),
-        publish / skip := false,
       )
 
     lazy val `rs-grpc-bridge` = project
@@ -2719,7 +2681,6 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         Compile / javacOptions ++= Seq("--release", "17"),
-        organization := "com.daml",
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           google_findbugs,
@@ -2949,6 +2910,7 @@ object BuildCommon {
           slf4j_api,
           typesafe_config,
         ),
+        organization := "com.daml",
         publish / skip := false,
         Compile / bufLintCheck := {},
         Compile / PB.targets := Seq(
@@ -2981,7 +2943,6 @@ object BuildCommon {
           scalatest_shouldmatchers,
           scalatest_wordspec,
         ),
-        publish / skip := false,
       )
 
     lazy val `test-evidence-scalatest` = project
@@ -3006,7 +2967,6 @@ object BuildCommon {
           shapeless,
           lihaoyi_sourcecode_2,
         ),
-        publish / skip := false,
       )
 
     lazy val `test-evidence-tag` = project
@@ -3018,7 +2978,6 @@ object BuildCommon {
           better_files,
           lihaoyi_sourcecode_2,
         ),
-        publish / skip := false,
       )
 
     lazy val `ports` = project
@@ -3171,6 +3130,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
+        organization := "com.daml",
         publish / skip := false,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
@@ -3348,11 +3308,9 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         // javaOnlySettings,
         wartremoverErrors := damlWarts,
-        publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_protobuf_java,
@@ -3480,28 +3438,15 @@ object BuildCommon {
 
     lazy val `daml-lf-language` = project
       .in(file("community/daml-lf/language"))
-      .enablePlugins(BuildInfoPlugin)
       .disablePlugins(
         WartRemover
       )
       .settings(
-        buildInfoPackage := "com.digitalasset.daml.lf",
-        buildInfoKeys ++= {
-          import DamlLfPlugin.LfVersionsDTO.*
-          Seq[BuildInfoKey](
-            BuildInfoKey("explicitVersionsDTO" -> explicitVersions.map { case (k, v) =>
-              k -> v.toJson
-            }),
-            BuildInfoKey("namedVersionsDTO" -> namedVersions.map { case (k, v) => k -> v.toJson }),
-            BuildInfoKey("versionListsDTO" -> versionLists.map { case (k, v) =>
-              k -> v.map(_.toJson)
-            }),
-          )
-        },
-        generateLfVersionJson := DamlLfPlugin.generateJsonLogic.value,
-        Compile / resourceGenerators += generateLfVersionJson.taskValue,
-        generateDTOLfVersionJson := DamlLfPlugin.generateDTOJsonLogic.value,
-        Compile / resourceGenerators += generateDTOLfVersionJson.taskValue,
+        Compile / sourceGenerators += DamlLfVersion.generateVersionsScala.taskValue,
+        Compile / resourceGenerators ++= Seq(
+          DamlLfVersion.generateVersionsJson.taskValue,
+          DamlLfVersion.generateVersionsDTOJson.taskValue,
+        ),
         sharedCommunitySettings,
         organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
@@ -3510,8 +3455,6 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          circe_core,
-          circe_parser,
           google_protobuf_java,
           scalatest % Test,
         ),
@@ -3577,11 +3520,9 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_common_protos,
@@ -3922,10 +3863,7 @@ object BuildCommon {
       project
         .in(file("community/daml-lf/tests"))
         .enablePlugins(DamlPlugin)
-        .settings(
-          sharedCommunitySettings,
-          publish / skip := false,
-        )
+        .settings(sharedCommunitySettings)
 
     lazy val `daml-lf-engine` = project
       .in(file("community/daml-lf/engine"))
@@ -4175,7 +4113,6 @@ object BuildCommon {
           // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
           "--doc_opt=" + file("community/docs/rst_lapi.tmpl") + "," + "proto-docs.rst"
         ),
-        Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api-proto/VERSION",
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_common_protos % "protobuf",
