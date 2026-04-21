@@ -391,7 +391,6 @@ private[speedy] case class PartialTransaction(
           nid,
           cid,
           createNode.gkeyOpt,
-          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
