@@ -106,6 +106,24 @@ class ExternalCallEngineTest
       }
     }
 
+    "surface external call failures through the engine continuation" in {
+      val result = submit(newEngine())
+
+      inside(result) {
+        case ResultNeedExternalCall(_, _, _, _, resume) =>
+          inside(
+            resume(Left(ExternalCallError(503, "upstream unavailable", Some("req-123")))).consume()
+          ) {
+            case Left(err @ Error.Interpretation(Error.Interpretation.DamlException(_), _)) =>
+              err.message should include("External call failed: upstream unavailable")
+              err.message should include("status=503")
+              err.message should include("requestId=req-123")
+              err.message should include("extensionId=ext")
+              err.message should include("functionId=fun")
+          }
+      }
+    }
+
     "use the configured external-call base cost when gas accounting is enabled" in {
       val outOfGas = submit(
         newEngine(
