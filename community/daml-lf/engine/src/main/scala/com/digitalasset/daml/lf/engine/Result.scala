@@ -38,8 +38,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
-    case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
-      ResultNeedExternalCall(extId, funcId, configHash, input, stored, result => resume(result).map(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, result => resume(result).map(f))
   }
 
   def flatMap[B](f: A => Result[B]): Result[B] = this match {
@@ -60,8 +60,8 @@ sealed trait Result[+A] extends Product with Serializable {
       )
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
-    case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
-      ResultNeedExternalCall(extId, funcId, configHash, input, stored, result => resume(result).flatMap(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, result => resume(result).flatMap(f))
   }
 
   private[lf] def consume(
@@ -90,10 +90,8 @@ sealed trait Result[+A] extends Product with Serializable {
         case ResultNeedKey(key, _, _, resume) =>
           go(resume(keys.lift(key).getOrElse(Vector.empty), NeedKeyProgression.Finished))
         case ResultPrefetch(_, _, result) => go(result())
-        case ResultNeedExternalCall(extId, funcId, configHash, input, storedResult, resume) =>
-          // Use stored result if available, otherwise try the externalCalls partial function
-          val result = storedResult.orElse(externalCalls.lift((extId, funcId, configHash, input)))
-          result match {
+        case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+          externalCalls.lift((extId, funcId, configHash, input)) match {
             case Some(output) => go(resume(Right(output)))
             case None =>
               go(resume(Left(ExternalCallError(
@@ -227,7 +225,6 @@ final case class ResultPrefetch[A](
   * @param functionId Function identifier within the extension
   * @param configHash Configuration hash (hex) for version validation
   * @param input Input data (hex)
-  * @param storedResult Optional stored result for replay mode
   * @param resume Callback to provide the result or error
   */
 final case class ResultNeedExternalCall[A](
@@ -235,7 +232,6 @@ final case class ResultNeedExternalCall[A](
     functionId: String,
     configHash: String,
     input: String,
-    storedResult: Option[String],
     resume: Either[ExternalCallError, String] => Result[A],
 ) extends Result[A]
 
@@ -346,13 +342,12 @@ object Result {
                     Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
                   ),
               )
-            case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
+            case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
               ResultNeedExternalCall(
                 extId,
                 funcId,
                 configHash,
                 input,
-                stored,
                 result =>
                   resume(result).flatMap(x =>
                     Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
