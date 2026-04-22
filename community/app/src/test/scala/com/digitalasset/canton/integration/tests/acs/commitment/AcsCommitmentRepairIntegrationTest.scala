@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
   IntervalDuration,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -41,7 +42,6 @@ import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
 
@@ -51,7 +51,6 @@ trait AcsCommitmentRepairIntegrationTest
     with SortedReconciliationIntervalsHelpers
     with CommitmentTestUtil {
 
-  private val iouContract = new AtomicReference[Iou.Contract]
   private val interval: JDuration = JDuration.ofSeconds(5)
   private implicit val intervalDuration: IntervalDuration = IntervalDuration(interval)
 
@@ -121,7 +120,6 @@ trait AcsCommitmentRepairIntegrationTest
       (1 to nContracts.value).map(_ =>
         deployOnTwoParticipantsAndCheckContract(
           synchronizerId,
-          iouContract,
           participant1,
           participant2,
         )
@@ -190,11 +188,9 @@ trait AcsCommitmentRepairIntegrationTest
       val ts = simClock.now
       // da might not have progressed time as acme when using BFTOrderer (since with BFT Time, the time of a block is
       // decided by the previous block). So we make sure the sequencers have observed this time.
-      sequencers.local.foreach(
-        _.underlying.value.sequencer.timeTracker.awaitTick(ts).foreach(_.futureValue)
-      )
-      // make sure participant1 have observed the latest time before we reinitialize
-      participant1.testing.fetch_synchronizer_times()
+      sequencers.local.foreach { s =>
+        TestUtils.waitForTargetTimeOnSequencer(s, ts, logger)
+      }
 
       val reinitCmtsResult =
         participant1.commitments.reinitialize_commitments(

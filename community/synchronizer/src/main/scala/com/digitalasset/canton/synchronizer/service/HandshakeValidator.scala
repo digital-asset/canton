@@ -21,10 +21,9 @@ object HandshakeValidator {
     // Client may mention a protocol version which is not known to the synchronizer
     val clientVersions = clientVersionsP.map(ProtocolVersion.parseUnchecked)
     val minClientVersion = minClientVersionP.map(ProtocolVersion.parseUnchecked)
-    for {
-      _ <- ProtocolVersionCompatibility
-        .canClientConnectToServer(clientVersions, serverVersion, minClientVersion)
-        .leftMap(_.asStatus)
-    } yield ()
+
+    ProtocolVersionCompatibility
+      .canClientConnectToServer(clientVersions, serverVersion, minClientVersion)
+      .leftMap(_.asStatus)
   }
 }

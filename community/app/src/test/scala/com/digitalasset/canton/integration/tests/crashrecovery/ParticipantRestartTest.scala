@@ -374,6 +374,8 @@ abstract class ParticipantRestartTest
   ): (ParticipantNodePersistentState, SyncPersistentStateManager) = {
     import env.*
     val cryptoConfig = CryptoConfig()
+    val connectionConfigStore = mock[SynchronizerConnectionConfigStore]
+
     val crypto =
       timeouts.default.await("Build test crypto")(
         Crypto
@@ -400,6 +402,32 @@ abstract class ParticipantRestartTest
     val indexedStringStore = new DbIndexedStringStore(storage, timeouts, loggerFactory)
     // need to fetch synchronizers once, assuming that everything is connected when the state inspection object is created
     val mapping = participant.synchronizers.list_connected()
+
+    when(connectionConfigStore.get(any[PhysicalSynchronizerId]))
+      .thenAnswer((psid: PhysicalSynchronizerId) =>
+        mapping
+          .find(_.physicalSynchronizerId == psid)
+          .map { m =>
+            StoredSynchronizerConnectionConfig(
+              SynchronizerConnectionConfig(
+                synchronizerAlias = m.synchronizerAlias,
+                sequencerConnections = SequencerConnections.single(
+                  GrpcSequencerConnection(
+                    NonEmpty(Set, Endpoint("not-relevant", Port.tryCreate(1))),
+                    transportSecurity = false,
+                    customTrustCertificates = None,
+                    sequencerAlias = SequencerAlias.tryCreate("not used"),
+                    sequencerId = None,
+                  )
+                ),
+              ),
+              status = SynchronizerConnectionConfigStore.Active,
+              configuredPsid = KnownPhysicalSynchronizerId(psid),
+              predecessor = None,
+            )
+          }
+          .toRight(SynchronizerConnectionConfigStore.UnknownPsid(psid))
+      )
     val aliasResolution = new SynchronizerAliasResolution() {
       override def synchronizerIdForAlias(alias: SynchronizerAlias): Option[SynchronizerId] =
         mapping.find(_.synchronizerAlias == alias).map(_.physicalSynchronizerId)
@@ -452,7 +480,7 @@ abstract class ParticipantRestartTest
             pnps.acsCounterParticipantConfigStore,
             parameters,
             TopologyConfig(),
-            mock[SynchronizerConnectionConfigStore],
+            connectionConfigStore,
             (staticSynchronizerParameters: StaticSynchronizerParameters) =>
               SynchronizerCrypto(crypto, staticSynchronizerParameters),
             env.environment.clock,

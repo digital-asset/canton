@@ -30,7 +30,7 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.topology.{GeneratorsTopology, Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -162,11 +162,7 @@ final class GeneratorsProtocol(
         batch = Batch(envelopes.map(_.toClosedUncompressedEnvelopeUnsafe), protocolVersion)
         maxSequencingTime <- Arbitrary.arbitrary[CantonTimestamp]
         aggregationRule <- Gen.option(Arbitrary.arbitrary[AggregationRule])
-        submissionCost <- GeneratorsVersion.defaultValueGen(
-          protocolVersion,
-          SubmissionRequest.submissionCostDefaultValue,
-          Gen.option(Arbitrary.arbitrary[SequencingSubmissionCost]),
-        )
+        submissionCost <- Gen.option(Arbitrary.arbitrary[SequencingSubmissionCost])
         topologyTimestamp <-
           if (aggregationRule.nonEmpty)
             Arbitrary.arbitrary[CantonTimestamp].map(Some(_))

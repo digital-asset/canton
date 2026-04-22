@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology
 
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest.testedProtocolVersion
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SigningKeySpec.EcSecp256k1
@@ -77,7 +78,13 @@ class CantonOrderingTopologyProviderTest
           when(topologySnapshotMock.sequencerGroup())
             .thenReturn(
               FutureUnlessShutdown.pure(
-                Some(SequencerGroup(someSequencerIds, Seq.empty, PositiveInt.one))
+                Some(
+                  SequencerGroup(
+                    NonEmptyUtil.fromUnsafe(someSequencerIds),
+                    Seq.empty,
+                    PositiveInt.one,
+                  )
+                )
               )
             )
           when(topologySnapshotMock.findDynamicSynchronizerParameters())
@@ -184,7 +191,9 @@ class CantonOrderingTopologyProviderTest
       when(topologySnapshotMock.sequencerGroup())
         .thenReturn(
           FutureUnlessShutdown.pure(
-            Some(SequencerGroup(someSequencerIds, Seq.empty, PositiveInt.one))
+            Some(
+              SequencerGroup(NonEmptyUtil.fromUnsafe(someSequencerIds), Seq.empty, PositiveInt.one)
+            )
           )
         )
       effectiveTimeForSequencers.foreach { case (sequencer, effectiveTime) =>

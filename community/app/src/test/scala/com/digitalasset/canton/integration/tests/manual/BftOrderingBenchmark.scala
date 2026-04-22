@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.manual
 
+import com.digitalasset.canton.config.ReplicationConfig
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   Port,
@@ -229,6 +230,15 @@ class BftOrderingBenchmark
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.sequencer-db-latency-millis"))
       .map(_.toLong)
 
+  /** Whether DB replication (`DbMultiStorage`) is enabled. Disabled if [[Some(false)]] (default).
+    * Disabling it explicitly yields significantly faster DABFT DB insertions and, as a result,
+    * lower ordering latency.
+    */
+  private val dbReplicationEnabled: Option[Boolean] =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.db-replication-enabled"))
+      .map(_.toBoolean)
+      .orElse(Some(false))
+
   registerPlugin(
     new UsePostgres(
       loggerFactory,
@@ -281,6 +291,15 @@ class BftOrderingBenchmark
             )
         }
       })
+      .addConfigTransforms(
+        ConfigTransforms.updateAllSequencerConfigs { case (_, config) =>
+          dbReplicationEnabled.fold(config) { replicationEnabled =>
+            config
+              .focus(_.replication)
+              .replace(Some(ReplicationConfig(enabled = Some(replicationEnabled))))
+          }
+        }
+      )
       .addConfigTransforms(
         _.focus(_.monitoring.tracing.tracer).replace(
           TracingConfig.Tracer(

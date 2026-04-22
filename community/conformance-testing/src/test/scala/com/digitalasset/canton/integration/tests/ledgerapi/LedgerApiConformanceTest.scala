@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
-import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -171,6 +170,11 @@ object LedgerApiConformanceBase {
     "ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed",
     "ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed",
     "CommandDeduplicationPeriodValidationIT:OffsetPruned",
+    "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndDescending",
+    "UpdateServiceStreamsIT:TXPagedDynamicPruningInJustAfterThePageDescending",
+    "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndInPageBoundaryDescending",
+    "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
+    "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
     // Exclude ContractIdIT tests except: RejectNonSuffixedV1Cid, AcceptSuffixedV1Cid
     "ContractIdIT:AcceptNonSuffixedV1Cid",
     "ContractIdIT:AcceptSuffixedV1CidExerciseTarget", // Racy with: ABORTED: CONTRACT_NOT_FOUND(14,0): Contract could not be found with id
@@ -208,17 +212,11 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   }
 }
 
-@RollbackTest
 class LedgerApiShard0ConformanceTestPostgres extends LedgerApiShardedConformanceBase(0)
-@RollbackTest
 class LedgerApiShard1ConformanceTestPostgres extends LedgerApiShardedConformanceBase(1)
-@RollbackTest
 class LedgerApiShard2ConformanceTestPostgres extends LedgerApiShardedConformanceBase(2)
-@RollbackTest
 class LedgerApiShard3ConformanceTestPostgres extends LedgerApiShardedConformanceBase(3)
-@RollbackTest
 class LedgerApiShard4ConformanceTestPostgres extends LedgerApiShardedConformanceBase(4)
-@RollbackTest
 class LedgerApiShard5ConformanceTestPostgres extends LedgerApiShardedConformanceBase(5)
 
 // Conformance test that need a suppressing rule on canton side
@@ -277,7 +275,6 @@ trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConforman
   }
 }
 
-@NuckTest
 class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSuppressedLogs {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -323,7 +320,6 @@ trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase
   }
 }
 
-@RollbackTest
 class LedgerApiKeysConformanceTest_Postgres extends LedgerApiKeysConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
   // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with
@@ -373,8 +369,6 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
 
 // not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
 
-@NuckTest
-@RollbackTest
 class LedgerApiExperimentalConformanceTest_Postgres extends LedgerApiExperimentalConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
   // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with
@@ -405,6 +399,11 @@ trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiC
         "CommandDeduplicationPeriodValidationIT:OffsetPruned",
         "ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed",
         "ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed",
+        "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndDescending",
+        "UpdateServiceStreamsIT:TXPagedDynamicPruningInJustAfterThePageDescending",
+        "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndInPageBoundaryDescending",
+        "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
+        "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
       )
 
       ledgerApiTestToolPlugin.runSuitesSerially(
@@ -476,7 +475,7 @@ class LedgerApiSingleTest extends SingleVersionLedgerApiConformanceBase {
   "Ledger Api Test Tool" can {
     "run a single test" in { implicit env =>
       ledgerApiTestToolPlugin.runSuites(
-        suites = "UserManagementServiceIT:TestExternalAllocationTimeGrantUserRights",
+        suites = "CommandDeduplicationIT:DeduplicateUsingDurations",
         exclude = Nil,
         concurrency = 1,
       )

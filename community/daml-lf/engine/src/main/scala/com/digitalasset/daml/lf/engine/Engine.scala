@@ -889,7 +889,7 @@ class Engine(
         config.iterationsBetweenInterruptions,
       )
       r <- interpret(machine, () => { machine.abort(); None })
-      version = machine.tmplId2TxVersion(interfaceId)
+      version = machine.assignSerializationVersion(hasKey = false)
     } yield Versioned(version, r.toNormalizedValue)
   }
 

@@ -375,6 +375,7 @@ class InitialTopologySnapshotValidatorTestInMemory extends InitialTopologySnapsh
   ): TopologyStore[TopologyStoreId.SynchronizerStore] =
     new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(synchronizerId),
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory.appendUnnamedKey("testName", testName),
       timeouts,

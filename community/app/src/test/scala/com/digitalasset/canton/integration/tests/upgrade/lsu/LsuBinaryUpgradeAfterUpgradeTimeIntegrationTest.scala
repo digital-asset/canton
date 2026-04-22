@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
@@ -13,10 +14,12 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.getParticipantHandshakesMetricValues
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
-import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, config}
+import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, UniquePortGenerator, config}
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration
@@ -78,6 +81,19 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
         ConfigTransforms.updateParticipantConfig("participant2")(
           _.focus(_.parameters.alphaVersionSupport).replace(false)
         )
+      )
+      .addConfigTransforms(
+        _.focus(_.monitoring.metrics)
+          .replace(
+            MetricsConfig(
+              qualifiers = Seq[MetricQualification](MetricQualification.Debug),
+              reporters = Seq(
+                MetricsReporterConfig.Prometheus(
+                  port = UniquePortGenerator.next
+                )
+              ),
+            )
+          )
       )
       .withSetup { implicit env =>
         import env.*
@@ -171,6 +187,11 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
                 .numberOfDirtyRequests() shouldBe 1
             }
 
+            val initialHandshakesCount = getParticipantHandshakesMetricValues(sequencer2)
+            initialHandshakesCount((participant1.id, "success")) should be > 0L
+            // initial handshakes from p2 fail
+            initialHandshakesCount((participant2.id, "failure")) should be > 0L
+
             participant2.stop()
             participant3.db.migrate() // dev migration
             participant3.start()
@@ -180,20 +201,19 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
               participant3.synchronizers.is_connected(fixture.newPsid) shouldBe true
             }
 
+            val finalHandshakesCount = getParticipantHandshakesMetricValues(sequencer2)
+            finalHandshakesCount((participant1.id, "success")) should be > 0L
+            finalHandshakesCount((participant3.id, "failure")) should be > 0L
+            finalHandshakesCount((participant3.id, "success")) should be > 0L
           },
-          // Logged twice: once during handshake and once during connect attempt
           (
             LogEntryOptionality.Required,
-            _.warningMessage should include(failedHandshakeError),
-          ),
-          (
-            LogEntryOptionality.Required,
-            _.warningMessage should include(failedHandshakeError),
-          ),
-          (
-            LogEntryOptionality.Required,
-            _.errorMessage should (include(s"Unable to perform handshake with ${fixture.newPsid}")
+            _.warningMessage should (include(s"Unable to perform handshake with ${fixture.newPsid}")
               and include(failedHandshakeError)),
+          ),
+          (
+            LogEntryOptionality.OptionalMany,
+            _.warningMessage should include(failedHandshakeError),
           ),
           (
             LogEntryOptionality.Required,

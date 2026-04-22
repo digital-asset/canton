@@ -182,7 +182,7 @@ sealed trait SynchronizerConnectivityIntegrationTest
         )
         // wait for all ping contracts to be archived
         eventually() {
-          participant1.ledger_api.state.acs.of_all() shouldBe empty
+          participant1.ledger_api.state.acs.count() shouldEqual 0
         }
         participant1.synchronizers.disconnect_local(daName)
         mediator1.stop()

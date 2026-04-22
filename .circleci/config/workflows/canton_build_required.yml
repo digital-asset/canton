@@ -16,6 +16,9 @@ jobs:
       filters:
         tags:
           only: /^v.*/
+        branches:
+          ignore:
+            - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
   - package_community:
       context:
         - datadog
@@ -51,6 +54,10 @@ jobs:
         - azure-self-cache
         - maven-mirror
         - da-images
+      filters:
+        branches:
+          ignore:
+            - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
   - protobuf_continuity:
       context:
         - datadog
@@ -168,26 +175,6 @@ jobs:
           only: /^v.*/
       requires:
         - test_protocol_version_34
-  # TODO(#30913): Remove this job once the NUCK feature development is completed
-  - temp_nuck_tests_pv_dev:
-      name: temp_nuck_tests_pv_dev
-      context:
-        - datadog
-        - artifactory
-        - azure-self-cache
-        - maven-mirror
-        - da-images
-        - aws_kms_testing
-        - gcp_kms_testing
-      requires:
-        - compile
-      filters:
-        branches:
-          # The NUCK tests are run as part of PV dev tests, so fine to ignore them on non-dev branches to save credits
-          ignore:
-            - main
-            - /^release-line.*/
-            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
   - unstable_test:
       context:
         - datadog

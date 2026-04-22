@@ -28,7 +28,7 @@ object TestPkg {
 class TestPkg(withKey: Boolean, languageVersion: LanguageVersion) {
   import TestPkg.{packageId, tuple2TyCon}
 
-  val serializationVersion: SerializationVersion = SerializationVersion.assign(languageVersion)
+  val serializationVersion: SerializationVersion = SerializationVersion.assign(hasKey = true)
 
   implicit val parserParameters: ParserParameters[this.type] =
     ParserParameters(packageId, languageVersion = languageVersion)

@@ -14,8 +14,8 @@ import com.digitalasset.canton.util.ReleaseUtils
   * respect to the Ledger API. The tests are executed for the latest published release.
   */
 trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
-  lazy val testedReleases: List[ReleaseUtils.TestedRelease] =
-    ProtocolContinuityConformanceTest.latestSupportedRelease(logger)
+  override lazy val testedReleases: List[ReleaseUtils.TestedRelease] =
+    ProtocolContinuityConformanceTest.latestSupportedRelease(logger).toList
 
   protected val numShards: Int = 1
   protected def shard: Int

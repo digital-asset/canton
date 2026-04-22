@@ -42,7 +42,8 @@ object SValueHash {
       templateName: Ref.QualifiedName,
       key: SValue,
   ): Hash = {
-    builder(Purpose.ContractKey, noCid2String, HashTracer.NoOp)
+    builder(Purpose.NextGenContractKey, noCid2String, HashTracer.NoOp)
+      .addByte(1.toByte, "version") // version
       .addString(packageName)
       .addQualifiedName(templateName)
       .addSValue(key)

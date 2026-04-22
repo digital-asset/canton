@@ -20,6 +20,7 @@ class InMemoryDownloadTopologyStateForInitializationServiceTest
     val storeId = SynchronizerStore(synchronizerId)
     new InMemoryTopologyStore[TopologyStoreId.SynchronizerStore](
       storeId,
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory.appendUnnamedKey("testName", testName),
       timeouts,

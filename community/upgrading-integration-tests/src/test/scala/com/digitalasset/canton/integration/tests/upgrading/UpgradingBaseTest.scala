@@ -8,12 +8,9 @@ import com.daml.ledger.javaapi
 import com.digitalasset.canton.BaseTest.getResourcePath
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.transaction.VettedPackage
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, LfPackageName}
 import monocle.Monocle.toAppliedFocusOps
-import org.scalactic.source
 import org.scalatest.verbs.ShouldVerb
-import org.scalatest.wordspec.FixtureAnyWordSpec
 
 object UpgradingBaseTest extends ShouldVerb {
   lazy val UpgradeV1: String = getResourcePath("Upgrade-1.0.0.dar")
@@ -67,27 +64,6 @@ object UpgradingBaseTest extends ShouldVerb {
   lazy val UtilV2: String = getResourcePath("util-2.0.0.dar")
   lazy val QuxV1: String = getResourcePath("qux-1.0.0.dar")
   lazy val QuxV2: String = getResourcePath("qux-2.0.0.dar")
-
-  /** The DARs above are used to test interface fetches that, at time of writing, is a 2.dev
-    * feature. For this reason only tests running a dev version of canton can use them.
-    *
-    * Once TransactionVersion.minFetchInterfaceId is a final LF version this can be removed
-    */
-  def testedPV(testedProtocolVersion: ProtocolVersion): Boolean =
-    testedProtocolVersion >= ProtocolVersion.dev
-
-  trait WhenPV {
-    self: FixtureAnyWordSpec =>
-    protected val testedProtocolVersion: ProtocolVersion
-    implicit class Wrapper(name: String) {
-      def whenUpgradeTestPV(f: => Unit)(implicit pos: source.Position): Unit =
-        if (testedPV(testedProtocolVersion)) {
-          name when f
-        } else {
-          ()
-        }
-    }
-  }
 
   implicit class CommandsWithExplicitPackageId(commandJava: javaapi.data.Command) {
     def withPackageId(packageId: String): javaapi.data.Command = {

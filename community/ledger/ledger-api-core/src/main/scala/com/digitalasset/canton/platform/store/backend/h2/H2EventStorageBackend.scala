@@ -8,6 +8,8 @@ import com.digitalasset.canton.platform.store.backend.common.EventStorageBackend
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 
+import java.sql.Connection
+
 class H2EventStorageBackend(
     ledgerEndCache: LedgerEndCache,
     stringInterning: StringInterning,
@@ -17,4 +19,8 @@ class H2EventStorageBackend(
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
       loggerFactory = loggerFactory,
-    )
+    ) {
+
+  // no need for locking in H2 as we access H2 DB on a single connection
+  override def lockExclusivelyPruningProcessingTable(connection: Connection): Unit = ()
+}

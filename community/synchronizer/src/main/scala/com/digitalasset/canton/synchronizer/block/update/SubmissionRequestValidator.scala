@@ -246,7 +246,7 @@ private[update] final class SubmissionRequestValidator(
                     SequencerErrors.SubmissionRequestRefused("No sequencer group found"),
                   )
                 )
-              )(group => Right((group.active ++ group.passive).toSet))
+              )(group => Right((group.active.forgetNE ++ group.passive).toSet[Member]))
             )
         )
       } yield Map((SequencersOfSynchronizer: GroupRecipient) -> sequencers).values.toSet.flatten

@@ -489,7 +489,7 @@ class MemberAuthenticationServiceImpl(
             ) // get the snapshot at the previous timestamp
             group <- snapshot.sequencerGroup() // get the modified group
             oldSequencerSet = group
-              .map(g => (g.active ++ g.passive).toSet)
+              .map(g => (g.active.forgetNE ++ g.passive).toSet)
               .getOrElse(Set.empty[SequencerId]) // get the set of all sequencers in the group
             leavers = oldSequencerSet.diff(newSequencerSet)
             _ = logger.info(
@@ -515,7 +515,7 @@ class MemberAuthenticationServiceImpl(
               _.index == modifiedMediatorIndex
             ) // filter for the modified group index
             oldMediatorSet = changedGroupInOld
-              .map(group => (group.active ++ group.passive).toSet)
+              .map(group => (group.active.forgetNE ++ group.passive).toSet)
               .getOrElse(Set.empty[MediatorId])
             leavers = oldMediatorSet.diff(newMediatorSet)
             _ = logger.info(

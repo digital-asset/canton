@@ -14,7 +14,7 @@ import org.scalatest.wordspec.AnyWordSpec
 /** Simple test that loads config files in the /config folder for each release and verifies they
   * parse in this Canton version
   */
-class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3Synchronization {
+final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3Synchronization {
 
   private lazy val allTransforms: Map[(Int, Int, Int), Transforms] = Map(
     (3, 5, 0) -> Transforms(

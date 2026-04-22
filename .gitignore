@@ -56,6 +56,9 @@ embed_reference.json
 # VS Code
 .vscode/settings.json
 
+# GitHub Copilot
+.github/copilot-instructions.md
+
 # tests
 dars
 

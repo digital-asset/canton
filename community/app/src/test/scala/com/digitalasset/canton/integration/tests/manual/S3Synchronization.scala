@@ -67,30 +67,46 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
       def getReleaseVersion(directory: String): ReleaseVersion =
         ReleaseVersion.tryCreate(directory.split("/").head)
 
-      val latestDumpReleaseVersion = listing
+      // Use maxOption instead of max to avoid UnsupportedOperationException on empty lists
+      val latestDumpReleaseVersionOpt = listing
         .map(getReleaseVersion)
         .filter(v => latestFromMajorMinor.forall(_ == v.majorMinor))
-        .max
+        .maxOption
 
-      listing
-        .map(directory =>
-          (
-            getReleaseVersion(directory),
-            mkContinuityDumpRef(directory),
-          )
-        )
-        // Data continuity started with 3.4
-        .filter { case (version, _) => version.majorMinor >= (3, 4) }
-        // Additional filtering
-        .filter { case (version, _) => !onlyLatestDump || version == latestDumpReleaseVersion }
-        /*
-        We want to keep:
-        - all stable releases
-        - at most one snapshot: the one that is higher than the latest release. It allows to detect breaking changes early.
-         */
-        .sortBy { case (version, _) => version }(implicitly[Ordering[ReleaseVersion]].reverse)
-        .zipWithIndex
-        .collect { case ((version, ref), idx) if version.isStable || idx == 0 => (ref, version) }
+      latestDumpReleaseVersionOpt match {
+        case None =>
+          // No dumps are found for the requested version line
+          latestFromMajorMinor.foreach { case (major, minor) =>
+            logger.info(
+              s"Skipping data continuity setup for version $major.$minor: No S3 dumps found. " +
+                s"This is expected behavior if $major.$minor is a newly created release branch."
+            )
+          }
+          Nil
+
+        case Some(latestDumpReleaseVersion) =>
+          listing
+            .map(directory =>
+              (
+                getReleaseVersion(directory),
+                mkContinuityDumpRef(directory),
+              )
+            )
+            // Data continuity started with 3.4
+            .filter { case (version, _) => version.majorMinor >= (3, 4) }
+            // Additional filtering
+            .filter { case (version, _) => !onlyLatestDump || version == latestDumpReleaseVersion }
+            /*
+            We want to keep:
+            - all stable releases
+            - at most one snapshot: the one that is higher than the latest release. It allows to detect breaking changes early.
+             */
+            .sortBy { case (version, _) => version }(implicitly[Ordering[ReleaseVersion]].reverse)
+            .zipWithIndex
+            .collect {
+              case ((version, ref), idx) if version.isStable || idx == 0 => (ref, version)
+            }
+      }
     }
 
     /** Returns the list of dumps, one for each release version (discarding protocol versions).

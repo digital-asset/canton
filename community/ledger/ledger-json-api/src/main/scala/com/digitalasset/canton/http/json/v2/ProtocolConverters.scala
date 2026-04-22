@@ -13,6 +13,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PreparedTransaction,
 }
 import com.daml.ledger.api.v2.reassignment.AssignedEvent
+import com.daml.ledger.api.v2.update_service.GetUpdatesPageResponse
 import com.digitalasset.canton.http.json.v2.IdentifierConverter.illegalValue
 import com.digitalasset.canton.http.json.v2.JsContractEntry.JsContractEntry
 import com.digitalasset.canton.http.json.v2.JsSchema.JsReassignmentEvent.JsReassignmentEvent
@@ -1097,6 +1098,38 @@ class ProtocolConverters(
             lapi.update_service.GetUpdatesResponse.Update.TopologyTransaction(value)
           )
       }).map(lapi.update_service.GetUpdatesResponse(_))
+  }
+
+  object GetUpdatesPageResponse
+      extends ProtocolConverter[
+        lapi.update_service.GetUpdatesPageResponse,
+        JsGetUpdatesPageResponse,
+      ] {
+    override def fromJson(
+        jsObj: JsGetUpdatesPageResponse
+    )(implicit traceContext: TraceContext): Future[GetUpdatesPageResponse] = jsObj.updates
+      .parTraverse(GetUpdateResponse.fromJson)
+      .map(updates =>
+        lapi.update_service.GetUpdatesPageResponse(
+          updates = updates,
+          lowestPageOffsetExclusive = jsObj.lowestPageOffsetExclusive,
+          highestPageOffsetInclusive = jsObj.highestPageOffsetInclusive,
+          nextPageToken = jsObj.nextPageToken,
+        )
+      )
+
+    override def toJson(lapiObj: GetUpdatesPageResponse)(implicit
+        traceContext: TraceContext
+    ): Future[JsGetUpdatesPageResponse] = lapiObj.updates
+      .parTraverse(GetUpdateResponse.toJson)
+      .map(updates =>
+        JsGetUpdatesPageResponse(
+          updates = updates,
+          lowestPageOffsetExclusive = lapiObj.lowestPageOffsetExclusive,
+          highestPageOffsetInclusive = lapiObj.highestPageOffsetInclusive,
+          nextPageToken = lapiObj.nextPageToken,
+        )
+      )
   }
 
   object GetUpdateResponse

@@ -300,7 +300,10 @@ def grepForPattern(pattern: String): Seq[String] = {
 object ErrorCollector extends ProcessLogger {
   private val allErrors = ListBuffer[String]()
   def errors() = allErrors.mkString("\n\n")
-  def anyError(): Boolean = allErrors.nonEmpty
+  def anyError(): Boolean = allErrors.filterNot(isNoise).nonEmpty
+
+  private def isNoise(s: String): Boolean =
+    s.contains("performing daemon worker op") || s.trim.isEmpty
 
   // Do not use ProcessLogger.apply(_) to work around:
   // https://github.com/lihaoyi/Ammonite/issues/1120

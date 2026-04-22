@@ -215,6 +215,8 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
       signatories = Set(signatory.toLf),
       observers = Set(observer.toLf),
       packageName = packageName,
+      // Use V1 serialization, since the template definition does not have a key
+      version = TestNodeBuilder.CreateSerializationVersion.Version(SerializationVersion.V1),
     )
 
     val contractSalt = ContractSalt.createV1(pureCrypto)(

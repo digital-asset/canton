@@ -192,10 +192,8 @@ lazy val testLibraries = Seq(
 
 lazy val ledgerTestToolLibaries = Seq(
   `ledger-common-dars-lf-v2-dev`,
-  `ledger-test-tool-suites-2-dev`,
   `ledger-test-tool-2-dev`,
   `ledger-common-dars-lf-v2-3`,
-  `ledger-test-tool-suites-2-3`,
   `ledger-test-tool-2-3`,
 )
 
@@ -467,9 +465,6 @@ lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
 lazy val `ledger-api-string-interning-benchmark` =
   CommunityProjects.`ledger-api-string-interning-benchmark`
 lazy val `ledger-api-bench-tool` = CommunityProjects.`ledger-api-bench-tool`
-lazy val `ledger-test-tool-suites-2-1` = CommunityProjects.`ledger-test-tool-suites-2-1`
-lazy val `ledger-test-tool-suites-2-3` = CommunityProjects.`ledger-test-tool-suites-2-3`
-lazy val `ledger-test-tool-suites-2-dev` = CommunityProjects.`ledger-test-tool-suites-2-dev`
 lazy val `ledger-test-tool-2-1` = CommunityProjects.`ledger-test-tool-2-1`
 lazy val `ledger-test-tool-2-3` = CommunityProjects.`ledger-test-tool-2-3`
 lazy val `ledger-test-tool-2-dev` = CommunityProjects.`ledger-test-tool-2-dev`

@@ -26,8 +26,8 @@ services:
       # Enable reload HTTP endpoint
       - --web.enable-lifecycle
       # Avoid local disk exhaustion
-      - --storage.tsdb.retention.size=10GB
-      - --storage.tsdb.retention.time=1d
+      - --storage.tsdb.retention.size=50GB
+      - --storage.tsdb.retention.time=14d
       - --enable-feature=native-histograms
     volumes:
       # Prometheus configuration

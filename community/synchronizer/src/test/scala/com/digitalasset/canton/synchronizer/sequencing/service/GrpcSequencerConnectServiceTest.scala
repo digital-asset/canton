@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
+import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
@@ -61,6 +62,7 @@ class GrpcSequencerConnectServiceTest
         LsuSequencingBounds.create(upgradeTime = ts, lowerBoundSequencingTimeExclusive = ts).value
       ),
       sanitizePublicErrorMessages = false,
+      SequencerTestMetrics,
       loggerFactory,
     )(parallelExecutionContext)
 

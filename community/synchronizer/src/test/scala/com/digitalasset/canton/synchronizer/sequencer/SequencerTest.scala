@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.parallel.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -85,7 +86,7 @@ class SequencerTest
     val clock = new WallClock(timeouts, loggerFactory = loggerFactory)
     private val testingTopology = TestingTopology(
       sequencerGroup = SequencerGroup(
-        active = Seq(SequencerId(synchronizerId.uid)),
+        active = NonEmpty(Seq, SequencerId(synchronizerId.uid)),
         passive = Seq.empty,
         threshold = PositiveInt.one,
       ),

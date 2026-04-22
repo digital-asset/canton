@@ -61,6 +61,7 @@ final case class Cli(
     manualStart: Boolean = false,
     exitAfterBootstrap: Boolean = false,
     devProtocol: Boolean = false,
+    nuck: Boolean = false,
     multiSync: Boolean = false,
     dars: Seq[String] = Seq.empty,
 ) {
@@ -387,60 +388,14 @@ object Cli {
       note("") // Newline
       cmd("sandbox")
         .text("Run Canton sandbox")
-        .action((_, cli) => cli.copy(command = Some(Sandbox)))
-        .children(
-          opt[Unit]("exit-after-bootstrap")
-            .hidden()
-            .action((_, cli) => cli.copy(exitAfterBootstrap = true)),
-          opt[Unit]("dev")
-            .text("Run sandbox with dev version of the protocol")
-            .action((_, cli) => cli.copy(devProtocol = true)),
-          opt[Unit]("multi-sync")
-            .text("Run sandbox in a multi-synchronizer constellation")
-            .action((_, cli) => cli.copy(multiSync = true)),
-          opt[Int]("ledger-api-port")
-            .text("Port for the sandbox Ledger API")
-            .action((port, cli) =>
-              cli ++ ("canton.participants.sandbox.ledger-api.port" -> port.toString)
-            ),
-          opt[Int]("admin-api-port")
-            .text("Port for the sandbox Admin API")
-            .action((port, cli) =>
-              cli ++ ("canton.participants.sandbox.admin-api.port" -> port.toString)
-            ),
-          opt[Int]("json-api-port")
-            .text("Port for the sandbox Json API")
-            .action((port, cli) =>
-              cli ++ ("canton.participants.sandbox.http-ledger-api.port" -> port.toString)
-            ),
-          opt[Int]("sequencer-public-port")
-            .text("Port for the sequencer Public API")
-            .action((port, cli) =>
-              cli ++ ("canton.sequencers.sequencer1.public-api.port" -> port.toString)
-            ),
-          opt[Int]("sequencer-admin-port")
-            .text("Port for the sequencer Admin API")
-            .action((port, cli) =>
-              cli ++ ("canton.sequencers.sequencer1.admin-api.port" -> port.toString)
-            ),
-          opt[Int]("mediator-admin-port")
-            .text("Port for the mediator Admin API")
-            .action((port, cli) =>
-              cli ++ ("canton.mediators.mediator1.admin-api.port" -> port.toString)
-            ),
-          opt[String]("canton-port-file")
-            .text("File that will contain the canton sandbox ports when ready")
-            .action((portFile, cli) => cli ++ ("canton.parameters.ports-file" -> portFile)),
-          opt[Unit]("static-time")
-            .text("Time on the sandbox should advance only when requested through the time service")
-            .action((_, cli) =>
-              cli ++ ("canton.parameters.clock.type" -> "sim-clock") ++ ("canton.participants.sandbox.testing-time.type" -> "monotonic-time")
-            ),
-          opt[Seq[File]]("dar")
-            .text("DAR file to upload to sandbox")
-            .unbounded()
-            .action((dars, cli) => cli.copy(dars = cli.dars ++ dars.map(_.getPath))),
-        )
+        .action((_, cli) => cli.copy(command = Some(Sandbox(Mode.Deamon))))
+        .children(sandboxOptions*)
+
+      note("") // Newline
+      cmd("sandbox-interactive")
+        .text("Run Canton sandbox interactively")
+        .action((_, cli) => cli.copy(command = Some(Sandbox(Mode.Interactive))))
+        .children(sandboxOptions*)
 
       note("") // Newline
       cmd("sandbox-console")
@@ -497,7 +452,9 @@ object Cli {
 
       checkConfig(cli =>
         if (
-          cli.configFiles.isEmpty && cli.configMap.isEmpty && !cli.command.contains(Command.Sandbox)
+          cli.configFiles.isEmpty && cli.configMap.isEmpty && cli.command.collect {
+            case Sandbox(_) => true
+          }.isEmpty
         ) {
           failure(
             "at least one config has to be defined either as files (-c), as key-values (-C) or as sandbox's default config"
@@ -505,9 +462,21 @@ object Cli {
         } else success
       )
       checkConfig(cli =>
-        if (cli.bootstrapScriptPath.nonEmpty && cli.command.contains(Command.Sandbox)) {
+        if (
+          cli.bootstrapScriptPath.nonEmpty && cli.command.collect { case Sandbox(_) =>
+            true
+          }.isDefined
+        ) {
           failure(
             "bootstrap script cannot be defined together with the 'sandbox' command"
+          )
+        } else success
+      )
+      checkConfig(cli =>
+        if (cli.devProtocol && cli.nuck) {
+          failure(
+            // Remove the restriction when NUCK no longer needs alpha features to run.
+            "NUCK and dev protocol options cannot be used together"
           )
         } else success
       )
@@ -519,6 +488,63 @@ object Cli {
       }
 
       override def showUsageOnError: Option[Boolean] = Some(true)
+
+      def sandboxOptions = Seq(
+        opt[Unit]("exit-after-bootstrap")
+          .hidden()
+          .action((_, cli) => cli.copy(exitAfterBootstrap = true)),
+        opt[Unit]("dev")
+          .text("Run sandbox with dev version of the protocol")
+          .action((_, cli) => cli.copy(devProtocol = true)),
+        opt[Unit]("nuck")
+          .text("Run sandbox with NUCK support")
+          .action((_, cli) => cli.copy(nuck = true)),
+        opt[Unit]("multi-sync")
+          .text("Run sandbox in a multi-synchronizer constellation")
+          .action((_, cli) => cli.copy(multiSync = true)),
+        opt[Int]("ledger-api-port")
+          .text("Port for the sandbox Ledger API")
+          .action((port, cli) =>
+            cli ++ ("canton.participants.sandbox.ledger-api.port" -> port.toString)
+          ),
+        opt[Int]("admin-api-port")
+          .text("Port for the sandbox Admin API")
+          .action((port, cli) =>
+            cli ++ ("canton.participants.sandbox.admin-api.port" -> port.toString)
+          ),
+        opt[Int]("json-api-port")
+          .text("Port for the sandbox Json API")
+          .action((port, cli) =>
+            cli ++ ("canton.participants.sandbox.http-ledger-api.port" -> port.toString)
+          ),
+        opt[Int]("sequencer-public-port")
+          .text("Port for the sequencer Public API")
+          .action((port, cli) =>
+            cli ++ ("canton.sequencers.sequencer1.public-api.port" -> port.toString)
+          ),
+        opt[Int]("sequencer-admin-port")
+          .text("Port for the sequencer Admin API")
+          .action((port, cli) =>
+            cli ++ ("canton.sequencers.sequencer1.admin-api.port" -> port.toString)
+          ),
+        opt[Int]("mediator-admin-port")
+          .text("Port for the mediator Admin API")
+          .action((port, cli) =>
+            cli ++ ("canton.mediators.mediator1.admin-api.port" -> port.toString)
+          ),
+        opt[String]("canton-port-file")
+          .text("File that will contain the canton sandbox ports when ready")
+          .action((portFile, cli) => cli ++ ("canton.parameters.ports-file" -> portFile)),
+        opt[Unit]("static-time")
+          .text("Time on the sandbox should advance only when requested through the time service")
+          .action((_, cli) =>
+            cli ++ ("canton.parameters.clock.type" -> "sim-clock") ++ ("canton.participants.sandbox.testing-time.type" -> "monotonic-time")
+          ),
+        opt[Seq[File]]("dar")
+          .text("DAR file to upload to sandbox")
+          .unbounded()
+          .action((dars, cli) => cli.copy(dars = cli.dars ++ dars.map(_.getPath))),
+      )
 
     }
 

@@ -46,6 +46,7 @@ import io.grpc.protobuf.StatusProto
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiParticipantPruningService private (
@@ -58,6 +59,8 @@ final class ApiParticipantPruningService private (
     extends ParticipantPruningServiceGrpc.ParticipantPruningService
     with GrpcApiService
     with NamedLogging {
+
+  private val inProgress: AtomicBoolean = new AtomicBoolean(false)
 
   override def bindService(): ServerServiceDefinition =
     ParticipantPruningServiceGrpc.bindService(this, executionContext)
@@ -86,51 +89,53 @@ final class ApiParticipantPruningService private (
         ),
       submissionId =>
         withEnrichedLoggingContext(logging.submissionId(submissionId)) { implicit loggingContext =>
-          logger.info(
-            s"Pruning up to ${request.pruneUpTo}, ${loggingContext.serializeFiltered("submissionId")}."
-          )
-          (for {
-            pruneUpTo <- validateRequest(request)
+          ensurePruningIsNotInProgress { () =>
+            logger.info(
+              s"Pruning up to ${request.pruneUpTo}, ${loggingContext.serializeFiltered("submissionId")}."
+            )
+            (for {
+              pruneUpTo <- validateRequest(request)
 
-            // If write service pruning succeeds but ledger api server index pruning fails, the user can bring the
-            // systems back in sync by reissuing the prune request at the currently specified or later offset.
-            _ = logger.debug("Pruning write service")
-            _ <- Tracked.future(
-              metrics.services.pruning.pruneCommandStarted,
-              metrics.services.pruning.pruneCommandCompleted,
-              pruneSyncService(pruneUpTo, submissionId),
-            )(MetricsContext(("phase", "underlyingLedger")))
+              // If write service pruning succeeds but ledger api server index pruning fails, the user can bring the
+              // systems back in sync by reissuing the prune request at the currently specified or later offset.
+              _ = logger.debug("Pruning write service")
+              _ <- Tracked.future(
+                metrics.services.pruning.pruneCommandStarted,
+                metrics.services.pruning.pruneCommandCompleted,
+                pruneSyncService(pruneUpTo, submissionId),
+              )(MetricsContext(("phase", "underlyingLedger")))
 
-            _ = logger.debug("Getting incomplete reassignments")
-            getIncompleteReassignmentOffsets = (offset: Offset) =>
-              syncService
-                .incompleteReassignmentOffsets(
-                  validAt = offset,
-                  stakeholders = Set.empty, // getting all incomplete reassignments
-                )
-                .failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
-            previousPrunedOffset <- readBackend.indexDbPrunedUpto
-            incompleteReassignmentOffsets <-
-              getIncompleteReassignmentOffsets(pruneUpTo)
-            previousIncompleteReassignmentOffsets <-
-              previousPrunedOffset
-                .map(getIncompleteReassignmentOffsets)
-                .getOrElse(Future.successful(Vector.empty))
+              _ = logger.debug("Getting incomplete reassignments")
+              getIncompleteReassignmentOffsets = (offset: Offset) =>
+                syncService
+                  .incompleteReassignmentOffsets(
+                    validAt = offset,
+                    stakeholders = Set.empty, // getting all incomplete reassignments
+                  )
+                  .failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
+              previousPrunedOffset <- readBackend.indexDbPrunedUpto
+              incompleteReassignmentOffsets <-
+                getIncompleteReassignmentOffsets(pruneUpTo)
+              previousIncompleteReassignmentOffsets <-
+                previousPrunedOffset
+                  .map(getIncompleteReassignmentOffsets)
+                  .getOrElse(Future.successful(Vector.empty))
 
-            _ = logger.debug("Pruning Ledger API Server")
-            pruneResponse <- Tracked.future(
-              metrics.services.pruning.pruneCommandStarted,
-              metrics.services.pruning.pruneCommandCompleted,
-              pruneLedgerApiServerIndex(
-                previousPrunedOffset,
-                previousIncompleteReassignmentOffsets,
-                pruneUpTo,
-                incompleteReassignmentOffsets,
-              ),
-            )(MetricsContext(("phase", "ledgerApiServerIndex")))
+              _ = logger.debug("Pruning Ledger API Server")
+              pruneResponse <- Tracked.future(
+                metrics.services.pruning.pruneCommandStarted,
+                metrics.services.pruning.pruneCommandCompleted,
+                pruneLedgerApiServerIndex(
+                  previousPrunedOffset,
+                  previousIncompleteReassignmentOffsets,
+                  pruneUpTo,
+                  incompleteReassignmentOffsets,
+                ),
+              )(MetricsContext(("phase", "ledgerApiServerIndex")))
 
-          } yield pruneResponse)
-            .thereafter(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
+            } yield pruneResponse)
+              .thereafter(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
+          }
         }(loggingContextWithTrace),
     )
   }
@@ -226,6 +231,19 @@ final class ApiParticipantPruningService private (
       loggingContext.traceContext,
       submissionId,
     )
+
+  private def ensurePruningIsNotInProgress[T](f: () => Future[T])(implicit
+      errorLogger: ErrorLoggingContext
+  ): Future[T] =
+    if (!inProgress.getAndSet(true)) {
+      val result = f()
+      result.onComplete(_ => inProgress.set(false))
+      result
+    } else {
+      Future.failed(
+        RequestValidationErrors.ParticipantPruningInProgress.Reject().asGrpcError
+      )
+    }
 }
 
 object ApiParticipantPruningService {

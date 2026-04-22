@@ -699,6 +699,7 @@ abstract class CantonNodeBootstrapImpl[
             TopologyStoreId.AuthorizedStore,
             storage,
             indexedStringStore,
+            predecessor = None,
             ProtocolVersion.latest,
             bootstrapStageCallback.timeouts,
             parameters.batchingConfig,
@@ -755,6 +756,7 @@ abstract class CantonNodeBootstrapImpl[
       val temporaryTopologyStore =
         new InMemoryTopologyStore(
           TemporaryStore.tryCreate(identifier),
+          predecessor = None,
           ProtocolVersion.latest,
           this.loggerFactory,
           this.timeouts,

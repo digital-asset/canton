@@ -90,7 +90,6 @@ checkout_release_branch() {
 stage_version_updates() {
   run "Stage version.sbt update" "$_GIT" add "$REPO_ROOT/version.sbt"
   run "Stage VERSION update" "$_GIT" add "$REPO_ROOT/VERSION"
-  run "Stage community/ledger-api/VERSION" "$_GIT" add "$REPO_ROOT/community/ledger-api/VERSION"
 
   # stage our daml.yaml changes
   run "Staging daml project updates" "$_GIT" add "**/daml.yaml"
@@ -212,7 +211,6 @@ update_main_after_release_branch() {
   update_version_sbt_and_VERSION "$next_version"
   run "Stage version.sbt" "$_GIT" add "$REPO_ROOT/version.sbt"
   run "Stage VERSION" "$_GIT" add "$REPO_ROOT/VERSION"
-  run "Stage community/ledger-api/VERSION" "$_GIT" add "$REPO_ROOT/community/ledger-api/VERSION"
 
   # Add the new version to the list of ReleaseVersion
   info "Adding $next_version to the versions list"

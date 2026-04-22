@@ -115,6 +115,7 @@ object ApiServices {
       userManagementServiceConfig: UserManagementServiceConfig,
       partyManagementServiceConfig: PartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig,
+      updateServiceConfig: UpdateServiceConfig,
       stateServiceConfig: StateServiceConfig,
       contractAuthenticator: ContractAuthenticatorFn,
       loggerFactory: NamedLoggerFactory,
@@ -176,9 +177,11 @@ object ApiServices {
         )
         val apiUpdateService =
           new ApiUpdateService(
-            updateService,
-            metrics,
-            loggerFactory,
+            updateService = updateService,
+            metrics = metrics,
+            loggerFactory = loggerFactory,
+            participantId = participantId,
+            updateServiceConfig = updateServiceConfig,
           )
         val apiStateService =
           new ApiStateService(

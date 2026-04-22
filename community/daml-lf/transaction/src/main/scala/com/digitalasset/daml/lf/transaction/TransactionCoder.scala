@@ -155,7 +155,16 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       if (version >= SerializationVersion.minVersion) {
         val builder = TransactionOuterClass.KeyWithMaintainers.newBuilder()
         TreeSet.from(key.maintainers).foreach(builder.addMaintainers(_))
-        ValueCoder.encodeKey(version, key.globalKey).map(bs => builder.setKey(bs).build)
+        ValueCoder.encodeValue(version, key.globalKey.key).map { bs =>
+          builder.setKey(bs)
+          // In canton >=3.5, encodeKeyWithMaintainers should always be called with vSerializationVersion.V2,
+          // so the `else` branch here is dead production code. We however need it to preserve canton<3.5's behavior
+          // in tests which test the interaction between the encoding of fat contract instances in canton<3.5 and
+          // the decoding of fact contract instances in canton>=3.5.
+          if (version >= SerializationVersion.V2)
+            discard(builder.setHash(key.globalKey.hash.bytes.toByteString))
+          builder.build
+        }
       } else
         Left(EncodeError(s"Contract key are not supported by $version"))
 
@@ -356,7 +365,33 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     ): Either[DecodeError, GlobalKeyWithMaintainers] = {
       for {
         maintainers <- toPartySet(msg.getMaintainersList)
-        gkey <- ValueCoder.decodeKey(templateId, packageName, version, msg.getKey)
+        // Contracts written with SerializationVersion.V1 should never contain a key, because canton >=3.5 uses
+        // V2 for contracts with keys, and canton <3.5 doesn't support keys. However, the decoding of keys was
+        // present without a serialization version check in canton <3.5, and we preserve that behavior in order for
+        // all canton versions to fail consistently with an upgrade error when receiving a V1 fat contract instance
+        // with a key, rather than failing with a deserialization error in canton >=3.5 and an upgrade error in
+        // canton <3.5.
+        keyValue <- ValueCoder.decodeValue(version, msg.getKey)
+        hash <-
+          if (version >= SerializationVersion.V2)
+            crypto.Hash
+              .fromBytes(data.Bytes.fromByteString(msg.getHash))
+              .left.map(DecodeError(_))
+          else
+            Either.cond(
+              msg.getHash.isEmpty,
+              (),
+              DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
+            ).flatMap(_ =>
+              // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
+              // that behavior fot the reasons state above.
+              crypto.Hash
+                .hashContractKey(templateId, packageName, keyValue)
+                .left.map(hashErr => DecodeError(hashErr.msg))
+            )
+        gkey <- GlobalKey
+          .build(templateId, packageName, keyValue, hash)
+          .left.map(hashErr => DecodeError(hashErr.msg))
       } yield GlobalKeyWithMaintainers(gkey, maintainers)
     }
 

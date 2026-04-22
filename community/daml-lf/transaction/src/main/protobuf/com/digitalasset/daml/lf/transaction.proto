@@ -115,4 +115,5 @@ message FatContractInstance {
 message KeyWithMaintainers {
   bytes key = 1;
   repeated string maintainers = 2; // the maintainers induced by the key
+  bytes hash = 3; // the hash of the key *since serialization version 2*
 }

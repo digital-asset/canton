@@ -50,7 +50,7 @@ final case class TopologyConfig(
     broadcastRetryDelay: NonNegativeFiniteDuration = defaultBroadcastRetryDelay,
     validateInitialTopologySnapshot: Boolean = true,
     disableOptionalTopologyChecks: Boolean = false,
-    dispatchQueueBackpressureLimit: NonNegativeInt = defaultMaxUnsentTopologyQueueSize,
+    dispatchQueueBackpressureLimit: NonNegativeInt = defaultDispatchQueueBackpressureLimit,
     useTimeProofsToObserveEffectiveTime: Boolean = false,
     topologyStateCacheEvictionThreshold: PositiveInt =
       defaultTopologyStateWriteThroughCacheEvictionThreshold,
@@ -62,7 +62,7 @@ final case class TopologyConfig(
 
 object TopologyConfig {
 
-  private[TopologyConfig] val defaultMaxUnsentTopologyQueueSize: NonNegativeInt =
+  private[TopologyConfig] val defaultDispatchQueueBackpressureLimit: NonNegativeInt =
     NonNegativeInt.tryCreate(100)
 
   private[TopologyConfig] val defaultTopologyTransactionRegistrationTimeout =

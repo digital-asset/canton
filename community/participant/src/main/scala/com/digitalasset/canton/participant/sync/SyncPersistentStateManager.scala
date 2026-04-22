@@ -11,6 +11,7 @@ import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
+import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -76,7 +77,7 @@ trait SyncPersistentStateLookup {
     * [[com.digitalasset.canton.topology.PhysicalSynchronizerId]]) for `synchronizerAlias`
     */
   def getLatest(synchronizerAlias: SynchronizerAlias): Option[SyncPersistentState] =
-    synchronizerIdForAlias(synchronizerAlias).map(getAllLatest)
+    synchronizerIdForAlias(synchronizerAlias).flatMap(getAllLatest.get)
 
   def getAllFor(id: SynchronizerId): Seq[SyncPersistentState]
 
@@ -173,10 +174,14 @@ class SyncPersistentStateManager(
           )
         )
         staticSynchronizerParameters <- getStaticSynchronizerParameters(psid)
+        storedSynchronizerConnectionConfig <- EitherT
+          .fromEither[FutureUnlessShutdown](synchronizerConnectionConfigStore.get(psid))
+          .leftMap(_.toString)
         persistentState = createPhysicalPersistentState(
           psidIndexed,
           indexedTopologyStoreId,
           staticSynchronizerParameters,
+          storedSynchronizerConnectionConfig.predecessor,
         )
         _ = logger.debug(s"Discovered existing state for $psid")
       } yield {
@@ -235,6 +240,7 @@ class SyncPersistentStateManager(
   def lookupOrCreatePersistentState(
       psid: PhysicalSynchronizerId,
       synchronizerParameters: StaticSynchronizerParameters,
+      predecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SyncPersistentState] =
@@ -255,6 +261,7 @@ class SyncPersistentStateManager(
               physicalSynchronizerIdx,
               indexedTopologyStoreId,
               synchronizerParameters,
+              predecessor,
             ),
           )
         }
@@ -264,6 +271,7 @@ class SyncPersistentStateManager(
           physical.connectivityStatusStore,
           synchronizerParameters,
         )
+        _ <- checkPredecessor(psid, physical.topologyStore.predecessor, predecessor)
       } yield {
         // only put the logical store into the map if we really also have a physical store.
         logicalPersistentStates
@@ -291,11 +299,13 @@ class SyncPersistentStateManager(
       physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
+      predecessor: Option[SynchronizerPredecessor],
   )(implicit writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
     mkPhysicalPersistentState(
       physicalSynchronizerIdx,
       indexedTopologyStoreId,
       staticSynchronizerParameters,
+      predecessor,
     )
 
   private def checkAndUpdateSynchronizerParameters(
@@ -324,6 +334,22 @@ class SyncPersistentStateManager(
           )
       }
     } yield ()
+
+  private def checkPredecessor(
+      psid: PhysicalSynchronizerId,
+      existingPredecessor: Option[SynchronizerPredecessor],
+      newPredecessor: Option[SynchronizerPredecessor],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
+    // Only flag when the caller asserts a predecessor that conflicts with the one the topology
+    // store was initialized with. A `None` from the caller just means "don't know", not "no predecessor".
+    EitherT.cond[FutureUnlessShutdown](
+      newPredecessor.forall(existingPredecessor.contains),
+      (),
+      SynchronizerRegistryError.ConfigurationErrors.SynchronizerPredecessorMismatch
+        .Error(psid, existingPredecessor, newPredecessor): SynchronizerRegistryError,
+    )
 
   override def acsInspection(synchronizerId: SynchronizerId): Option[AcsInspection] =
     logicalPersistentStates.get(synchronizerId).map(_.acsInspection)
@@ -426,6 +452,7 @@ class SyncPersistentStateManager(
       physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
+      predecessor: Option[SynchronizerPredecessor],
   )(implicit @unused writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
     PhysicalSyncPersistentState
       .create(
@@ -435,6 +462,7 @@ class SyncPersistentStateManager(
         staticSynchronizerParameters,
         synchronizerCryptoFactory(staticSynchronizerParameters),
         parameters,
+        predecessor,
         psidLoggerFactory(physicalSynchronizerIdx.psid),
         futureSupervisor,
       )

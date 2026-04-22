@@ -27,7 +27,8 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.metrics.MetricValue
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.metrics.MetricValue.LongPoint
+import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
 
@@ -57,8 +58,7 @@ private[lsu] trait LsuBase
   protected val useStaticTime: Boolean = true
 
   protected def configTransforms: Seq[ConfigTransform] = List(
-    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
-    ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet)
   ) ++ ConfigTransforms.enableAlphaVersionSupport
     ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
@@ -103,9 +103,9 @@ private[lsu] trait LsuBase
       psid: PhysicalSynchronizerId,
       synchronizerOwners: Set[InstanceReference],
       hasTrafficControl: Boolean = true,
+      reconciliationInterval: config.PositiveDurationSeconds =
+        config.PositiveDurationSeconds.ofSeconds(1),
   ): Unit = {
-    val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
-
     synchronizerOwners.foreach(
       _.topology.synchronizer_parameters.propose_update(
         psid,
@@ -313,17 +313,51 @@ object LsuBase {
   import org.scalatest.EitherValues.*
 
   // Returns the number of received messages per sender
-  def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] = {
-    val metricName = "daml.received-lsu-sequencing-test-messages"
-    node.metrics
-      .list(metricName)
-      .get(metricName)
-      .value
-      .collect { case metric: MetricValue.LongPoint =>
+  def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] =
+    getMetricValues(node, "daml.received-lsu-sequencing-test-messages").value.collect {
+      case metric: MetricValue.LongPoint =>
         Member.fromProtoPrimitive_(metric.attributes.get("sender").value).value -> metric.value
-      }
-      .toMap
-  }
+    }.toMap
+
+  // Returns the number of handshakes. Key is (participant id, status) where status is "success" or "failure"
+  def getParticipantHandshakesMetricValues(
+      node: LocalInstanceReference
+  ): Map[(ParticipantId, String), Long] = {
+    getMetricValues(node, "daml.sequencer.public-api.handshakes").toList
+      .flatMap(_.collect { case l: LongPoint =>
+        val member = Member
+          .fromProtoPrimitive_(l.attributes.get("member").value)
+          .value
+
+        member match {
+          case p: ParticipantId =>
+            val status = l.attributes.get("status").value
+
+            Some((p, status) -> l.value)
+          case _ => None
+        }
+      })
+      .flatten
+  }.toMap
+
+  // Return the status of the LSU, per successor psid
+  def getLsuStatusMetricValues(
+      node: LocalInstanceReference
+  ): Map[PhysicalSynchronizerId, NonNegativeInt] = {
+    getMetricValues(node, "daml.participant.lsu_status").toList.flatMap(_.collect {
+      case l: LongPoint =>
+        PhysicalSynchronizerId.tryFromString(
+          l.attributes.get("successor_psid").value
+        ) -> NonNegativeInt.tryCreate(l.value.toInt)
+    })
+  }.toMap
+
+  private def getMetricValues(
+      node: LocalInstanceReference,
+      metricName: String,
+  ): Option[Seq[MetricValue]] = node.metrics
+    .list(metricName)
+    .get(metricName)
 
   final case class Fixture(
       currentPsid: PhysicalSynchronizerId,

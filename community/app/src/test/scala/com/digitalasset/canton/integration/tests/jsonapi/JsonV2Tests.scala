@@ -1239,7 +1239,9 @@ class JsonV2Tests
               status should be(StatusCodes.OK)
               inside(decode[state_service.GetLedgerEndResponse](result)) { case Right(resp) =>
                 resp.offset should be > 0L
-                resp.offset shouldBe endOffset
+                // The ledger offset may increment between the client call and the HTTP request
+                // due to background ledger activity, so we check for >= to prevent flaky tests.
+                resp.offset should be >= endOffset
               }
             }
         } yield ()

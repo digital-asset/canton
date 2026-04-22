@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.digitalasset.canton.BaseTest.CantonLfV21
-import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference, ParticipantReference}
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -348,7 +347,6 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
-@RollbackTest
 class OnlinePartyReplicationCascadingRepetitionsTestPostgres
     extends OnlinePartyReplicationCascadingRepetitionsTest {
   registerPlugin(new UsePostgres(loggerFactory))

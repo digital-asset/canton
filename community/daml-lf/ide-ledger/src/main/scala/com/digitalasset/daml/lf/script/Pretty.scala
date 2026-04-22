@@ -42,19 +42,6 @@ private[lf] object Pretty {
             comma + space,
             observers.map(prettyParty),
           ) + char('.')
-      case Error.ContractKeyNotVisible(coid, gk, actAs, readAs, stakeholders) =>
-        text("Script failed due to the failure to fetch the contract") & prettyContractId(coid) &
-          char('(') + (prettyIdentifier(gk.templateId)) + text(") associated with key ") +
-          prettyValue(false)(gk.key) &
-          text("The contract had not been disclosed to the reading parties:") &
-          text("actAs:") & intercalate(comma + space, actAs.map(prettyParty))
-            .tightBracketBy(char('{'), char('}')) &
-          text("readAs:") & intercalate(comma + space, readAs.map(prettyParty))
-            .tightBracketBy(char('{'), char('}')) +
-          char('.') / text("Stakeholders:") & intercalate(
-            comma + space,
-            stakeholders.map(prettyParty),
-          ) + char('.')
 
       case Error.MustFailSucceeded(tx @ _) =>
         // TODO(JM): Further info needed. Location annotations?

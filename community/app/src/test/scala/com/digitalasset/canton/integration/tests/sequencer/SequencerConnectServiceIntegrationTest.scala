@@ -25,6 +25,7 @@ import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
@@ -66,13 +67,13 @@ trait SequencerConnectServiceIntegrationTest
 
   lazy val alias: SynchronizerAlias = SynchronizerAlias.tryCreate("sequencer1")
 
-  protected def getSequencerConnectClient()(implicit
+  protected def getSequencerConnectClient(member: Member)(implicit
       env: TestConsoleEnvironment
   ): SequencerConnectClient
 
   "SequencerConnectService" should {
     "respond to handshakes" in { implicit env =>
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(env.participant1.id)
 
       val unsupportedPV = TestProtocolVersions.UnsupportedPV
 
@@ -127,7 +128,7 @@ trait SequencerConnectServiceIntegrationTest
     "respond to GetSynchronizerParameters requests" in { implicit env =>
       import env.*
 
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
 
       val fetchedSynchronizerParameters =
         grpcSequencerConnectClient.getSynchronizerParameters().futureValueUS.value
@@ -157,7 +158,7 @@ trait SequencerConnectServiceIntegrationTest
     "respond to SynchronizerClientBootstrapInfo requests" in { implicit env =>
       import env.*
 
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
 
       val bi = grpcSequencerConnectClient
         .getSynchronizerClientBootstrapInfo()
@@ -169,10 +170,10 @@ trait SequencerConnectServiceIntegrationTest
     "respond to isActive requests" in { implicit env =>
       import env.*
 
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
 
       grpcSequencerConnectClient
-        .isActive(participant1.id, waitForActive = false)
+        .isActive(waitForActive = false)
         .futureValueUS
         .value shouldBe false
 
@@ -182,7 +183,7 @@ trait SequencerConnectServiceIntegrationTest
         utils.retry_until_true(Seq(participant1).forall(_.synchronizers.active(alias)))
 
         grpcSequencerConnectClient
-          .isActive(participant1.id, waitForActive = false)
+          .isActive(waitForActive = false)
           .futureValueUS
           .value shouldBe true
       }
@@ -192,8 +193,12 @@ trait SequencerConnectServiceIntegrationTest
 
 trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectServiceIntegrationTest {
 
-  private def getSequencerConnectClientInternal(endpoint: Endpoint, timeouts: ProcessingTimeout)(
-      implicit env: TestConsoleEnvironment
+  private def getSequencerConnectClientInternal(
+      member: Member,
+      endpoint: Endpoint,
+      timeouts: ProcessingTimeout,
+  )(implicit
+      env: TestConsoleEnvironment
   ): GrpcSequencerConnectClient = {
     val grpcSequencerConnection =
       GrpcSequencerConnection(
@@ -205,6 +210,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       )
 
     new GrpcSequencerConnectClient(
+      member = member,
       sequencerConnection = grpcSequencerConnection,
       synchronizerAlias = alias,
       timeouts = timeouts,
@@ -214,12 +220,12 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
     )(env.executionContext)
   }
 
-  protected def getSequencerConnectClient()(implicit
+  protected def getSequencerConnectClient(member: Member)(implicit
       env: TestConsoleEnvironment
   ): GrpcSequencerConnectClient = {
     val publicApi = sequencerNodeConfig.publicApi
     val endpoint = Endpoint(publicApi.address, publicApi.port)
-    getSequencerConnectClientInternal(endpoint, timeouts)
+    getSequencerConnectClientInternal(member, endpoint, timeouts)
   }
 
   protected def localSequencer(implicit
@@ -240,13 +246,14 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
         val badSequencerNodeEndpoint =
           Endpoint(publicApi.address, RequireTypes.Port.tryCreate(0))
         val grpcSequencerConnectClient = getSequencerConnectClientInternal(
+          participant1.id,
           badSequencerNodeEndpoint,
           // Lower the timeout to avoid lengthy retries of 60 seconds by default
           timeouts.copy(verifyActive = config.NonNegativeDuration.ofMillis(500)),
         )
 
         val errorFromLeft = grpcSequencerConnectClient
-          .isActive(participant1.id, waitForActive = false)
+          .isActive(waitForActive = false)
           .leftMap(_.message)
           .futureValueUS
         errorFromLeft.left.value should include regex "Request failed for .*. Is the server running?"
@@ -256,7 +263,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       import env.*
       import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
 
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
       val syncId = sequencer1.synchronizer_id
 
       // Lock the synchronizer
@@ -296,7 +303,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
     "reject onboarding for mediators" in { implicit env =>
       import env.*
 
-      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
 
       //  Attempt registration
       val identityTxs = mediator1.topology.transactions.identity_transactions()
@@ -323,7 +330,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 
       val syncId = sequencer1.synchronizer_id
-      val client = getSequencerConnectClient()
+      val client = getSequencerConnectClient(participant1.id)
       val p1Id = participant1.id
 
       val existingStc = participant1.topology.transactions
@@ -367,7 +374,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
 
       val syncId = sequencer1.synchronizer_id
-      val client = getSequencerConnectClient()
+      val client = getSequencerConnectClient(participant2.id)
 
       // Set to RestrictedOpen
       sequencer1.topology.synchronizer_parameters.propose_update(
@@ -424,7 +431,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
 
       eventually() {
         val isActiveResult = client
-          .isActive(participant2.id, waitForActive = false) // calls the gRPC endpoint
+          .isActive(waitForActive = false) // calls the gRPC endpoint
           .value
           .futureValueUS
         isActiveResult shouldBe Right(true)

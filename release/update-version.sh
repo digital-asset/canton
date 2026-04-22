@@ -13,6 +13,10 @@ update_VERSION_file() {
   rm "$ABSDIR/../${VERSION_file}.old"
 }
 
+update_version() {
+  update_version_sbt_and_VERSION "$@"
+}
+
 update_version_sbt_and_VERSION() {
   local -r version=$1
 
@@ -21,7 +25,6 @@ update_version_sbt_and_VERSION() {
   run "Update version.sbt" sed -i.old -E "s/\"[0-9].+\"/\"$version\"/" "$ABSDIR/../version.sbt"
   rm "$ABSDIR/../version.sbt.old"
   update_VERSION_file "${version}" "VERSION"
-  update_VERSION_file "${version}" "community/ledger-api/VERSION"
 }
 
 update_version_command() {
@@ -29,7 +32,7 @@ update_version_command() {
 
   if [[ -n "$new_version" ]]; then
     info "Updating canton to version [$new_version]"
-    update_version_sbt_and_VERSION "$new_version"
+    update_version "$new_version"
     info "Version successfully updated"
     echo "HINT: Run 'reload' in any active sbt sessions to pick up the new version"
     echo "Now smoke testing that the release works by running a Ping (this takes ~1-2min)"

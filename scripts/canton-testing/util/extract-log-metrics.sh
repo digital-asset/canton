@@ -33,7 +33,8 @@ ${DATADOG_METRIC_PREFIX}.log.synchronizers.size=$((synchronizers_log_size))
 EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Number of warnings / errors: $participants_num_warnings_or_errors (participants), $synchronizers_num_warnings_or_errors (synchronizers)
-Log file size (uncompressed): $(print-bytes "$participants_log_size") (participants), $(print-bytes "$synchronizers_log_size") (synchronizers)
+*Logs*
+• Warnings/errors: *$participants_num_warnings_or_errors* (participants), *$synchronizers_num_warnings_or_errors* (synchronizers)
+• Size (uncompressed): $(print-bytes "$participants_log_size") (participants), $(print-bytes "$synchronizers_log_size") (synchronizers)
 
 EOI

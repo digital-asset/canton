@@ -19,12 +19,16 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{DelayUtil, MonadUtil}
 import io.circe.{Encoder, Json, KeyEncoder, jawn}
 import io.opentelemetry.exporter.internal.otlp.metrics.ResourceMetricsMarshaler
 import io.opentelemetry.sdk.metrics.data.MetricData
 
 import java.io.ByteArrayOutputStream
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.jdk.CollectionConverters.SeqHasAsJava
 import scala.util.control.NonFatal
@@ -144,7 +148,7 @@ class CantonHealthAdministration(protected val consoleEnv: ConsoleEnvironment)
     def getLocalDump(nodes: NonEmptyList[InstanceReference]): Future[String] =
       Future {
         nodes.head.health.dump(
-          File.newTemporaryFile(s"local-").name,
+          File.newTemporaryFile(s"local-").canonicalPath,
           timeout,
           chunkSize,
         )
@@ -156,7 +160,12 @@ class CantonHealthAdministration(protected val consoleEnv: ConsoleEnvironment)
               e,
             )
             getLocalDump(tail)
-          case None => Future.failed(e)
+          case None =>
+            logger.debug(
+              s"Could not get health dumps from any of local nodes: $nodes",
+              e,
+            )
+            Future.failed(e)
         }
       }
 
@@ -166,15 +175,55 @@ class CantonHealthAdministration(protected val consoleEnv: ConsoleEnvironment)
       .traverse(getLocalDump)
       .map(_.toList)
 
-    consoleEnv.run {
-      val zippedHealthDump = List(remoteDumps, localDump).flatSequence.map { allDumps =>
-        File(outputFile).zipIn(allDumps.map(File(_)).iterator).pathAsString
+    val isTimedOut = new AtomicBoolean(false)
+
+    def awaitFileMaterialization(path: String, retries: Int = 20): Future[File] = {
+      val file = File(path)
+      if (file.exists) {
+        Future.successful(file)
+      } else if (retries <= 0) {
+        Future.failed(
+          new java.nio.file.NoSuchFileException(s"File $path has not been materialized in time.")
+        )
+      } else {
+        DelayUtil.delay(100.millis).flatMap(_ => awaitFileMaterialization(path, retries - 1))
       }
+    }
+
+    consoleEnv.run {
+      val dumpFutures = List(remoteDumps, localDump).flatSequence
+
+      val zippedHealthDump = (for {
+        allDumps <- dumpFutures
+        readyFiles <- MonadUtil.sequentialTraverse(allDumps)(awaitFileMaterialization(_))
+      } yield {
+        val timeOutAwareIterator = readyFiles.iterator.map { file =>
+          if (isTimedOut.get()) {
+            // Need to throw to cancel on ongoing zipIn
+            throw new TimeoutException(
+              s"Aborted zipping: Timeout occurred mid-zip for ${file.pathAsString}"
+            )
+          }
+          file
+        }
+        File(outputFile).zipIn(timeOutAwareIterator).pathAsString
+      }).thereafter { _ =>
+        dumpFutures.value.foreach {
+          case Success(paths) =>
+            paths.foreach(path => File(path).delete(swallowIOExceptions = true))
+          case Failure(_) => // Nothing to clean up
+        }
+      }
+
       Try(Await.result(zippedHealthDump, timeout.duration)) match {
         case Success(result) => CommandSuccessful(result)
         case Failure(e: TimeoutException) =>
+          // Captures the Await.result TimeoutException
+          isTimedOut.set(true)
           CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
-        case Failure(exception) => CommandErrors.CommandInternalError.ErrorWithException(exception)
+        case Failure(exception) =>
+          // Captures NoSuchFileException
+          CommandErrors.CommandInternalError.ErrorWithException(exception)
       }
     }
   }

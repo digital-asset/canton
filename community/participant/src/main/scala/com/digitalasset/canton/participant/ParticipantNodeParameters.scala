@@ -30,7 +30,7 @@ final case class ParticipantNodeParameters(
     enableStrictDarValidation: Boolean,
     commandProgressTracking: CommandProgressTrackerConfig,
     alphaOnlinePartyReplicationSupport: Option[AlphaOnlinePartyReplicationConfig],
-    automaticallyPerformLsu: Boolean,
+    lsuConfig: LsuConfig,
     reassignmentsConfig: ReassignmentsConfig,
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
     disableOptionalTopologyChecks: Boolean,
@@ -72,7 +72,8 @@ object ParticipantNodeParameters {
       exitOnFatalFailures = true,
       watchdog = None,
       startupMemoryCheckConfig = StartupMemoryCheckConfig(ReportingLevel.Warn),
-      dispatchQueueBackpressureLimit = NonNegativeInt.tryCreate(10),
+      topologyConfig =
+        TopologyConfig(dispatchQueueBackpressureLimit = NonNegativeInt.tryCreate(10)),
       sanitizePublicErrorMessages = false,
     ),
     activationFrequencyForWarnAboutConsistencyChecks = 1000L,
@@ -94,7 +95,7 @@ object ParticipantNodeParameters {
     enableStrictDarValidation = true,
     commandProgressTracking = CommandProgressTrackerConfig(),
     alphaOnlinePartyReplicationSupport = None,
-    automaticallyPerformLsu = true,
+    lsuConfig = LsuConfig(),
     reassignmentsConfig = ReassignmentsConfig(
       targetTimestampForwardTolerance = NonNegativeFiniteDuration.ofSeconds(30)
     ),

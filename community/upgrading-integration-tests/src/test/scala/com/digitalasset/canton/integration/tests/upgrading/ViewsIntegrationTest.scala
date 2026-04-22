@@ -15,10 +15,7 @@ import com.digitalasset.canton.topology.PartyId
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
-class ViewsIntegrationTest
-    extends CommunityIntegrationTest
-    with SharedEnvironment
-    with UpgradingBaseTest.WhenPV {
+final class ViewsIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
   private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
     env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
@@ -26,7 +23,7 @@ class ViewsIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
 
-  "Inter view upgrading" whenUpgradeTestPV {
+  "Inter view upgrading" should {
 
     "setup the stage" in { implicit env =>
       import env.*
@@ -50,7 +47,7 @@ class ViewsIntegrationTest
       )
     }
 
-    "not require the package used in the creating view" ignore { implicit env =>
+    "not require the package used in the creating view" in { implicit env =>
       val alice = party("alice")
       val bob = party("bob")
 

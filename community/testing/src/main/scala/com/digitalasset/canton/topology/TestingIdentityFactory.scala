@@ -296,14 +296,14 @@ object TestingTopology {
     DefaultTestIdentities.physicalSynchronizerId
   )
   private val defaultSequencerGroup: SequencerGroup = SequencerGroup(
-    active = Seq(DefaultTestIdentities.sequencerId),
+    active = NonEmpty(Seq, DefaultTestIdentities.sequencerId),
     passive = Seq.empty,
     threshold = PositiveInt.one,
   )
   private val defaultMediatorGroups: Set[MediatorGroup] = Set(
     MediatorGroup(
       NonNegativeInt.zero,
-      Seq(DefaultTestIdentities.mediatorId),
+      NonEmpty(Seq, DefaultTestIdentities.mediatorId),
       Seq(),
       PositiveInt.one,
     )
@@ -541,6 +541,7 @@ class TestingIdentityFactory(
 
     val store = new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(synchronizerId.toPhysical),
+      predecessor = None,
       BaseTest.testedProtocolVersion,
       loggerFactory,
       DefaultProcessingTimeouts.testing,
@@ -563,7 +564,7 @@ class TestingIdentityFactory(
       participantsTxs(defaultPermissionByParticipant, topology.packages, topology.featureFlags)
 
     val synchronizerMembers =
-      (topology.sequencerGroup.active ++ topology.sequencerGroup.passive ++ topology.mediators)
+      (topology.sequencerGroup.active.forgetNE ++ topology.sequencerGroup.passive ++ topology.mediators)
         .flatMap(m => genKeyCollection(m))
 
     val mediatorOnboarding = topology.mediatorGroups.map(group =>

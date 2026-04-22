@@ -15,6 +15,7 @@ object LfSerializationVersionToProtocolVersions {
       : SortedMap[LfSerializationVersion, ProtocolVersion] =
     SortedMap(
       LfSerializationVersion.V1 -> ProtocolVersion.v34,
+      LfSerializationVersion.V2 -> ProtocolVersion.v35,
       LfSerializationVersion.VDev -> ProtocolVersion.dev,
     )
 

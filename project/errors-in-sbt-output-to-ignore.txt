@@ -31,6 +31,7 @@ com\.google\.errorprone:error_prone_annotations:
 
 # Directory and file names
 project/base/errors
+canton/base/errors
 protobuf/lib/google/rpc/error_details\.proto
 
 # Name of the sbt command

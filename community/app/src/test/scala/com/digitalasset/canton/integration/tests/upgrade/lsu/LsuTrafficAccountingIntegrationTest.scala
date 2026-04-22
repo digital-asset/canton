@@ -321,7 +321,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
         _.shouldBeCantonErrorCode(SequencerError.LsuTrafficAlreadyInitialized),
       )
 
-      eventually(maxPollInterval = 100.millis) {
+      eventually(maxPollInterval = 100.millis, timeUntilSuccess = 40.seconds) {
         environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
       }

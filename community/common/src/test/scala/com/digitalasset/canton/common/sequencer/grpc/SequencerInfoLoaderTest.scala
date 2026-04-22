@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.{
   SubmissionRequestAmplification,
 }
 import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
   PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
@@ -356,6 +357,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
     val actorSystem = ActorSystem()
     implicit val materializer: Materializer = Materializer(actorSystem)
     val sequencerInfoLoader = new SequencerInfoLoader(
+      DefaultTestIdentities.sequencerId,
       ProcessingTimeout(),
       ClientChannelParams.ForTesting,
       clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(

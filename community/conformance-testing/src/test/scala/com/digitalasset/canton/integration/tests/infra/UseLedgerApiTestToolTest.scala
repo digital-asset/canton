@@ -5,14 +5,13 @@ package com.digitalasset.canton.integration.tests.infra
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.integration.plugins.LAPITTRelease
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
-  extractVersionString,
-  findAllReleases,
+  findAllCoreVersions,
   findMatchingVersions,
-  latestVersionFromArtifactory,
-  releasesFromArtifactory,
+  latestRelease,
+  latestReleases,
 }
-import com.digitalasset.canton.integration.plugins.{ArtifactoryToolVersion, ToolVersion}
 import com.digitalasset.canton.version.{ReleaseVersion, ReleaseVersionToProtocolVersions}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -20,7 +19,7 @@ import org.scalatest.matchers.should.Matchers
 import scala.util.matching.Regex
 
 final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with BaseTest {
-  private val versionStrings = Seq(
+  private val versions = Seq(
     "3.3.0-snapshot.20250416.15779.0.v6cccc0c4",
     "3.3.0-ad-hoc.20250905.16091.0.v704bf59d",
     "3.3.0-snapshot.20251007.16123.0.v670c8fae",
@@ -29,22 +28,20 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     "3.4.0-snapshot.20250429.15866.0.vc8f10812",
     "3.4.0-snapshot.20251003.17075.0.v69d92264",
     "dev",
-  )
+  ).map(LAPITTRelease(_))
 
-  private val versions: Seq[ToolVersion] = versionStrings.map(ArtifactoryToolVersion.apply)
-
-  "findAllReleases" should "find the major.minor.patch releases correctly" in {
-    findAllReleases(versions) shouldBe Seq("3.3.0", "3.3.1", "3.3.10", "3.4.0")
+  "findAllCoreVersions" should "find the major.minor.patch releases correctly" in {
+    findAllCoreVersions(versions) shouldBe Seq("3.3.0", "3.3.1", "3.3.10", "3.4.0")
   }
 
   "findMatchingVersions" should "find and sort (by date) all the versions matching the given release" in {
-    findMatchingVersions(versions, "3.3.0").map(_.id()) shouldBe Seq(
+    findMatchingVersions(versions, "3.3.0").map(_.version) shouldBe Seq(
       "3.3.0-snapshot.20250416.15779.0.v6cccc0c4",
       "3.3.0-ad-hoc.20250905.16091.0.v704bf59d",
       "3.3.0-snapshot.20251007.16123.0.v670c8fae",
     )
 
-    findMatchingVersions(versions, "3.4.0").map(_.id()) shouldBe Seq(
+    findMatchingVersions(versions, "3.4.0").map(_.version) shouldBe Seq(
       "3.4.0-snapshot.20250429.15866.0.vc8f10812",
       "3.4.0-snapshot.20251003.17075.0.v69d92264",
     )
@@ -77,23 +74,21 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
       case None => allReleases.last
     }
 
-  "latestVersionFromArtifactory" should "be able to fetch the latest version from artifactory" in {
-    val latestToolVersion = latestVersionFromArtifactory(logger)
+  "latestRelease" should "be able to fetch the latest version from S3" in {
+    val latestTool = latestRelease(logger)
 
-    latestToolVersion should not be empty
-    extractVersion(latestToolVersion).major shouldBe 3
-    extractVersion(latestToolVersion).majorMinor shouldBe >=(
-      previous(extractVersion(BuildInfo.version))
-    )
+    inside(latestTool.baseVersion.map(ReleaseVersion.tryCreate)) { case Some(baseVersion) =>
+      baseVersion.major shouldBe 3
+      baseVersion.majorMinor shouldBe >=(previous(extractVersion(BuildInfo.version)))
+    }
   }
 
-  "releasesFromArtifactory" should "be able to fetch the lapitt for each release from artifactory" in {
-    val releasedToolVersions = releasesFromArtifactory(logger)
+  "latestReleases" should "be able to fetch the lapitt for each release from S3" in {
+    val releasedTools = latestReleases(logger)
 
-    releasedToolVersions should not be empty
+    releasedTools should not be empty
 
-    val extractedVersions =
-      releasedToolVersions.collect(extractVersionString).map(ReleaseVersion.tryCreate)
+    val extractedVersions = releasedTools.flatMap(_.baseVersion).map(ReleaseVersion.tryCreate)
     val currentMajorMinor =
       ReleaseVersion(ReleaseVersion.current.major, ReleaseVersion.current.minor, 0)
 

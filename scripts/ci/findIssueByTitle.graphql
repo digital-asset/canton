@@ -5,7 +5,7 @@ search(query: $searchstr, type: ISSUE, first: 10) {
             number
             title
             body
-            projectItems(first:1, includeArchived:true) {
+            projectItems(first:10, includeArchived:true) {
                 nodes {
                     id
                     isArchived

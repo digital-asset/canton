@@ -36,8 +36,9 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
       s"$cantonBin --help" ! processLogger
       checkOutput(
         processLogger,
-        shouldContain =
-          Seq("Usage: canton [daemon|run|generate|sandbox|sandbox-console] [options] <args>..."),
+        shouldContain = Seq(
+          "Usage: canton [daemon|run|generate|sandbox|sandbox-interactive|sandbox-console] [options] <args>..."
+        ),
       )
     }
 
@@ -45,8 +46,9 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
       s"$cantonBin" ! processLogger
       checkOutput(
         processLogger,
-        shouldContain =
-          Seq("Usage: canton [daemon|run|generate|sandbox|sandbox-console] [options] <args>..."),
+        shouldContain = Seq(
+          "Usage: canton [daemon|run|generate|sandbox|sandbox-interactive|sandbox-console] [options] <args>..."
+        ),
         shouldSucceed = false,
       )
     }
@@ -285,5 +287,34 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
       )
     }
 
+    "sandbox started in multi-sync mode is able to perform assignments" in { processLogger =>
+      Process("rm -f log/canton.log", Some(new java.io.File(cantonDir))) !
+      val scriptFile = new java.io.File(s"$resourceDir/scripts/multi-sync-smoke-test.canton")
+      val cmd =
+        s"bin/canton sandbox-interactive --multi-sync -C canton.features.enable-testing-commands=yes --no-tty"
+      Process(cmd, Some(new java.io.File(cantonDir))) #< scriptFile ! processLogger
+      val logLines = (File(cantonDir) / "log" / "canton.log").lines()
+      val expectedLine = "MULTI-SYNC: Smoke test success"
+      forAtLeast(1, logLines)(_ should endWith(expectedLine))
+      checkOutput(processLogger)
+    }
+
+    "sandbox started in nuck mode accepts packages containing keys" in { processLogger =>
+      Process("rm -f log/canton.log", Some(new java.io.File(cantonDir))) !
+      val scriptFile = new java.io.File(s"$resourceDir/scripts/nuck-smoke-test.canton")
+      val cmd = Seq(
+        "bin/canton",
+        "sandbox-interactive",
+        "--nuck",
+        "--no-tty",
+        s"-Dnuck-smoke-test.dar-path=$CantonTestsLF23Path",
+        "-Dnuck-smoke-test.package-name=CantonTestsLF23",
+      )
+      Process(cmd, Some(new java.io.File(cantonDir))) #< scriptFile ! processLogger
+      val logLines = (File(cantonDir) / "log" / "canton.log").lines()
+      val expectedLine = "NUCK: Smoke test success"
+      forAtLeast(1, logLines)(_ should endWith(expectedLine))
+      checkOutput(processLogger)
+    }
   }
 }

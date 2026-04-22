@@ -1,0 +1,60 @@
+import com.digitalasset.canton.protocol.LfContractId
+
+try {
+
+  logger.info("MULTI-SYNC: Starting smoke test")
+  val Seq(sync1, sync2) = sandbox
+    .ledger_api
+    .state
+    .connected_synchronizers()
+    .connectedSynchronizers
+    .map(_.synchronizerId)
+    .sorted
+    .map(SynchronizerId.tryFromString)
+  logger.info(s"MULTI-SYNC: Connected synchronizers: $sync1, $sync2")
+
+  sandbox.ledger_api.parties.allocate(party = "Alice", synchronizerId = sync1)
+  val alice = sandbox.ledger_api.parties.allocate(party = "Alice", synchronizerId = sync2).party
+
+  logger.info(s"MULTI-SYNC: Allocated party Alice with id $alice on both synchronizers")
+
+  val pings = sandbox.packages.find_by_module("Canton.Internal.Ping").head
+
+  logger.info(s"MULTI-SYNC: Found package with id ${pings.packageId} containing Canton.Internal.Ping template")
+
+  val createIouCmd = ledger_api_utils.create(
+    pings.packageId,
+    "Canton.Internal.Ping",
+    "Ping",
+    Map(
+      "id" -> "alice-pinging-herself",
+      "initiator" -> alice,
+      "responder" -> alice
+    )
+  )
+
+  val contractId = sandbox
+    .ledger_api
+    .commands
+    .submit(Seq(alice), Seq(createIouCmd), synchronizerId = Some(sync1))
+    .events
+    .headOption
+    .flatMap(_.event.created)
+    .map(_.contractId)
+    .map(LfContractId.assertFromString)
+
+  logger.info(s"MULTI-SYNC: Submitted Ping contract creation command on synchronizer $sync1 and got contract id $contractId")
+
+  val reassignment = sandbox
+    .ledger_api
+    .commands
+    .submit_reassign(alice, Seq(contractId.get), sync1, sync2)
+
+  logger.info(s"MULTI-SYNC: Submitted reassignment command to move contract $contractId from synchronizer $sync1 to synchronizer $sync2")
+
+  logger.info(s"MULTI-SYNC: Smoke test success")
+} catch {
+  case e: Throwable =>
+    logger.info("MULTI-SYNC: Smoke test failed", e)
+}
+exit

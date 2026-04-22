@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology.store.db
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedTopologyStoreId
@@ -50,6 +51,13 @@ trait DbTopologyStoreHelper {
   protected def mkStore(
       synchronizerId: PhysicalSynchronizerId,
       testName: String,
+  ): TopologyStore[TopologyStoreId.SynchronizerStore] =
+    mkStoreWithPredecessor(synchronizerId, testName, predecessor = None)
+
+  protected def mkStoreWithPredecessor(
+      synchronizerId: PhysicalSynchronizerId,
+      testName: String,
+      predecessor: Option[SynchronizerPredecessor],
   ): TopologyStore[TopologyStoreId.SynchronizerStore] = {
     val storeId = TopologyStoreId.SynchronizerStore(synchronizerId)
     // this one is in memory and will therefore complete immediately
@@ -59,6 +67,7 @@ trait DbTopologyStoreHelper {
       storage,
       storeId,
       storeIndex.onShutdown(throw new IllegalStateException("Shutdown")),
+      predecessor = predecessor,
       testedProtocolVersion,
       timeouts,
       batchingConfig,

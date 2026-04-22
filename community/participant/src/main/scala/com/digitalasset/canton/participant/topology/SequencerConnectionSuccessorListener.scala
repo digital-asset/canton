@@ -14,6 +14,8 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.config.LsuConfig
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.{SyncPersistentStateManager, SyncServiceError}
 import com.digitalasset.canton.participant.synchronizer.{
@@ -21,6 +23,7 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerRegistryHelpers,
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.store.PendingOperation
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -54,8 +57,9 @@ class SequencerConnectionSuccessorListener(
     topologyClient: SynchronizerTopologyClient,
     synchronizerHandshake: HandshakeWithSuccessor,
     syncPersistentStateManager: SyncPersistentStateManager,
-    automaticallyConnectToUpgradedSynchronizer: Boolean,
+    lsuConfig: LsuConfig,
     pendingLsuOperationsStore: PendingLsuOperation.Store,
+    metrics: ParticipantMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyTransactionProcessingSubscriber
@@ -116,6 +120,8 @@ class SequencerConnectionSuccessorListener(
       _ <- OptionT
         .when[FutureUnlessShutdown, Unit](configuredSequencersWithoutSuccessor.isEmpty)(())
 
+      _ = metrics.setLsuStatus(ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown, successorPsid)
+
       successorConnections <- OptionT.fromOption[FutureUnlessShutdown](
         NonEmpty.from(sequencerSuccessors.flatMap { case (successorSequencerId, successorConfig) =>
           configuredSequencers.get(successorSequencerId).map { sequencerAlias =>
@@ -161,7 +167,7 @@ class SequencerConnectionSuccessorListener(
         .map(_.config.sequencerConnections)
         .contains(updatedSuccessorConfig.sequencerConnections)
 
-      _ = if (automaticallyConnectToUpgradedSynchronizer && sequencerConnectionsChanged) {
+      _ = if (lsuConfig.automaticallyPerformLsu && sequencerConnectionsChanged) {
         logger.info(s"Performing handshake to validate connection to $successorPsid")
         performHandshakeAndInitiateTopology(successorPsid, predecessor)
       }
@@ -178,13 +184,12 @@ class SequencerConnectionSuccessorListener(
   ): Unit = {
 
     val rpv = PendingLsuOperation.protocolVersionRepresentativeFor(topologyClient.protocolVersion)
+    val pendingOperation = PendingLsuOperation(successorPsid)(rpv)
+      .toPendingOperation(currentPsid = topologyClient.psid)
 
     val resF: FutureUnlessShutdown[Unit] = for {
       _ <- pendingLsuOperationsStore
-        .insert(
-          PendingLsuOperation(successorPsid)(rpv)
-            .toPendingOperation(currentPsid = topologyClient.psid)
-        )
+        .insert(pendingOperation)
         /* Left can happen only on inconsistent successor for a given psid which cannot happen because:
         - successor psid cannot be changed
         - the entry is removed upon LSU cancellation
@@ -194,7 +199,7 @@ class SequencerConnectionSuccessorListener(
         .void
 
       _ <- synchronizerHandshake
-        .handshakeWithSuccessor(successorPsid)
+        .handshakeWithSuccessor(pendingOperation)
         .value
         .flatMap {
           case Left(error) =>
@@ -206,16 +211,24 @@ class SequencerConnectionSuccessorListener(
             else
               logger.error(s"Unable to perform handshake with $successorPsid: $error")
             FutureUnlessShutdown.unit
-          case Right(staticParams) =>
+
+          case Right(Some(staticParams)) =>
             logger.info(s"Handshake with $successorPsid was successful")
             copyTopologyFromPredecessor(successorPsid, staticParams, predecessor)
-              .map(_ =>
+              .flatMap(_ =>
                 pendingLsuOperationsStore.delete(
                   topologyClient.psid,
                   PendingLsuOperation.operationKey,
                   PendingLsuOperation.operationName,
                 )
               )
+
+          case Right(None) =>
+            logger.info(
+              s"Handshake with $successorPsid did not return any static synchronizer parameters. LSU was cancelled or a non-retryable error occurred during handshake."
+            )
+            FutureUnlessShutdown.unit
+
         }
     } yield ()
 
@@ -236,6 +249,7 @@ class SequencerConnectionSuccessorListener(
         .lookupOrCreatePersistentState(
           successorPsid,
           successorStaticParams,
+          Some(predecessor),
         )
 
       _ <- SynchronizerRegistryHelpers
@@ -243,6 +257,7 @@ class SequencerConnectionSuccessorListener(
           Some(predecessor),
           persistentState,
           syncPersistentStateManager,
+          metrics,
         )
     } yield logger.info(s"Successfully copied topology from predecessor to $successorPsid"))
       .valueOr { error =>
@@ -251,7 +266,9 @@ class SequencerConnectionSuccessorListener(
 }
 
 trait HandshakeWithSuccessor {
-  def handshakeWithSuccessor(successorPsid: PhysicalSynchronizerId)(implicit
+  def handshakeWithSuccessor(
+      pendingOperation: PendingOperation[PendingLsuOperation, PhysicalSynchronizerId]
+  )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, StaticSynchronizerParameters]
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]]
 }

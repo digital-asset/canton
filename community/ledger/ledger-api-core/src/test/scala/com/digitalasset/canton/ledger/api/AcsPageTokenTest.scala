@@ -59,7 +59,7 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
         originalToken,
       )
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
+      "INVALID_ACS_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsPageResponse and used with the same " +
         "EventFormat settings, with the same Canton participant running the same Canton version. The page " +
         "token was prepared by a different participant."
@@ -75,7 +75,7 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
     val decodedToken =
       AcsPageToken.decodeAndValidate(requestChecksum, participantIdChecksum, originalToken)
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
+      "INVALID_ACS_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsPageResponse and used with the same " +
         "EventFormat settings, with the same Canton participant running the same Canton version. The page " +
         "token was prepared with different event_format or active_at_offset."
@@ -91,7 +91,7 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
     val decodedToken =
       AcsPageToken.decodeAndValidate(checksum, participantIdChecksum, originalToken)
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
+      "INVALID_ACS_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsPageResponse and used with the same " +
         "EventFormat settings, with the same Canton participant running the same Canton version. The page " +
         "token was prepared with different event_format or active_at_offset."
@@ -123,7 +123,7 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
         tokenWithDifferentVersion,
       )
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
+      "INVALID_ACS_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in " +
         "ACS requests must be taken from a valid GetActiveContractsPageResponse and used with the same " +
         "EventFormat settings, with the same Canton participant running the same Canton version. The page " +
         "token was prepared with different page API version."

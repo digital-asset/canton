@@ -116,6 +116,7 @@ final class CantonNetworkTopologyStateIntegrationTest
       case _: MemoryStorage =>
         new InMemoryTopologyStore[TopologyStoreId](
           SynchronizerStore(synchronizerId.toPhysical),
+          predecessor = None,
           testedProtocolVersion,
           loggerFactory,
           timeouts,
@@ -125,6 +126,7 @@ final class CantonNetworkTopologyStateIntegrationTest
           storage,
           storeId,
           IndexedTopologyStoreId.tryCreate(storeId, topoStoreIdx),
+          predecessor = None,
           testedProtocolVersion,
           timeouts,
           BatchingConfig(),

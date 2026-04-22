@@ -15,6 +15,7 @@ class InMemoryTopologyStoreTest extends TopologyStoreTest with HasTestCloseConte
     behave like topologyStore { case (synchronizerId, testName) =>
       new InMemoryTopologyStore(
         TopologyStoreId.SynchronizerStore(synchronizerId),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory.appendUnnamedKey("testName", testName),
         timeouts,

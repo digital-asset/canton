@@ -8,7 +8,7 @@ import com.digitalasset.daml.lf.data.Ref.{Identifier, Party, PackageId}
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.language.Ast.PackageMetadata
 import com.digitalasset.daml.lf.speedy.SError.SError
-import com.digitalasset.daml.lf.transaction.{GlobalKey, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.VersionedTransaction
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import scala.concurrent.duration.Duration
@@ -54,18 +54,6 @@ object Error {
       actAs: Set[Party],
       readAs: Set[Party],
       observers: Set[Party],
-  ) extends Error
-
-  /** A fetchByKey or lookupByKey was being made against a key
-    * for which the contract exists but has not
-    * been disclosed to 'committer'.
-    */
-  final case class ContractKeyNotVisible(
-      coid: ContractId,
-      key: GlobalKey,
-      actAs: Set[Party],
-      readAs: Set[Party],
-      stakeholders: Set[Party],
   ) extends Error
 
   /** The transaction produced by the update expression in a 'mustFailAt' succeeded. */

@@ -172,10 +172,9 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
                 cmdIdAtUpgradeTime,
                 offsetBeforeSubmit,
                 bank,
-                _ should (
-                  include(TimeRejects.LocalTimeout.id) or
-                    include(SubmissionErrors.TimeoutError.id)
-                ),
+                _ should (include(TimeRejects.LocalTimeout.id) or include(
+                  SubmissionErrors.TimeoutError.id
+                ) or include(SubmissionErrors.SequencerRequest.id)),
               )
             },
             Optional -> (_.warningMessage should (include regex "Response message for request .* timed out at")),

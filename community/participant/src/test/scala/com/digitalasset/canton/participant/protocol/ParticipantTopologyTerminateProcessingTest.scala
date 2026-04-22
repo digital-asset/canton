@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol
 
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -20,6 +22,7 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.metrics.{ParticipantHistograms, ParticipantMetrics}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
@@ -65,6 +68,7 @@ final class ParticipantTopologyTerminateProcessingTest
   protected def mkStore: TopologyStore[TopologyStoreId.SynchronizerStore] =
     new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(psid2),
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory,
       timeouts,
@@ -106,6 +110,11 @@ final class ParticipantTopologyTerminateProcessingTest
       )
     )
 
+    val metrics = new ParticipantMetrics(
+      new ParticipantHistograms(MetricName("test"))(new HistogramInventory),
+      new NoOpMetricsFactory,
+    )
+
     val proc = new ParticipantTopologyTerminateProcessing(
       recordOrderPublisher,
       store,
@@ -117,6 +126,7 @@ final class ParticipantTopologyTerminateProcessingTest
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
       retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
+      metrics,
       loggerFactory,
     )
     (proc, store, eventCaptor, recordOrderPublisher, pendingOnboardingClearanceStoreMock)

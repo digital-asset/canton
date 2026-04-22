@@ -108,12 +108,12 @@ final class TopologyLookup(
     * the synchronizer, uses the known topology.
     */
   def maybeOfflineApproximateSnapshot(
-      synchronizerId: SynchronizerId
+      synchronizer: Synchronizer
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, TopologySnapshot] =
     for {
-      client <- maybeOfflineTopologyClient(synchronizerId)
+      client <- maybeOfflineTopologyClient(synchronizer)
       snapshot <- EitherT.liftF(client.currentSnapshotApproximation)
     } yield snapshot
 
@@ -135,11 +135,15 @@ final class TopologyLookup(
       )
     }
 
-  private def maybeOfflineTopologyClient(synchronizerId: SynchronizerId)(implicit
+  private def maybeOfflineTopologyClient(synchronizer: Synchronizer)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SynchronizerTopologyClient] =
     for {
-      psid <- activePsidFor(synchronizerId).toEitherT[FutureUnlessShutdown]
+      psid <- synchronizer match {
+        case lsid: SynchronizerId => activePsidFor(lsid).toEitherT[FutureUnlessShutdown]
+        case psid: PhysicalSynchronizerId =>
+          EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](psid)
+      }
       client <- topologyClientFor(psid).biflatMap(
         _ => offlineTopologyClient(psid).toEitherT[FutureUnlessShutdown],
         topologyClient =>

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
@@ -62,7 +63,7 @@ final class LsuSequencingTestMessageHandlerTest
   private lazy val testingIdentityFactory = TestingIdentityFactory(
     TestingTopology.from(sequencerGroup =
       SequencerGroup(
-        active = Seq(sequencerId, sequencerId2),
+        active = NonEmpty(Seq, sequencerId, sequencerId2),
         passive = Nil,
         threshold = PositiveInt.one,
       )

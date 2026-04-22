@@ -47,7 +47,7 @@ object ExternalTransactionProcessor {
   )
 }
 
-/** This class contains the logic to process prepare and execute requests from the interactive
+/** This class contains the logic to process, prepare, and execute requests from the interactive
   * submission API. The general flow is as follows:
   * {{{
   * IC = Input Contract

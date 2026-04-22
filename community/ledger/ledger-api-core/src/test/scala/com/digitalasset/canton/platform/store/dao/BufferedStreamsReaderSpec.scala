@@ -416,6 +416,7 @@ object BufferedStreamsReaderSpec {
             endInclusive: Offset,
             descendingOrder: Boolean,
             filter: Object,
+            skipPruningChecks: Boolean,
         )(implicit
             loggingContext: LoggingContextWithTrace
         ): Source[(Offset, String), NotUsed] = fail(
@@ -449,6 +450,7 @@ object BufferedStreamsReaderSpec {
             bufferFilter = bufferSliceFilter,
             toApiResponse = tx => Future.successful(tx.updateId),
             descendingOrder = descendingOrder,
+            skipPruningChecks = false,
           )
           .runWith(Sink.foreach(streamElements.addOne))
           .futureValue
@@ -466,15 +468,17 @@ object BufferedStreamsReaderSpec {
               endInclusive: Offset,
               descendingOrder: Boolean,
               filter: Object,
+              skipPruningChecks: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, String), NotUsed] =
-            (startInclusive, endInclusive, filter, descendingOrder) match {
+            (startInclusive, endInclusive, filter, descendingOrder, skipPruningChecks) match {
               case (
                     `expectedStartInclusive`,
                     `expectedEndInclusive`,
                     `expectedFilter`,
                     `expectedDescendingOrder`,
+                    false,
                   ) =>
                 thenReturnStream
               case unexpected =>
@@ -496,6 +500,7 @@ object BufferedStreamsReaderSpec {
             endInclusive: Offset,
             descendingOrder: Boolean,
             filter: Object,
+            skipPruningChecks: Boolean,
         )(implicit
             loggingContext: LoggingContextWithTrace
         ): Source[(Offset, String), NotUsed] =
@@ -572,6 +577,7 @@ object BufferedStreamsReaderSpec {
             bufferFilter = noFilterBufferSlice, // Do not filter
             toApiResponse = tx => Future.successful(tx.updateId),
             descendingOrder = descendingOrder,
+            skipPruningChecks = false,
           )
           .async
           .mapAsync(1) { idx =>

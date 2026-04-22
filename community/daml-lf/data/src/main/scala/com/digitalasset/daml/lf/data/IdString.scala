@@ -319,8 +319,14 @@ private[data] final class IdStringImpl extends IdString {
   override val LedgerString: ConcatenableStringModule[LedgerString, HexString] =
     new ConcatenableMatchingStringModule("Daml-LF Ledger String", "._:-#/ ", 255)
 
+  /** Participant identifiers are non-empty US-ASCII strings built from letters, digits, space,
+    * colon, minus and, underscore limited to 255 chars. We use them to represent participant
+    * identifiers. As participant identifiers are used to construct party identifiers, the character
+    * set needs to be restricted in a similar way.
+    */
   override type ParticipantId = String
-  override val ParticipantId = LedgerString
+  override val ParticipantId: ConcatenableStringModule[LedgerString, HexString] =
+    new ConcatenableMatchingStringModule("Daml-LF Participant ID", ":-_ ", 255)
 
   /** Legacy contractIds.
     */

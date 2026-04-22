@@ -60,10 +60,11 @@ EOI
 ### Create slack report
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
-Throughput (transaction service): $TX_THROUGHPUT root nodes/s ($TX_EARLY_TO_LATE_COUNT tx root nodes in $TX_EARLY_TO_LATE_TIME s)
-Throughput (read service): $UPDATES_THROUGHPUT updates/s ($UPDATES_EARLY_TO_LATE_COUNT updates in $UPDATES_EARLY_TO_LATE_TIME s)
-Throughput (participant sequencer client): $PARTICIPANT_EVENTS_THROUGHPUT events/s ($PARTICIPANT_EVENTS_EARLY_TO_LATE_COUNT events in $PARTICIPANT_EVENTS_EARLY_TO_LATE_TIME s)
-Throughput (mediator sequencer client): $MEDIATOR_EVENTS_THROUGHPUT events/s ($MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT events in $MEDIATOR_EVENTS_EARLY_TO_LATE_TIME s)
-Failed commands (trader1): $FAILED_TRADER1_EARLY_TO_LATE_COUNT
+*Throughput*
+• Transaction service: *$TX_THROUGHPUT root nodes/s* ($TX_EARLY_TO_LATE_COUNT tx root nodes in $TX_EARLY_TO_LATE_TIME s)
+• Read service: *$UPDATES_THROUGHPUT updates/s* ($UPDATES_EARLY_TO_LATE_COUNT updates in $UPDATES_EARLY_TO_LATE_TIME s)
+• Participant sequencer client: *$PARTICIPANT_EVENTS_THROUGHPUT events/s* ($PARTICIPANT_EVENTS_EARLY_TO_LATE_COUNT events in $PARTICIPANT_EVENTS_EARLY_TO_LATE_TIME s)
+• Mediator sequencer client: *$MEDIATOR_EVENTS_THROUGHPUT events/s* ($MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT events in $MEDIATOR_EVENTS_EARLY_TO_LATE_TIME s)
+• Failed commands (trader1): *$FAILED_TRADER1_EARLY_TO_LATE_COUNT*
 
 EOI

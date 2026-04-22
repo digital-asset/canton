@@ -499,7 +499,7 @@ object PartyId {
   */
 final case class MediatorGroup(
     index: MediatorGroupIndex,
-    active: Seq[MediatorId],
+    active: NonEmpty[Seq[MediatorId]],
     passive: Seq[MediatorId],
     threshold: PositiveInt,
 ) {
@@ -547,7 +547,7 @@ object MediatorId {
   * tolerate up to `min(threshold - 1, (active.size - 1)/3)` malicious active sequencers.
   */
 final case class SequencerGroup(
-    active: Seq[SequencerId],
+    active: NonEmpty[Seq[SequencerId]],
     passive: Seq[SequencerId],
     threshold: PositiveInt,
 )

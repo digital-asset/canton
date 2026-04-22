@@ -88,8 +88,8 @@ trait ConsoleCommandIntegrationTest
     "succeed when never connected to a synchronizer" in { implicit env =>
       import env.*
 
-      val acs = participant1.ledger_api.state.acs.of_all()
-      acs.size shouldBe 0
+      val acsSize = participant1.ledger_api.state.acs.count()
+      acsSize shouldBe 0
     }
 
     "succeed when disconnected from a synchronizer" in { implicit env =>
@@ -97,12 +97,12 @@ trait ConsoleCommandIntegrationTest
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
-      val acsBefore = participant1.ledger_api.state.acs.of_all()
+      val acsCountBefore = participant1.ledger_api.state.acs.count()
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
       participant1.synchronizers.disconnect(daName)
 
-      val acsAfter = participant1.ledger_api.state.acs.of_all()
-      (acsAfter.size - acsBefore.size) shouldBe 1
+      val acsCountAfter = participant1.ledger_api.state.acs.count()
+      (acsCountAfter - acsCountBefore) shouldBe 1
     }
 
     "succeed when there are only admin parties" in { implicit env =>
@@ -110,11 +110,11 @@ trait ConsoleCommandIntegrationTest
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
-      val acsBefore = participant1.ledger_api.state.acs.of_all()
+      val acsCountBefore = participant1.ledger_api.state.acs.count()
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
-      val acsAfter = participant1.ledger_api.state.acs.of_all()
+      val acsCountAfter = participant1.ledger_api.state.acs.count()
 
-      (acsAfter.size - acsBefore.size) shouldBe 1
+      (acsCountAfter - acsCountBefore) shouldBe 1
     }
 
     "succeed when parties are allocated" in { implicit env =>
@@ -130,11 +130,11 @@ trait ConsoleCommandIntegrationTest
         plist1.map(_.party.toProtoPrimitive) contains alice
       }
 
-      val acsBefore = participant1.ledger_api.state.acs.of_all()
+      val acsCountBefore = participant1.ledger_api.state.acs.count()
       createCycleContract(participant1, alice.toPartyId(), "cycle contract p1 alice")
-      val acsAfter = participant1.ledger_api.state.acs.of_all()
+      val acsCountAfter = participant1.ledger_api.state.acs.count()
 
-      (acsAfter.size - acsBefore.size) shouldBe 1
+      (acsCountAfter - acsCountBefore) shouldBe 1
     }
   }
 

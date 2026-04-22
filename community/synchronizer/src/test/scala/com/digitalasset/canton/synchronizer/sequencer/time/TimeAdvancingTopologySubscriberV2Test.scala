@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.time
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
@@ -139,7 +139,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       val snapshot = mock[TopologySnapshotLoader]
       val sequencerGroup =
         SequencerGroup(
-          active = Seq(aSequencerId),
+          active = NonEmpty(Seq, aSequencerId),
           passive = Seq.empty,
           threshold = PositiveInt.one,
         )
@@ -226,7 +226,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         FutureUnlessShutdown.pure(
           Some(
             SequencerGroup(
-              active = Seq(aSequencerId),
+              active = NonEmpty(Seq, aSequencerId),
               passive = Seq(passiveSequencerId),
               threshold = PositiveInt.one,
             )
@@ -288,7 +288,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       val snapshot = mock[TopologySnapshotLoader]
       val sequencerGroup =
         SequencerGroup(
-          active = Seq(aSequencerId),
+          active = NonEmpty(Seq, aSequencerId),
           passive = Seq.empty,
           threshold = PositiveInt.one,
         )
@@ -347,9 +347,11 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       val sequencerClient = mock[SequencerClient]
 
       val snapshot = mock[TopologySnapshotLoader]
+      val anotherActiveSequencerId =
+        SequencerId.tryCreate("other-active", Namespace(Fingerprint.tryFromString("other")))
       val sequencerGroup =
         SequencerGroup(
-          active = Seq.empty,
+          active = NonEmpty(Seq, anotherActiveSequencerId),
           passive = Seq(aSequencerId),
           threshold = PositiveInt.one,
         )
@@ -416,7 +418,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       val snapshot = mock[TopologySnapshotLoader]
       val sequencerGroup =
         SequencerGroup(
-          active = Seq(aSequencerId),
+          active = NonEmpty(Seq, aSequencerId),
           passive = Seq.empty,
           threshold = PositiveInt.one,
         )
@@ -512,7 +514,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
       val snapshot = mock[TopologySnapshotLoader]
       val sequencerGroup =
         SequencerGroup(
-          active = Seq(aSequencerId),
+          active = NonEmpty(Seq, aSequencerId),
           passive = Seq.empty,
           threshold = PositiveInt.one,
         )

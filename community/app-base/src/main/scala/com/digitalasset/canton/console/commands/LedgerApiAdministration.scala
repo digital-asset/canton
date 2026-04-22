@@ -94,7 +94,11 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
+import com.digitalasset.canton.networking.grpc.{
+  CountingStreamObserver,
+  GrpcError,
+  RecordingStreamObserver,
+}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
@@ -1883,15 +1887,17 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             .map(WrappedIncompleteAssigned(_))
 
         @Help.Summary(
-          "List the set of active contracts for all parties hosted on this participant"
+          "Retrieves the first N active contracts for all parties on this participant"
         )
         @Help.Description(
-          """This command will return the current set of active contracts for all parties.
+          """Fetches a subset of the Active Contract Set across all parties. Use the limit parameter
+            |to control the number of records returned.
             |
             |Parameters:
             |- limit: Limit (default set via canton.parameter.console).
             |- verbose: Whether the resulting events should contain detailed type information.
-            |- filterTemplate: List of templates ids to filter for, empty sequence acts as a wildcard.
+            |- filterTemplates: List of templates ids to filter for, empty sequence acts as
+            |  a wildcard.
             |- filterInterfaces: List of interface ids to filter for, empty sequence does not
             |  influence the resulting filter.
             |- activeAtOffsetO: The offset at which the snapshot of the active contracts will be
@@ -1918,47 +1924,93 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
         ): Seq[WrappedContractEntry] =
           consoleEnvironment.runE {
-            for {
-              parties <- ledgerApiCommand(
-                LedgerApiCommands.PartyManagementService.ListKnownParties(
-                  identityProviderId = identityProviderId,
-                  filterParty = "",
+            ledgerCommandResultWithLocalParties(ifPartiesEmpty =
+              Right(Seq.empty[WrappedContractEntry])
+            )(
+              identityProviderId,
+              ledgerCommandResultF = localParties => {
+                val observer = new RecordingStreamObserver[GetActiveContractsResponse](
+                  limit,
+                  resultFilter,
                 )
-              ).toEither
-              localParties <- parties.filter(_.isLocal).map(_.party).traverse(LfPartyId.fromString)
-              res <- {
-                if (localParties.isEmpty) Right(Seq.empty)
-                else {
-                  val observer = new RecordingStreamObserver[GetActiveContractsResponse](
-                    limit,
-                    resultFilter,
-                  )
-                  Try(
-                    mkResult(
-                      consoleEnvironment.run {
-                        ledgerApiCommand(
-                          LedgerApiCommands.StateService.GetActiveContracts(
-                            observer,
-                            localParties.toSet,
-                            limit,
-                            filterTemplates,
-                            filterInterfaces,
-                            activeAtOffsetO.getOrElse(end()),
-                            verbose,
-                            timeout.asFiniteApproximation,
-                            includeCreatedEventBlob,
-                          )
-                        )
-                      },
-                      "getActiveContracts",
-                      observer,
-                      timeout,
-                    ).map(activeContract => WrappedContractEntry(activeContract.contractEntry))
-                  ).toEither.left.map(_.getMessage)
-                }
-              }
-            } yield res
+                mkResult(
+                  consoleEnvironment.run {
+                    ledgerApiCommand(
+                      LedgerApiCommands.StateService.GetActiveContracts(
+                        observer,
+                        localParties,
+                        limit,
+                        filterTemplates,
+                        filterInterfaces,
+                        activeAtOffsetO.getOrElse(end()),
+                        verbose,
+                        timeout.asFiniteApproximation,
+                        includeCreatedEventBlob,
+                      )
+                    )
+                  },
+                  "getActiveContracts",
+                  observer,
+                  timeout,
+                ).map(activeContract => WrappedContractEntry(activeContract.contractEntry))
+              },
+            )
           }
+
+        @Help.Summary(
+          "Retrieves the count of contracts for all parties on this participant",
+          FeatureFlag.Testing,
+        )
+        @Help.Description(
+          """Fetches the count of Active Contracts across all parties.
+            |
+            |Parameters:
+            |- filterTemplates: List of templates ids to filter for, empty sequence acts as
+            |  a wildcard.
+            |- filterInterfaces: List of interface ids to filter for, empty sequence does not
+            |  influence the resulting filter.
+            |- activeAtOffsetO: The offset at which the snapshot of the active contracts will be
+            |  computed, it must be no greater than the current ledger end offset and must be greater
+            |  than or equal to the last pruning offset. If no offset is specified then the current
+            |  participant end will be used.
+            |- identityProviderId: Limit the response to parties governed by the given identity
+            |  provider.
+            |- timeout: The maximum wait time for the complete acs to arrive.
+            """
+        )
+        def count(
+            filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
+            activeAtOffsetO: Option[Long] = None,
+            timeout: config.NonNegativeDuration = timeouts.unbounded,
+            identityProviderId: String = "",
+        ): Int =
+          check(FeatureFlag.Testing)(consoleEnvironment.runE {
+            ledgerCommandResultWithLocalParties(ifPartiesEmpty = Right(0))(
+              identityProviderId,
+              localParties => {
+                val observer = new CountingStreamObserver[GetActiveContractsResponse]()
+                mkResult(
+                  consoleEnvironment.run {
+                    ledgerApiCommand(
+                      LedgerApiCommands.StateService.GetActiveContracts(
+                        observer = observer,
+                        parties = localParties,
+                        limit = PositiveInt.MaxValue,
+                        templateFilter = filterTemplates,
+                        interfaceFilter = filterInterfaces,
+                        activeAtOffset = activeAtOffsetO.getOrElse(end()),
+                        timeout = timeout.asFiniteApproximation,
+                      )
+                    )
+                  },
+                  "getActiveContractsCount",
+                  observer,
+                  timeout,
+                )
+              },
+            )
+          })
 
         @Help.Summary(
           "Wait until the party sees the given contract in the active contract service"
@@ -3533,6 +3585,27 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
     val deletions = original.removedAll(modified.keys).view.mapValues(_ => "").toMap
     modified.concat(deletions)
   }
+
+  private def ledgerCommandResultWithLocalParties[R](ifPartiesEmpty: => Either[?, R])(
+      identityProviderId: String,
+      ledgerCommandResultF: Set[LfPartyId] => R,
+  ): Either[?, R] =
+    for {
+      parties <- ledgerApiCommand(
+        LedgerApiCommands.PartyManagementService.ListKnownParties(
+          identityProviderId = identityProviderId,
+          filterParty = "",
+        )
+      ).toEither
+      localParties <- parties
+        .filter(_.isLocal)
+        .map(_.party)
+        .traverse(LfPartyId.fromString)
+      res <-
+        if (localParties.isEmpty) ifPartiesEmpty
+        else
+          Try(ledgerCommandResultF(localParties.toSet)).toEither.left.map(_.getMessage)
+    } yield res
 }
 
 trait LedgerApiAdministration extends BaseLedgerApiAdministration {

@@ -24,6 +24,7 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.GetSynchronizerParametersResponse.Parameters
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.VerifyActiveRequest
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
+import com.digitalasset.canton.sequencing.client.SequencerConnectClientInterceptor
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
@@ -39,6 +40,7 @@ import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.DurationInt
 
 class GrpcSequencerConnectClient(
+    member: Member,
     sequencerConnection: GrpcSequencerConnection,
     synchronizerAlias: SynchronizerAlias,
     val timeouts: ProcessingTimeout,
@@ -48,6 +50,8 @@ class GrpcSequencerConnectClient(
     extends SequencerConnectClient
     with NamedLogging
     with FlagCloseable {
+
+  private val interceptor = new SequencerConnectClientInterceptor(member, loggerFactory)
 
   private val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
   private val builder = {
@@ -144,7 +148,9 @@ class GrpcSequencerConnectClient(
           serverName = synchronizerAlias.unwrap,
           requestDescription = "handshake",
           channelBuilder = builder,
-          stubFactory = v30.SequencerConnectServiceGrpc.stub,
+          stubFactory = channel =>
+            v30.SequencerConnectServiceGrpc
+              .stub(ClientInterceptors.intercept(channel, interceptor)),
           timeout = timeouts.network.unwrap,
           logger = logger,
           logPolicy = CantonGrpcUtil.SilentLogPolicy,
@@ -167,13 +173,10 @@ class GrpcSequencerConnectClient(
     } yield handshakeResponse
 
   override def isActive(
-      participantId: ParticipantId,
-      waitForActive: Boolean,
+      waitForActive: Boolean
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Boolean] = {
-    val interceptor = new SequencerConnectClientInterceptor(participantId, loggerFactory)
-
     // retry in case of failure. Also if waitForActive is true, retry if response is negative
     implicit val success: Success[Either[Error, Boolean]] =
       retry.Success {

@@ -18,7 +18,6 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.{
-  DefaultValueUntilExclusive,
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
@@ -217,15 +216,6 @@ object SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
   )
-
-  lazy val submissionCostDefaultValue
-      : DefaultValueUntilExclusive[SubmissionRequest, this.type, Option[SequencingSubmissionCost]] =
-    DefaultValueUntilExclusive(
-      _.submissionCost,
-      "submissionCost",
-      protocolVersionRepresentativeFor(ProtocolVersion.dev),
-      None,
-    )
 
   override def name: String = "submission request"
 

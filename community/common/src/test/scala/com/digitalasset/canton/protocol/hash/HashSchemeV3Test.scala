@@ -13,7 +13,12 @@ import com.digitalasset.daml.lf.transaction.test.{
   TestNodeBuilder,
   TreeTransactionBuilder,
 }
-import com.digitalasset.daml.lf.transaction.{Node, NodeId, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  Node,
+  NodeId,
+  SerializationVersion,
+  VersionedTransaction,
+}
 import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
@@ -32,6 +37,7 @@ class HashSchemeV3Test extends BaseTest with AnyWordSpecLike with Matchers with 
       templateId = defRef("module", "name"),
       argument = VA.int64.inj(31380L),
       signatories = Set(alice),
+      version = TestNodeBuilder.CreateSerializationVersion.Version(SerializationVersion.V1),
     )
 
     val tx1: VersionedTransaction = txBuilder.toVersionedTransaction(create1)

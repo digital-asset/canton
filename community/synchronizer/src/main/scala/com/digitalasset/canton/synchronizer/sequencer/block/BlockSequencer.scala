@@ -1121,7 +1121,9 @@ class BlockSequencer(
       )
     result <- blockRateLimitManager.getTrafficStateForMemberAt(
       member,
-      timestamp,
+      // In a disaster recovery PN may request an earlier timestamp than the first available
+      // on the recovery synchronizer (at upgradeTime)
+      timestamp.max(lsuSequencingBounds.map(_.upgradeTime).getOrElse(CantonTimestamp.MinValue)),
       latestSequencerEventTimestamp,
     )
   } yield result
@@ -1357,10 +1359,8 @@ class BlockSequencer(
               logger.debug(
                 s"Setting LSU traffic purchased for member ${trafficPurchasedRecord.member} to $trafficPurchasedRecord"
               )
-              val updateTrafficPurchasedRecord =
-                trafficPurchasedRecord.copy(sequencingTimestamp = upgradeTime.immediatePredecessor)
               blockRateLimitManager.trafficPurchasedManager.addTrafficPurchased(
-                updateTrafficPurchasedRecord
+                trafficPurchasedRecord
               )
             }
           )

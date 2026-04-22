@@ -94,6 +94,7 @@ object ConfigValidations extends NamedLogging {
       atLeastOneNode,
       sequencerClientRetryDelays,
       awsKmsDisableSSLVerificationRequiresNonStandard,
+      defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
@@ -886,6 +887,17 @@ object ConfigValidations extends NamedLogging {
 
   def awsKmsDisableSSLVerificationRequiresNonStandardError(nodeType: String, nodeName: String) =
     s"Disabling SSL verification for AWS KMS on $nodeType $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
+
+  private def defaultUpdatesPageSizeMustBeLeqMaximalPageSize(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated(config.participants.flatMap { case (name, nodeConfig) =>
+      nodeConfig.ledgerApi.updateService.pipe(usc =>
+        Option.when(usc.defaultUpdatesPageSize > usc.maxUpdatesPageSize)(
+          s"Default updates page size is larger than maximal page size ${usc.maxUpdatesPageSize} in config for participant ${name.unwrap}"
+        )
+      )
+    }.toSeq)
 
   private def defaultAcsPageSizeMustBeLeqMaxPageSize(
       config: CantonConfig

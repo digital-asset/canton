@@ -166,6 +166,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           SynchronizerStore(psid),
           storage,
           indexedStringStore,
+          predecessor = None,
           testedProtocolVersion,
           timeouts,
           BatchingConfig(),
