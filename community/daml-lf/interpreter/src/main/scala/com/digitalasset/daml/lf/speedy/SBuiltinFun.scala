@@ -927,6 +927,12 @@ private[lf] object SBuiltinFun {
       // Validate hex encoding before making the external call
       (Ref.HexString.fromString(configHex), Ref.HexString.fromString(inputHex)) match {
         case (Right(_), Right(_)) =>
+          if (!machine.ptx.canRecordExternalCallResult) {
+            Control.Error(IE.UserError(
+              s"External calls are only supported within exercise context. " +
+                s"extensionId=$extensionId, functionId=$functionId"
+            ))
+          } else
           // Use question/answer pattern - participant handles the actual HTTP call
           machine.needExternalCall(
             extensionId = extensionId,

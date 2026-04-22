@@ -635,6 +635,9 @@ private[speedy] case class PartialTransaction(
     * Walks up through try/catch scopes and returns None only when not inside any
     * exercise context.
     */
+  def canRecordExternalCallResult: Boolean =
+    findEnclosingExercise(context.info).nonEmpty
+
   def recordExternalCallResult(
       extensionId: String,
       functionId: String,
