@@ -232,6 +232,35 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       }
     }
 
+    "surface external call failures and not record a result" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:run"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
+            callback(Left(Question.Update.ExternalCallError(503, "upstream unavailable", Some("req-123"))))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
+        message should include("External call failed: upstream unavailable")
+        message should include("status=503")
+        message should include("requestId=req-123")
+        message should include("extensionId=ext")
+        message should include("functionId=fun")
+      }
+      machine.ptx.externalCallResults shouldBe empty
+    }
+
     "reject root-level external calls before issuing NeedExternalCall" in {
       val machine = Speedy.Machine.fromUpdateSExpr(
         pkgs,
