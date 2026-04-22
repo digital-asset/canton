@@ -47,6 +47,14 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
           controllers Cons @Party [M:T {party} this] (Nil @Party)
           to EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
 
+        choice CallBadConfig (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to EXTERNAL_CALL "ext" "fun" "zzzz" "c0ff";
+
+        choice CallBadInput (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to EXTERNAL_CALL "ext" "fun" "0a0b" "nope";
+
         choice CallInTry (self) (arg: Unit) : Text,
           controllers Cons @Party [M:T {party} this] (Nil @Party)
           to try @Text
@@ -65,6 +73,14 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       val run : Party -> Update Text = \(party: Party) ->
         ubind cid: ContractId M:T <- create @M:T M:T { party = party }
         in exercise @M:T Call cid ();
+
+      val runBadConfig : Party -> Update Text = \(party: Party) ->
+        ubind cid: ContractId M:T <- create @M:T M:T { party = party }
+        in exercise @M:T CallBadConfig cid ();
+
+      val runBadInput : Party -> Update Text = \(party: Party) ->
+        ubind cid: ContractId M:T <- create @M:T M:T { party = party }
+        in exercise @M:T CallBadInput cid ();
 
       val runInTry : Party -> Update Text = \(party: Party) ->
         ubind cid: ContractId M:T <- create @M:T M:T { party = party }
@@ -230,6 +246,60 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
 
       inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
         message should include("Invalid hex encoding in external call output")
+      }
+    }
+
+    "reject malformed config hex before issuing NeedExternalCall" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:runBadConfig"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      var questions = 0
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
+            questions += 1
+            callback(Right("beef"))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      questions shouldBe 0
+      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
+        message should include("Invalid hex encoding in config or input")
+      }
+    }
+
+    "reject malformed input hex before issuing NeedExternalCall" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:runBadInput"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      var questions = 0
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
+            questions += 1
+            callback(Right("beef"))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      questions shouldBe 0
+      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
+        message should include("Invalid hex encoding in config or input")
       }
     }
 
