@@ -536,14 +536,9 @@ abstract class EventStorageBackendTemplate(
       val completedReassignments =
         previousIncompleteReassignmentOffsets.filterNot(currentIncompleteSet)
 
-      logger.info("Creating temporary table for storing pruning candidates")
-      SQL"""
-      -- Create temporary table for storing deactivated_contract candidates for pruning
-      CREATE LOCAL TEMPORARY TABLE IF NOT EXISTS temp_candidate_deactivated (
-        deactivate_event_sequential_id bigint NOT NULL,
-        activate_event_sequential_id bigint
-      ) ON COMMIT DELETE ROWS
-      """.execute().discard
+      logger.info("Lock pruning processing table for serialized pruning")
+      lockExclusivelyPruningProcessingTable(connection)
+      logger.info("Locked pruning processing table for serialized pruning")
 
       // Please note: the big union + join query is deliberately pu in one CTE due to some H2 bug.
       // (possibly the H2 bug is around multiple CTEs targeting the same table)
@@ -567,7 +562,7 @@ abstract class EventStorageBackendTemplate(
         |    AND d2.deactivated_event_sequential_id = a.event_sequential_id
         |    AND d2.event_sequential_id <= ?
         |)
-        |INSERT INTO temp_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
+        |INSERT INTO lapi_pruning_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
         |SELECT event_sequential_id, deactivated_event_sequential_id
         |FROM completed_ids""".stripMargin
       ) { preparedStatement => offset =>
@@ -579,7 +574,7 @@ abstract class EventStorageBackendTemplate(
       logger.info("Populating candidates for deactivated contracts in the pruned range")
       SQL"""
       -- Create temporary table for storing deactivated_contract candidates for pruning
-      INSERT INTO temp_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
+      INSERT INTO lapi_pruning_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
       SELECT event_sequential_id, deactivated_event_sequential_id
       FROM lapi_events_deactivate_contract
       WHERE
@@ -587,13 +582,8 @@ abstract class EventStorageBackendTemplate(
         AND event_sequential_id <= $pruningToInclusiveEventSeqId
       """.execute().discard
 
-      logger.info("Indexing temporary table for storing pruning candidates")
-      SQL"""
-      -- Create temporary table for storing deactivated_contract candidates for pruning
-      CREATE INDEX temp_candidate_deactivated_deactivate ON temp_candidate_deactivated USING btree (deactivate_event_sequential_id);
-      CREATE INDEX temp_candidate_deactivated_activate ON temp_candidate_deactivated USING btree (activate_event_sequential_id);
-      ${queryStrategy.analyzeTable("temp_candidate_deactivated")};
-      """.execute().discard
+      logger.info("Analyze lapi_pruning_candidate_deactivated table")
+      SQL"${queryStrategy.analyzeTable("lapi_pruning_candidate_deactivated")}".execute().discard
 
       loadOffsets(
         incompleteReassignmentOffsets,
@@ -605,19 +595,22 @@ abstract class EventStorageBackendTemplate(
         |  UNION ALL
         |  SELECT event_sequential_id FROM lapi_events_deactivate_contract WHERE event_offset = ?
         |)
-        |DELETE FROM temp_candidate_deactivated
+        |DELETE FROM lapi_pruning_candidate_deactivated
         |WHERE EXISTS (
         |  SELECT 1
         |  FROM incomplete_ids
         |  WHERE
         |    -- either respective activation or deactivation is a match, we need to remove both - the whole row
-        |    incomplete_ids.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
-        |    OR incomplete_ids.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
+        |    incomplete_ids.event_sequential_id = lapi_pruning_candidate_deactivated.deactivate_event_sequential_id
+        |    OR incomplete_ids.event_sequential_id = lapi_pruning_candidate_deactivated.activate_event_sequential_id
         |)""".stripMargin
       ) { preparedStatement => offset =>
         preparedStatement.setLong(1, offset.unwrap)
         preparedStatement.setLong(2, offset.unwrap)
       }
+
+      logger.info("Analyze lapi_pruning_candidate_deactivated table")
+      SQL"${queryStrategy.analyzeTable("lapi_pruning_candidate_deactivated")}".execute().discard
 
       def pruneActivate(tableName: String): Unit =
         pruneWithLogging(s"Pruning $tableName table") {
@@ -625,8 +618,8 @@ abstract class EventStorageBackendTemplate(
           DELETE from #$tableName
           WHERE EXISTS (
             SELECT 1
-            FROM temp_candidate_deactivated
-            WHERE #$tableName.event_sequential_id = temp_candidate_deactivated.activate_event_sequential_id
+            FROM lapi_pruning_candidate_deactivated
+            WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.activate_event_sequential_id
           )"""
         }
 
@@ -643,8 +636,8 @@ abstract class EventStorageBackendTemplate(
           DELETE from #$tableName
           WHERE EXISTS (
             SELECT 1
-            FROM temp_candidate_deactivated
-            WHERE #$tableName.event_sequential_id = temp_candidate_deactivated.deactivate_event_sequential_id
+            FROM lapi_pruning_candidate_deactivated
+            WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.deactivate_event_sequential_id
           )"""
         }
 
@@ -653,12 +646,8 @@ abstract class EventStorageBackendTemplate(
       pruneDeactivate("lapi_filter_deactivate_stakeholder")
       pruneDeactivate("lapi_filter_deactivate_witness")
 
-      logger.info("Dropping temporary table for storing pruning candidates")
-      SQL"""
-      DROP INDEX temp_candidate_deactivated_deactivate;
-      DROP INDEX temp_candidate_deactivated_activate;
-      DROP TABLE temp_candidate_deactivated;
-      """.execute().discard
+      logger.info("Truncate table for storing pruning candidates")
+      SQL"""TRUNCATE TABLE lapi_pruning_candidate_deactivated;""".execute().discard
 
       // witnessed
       pruneWithLogging("Pruning lapi_events_various_witnessed table") {

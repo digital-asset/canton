@@ -41,6 +41,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.protobuf.ByteString
 import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import org.apache.pekko.NotUsed
@@ -125,6 +126,10 @@ class JsUpdateService(
     withServerLogic(
       JsUpdateService.getTransactionTreeByIdEndpoint,
       getTransactionTreeById,
+    ),
+    withServerLogic(
+      JsUpdateService.getUpdatesPageEndpoint,
+      getUpdatesPage,
     ),
   )
 
@@ -359,6 +364,19 @@ class JsUpdateService(
         )
     }
 
+  private def getUpdatesPage(
+      caller: CallerContext
+  ): TracedInput[update_service.GetUpdatesPageRequest] => Future[
+    Either[JsCantonError, JsGetUpdatesPageResponse]
+  ] =
+    req => {
+      implicit val tc = caller.traceContext()
+      updateServiceClient(caller.token())
+        .getUpdatesPage(req.in)
+        .flatMap(protocolConverters.GetUpdatesPageResponse.toJson(_))
+        .resultToRight
+    }
+
   private def toGetUpdatesRequest(
       req: LegacyDTOs.GetUpdatesRequest,
       forTrees: Boolean,
@@ -548,6 +566,13 @@ object JsUpdateService extends DocumentationEndpoints {
       .out(jsonBody[JsGetUpdateResponse])
       .protoRef(update_service.UpdateServiceGrpc.METHOD_GET_UPDATE_BY_ID)
 
+  val getUpdatesPageEndpoint =
+    updates.post
+      .in(sttp.tapir.stringToPath("get-updates-page"))
+      .in(jsonBody[update_service.GetUpdatesPageRequest])
+      .out(jsonBody[JsGetUpdatesPageResponse])
+      .protoRef(update_service.UpdateServiceGrpc.METHOD_GET_UPDATES_PAGE)
+
   override def documentation: Seq[AnyEndpoint] = List(
     getUpdatesEndpoint,
     getUpdatesListEndpoint,
@@ -561,6 +586,7 @@ object JsUpdateService extends DocumentationEndpoints {
     getTransactionByIdEndpoint,
     getUpdateByIdEndpoint,
     getTransactionTreeByIdEndpoint,
+    getUpdatesPageEndpoint,
   )
 }
 
@@ -581,6 +607,15 @@ final case class JsGetUpdateResponse(update: JsUpdate.Update)
 
 final case class JsGetUpdatesResponse(
     update: JsUpdate.Update
+)
+
+final case class JsGetUpdatesPageResponse(
+    updates: Seq[
+      JsGetUpdateResponse
+    ],
+    lowestPageOffsetExclusive: Long,
+    highestPageOffsetInclusive: Long,
+    nextPageToken: Option[ByteString],
 )
 
 object JsUpdateTree {
@@ -638,6 +673,10 @@ object JsUpdateServiceCodecs {
   implicit val jsUpdateTreeReassignmentRW: Codec[JsUpdateTree.Reassignment] = deriveConfiguredCodec
   implicit val jsUpdateTreeTransactionRW: Codec[JsUpdateTree.TransactionTree] =
     deriveConfiguredCodec
+
+  implicit val jsGetUpdatesPageResponseRW: Codec[JsGetUpdatesPageResponse] = deriveConfiguredCodec
+  implicit val getUpdatesPageRequest: Codec[update_service.GetUpdatesPageRequest] =
+    deriveRelaxedCodec
 
   implicit val jsTopologyParticipantAuthorizationAddedRW
       : Codec[lapi.topology_transaction.ParticipantAuthorizationAdded] =

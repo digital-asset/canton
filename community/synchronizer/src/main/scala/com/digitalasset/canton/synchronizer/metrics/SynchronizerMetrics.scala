@@ -185,6 +185,19 @@ class SequencerMetrics(
         .getOrElseUpdate(mc, Eval.later(createSubscriptionLastTimestampGauge))
         .value
     }
+
+    val handshakes: Meter = openTelemetryMetricsFactory.meter(
+      MetricInfo(
+        prefix :+ "handshakes",
+        summary = "The number of handshakes",
+        description = "Record the number of handshakes per member and status.",
+        qualification = MetricQualification.Debug,
+        labelsWithDescription = Map(
+          "member" -> "The member performing the handshake or 'unknown'",
+          "status" -> "Status of the handshake: success or failure",
+        ),
+      )
+    )
   }
 
   val publicApi = new PublicApiMetrics
@@ -474,7 +487,7 @@ class MediatorMetrics(
 }
 
 object MediatorMetrics {
-  val duplicateRejectLabel = "duplicate_reject"
+  val duplicateRejectLabel: String = "duplicate_reject"
   val duplicateRejectContext: MetricsContext = MetricsContext(duplicateRejectLabel -> "true")
   val nonduplicateRejectContext: MetricsContext = MetricsContext(duplicateRejectLabel -> "false")
 }

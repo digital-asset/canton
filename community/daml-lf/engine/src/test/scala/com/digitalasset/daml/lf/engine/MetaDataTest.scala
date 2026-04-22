@@ -175,7 +175,7 @@ class MetaDataTestHelper(loggerFactory: NamedLoggerFactory) {
 
   object langNodeBuilder extends TestNodeBuilder {
     override def serializationVersion(packageId: PackageId): Option[SerializationVersion] =
-      Some(SerializationVersion.assign(langVersion))
+      Some(SerializationVersion.assign(hasKey = false))
   }
 
   val engine = Engine.DevEngine(loggerFactory)

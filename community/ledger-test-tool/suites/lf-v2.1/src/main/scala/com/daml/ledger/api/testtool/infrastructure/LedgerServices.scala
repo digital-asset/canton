@@ -161,6 +161,8 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
   GetUpdateResponse,
+  GetUpdatesPageRequest,
+  GetUpdatesPageResponse,
   GetUpdatesRequest,
   GetUpdatesResponse,
   UpdateServiceGrpc,
@@ -205,6 +207,7 @@ import com.digitalasset.canton.http.json.v2.{
   SchemaProcessorsImpl,
   TranscodePackageIdResolver,
 }
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.audit.TransportType.Http
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NoLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
@@ -214,6 +217,11 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata.Implicits.packa
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.daml.lf.archive.{DarParser, Decode}
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.engine.Error.Preprocessing
+import com.digitalasset.daml.lf.language.Ast.TVar
+import com.digitalasset.daml.lf.value.Value.ValueUnit
+import com.digitalasset.transcode.MissingFieldsException
 import io.grpc.health.v1.health.HealthGrpc
 import io.grpc.health.v1.health.HealthGrpc.Health
 import io.grpc.stub.StreamObserver
@@ -444,6 +452,21 @@ private final class LedgerServicesJson(
     unusedF.discard
   }
 
+  private def handleClientSideTranscodeError[T]: PartialFunction[Throwable, Future[T]] = {
+    case fieldMissing: MissingFieldsException =>
+      Future.failed(
+        CommandExecutionErrors.Preprocessing.PreprocessingFailed
+          .Reject(
+            Preprocessing.TypeMismatch(
+              TVar(Ref.Name.assertFromString("unknown")),
+              ValueUnit,
+              s"Missing non-optional fields: ${fieldMissing.missingFields}",
+            )
+          )
+          .asGrpcError
+      )
+  }
+
   private val packageMetadataView: AtomicReference[PackageMetadata] =
     new AtomicReference(PackageMetadata())
 
@@ -472,14 +495,19 @@ private final class LedgerServicesJson(
     override def submitAndWait(
         request: SubmitAndWaitRequest
     ): Future[SubmitAndWaitResponse] = for {
-      jsCommands <- protocolConverters.Commands.toJson(request.getCommands)
+      jsCommands <- protocolConverters.Commands
+        .toJson(request.getCommands)
+        .recoverWith(handleClientSideTranscodeError)
+
       response <- clientCall(JsCommandService.submitAndWait, jsCommands)
     } yield response
 
     override def submitAndWaitForTransaction(
         request: SubmitAndWaitForTransactionRequest
     ): Future[SubmitAndWaitForTransactionResponse] = for {
-      jsRequest <- protocolConverters.SubmitAndWaitForTransactionRequest.toJson(request)
+      jsRequest <- protocolConverters.SubmitAndWaitForTransactionRequest
+        .toJson(request)
+        .recoverWith(handleClientSideTranscodeError)
       jsResponse <- clientCall(JsCommandService.submitAndWaitForTransactionEndpoint, jsRequest)
       response <- protocolConverters.SubmitAndWaitTransactionResponse.fromJson(jsResponse)
     } yield response
@@ -507,7 +535,9 @@ private final class LedgerServicesJson(
 
     override def submit(request: SubmitRequest): Future[SubmitResponse] =
       for {
-        jsCommands <- protocolConverters.Commands.toJson(request.getCommands)
+        jsCommands <- protocolConverters.Commands
+          .toJson(request.getCommands)
+          .recoverWith(handleClientSideTranscodeError)
         resp <- clientCall(JsCommandService.submitAsyncEndpoint, jsCommands)
       } yield resp
 
@@ -792,6 +822,11 @@ private final class LedgerServicesJson(
         request,
       )
         .flatMap(protocolConverters.GetUpdateResponse.fromJson)
+
+    override def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+      clientCall(JsUpdateService.getUpdatesPageEndpoint, request).flatMap(
+        protocolConverters.GetUpdatesPageResponse.fromJson
+      )
   }
 
   def eventQuery: EventQueryService = (request: GetEventsByContractIdRequest) =>
@@ -896,7 +931,9 @@ private final class LedgerServicesJson(
       override def prepareSubmission(
           request: PrepareSubmissionRequest
       ): Future[PrepareSubmissionResponse] = for {
-        jsPrepareRequest <- protocolConverters.PrepareSubmissionRequest.toJson(request)
+        jsPrepareRequest <- protocolConverters.PrepareSubmissionRequest
+          .toJson(request)
+          .recoverWith(handleClientSideTranscodeError)
         response <- clientCall[JsPrepareSubmissionRequest, JsPrepareSubmissionResponse](
           JsInteractiveSubmissionService.prepareEndpoint,
           jsPrepareRequest,
@@ -909,7 +946,9 @@ private final class LedgerServicesJson(
           request: ExecuteSubmissionRequest
       ): Future[ExecuteSubmissionResponse] =
         for {
-          jsExecuteRequest <- protocolConverters.ExecuteSubmissionRequest.toJson(request)
+          jsExecuteRequest <- protocolConverters.ExecuteSubmissionRequest
+            .toJson(request)
+            .recoverWith(handleClientSideTranscodeError)
           response <- clientCall[JsExecuteSubmissionRequest, ExecuteSubmissionResponse](
             JsInteractiveSubmissionService.executeEndpoint,
             jsExecuteRequest,
@@ -949,7 +988,9 @@ private final class LedgerServicesJson(
           request: ExecuteSubmissionAndWaitRequest
       ): Future[ExecuteSubmissionAndWaitResponse] =
         for {
-          jsExecuteRequest <- protocolConverters.ExecuteSubmissionAndWaitRequest.toJson(request)
+          jsExecuteRequest <- protocolConverters.ExecuteSubmissionAndWaitRequest
+            .toJson(request)
+            .recoverWith(handleClientSideTranscodeError)
           response <- clientCall[
             JsExecuteSubmissionAndWaitRequest,
             ExecuteSubmissionAndWaitResponse,
@@ -965,6 +1006,7 @@ private final class LedgerServicesJson(
         for {
           jsExecuteRequest <- protocolConverters.ExecuteSubmissionAndWaitForTransactionRequest
             .toJson(request)
+            .recoverWith(handleClientSideTranscodeError)
           response <- clientCall[
             JsExecuteSubmissionAndWaitForTransactionRequest,
             JsExecuteSubmissionAndWaitForTransactionResponse,

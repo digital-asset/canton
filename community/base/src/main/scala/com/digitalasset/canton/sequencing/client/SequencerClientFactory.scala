@@ -238,13 +238,6 @@ object SequencerClientFactory {
                 _.upgradeTime
               )
             )
-            // If there's no timestamp, in most cases the participant will have no traffic state as it probably is connecting
-            // to the synchronizer for the first time. However in rare cases it can happen: for example if the node
-            // was onboarded entirely by another node and traffic was purchased for it before it even connected for the first time.
-            // In that case, we fallback to clock.now() which is the next best timestamp we can use
-            // Note: Only do this for participants. Mediators are given unlimited traffic anyway, and this won't work
-            // during an LSU because mediators connect to the sequencer before upgrade time (and thus before the traffic state is transferred).
-            .orElse(Option.when(member.code == ParticipantId.Code)(clock.now))
 
           _ = logger.info(
             s"Initializing traffic state at timestamp: $trafficInitTimestampO"

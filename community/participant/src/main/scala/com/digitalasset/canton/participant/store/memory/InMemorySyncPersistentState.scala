@@ -7,6 +7,7 @@ import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
+import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -89,6 +90,7 @@ class InMemoryPhysicalSyncPersistentState(
     crypto: SynchronizerCrypto,
     override val physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
     val staticSynchronizerParameters: StaticSynchronizerParameters,
+    val predecessor: Option[SynchronizerPredecessor],
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
     val futureSupervisor: FutureSupervisor,
@@ -106,6 +108,7 @@ class InMemoryPhysicalSyncPersistentState(
   override val topologyStore =
     new InMemoryTopologyStore(
       SynchronizerStore(psid),
+      predecessor = predecessor,
       staticSynchronizerParameters.protocolVersion,
       loggerFactory,
       timeouts,

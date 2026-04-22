@@ -5,11 +5,12 @@ package com.digitalasset.canton.integration.util
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
-import com.digitalasset.canton.crypto.SigningKeysWithThreshold
+import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningKeysWithThreshold}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarativeCommon.{
   PartyHostingState,
@@ -24,6 +25,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion
 import org.scalatest.Assertions.fail
 
@@ -490,7 +492,7 @@ class PartiesAllocator(
 )(
     newParties: Seq[(String, ParticipantId)],
     val targetTopology: Map[String, Map[PhysicalSynchronizerId, PartyHostingState]],
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, env: TestEnvironment)
     extends PartyToParticipantDeclarativeCommon[String] {
 
   override def externalParties: Set[ExternalParty] = Set.empty
@@ -503,7 +505,7 @@ class PartiesAllocator(
   override protected def partyReference: (PartyToParticipant, HashingSchemeVersion) => String =
     (ptp, _) => ptp.partyId.identifier.str
 
-  def run(): Seq[PartyId] = {
+  def run(): Seq[Party] = {
     val result = for {
       (partyName, owningParticipantId) <- newParties
       owningParticipant = getParticipantReference(owningParticipantId)
@@ -513,30 +515,76 @@ class PartiesAllocator(
           s"Party $partyName should be mentioned in target topology state"
         ),
       )
-      partyId = UniqueIdentifier
-        .create(partyName, owningParticipant.namespace)
-        .map(PartyId(_))
-        .valueOr(err =>
-          throw new RuntimeException(s"Unable to create party id for $partyName: $err")
-        )
-      (synchronizerId, PartyHostingState(threshold, hostingParticipants, _partySigningKeys)) <-
+      (synchronizerId, PartyHostingState(threshold, hostingParticipants, partySigningKeys)) <-
         topology
+      party = partySigningKeys match {
+        case Some(SigningKeysWithThreshold(keys, threshold)) =>
+          val preferredHashingScheme = HashingSchemeVersion
+            .getHashingSchemeVersionsForProtocolVersion(synchronizerId.protocolVersion)
+            .max1
+          // If signing keys are provided, it's an external party.
+          // Use the first key as the namespace key for simplicity
+          ExternalParty(
+            UniqueIdentifier
+              .create(partyName, keys.head1.fingerprint)
+              .map(PartyId(_))
+              .valueOr(err =>
+                throw new RuntimeException(s"Unable to create party id for $partyName: $err")
+              ),
+            keys.map(_.fingerprint).toSeq,
+            threshold,
+            preferredHashingScheme,
+          )
+        case None =>
+          UniqueIdentifier
+            .create(partyName, owningParticipant.namespace)
+            .map(PartyId(_))
+            .valueOr(err =>
+              throw new RuntimeException(s"Unable to create party id for $partyName: $err")
+            )
+      }
       hostingParticipantIds = hostingParticipants.map { case (id, _) => id }
-      authorizingParticipantsId = hostingParticipantIds + owningParticipantId
-      authorizingParticipants = authorizingParticipantsId.map(getParticipantReference)
-      res = authorizingParticipants.map { authorizingParticipant =>
+      hostingParticipantsReferences = hostingParticipantIds.map(getParticipantReference)
+
+      // Extract the authorization from the owning participant in its own specific future,
+      // so that in the case of an external party, we can chain its authorization to it
+      owningParticipantAuthorization = Future {
+        owningParticipant.topology.party_to_participant_mappings
+          .propose(
+            party = party.partyId,
+            newParticipants = hostingParticipants.toSeq,
+            threshold = threshold,
+            store = synchronizerId,
+            partySigningKeys = partySigningKeys,
+          )
+      }.map { transaction =>
+        // If it's an external party, also authorize on behalf of it
+        party match {
+          case external: ExternalParty =>
+            owningParticipant.topology.transactions.load(
+              Seq(
+                env.global_secret
+                  .sign(transaction.transaction, external, synchronizerId.protocolVersion)
+              ),
+              synchronizerId,
+            )
+          case _ =>
+        }
+      }
+
+      res = hostingParticipantsReferences.map { authorizingParticipant =>
         Future {
           authorizingParticipant.topology.party_to_participant_mappings
             .propose(
-              party = partyId,
+              party = party.partyId,
               newParticipants = hostingParticipants.toSeq,
               threshold = threshold,
               store = synchronizerId,
+              partySigningKeys = partySigningKeys,
             )
-            .discard
         }
-      }
-    } yield partyId -> res
+      } ++ Set(owningParticipantAuthorization)
+    } yield party -> res
 
     // For performance reasons, we delay synchronization until here
     Await.result(
@@ -573,15 +621,44 @@ object PartiesAllocator {
         String,
         Map[PhysicalSynchronizerId, (PositiveInt, Set[(ParticipantId, ParticipantPermission)])],
       ],
-  )(implicit executionContext: ExecutionContext): Seq[PartyId] =
+  )(implicit
+      executionContext: ExecutionContext,
+      env: TestEnvironment,
+      partyKind: PartyKind,
+  ): Seq[Party] =
     new PartiesAllocator(participants)(
       newParties,
       targetTopology.view
         .mapValues(
           _.view
-            // TODO(i29008): Support onboarding of external parties by setting SigningKeysWithThreshold
             .mapValues { case (threshold, hosting) =>
-              (threshold, hosting, Option.empty[SigningKeysWithThreshold])
+              partyKind match {
+                case PartyKind.Local =>
+                  (threshold, hosting, Option.empty[SigningKeysWithThreshold])
+                case _: PartyKind.External =>
+                  val signinKey = Await
+                    .result(
+                      env.tryGlobalCrypto
+                        .generateSigningKey(usage =
+                          NonEmpty.mk(Set, SigningKeyUsage.Namespace, SigningKeyUsage.Protocol)
+                        )(TraceContext.empty)
+                        .value
+                        .failOnShutdownToAbortException(
+                          "Generating signing key for external party"
+                        ),
+                      ConsoleCommandTimeout.defaultBoundedTimeout.asFiniteApproximation,
+                    )
+                    .valueOr { err =>
+                      throw new RuntimeException(
+                        s"Failed to generate signing key for test party: $err"
+                      )
+                    }
+                  (
+                    threshold,
+                    hosting,
+                    Some(SigningKeysWithThreshold(NonEmpty.mk(Set, signinKey), PositiveInt.one)),
+                  )
+              }
             }
             .mapValues((PartyHostingState.apply _).tupled)
             .toMap

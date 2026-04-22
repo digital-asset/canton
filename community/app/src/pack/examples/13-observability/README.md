@@ -14,8 +14,12 @@ in the official documentation.
   * Copy [`Dockerfile`](canton/Dockerfile) there.
   * `docker build . -t canton-community:latest` (or anything matching your [.env](.env)'s `CANTON_IMAGE`).
 * A matching ledger API test tool ("LAPITT"):
-  * Build it with `sbt ledger-test-tool-2-dev/assembly`.
-  * Copy it as `lapitt.jar` here from `enterprise/ledger-test-tool/tool/lf-v2.dev/target/scala-2.13/ledger-api-test-tool-2.dev-3.?.0-SNAPSHOT.jar`
+  * From the **repository root**, build it with `sbt ledger-test-tool-2-1/assembly`.
+  * Copy it as `lapitt.jar` into the release pack folder you are working from (created by `sbt packRelease`):
+    ```sh
+    cp community/ledger-test-tool/tool/lf-v2.1/target/scala-2.13/ledger-api-test-tool-2.1-*.jar \
+       community/app/target/release/canton-open-source-*/examples/13-observability/lapitt.jar
+    ```
 
 ⚠️ **Docker compose V1 is deprecated and incompatible with this project**, check [Docker documentation](https://docs.docker.com/compose/migrate/).
 One sign you are using the wrong version is the command syntax with a dash instead of a space:
@@ -25,16 +29,25 @@ One sign you are using the wrong version is the command syntax with a dash inste
 
 To quickly get up and running, **make sure you have all the prerequisites installed** and then:
 
-* Ensure you have enough CPU/RAM/disk to run this project; if resource limits are reached, a container can be killed.
-Canton can use over 4GB of RAM for example.
-* Start everything: `docker compose up`
+* Ensure you have enough CPU/RAM/disk to run this project. **Docker Desktop must be configured with at least 12 GiB of memory** (Settings → Resources → Memory). The full stack allocates ~6 GiB to the main Canton node, ~2 GiB each to sequencer4 and sequencer5, plus memory for PostgreSQL, Prometheus, Grafana, Loki and Promtail. If a container is OOM-killed (exit code 137), increase Docker Desktop's memory limit.
+* Start everything: `docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml up`
+  (or simply `make up` if you have `make` installed)
 * Create workload: there are various scripts that generate load, run them in different terminals:
-  * `scripts/generate-load.sh` (generates gRPC traffic to the Ledger API running the conformance tests in loop)
+  * `scripts/generate-load.sh` (runs Ledger API conformance tests in a loop; requires `lapitt.jar` : see [Prerequisites](#-prerequisites-))
+
+> ⚠️ **`generate-load.sh` is expected to report some test failures, this is normal.**
+> The purpose of this script is to **generate observable load** on the Canton nodes so that metrics,
+> traces and logs appear in Grafana, Jaeger and Loki. It is not a correctness test suite for this
+> environment. Several Ledger API conformance tests are known to fail here due to inherent
+> limitations of this Docker-based observability setup.
+>
+> None of these affect the observability data visible in Grafana/Jaeger/Loki, which is the actual
+> goal of this example.
 * Log in to the Grafana at [http://localhost:3000/](http://localhost:3000/) using the default
 user and password `digitalasset`. After you open any dashboard, you can lower the time range to 5 minutes and
 refresh to 10 seconds to see results quickly.
 * After you stop, you must [cleanup everything](#cleanup-everything) and start fresh next time:
-`docker compose down -v`
+`docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml down --volumes`
 
 The "BFT ordering" dashboard should look like this:
 
@@ -48,11 +61,18 @@ The "BFT ordering" dashboard should look like this:
 Docker Compose will start the following services:
 
 * PostgreSQL database server
-* All-in-one Canton node (mediator, sequencer and participant)
+* Canton all-in-one node (`canton` container) hosting:
+  * 2 participants (`participant1` on gRPC 10011 / HTTP 10013 / admin 10012, `participant2` on gRPC 10021 / HTTP 10023 / admin 10022)
+  * 2 mediators
+  * 3 BFT sequencers (`sequencer1`, `sequencer2`, `sequencer3`)
+* `sequencer4` : 4th BFT sequencer (separate container)
+* `sequencer5` : 5th BFT sequencer, dormant until [onboarded](#onboarding-sequencer5) (separate container)
+* Jaeger all-in-one (distributed tracing, UI at http://localhost:16686/)
 * Monitoring
-  * Prometheus `2.x`
+  * Prometheus `3.x`
   * Grafana `9.x`
   * Node Exporter
+  * PostgreSQL Exporter
   * Loki + Promtail `2.x`
 
 Prometheus and Loki are [preconfigured as datasources for Grafana](grafana/datasources.yml). You can add other
@@ -64,14 +84,18 @@ services/exporters in the [Docker compose file](docker-compose-observability.yml
 Start everything (blocking command, show all logs):
 
 ```sh
-docker compose up
+docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml up
 ```
+
+Or simply `make up` if you have `make` installed.
 
 Start everything (detached: background, not showing logs)
 
 ```sh
-docker compose up -d
+docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml up -d
 ```
+
+Or simply `make upd`.
 
 If you see the error message `no configuration file provided: not found`
 please check that you are placed at the root of this project.
@@ -162,21 +186,27 @@ sequencer4.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(310
 
 * If you used a blocking `docker compose up`, just cancel via keyboard with `[Ctrl]+[c]`
 
-* If you detached compose: `docker compose down`
+* If you detached compose: `docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml down`
 
 ### Cleanup Everything
 
 Stop everything, remove networks and all Canton, Prometheus & Grafana data stored in volumes:
 
 ```sh
-docker compose down --volumes
+docker compose -f docker-compose-canton.yml -f docker-compose-observability.yml down --volumes
 ```
+
+Or simply `make down`.
 
 ## Important Endpoints to Explore
 
 * Prometheus: http://localhost:9090/
 * Grafana: http://localhost:3000/ (default user and password: `digitalasset`)
-* Participant's Ledger API endpoint: http://localhost:10011/
+* Jaeger: http://localhost:16686/ (distributed tracing)
+* Participant 1 : gRPC Ledger API: `localhost:10011`, HTTP (JSON) Ledger API: http://localhost:10013/v2/parties
+* Participant 2 : gRPC Ledger API: `localhost:10021`, HTTP (JSON) Ledger API: http://localhost:10023/v2/parties
+
+> **Note:** The root URL (`/`) returns a 404 : use a valid API path. For example, [`/v2/version`](http://localhost:10013/v2/version) returns the Canton version and [`/v2/parties`](http://localhost:10013/v2/parties) lists known parties.
 
 Check all exposed services/ports in the different [Docker compose YAML] files:
 * [Canton](docker-compose-canton.yml)
@@ -185,6 +215,7 @@ Check all exposed services/ports in the different [Docker compose YAML] files:
 ### Logs
 
 ```sh
+docker logs daml_observability_canton
 docker logs daml_observability_postgres
 docker logs daml_observability_prometheus
 docker logs daml_observability_grafana
@@ -192,6 +223,7 @@ docker logs daml_observability_grafana
 You can open multiple terminals and follow logs (blocking command) of a specific container:
 
 ```
+docker logs -f daml_observability_canton
 docker logs -f daml_observability_postgres
 docker logs -f daml_observability_prometheus
 docker logs -f daml_observability_grafana
@@ -211,7 +243,7 @@ You can query Prometheus for metrics [using Grafana in the `Explore` section](ht
 
 Reload or restart on changes:
 * Reload:
-  * Signal: `docker exec -it daml_observability_prometheus -- kill -HUP 1`
+  * Signal: `docker exec -it daml_observability_prometheus kill -HUP 1`
   * HTTP: `curl -X POST http://localhost:9090/-/reload`
 * Restart: `docker compose restart prometheus`
 

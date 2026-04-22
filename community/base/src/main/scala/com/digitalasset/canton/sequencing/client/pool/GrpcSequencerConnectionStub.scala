@@ -24,12 +24,18 @@ import com.digitalasset.canton.sequencer.api.v30.{
   SequencerConnectServiceGrpc,
   SequencerServiceGrpc,
 }
+import com.digitalasset.canton.sequencing.client.SequencerConnectClientInterceptor
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  Member,
+  PhysicalSynchronizerId,
+  SequencerId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.Channel
+import io.grpc.{Channel, ClientInterceptors}
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContextExecutor
@@ -39,13 +45,17 @@ import SequencerConnectionStub.SequencerConnectionStubError
 /** Stub to interact with a sequencer, specialized for gRPC transport.
   */
 class GrpcSequencerConnectionStub(
+    member: Member,
     connection: GrpcConnection,
     apiSvcFactory: Channel => ApiInfoServiceStub,
     sequencerConnectSvcFactory: Channel => SequencerConnectServiceStub,
     metricsContext: MetricsContext,
+    loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor
 ) extends SequencerConnectionStub {
+  private val interceptor = new SequencerConnectClientInterceptor(member, loggerFactory)
+
   override def getApiName(
       retryPolicy: GrpcError => Boolean,
       logPolicy: CantonGrpcUtil.GrpcLogPolicy,
@@ -74,11 +84,13 @@ class GrpcSequencerConnectionStub(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, HandshakeResponse] = {
     val handshakeRequest = HandshakeRequest(clientProtocolVersions, minimumProtocolVersion)
+
     for {
       handshakeResponseP <- connection
         .sendRequest(
           requestDescription = "perform handshake",
-          stubFactory = sequencerConnectSvcFactory,
+          stubFactory = channel =>
+            sequencerConnectSvcFactory(ClientInterceptors.intercept(channel, interceptor)),
           retryPolicy = retryPolicy,
           logPolicy = logPolicy,
           metricsContext = metricsContext.withExtraLabels("endpoint" -> "Handshake"),
@@ -161,17 +173,19 @@ class GrpcSequencerConnectionStub(
     } yield synchronizerParameters
 }
 
-class SequencerConnectionStubFactoryImpl(loggerFactory: NamedLoggerFactory)
+class SequencerConnectionStubFactoryImpl(member: Member, loggerFactory: NamedLoggerFactory)
     extends SequencerConnectionStubFactory {
   override def createStub(connection: Connection, metricsContext: MetricsContext)(implicit
       ec: ExecutionContextExecutor
   ): SequencerConnectionStub = connection match {
     case grpcConnection: GrpcConnection =>
       new GrpcSequencerConnectionStub(
+        member,
         grpcConnection,
         ApiInfoServiceGrpc.stub,
         SequencerConnectServiceGrpc.stub,
         metricsContext,
+        loggerFactory,
       )
 
     case _ => throw new IllegalStateException(s"Connection type not supported: $connection")

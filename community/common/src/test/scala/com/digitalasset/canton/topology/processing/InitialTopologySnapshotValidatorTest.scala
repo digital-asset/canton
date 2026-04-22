@@ -53,6 +53,7 @@ abstract class InitialTopologySnapshotValidatorTest
       TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
       staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
       timeouts,
+      futureSupervisor = futureSupervisor,
       loggerFactory,
       cleanupTopologySnapshot = true,
     )
@@ -375,6 +376,7 @@ class InitialTopologySnapshotValidatorTestInMemory extends InitialTopologySnapsh
   ): TopologyStore[TopologyStoreId.SynchronizerStore] =
     new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(synchronizerId),
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory.appendUnnamedKey("testName", testName),
       timeouts,

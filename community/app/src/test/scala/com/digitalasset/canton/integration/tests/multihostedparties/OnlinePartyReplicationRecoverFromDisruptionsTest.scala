@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
-import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
@@ -336,13 +335,11 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
   }
 }
 
-@RollbackTest
 class OnlinePartyReplicationRecoverFromDisruptionsTestH2
     extends OnlinePartyReplicationRecoverFromDisruptionsTest {
   registerPlugin(new UseH2(loggerFactory))
 }
 
-@RollbackTest
 class OnlinePartyReplicationRecoverFromDisruptionsTestPostgres
     extends OnlinePartyReplicationRecoverFromDisruptionsTest {
   registerPlugin(new UsePostgres(loggerFactory))

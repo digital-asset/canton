@@ -168,6 +168,8 @@ sealed trait DisseminationStatus extends Product with Serializable with PrettyPr
   def ackOf(nodeId: BftNodeId): Option[AvailabilityAck] =
     DisseminationStatus.ackOf(nodeId, acks)
 
+  def needsSigning: Boolean
+
   def toEither: Either[InProgress, Complete] = this match {
     case ip: InProgress => Left(ip)
     case c: Complete => Right(c)
@@ -227,11 +229,11 @@ object DisseminationStatus {
     override lazy val sendBatchTo: Set[BftNodeId] =
       computeSendTo(membership, acks, batchSentTo, previousAcks.getOrElse(acks))
 
+    override lazy val needsSigning: Boolean =
+      this.ackOf(membership.myId).isEmpty
+
     override def resetRegressions(): InProgress =
       copy(regressionsToSigning = 0, disseminationRegressions = 0)
-
-    def needsSigning: Boolean =
-      this.ackOf(membership.myId).isEmpty
   }
 
   /** A complete dissemination.
@@ -263,6 +265,8 @@ object DisseminationStatus {
         recipients
       else
         Set.empty
+
+    override val needsSigning: Boolean = false
 
     override def tracedBatchId: Traced[BatchId] = tracedProofOfAvailability.map(_.batchId)
 

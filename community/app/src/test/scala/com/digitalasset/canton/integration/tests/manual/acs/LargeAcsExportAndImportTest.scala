@@ -235,8 +235,7 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
       .of_party(bank, limit = PositiveInt.MaxValue)
       .size shouldBe testSet.acsSize.value
     participant2.ledger_api.state.acs
-      .of_all(limit = PositiveInt.MaxValue)
-      .size shouldBe testSet.acsSize.value
+      .count() shouldBe testSet.acsSize.value
   }
 }
 

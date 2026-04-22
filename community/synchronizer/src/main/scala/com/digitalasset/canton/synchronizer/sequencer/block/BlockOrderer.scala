@@ -26,13 +26,16 @@ import BlockSequencerFactory.OrderingTimeFixMode
 
 /** The interface to the ordering functionality for a block sequencer.
   *
-  * It is not BFT-specific, but an implementation may be Byzantine Fault tolerant with respect to
+  * It is not BFT-specific, but an implementation may be Byzantine Fault Tolerant with respect to
   * the ordering functionality.
   *
-  * BFT reads and writes require, however client cooperation: if `f` is the maximum number of
+  * BFT reads and writes require, however, client cooperation: if `f` is the maximum number of
   * tolerated faulty sequencer nodes, then a BFT read requires reading `f+1` streams and BFT writes
   * require either writing to `f+1` sequencers or writing to a single sequencer and be prepared to
   * retry on another sequencer if a BFT read for the corresponding event fails.
+  *
+  * An implementation must not rely on its output being final, as reordering and timestamp changes
+  * are possible post-ordering.
   */
 trait BlockOrderer extends AutoCloseable {
 

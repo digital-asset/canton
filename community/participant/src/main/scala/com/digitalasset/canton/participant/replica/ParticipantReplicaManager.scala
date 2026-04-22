@@ -89,7 +89,9 @@ class ParticipantReplicaManager(
           // Reconnect to the synchronizers to start processing
           _ <- connectSynchronizers(participantServices.cantonSyncService)
 
+          // Run asynchronously
           _ = participantServices.cantonSyncService.attemptPendingLsuOperations()
+          _ = participantServices.cantonSyncService.setLsuStatusMetrics()
 
           _ = logger.info("Participant replica is becoming active: Synchronizers reconnected")
           // Start the schedulers, pruning scheduler depends on the Ledger API server

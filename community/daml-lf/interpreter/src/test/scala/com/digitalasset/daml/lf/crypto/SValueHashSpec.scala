@@ -106,7 +106,7 @@ class SValueHashSpec
 
   /** The expected hash of [[complexRecord]] for the key hasher */
   private val expectedComplexRecordKeyHash =
-    "115251e29818e522e262fcaa70a1ca3c92c3102697b6661d0138bf5841ae1adb"
+    "71c28060678dcc5b193f248769672af758205c0520b12d69c680edbc9d5d0ea6"
 
   /** A list of values whose expected hashes are recorded in expected-stability-values-contract-hashes.txt and
     * expected-stability-values-key-hashes.txt

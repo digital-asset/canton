@@ -70,6 +70,7 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  UpdateServiceConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -495,7 +496,7 @@ final case class CantonConfig(
         commandProgressTracking = participantParameters.commandProgressTracker,
         alphaOnlinePartyReplicationSupport =
           participantParameters.alphaOnlinePartyReplicationSupport,
-        automaticallyPerformLsu = participantParameters.automaticallyPerformLsu,
+        lsuConfig = participantParameters.lsu,
         reassignmentsConfig = participantParameters.reassignmentsConfig,
         doNotAwaitOnCheckingIncomingCommitments =
           participantParameters.doNotAwaitOnCheckingIncomingCommitments,
@@ -694,7 +695,7 @@ private[canton] object CantonNodeParameterConverter {
       exitOnFatalFailures = parent.parameters.exitOnFatalFailures,
       watchdog = node.parameters.watchdog,
       startupMemoryCheckConfig = parent.parameters.startupMemoryCheckConfig,
-      dispatchQueueBackpressureLimit = node.topology.dispatchQueueBackpressureLimit,
+      topologyConfig = node.topology,
       sanitizePublicErrorMessages = parent.monitoring.sanitizePublicErrorMessages,
     )
 
@@ -796,8 +797,8 @@ object CantonConfig {
       lazy implicit final val cryptoProviderReader: ConfigReader[CryptoProvider] =
         deriveEnumerationReader[CryptoProvider]
 
-      implicit val kmsBackoffConfigReader: ConfigReader[KmsConfig.ExponentialBackoffConfig] =
-        deriveReader[KmsConfig.ExponentialBackoffConfig]
+      implicit val kmsBackoffConfigReader: ConfigReader[ExponentialBackoffConfig] =
+        deriveReader[ExponentialBackoffConfig]
       implicit val kmsRetryConfigReader: ConfigReader[KmsConfig.RetryConfig] =
         deriveReader[KmsConfig.RetryConfig]
 
@@ -1016,6 +1017,9 @@ object CantonConfig {
     }
     lazy implicit final val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
+
+    lazy implicit final val updateServiceConfigReader: ConfigReader[UpdateServiceConfig] =
+      deriveReader[UpdateServiceConfig]
 
     lazy implicit final val stateServiceConfigReader: ConfigReader[StateServiceConfig] =
       deriveReader[StateServiceConfig]
@@ -1437,6 +1441,16 @@ object CantonConfig {
               to = Seq("automatically-perform-lsu"),
             ),
             DeprecatedConfigUtils.MovedConfigPath(
+              "automatically-perform-lsu",
+              since = "3.6.0",
+              to = Seq("lsu.automatically-perform-lsu"),
+            ),
+            DeprecatedConfigUtils.MovedConfigPath(
+              "automatically-perform-logical-synchronizer-upgrade",
+              since = "3.6.0",
+              to = Seq("lsu.automatically-perform-lsu"),
+            ),
+            DeprecatedConfigUtils.MovedConfigPath(
               "unsafe-online-party-replication",
               since = "3.5.0",
               to = Seq("alpha-online-party-replication-support"),
@@ -1503,6 +1517,7 @@ object CantonConfig {
         deriveReader[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig]
+      implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig]
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val timeTrackerConfigReader: ConfigReader[SynchronizerTimeTrackerConfig] = {
@@ -1662,8 +1677,8 @@ object CantonConfig {
       implicit val cryptoProviderWriter: ConfigWriter[CryptoProvider] =
         deriveEnumerationWriter[CryptoProvider]
 
-      implicit val kmsBackoffConfigWriter: ConfigWriter[KmsConfig.ExponentialBackoffConfig] =
-        deriveWriter[KmsConfig.ExponentialBackoffConfig]
+      implicit val kmsBackoffConfigWriter: ConfigWriter[ExponentialBackoffConfig] =
+        deriveWriter[ExponentialBackoffConfig]
       implicit val kmsRetryConfigWriter: ConfigWriter[KmsConfig.RetryConfig] =
         deriveWriter[KmsConfig.RetryConfig]
 
@@ -1862,6 +1877,8 @@ object CantonConfig {
     }
     lazy implicit final val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
       deriveWriter[RateLimitingConfig]
+    lazy implicit final val updateServiceConfigWriter: ConfigWriter[UpdateServiceConfig] =
+      deriveWriter[UpdateServiceConfig]
     lazy implicit final val stateServiceConfigWriter: ConfigWriter[StateServiceConfig] =
       deriveWriter[StateServiceConfig]
     lazy implicit final val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] = {
@@ -2214,6 +2231,7 @@ object CantonConfig {
         deriveWriter[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsConfigWriter: ConfigWriter[ReassignmentsConfig] =
         deriveWriter[ReassignmentsConfig]
+      implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }
     lazy implicit final val timeTrackerConfigWriter: ConfigWriter[SynchronizerTimeTrackerConfig] = {

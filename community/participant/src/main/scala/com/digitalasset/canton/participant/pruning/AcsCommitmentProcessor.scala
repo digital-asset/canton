@@ -438,7 +438,14 @@ class AcsCommitmentProcessor private (
   private def initRunningCommitments(): FutureUnlessShutdown[Unit] =
     runningCommitmentsAsync.map { rc =>
       runningCommitments = rc
-      lastCheckpointTs = rc.watermark.timestamp
+      // The checkpointing logic and in particular `collapseAndPublishAcsChanges` relies on checkpoints happening
+      // at fixed intervals anchored at epoch. However, the running snapshot watermark merely persists the last timestamp
+      // when an ACS change was processed, rather than the checkpoint. Accordingly, upon initialization, we do not
+      // know the exact timestamp at which the checkpoint was created. Moreover, the checkpointing interval
+      // might have been reconfigured since the last checkpoint has been computed. Therefore,
+      // we simply round down to the nearest checkpoint prior to the watermark. This way, the checkpointing
+      // logic will persist the next checkpoint at the first checkpoint interval end after the watermark.
+      lastCheckpointTs = checkpointBefore(rc.watermark.timestamp)
     }
 
   private def processBufferedAtInit(
@@ -1134,15 +1141,7 @@ class AcsCommitmentProcessor private (
               commitmentCheckpointInterval.duration.toSeconds
             )
           ) {
-            // round down to nearest multiple of commitmentCheckpointInterval
-            val checkpointTs = CantonTimestamp.ofEpochSecond(
-              Math.multiplyExact(
-                // division can't overflow because the divisor is positive by construction of PositiveDurationSeconds
-                // also the divisor is guaranteed to be > 0 by construction of PositiveDurationSeconds
-                toc.timestamp.getEpochSecond / commitmentCheckpointInterval.duration.toSeconds,
-                commitmentCheckpointInterval.duration.toSeconds,
-              )
-            )
+            val checkpointTs = checkpointBefore(toc.timestamp)
             // snapshot still needs to run on the publish queue, so it needs to be taken here, not lower
             val snapshot = runningCommitments.snapshot()
             val res = checkpointQueue.executeUS(
@@ -1268,6 +1267,17 @@ class AcsCommitmentProcessor private (
       logPassiveInstanceAtInfo = true,
     )
   }
+
+  /** round down to nearest multiple of commitmentCheckpointInterval */
+  private def checkpointBefore(timestamp: CantonTimestamp) =
+    CantonTimestamp.ofEpochSecond(
+      Math.multiplyExact(
+        // division can't overflow because the divisor is positive by construction of PositiveDurationSeconds
+        // also the divisor is guaranteed to be > 0 by construction of PositiveDurationSeconds
+        timestamp.getEpochSecond / commitmentCheckpointInterval.duration.toSeconds,
+        commitmentCheckpointInterval.duration.toSeconds,
+      )
+    )
 
   private def persistRunningCommitments(
       persistenceAtUpdate: PersistRunningCommitmentsAtUpgradeTime

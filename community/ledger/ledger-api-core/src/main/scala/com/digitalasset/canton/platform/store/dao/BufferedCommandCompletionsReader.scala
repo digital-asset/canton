@@ -37,6 +37,7 @@ class BufferedCommandCompletionsReader(
         bufferFilter = filterCompletions(_, parties, userId),
         toApiResponse = (response: CompletionStreamResponse) => Future.successful(response),
         descendingOrder = false,
+        skipPruningChecks = false,
       )
 
   private def filterCompletions(
@@ -88,10 +89,12 @@ object BufferedCommandCompletionsReader {
           endInclusive: Offset,
           descendingOrder: Boolean,
           filter: (UserId, Parties),
+          skipPruningChecks: Boolean,
       )(implicit
           loggingContext: LoggingContextWithTrace
       ): Source[(Offset, CompletionStreamResponse), NotUsed] = {
         require(!descendingOrder, s"This flow cannot use descending order")
+        require(!skipPruningChecks, s"This flow cannot use skipping pruning checks")
         val (userId, parties) = filter
         delegate
           .getCommandCompletions(

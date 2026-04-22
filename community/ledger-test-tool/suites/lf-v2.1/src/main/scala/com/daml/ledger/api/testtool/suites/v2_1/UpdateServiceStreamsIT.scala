@@ -6,13 +6,16 @@ package com.daml.ledger.api.testtool.suites.v2_1
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
+import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
 import com.daml.ledger.api.testtool.infrastructure.{
   LedgerTestSuite,
   OngoingStreamPackageUploadTestDar,
   TestConstraints,
 }
-import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.ledger.api.v2.transaction_filter.{TransactionFormat, UpdateFormat}
+import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageRequest}
+import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.ledger.test.java.model.iou.Iou
 import com.daml.ledger.test.java.model.test.{Dummy, DummyFactory}
 import com.daml.ledger.test.java.ongoing_stream_package_upload.ongoingstreampackageuploadtest.OngoingStreamPackageUploadTestTemplate
@@ -379,9 +382,10 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       transactions <- ledger.transactionsByTemplateIdWithVariants(
         Dummy.TEMPLATE_ID,
         Some(Seq(party)),
+        Some("with party filter"),
       )
       transactionsPartyWildcard <- ledger
-        .transactionsByTemplateIdWithVariants(Dummy.TEMPLATE_ID, None)
+        .transactionsByTemplateIdWithVariants(Dummy.TEMPLATE_ID, None, Some("wildcard party"))
     } yield {
       val contract = assertSingleton("FilterByTemplate", transactions.flatMap(createdEvents))
       assertEquals(
@@ -496,6 +500,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       )
       txs <- ledger.transactionsWithVariants(
         transactionShape = LedgerEffects,
+        clue = None,
         parties = owner,
       )
     } yield {
@@ -520,6 +525,7 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
       )
       txs <- ledger.transactionsWithVariants(
         transactionShape = AcsDelta,
+        clue = None,
         parties = owner,
       )
     } yield {
@@ -673,4 +679,562 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     }
   })
 
+  test(
+    "TXFetchFirstPageAsc",
+    "Requesting a first page of should return the page containing the requested number of elements",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      contracts <- MonadUtil.sequentialTraverse(Range(0, 10))(_ =>
+        ledger.create(party, new Dummy(party))
+      )
+      request <- ledger.getUpdatesPageRequest(
+        transactionFormat =
+          ledger.transactionFormat(Some(Seq(party)), transactionShape = LedgerEffects),
+        pageSize = 5,
+      )
+      transactions <- ledger.transactionsSinglePage(request)
+    } yield {
+      assert(
+        transactions.map(_.events.loneElement.getCreated.contractId) == contracts
+          .take(5)
+          .map(
+            _.contractId
+          ),
+        s"Expected contract ids in order ${contracts
+            .take(5)
+            .map(_.contractId)}, got ${transactions.map(_.events.loneElement.getCreated.contractId)}",
+      )
+    }
+  })
+
+  test(
+    "TXPagedFetchDynamicEnd",
+    "Requesting paged updates with dynamic end should return a valid token after reaching an ledger end",
+    allocate(SingleParty),
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      rangeStart <- ledger.currentEnd()
+      dummy1 <- ledger.create(party, new Dummy(party))
+      dummy2 <- ledger.create(party, new Dummy(party))
+      notDummy1 <- ledger.create(
+        party,
+        new Iou(party, party, "USD", java.math.BigDecimal.ONE, Nil.asJava),
+      )
+      ledgerEndAfterNotDummy <- ledger.currentEnd()
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+        transactionShape = LedgerEffects,
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(rangeStart - 1L),
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = false,
+        pageToken = None,
+      )
+      page1 <- ledger.getUpdatesPageRaw(request)
+      _ = assert(page1.nextPageToken.nonEmpty, s"Expected page with next page token, got $page1")
+      emptyPage <- ledger.getUpdatesPageRaw(
+        request.update(_.pageToken := page1.nextPageToken.value)
+      )
+      dummy3 <- ledger.create(party, new Dummy(party))
+      page2 <- ledger.getUpdatesPageRaw(
+        request.update(_.pageToken := emptyPage.nextPageToken.value)
+      )
+    } yield {
+      assert(
+        page1.updates.map(
+          _.update.transaction.value.events.loneElement.getCreated.contractId
+        ) == Seq(dummy1.contractId, dummy2.contractId),
+        s"Expected two first updates ${Seq(dummy1.contractId, dummy2.contractId)}, but got ${page1.updates.map(
+            _.update.transaction.value.events.loneElement.getCreated.contractId
+          )}",
+      )
+      assert(
+        page1.highestPageOffsetInclusive >= ledgerEndAfterNotDummy,
+        s"highestPageOffsetInclusive range end does not cover not-dummy contract id",
+      )
+      assert(
+        page1.highestPageOffsetInclusive == page2.lowestPageOffsetExclusive,
+        "page2 range is not a direct continuation of page1 range",
+      )
+      assert(emptyPage.updates.isEmpty, s"Expected empty page, got ${emptyPage.updates}")
+      assert(
+        page2.nextPageToken.nonEmpty,
+        s"Token at the last page should be non-empty",
+      )
+      assert(
+        page2.updates.loneElement.update.transaction.value.events.loneElement.getCreated.contractId == dummy3.contractId,
+        s"Second non-empty page should contain ${dummy3.contractId} contract, but got ${page2.updates.loneElement.update.transaction.value.events.loneElement.getCreated.contractId}",
+      )
+    }
+  })
+
+  test(
+    "TXPagedFetchDescendingOrderBeyondEnd",
+    "Requesting an updates page with a range range beyond ledger end and descending order should fail",
+    allocate(SingleParty),
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      rangeStart <- ledger.currentEnd()
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(rangeStart - 1L),
+        endOffsetInclusive = Some(rangeStart + 2L), // Beyond the end
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = true,
+        pageToken = None,
+      )
+
+      failure <- ledger
+        .getUpdatesPageRaw(request)
+        .mustFail("Requesting descending page beyond ledger end should fail")
+    } yield {
+      assertGrpcError(
+        failure,
+        RequestValidationErrors.OffsetAfterLedgerEnd,
+        Some("is after ledger end"),
+      )
+    }
+  })
+
+  test(
+    "TXPagedDynamicStartEndAscending",
+    "Requesting update pages in ascending order with dynamic start end end should yield all transactions",
+    allocate(SingleParty),
+    repeated = 10,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      contracts <- MonadUtil
+        .sequentialTraverse(Range(0, 10))(_ => ledger.create(party, new Dummy(party)))
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = false,
+        pageToken = None,
+      )
+      (transactions, token) <- fetchNPages(ledger)(request, 5)
+    } yield {
+      assert(
+        contracts.sizeIs == transactions.length,
+        s"Expected ${contracts.length} transactions, got ${transactions.length}, got ids: ${transactions
+            .map(_.update.transaction.value.events.loneElement.getCreated.contractId)}, wanted: ${contracts
+            .map(_.contractId)}",
+      )
+      assert(
+        transactions.map(
+          _.update.transaction.value.events.loneElement.getCreated.contractId
+        ) == contracts.map(_.contractId),
+        s"Expected ${contracts.reverse
+            .map(_.contractId)} in this order, got ${transactions
+            .map(_.update.transaction.value.events.loneElement.getCreated.contractId)}",
+      )
+      assert(
+        token.nonEmpty,
+        s"Continuation token from the last page should contain page token, but the token was missing",
+      )
+    }
+  })
+
+  test(
+    "TXPagedDynamicStartEndDescending",
+    "Requesting update pages in descending order with dynamic start end end should yield all transactions in descending order",
+    allocate(SingleParty),
+    repeated = 10,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      contracts <- MonadUtil
+        .sequentialTraverse(Range(0, 10))(_ => ledger.create(party, new Dummy(party)))
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = true,
+        pageToken = None,
+      )
+      transactions <- ledger.transactionsAllPages(request, None)
+    } yield {
+      assert(
+        transactions.map(
+          _.update.transaction.value.events.loneElement.getCreated.contractId
+        ) == contracts.reverse.map(_.contractId),
+        s"Expected ${contracts.reverse
+            .map(_.contractId)} in this order, got ${transactions
+            .map(_.update.transaction.value.events.loneElement.getCreated.contractId)}",
+      )
+    }
+  })
+
+  test(
+    "TXPagedDynamicPruningStartEndDescending",
+    "Requesting update pages in descending order with dynamic start end end should yield all transactions until pruning is reached",
+    allocate(SingleParty),
+    repeated = 1,
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      dummy1 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy2 <- ledger.create(party, new Dummy(party))
+      dummy3 <- ledger.create(party, new Dummy(party))
+
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = true,
+        pageToken = None,
+      )
+
+      firstPage <- ledger.getUpdatesPageRaw(request)
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      secondPage <- ledger.getUpdatesPageRaw(
+        request.update(_.pageToken := firstPage.nextPageToken.value)
+      )
+    } yield {
+      assert(
+        secondPage.updates.isEmpty,
+        s"The second page of dynamic bound response should updates should be empty due to pruning, but is ${secondPage.updates}",
+      )
+      assert(
+        secondPage.lowestPageOffsetExclusive == pruningOffset,
+        s"The second page should end at pruning bound $pruningOffset, but was ${secondPage.lowestPageOffsetExclusive} instead",
+      )
+      ()
+    }
+  })
+
+  test(
+    "TXPagedDynamicPruningInJustAfterThePageDescending",
+    "Requesting update pages in descending order with dynamic start end end should yield all transactions until reaching the pruning offset after the last page",
+    allocate(SingleParty),
+    repeated = 1,
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      dummy1 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy2 <- ledger.create(party, new Dummy(party))
+      dummy3 <- ledger.create(party, new Dummy(party))
+      dummy4 <- ledger.create(party, new Dummy(party))
+
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = true,
+        pageToken = None,
+      )
+
+      firstPage <- ledger.getUpdatesPageRaw(request)
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      secondPage <- ledger.getUpdatesPageRaw(
+        request.update(_.pageToken := firstPage.nextPageToken.value)
+      )
+    } yield {
+      compareContractIds(
+        "Second page should contain only one element due to pruning",
+        secondPage.updates,
+        Seq(dummy2),
+      )
+      assert(
+        secondPage.nextPageToken.isEmpty,
+        "The second page should not have a next page token as the contents after it are pruned",
+      )
+      assert(
+        secondPage.lowestPageOffsetExclusive == pruningOffset,
+        s"The second page should end at pruning bound $pruningOffset, but was ${secondPage.lowestPageOffsetExclusive} instead",
+      )
+      ()
+    }
+  })
+
+  test(
+    "TXPagedDynamicPruningStartEndInPageBoundaryDescending",
+    "Requesting update pages in descending order with dynamic start end end should yield all transactions until pruning is reached in page boundary",
+    allocate(SingleParty),
+    repeated = 1,
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      dummy1 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy2 <- ledger.create(party, new Dummy(party))
+      dummy3 <- ledger.create(party, new Dummy(party))
+      dummy4 <- ledger.create(party, new Dummy(party))
+      dummy5 <- ledger.create(party, new Dummy(party))
+
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = true,
+        pageToken = None,
+      )
+
+      firstPage <- ledger.getUpdatesPageRaw(request)
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      secondPage <- ledger.getUpdatesPageRaw(
+        request.update(_.pageToken := firstPage.nextPageToken.value)
+      )
+    } yield {
+      compareContractIds("First page contain two elements", firstPage.updates, Seq(dummy5, dummy4))
+      compareContractIds(
+        "Second page should contain two elements",
+        secondPage.updates,
+        Seq(dummy3, dummy2),
+      )
+      assert(
+        secondPage.nextPageToken.isEmpty,
+        "The second page should not have a next page token as the contents after it are pruned",
+      )
+      assert(
+        secondPage.lowestPageOffsetExclusive == pruningOffset,
+        s"The second page should end at pruning bound $pruningOffset, but was ${secondPage.lowestPageOffsetExclusive} instead",
+      )
+      ()
+    }
+  })
+
+  test(
+    "TXPagedDynamicStartAscendingPruning",
+    "Ascending page update stream should start at pruning offset",
+    allocate(SingleParty),
+    repeated = 1,
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      dummy1 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy2 <- ledger.create(party, new Dummy(party))
+      dummy3 <- ledger.create(party, new Dummy(party))
+      lastOffset <- ledger.currentEnd()
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = Some(lastOffset),
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = false,
+        pageToken = None,
+      )
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      firstPage <- ledger.getUpdatesPageRaw(request)
+    } yield {
+      compareContractIds("First page contains two elements", firstPage.updates, Seq(dummy2, dummy3))
+      assert(
+        firstPage.nextPageToken.isEmpty,
+        "There should not be a next page",
+      )
+      assert(
+        firstPage.lowestPageOffsetExclusive == pruningOffset,
+        s"The second page should end at pruning bound $pruningOffset, but was ${firstPage.lowestPageOffsetExclusive} instead",
+      )
+      ()
+    }
+  })
+
+  test(
+    "TXPagedAscendingPruningCatchesUp",
+    "Ascending page fetch should fail if pruning catches it",
+    allocate(SingleParty),
+    repeated = 1,
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      dummy1 <- ledger.create(party, new Dummy(party))
+      dummy2 <- ledger.create(party, new Dummy(party))
+      dummy3 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy4 <- ledger.create(party, new Dummy(party))
+      lastOffset <- ledger.currentEnd()
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = false,
+        pageToken = None,
+      )
+      firstPage <- ledger.getUpdatesPageRaw(request)
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      err <- ledger
+        .getUpdatesPageRaw(request.update(_.pageToken := firstPage.getNextPageToken))
+        .mustFail(
+          s"Second page fetch should fail as it interferes with pruning, first page contents: ${firstPage.updates}"
+        )
+    } yield {
+      compareContractIds("First page contains two elements", firstPage.updates, Seq(dummy1, dummy2))
+      assertGrpcError(
+        err,
+        RequestValidationErrors.ParticipantPrunedDataAccessed,
+        Some("precedes pruned offset"),
+      )
+    }
+  })
+
+  private def fetchNPages(ledger: ParticipantTestContext)(
+      request: GetUpdatesPageRequest,
+      count: Int,
+      transactions: Seq[GetUpdateResponse] = Seq(),
+  )(implicit ec: ExecutionContext): Future[(Seq[GetUpdateResponse], Option[ByteString])] =
+    ledger.getUpdatesPageRaw(request).flatMap { response =>
+      val remainingPages = count - 1
+      response.nextPageToken match {
+        case token if remainingPages == 0 =>
+          Future.successful((transactions ++ response.updates, token))
+        case None if remainingPages > 0 =>
+          Future.failed(
+            new AssertionError(s"Expected $remainingPages more pages, but got no next page token")
+          )
+        case Some(token) =>
+          fetchNPages(ledger)(
+            request.update(_.pageToken := token),
+            remainingPages,
+            transactions ++ response.updates,
+          )
+        case _ => Future.failed(new IllegalArgumentException("remaining pages is negative"))
+      }
+    }
+
+  private def compareContractIds(
+      clue: String,
+      updates: Seq[GetUpdateResponse],
+      expectedIds: Seq[ContractId[?]],
+  ): Unit =
+    assert(
+      updates.map(
+        _.update.transaction.value.events.loneElement.getCreated.contractId
+      ) == expectedIds.map(_.contractId),
+      s"$clue, Expected: ${expectedIds.map(_.contractId)}, got ${updates
+          .map(_.update.transaction.value.events.loneElement.getCreated.contractId)}",
+    )
 }

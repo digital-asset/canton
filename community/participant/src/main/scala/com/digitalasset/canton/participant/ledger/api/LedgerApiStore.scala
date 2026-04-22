@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.ledger.api
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.concurrent.{ExecutionContextIdlenessExecutorService, Threading}
 import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
@@ -21,6 +22,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   SynchronizerOffset,
 }
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterningView
@@ -33,7 +35,8 @@ import com.digitalasset.canton.{LedgerParticipantId, config}
 import com.google.common.annotations.VisibleForTesting
 
 import java.sql.Connection
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 class LedgerApiStore(
     val ledgerApiDbSupport: DbSupport,
@@ -90,6 +93,26 @@ class LedgerApiStore(
     executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingMoveLedgerEndBackToScratch"))(
       integrityStorageBackend.moveLedgerEndBackToScratch()
     )
+
+  @VisibleForTesting
+  def lockPruning(
+      releaseLock: Promise[Unit],
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
+    val locked = Promise[Unit]()
+    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingLockPruning")) {
+      QueryStrategy.withoutNetworkTimeout { connection =>
+        eventStorageBackend.lockExclusivelyPruningProcessingTable(connection)
+        locked.trySuccess(()).discard
+        Threading.sleep(1000)
+        Await.result(releaseLock.future, timeout)
+      }(_, noTracingLogger)
+    }
+    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
+  }
 
   @VisibleForTesting
   def numberOfAcceptedTransactionsFor(synchronizerId: SynchronizerId)(implicit

@@ -16,8 +16,6 @@ trait AllProtocolContinuityConformanceTest extends ProtocolContinuityConformance
   lazy val testedReleases =
     ProtocolContinuityConformanceTest.previousSupportedReleases(logger)
 
-  override lazy val ledgerApiTestToolVersions = testedReleases.map(_.releaseVersion.toString)
-
   protected val numShards: Int = 6
   protected def shard: Int
 }

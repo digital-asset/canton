@@ -1,12 +1,12 @@
 openapi: 3.0.3
 info:
   title: JSON Ledger API HTTP endpoints
-  version: 3.5.0-SNAPSHOT
+  version: 3.5.1-SNAPSHOT
   description: |-
     This specification version fixes the API inconsistencies where certain fields marked as required in the spec are in fact optional.
     If you use code generation tool based on this file, you might need to adjust the existing application code to handle those fields as optional.
     If you do not want to change your client code, continue using the OpenAPI specification for the latest Canton 3.4 patch release.
-    MINIMUM_CANTON_VERSION=3.5.0
+    MINIMUM_CANTON_VERSION=3.5.1
 paths:
   /v2/commands/submit-and-wait:
     post:
@@ -1612,6 +1612,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
       deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/updates/get-updates-page:
+    post:
+      description: |-
+        Read a page of ledger's filtered updates. It returns the event types in accordance with
+        the specified contents and filters.
+        Additionally, the selection criteria for individual events depends on the transaction shape chosen.
+
+        - ACS delta: an event is included only if the requesting party is a stakeholder.
+        - ledger effects: an event is included if the requesting party is a witness.
+      operationId: postV2UpdatesGet-updates-page
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetUpdatesPageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsGetUpdatesPageResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -4738,6 +4776,66 @@ components:
             The format for the update.
 
             Required
+    GetUpdatesPageRequest:
+      title: GetUpdatesPageRequest
+      type: object
+      required:
+      - updateFormat
+      properties:
+        beginOffsetExclusive:
+          description: |-
+            Exclusive lower bound offset of the requested ledger section (non-negative integer).
+            The response page will only contain updates whose offset is strictly greater than this.
+            If set to zero or not defined, the lower bound is set to the actual pruning offset or to the beginning of the
+            ledger if the participant was not pruned yet.
+            If set to positive and the ledger has been pruned, this parameter must be greater or equal than the pruning offset.
+
+            Optional
+          type: integer
+          format: int64
+        endOffsetInclusive:
+          description: |-
+            Inclusive upper bound offset of the requested ledger section.
+            If specified the response will only contain updates whose offset is less than or equal to this.
+            If not specified response will only contain updates whose offset is less than the current ledger-end.
+
+            Optional
+          type: integer
+          format: int64
+        maxPageSize:
+          description: |-
+            The result page will contain the first max_page_size Updates of all matching updates.
+            The server may reject queries with max_page_size above server specified limits.
+            If not specified, the default max_page_size is determined by the server.
+
+            Optional
+          type: integer
+          format: int32
+        updateFormat:
+          $ref: '#/components/schemas/UpdateFormat'
+          description: Required
+        descendingOrder:
+          description: |-
+            If set, the page will populate the elements in descending order starting from the end_offset_inclusive.
+
+             Optional
+          type: boolean
+        pageToken:
+          description: |-
+            To get the next page of updates, the ``page_token`` should be set to the
+            ``next_page_token`` of the last ``GetUpdatesPageResponse``.
+            To achieve correct paging: subsequent requests must
+
+            - be executed on the same participant with the same version of canton,
+            - have the same begin_offset_exclusive,
+            - have the same end_offset_inclusive,
+            - have the same update_format and
+            - have the same descending_order.
+
+            If not specified, the first page of updates will be returned.
+
+            Optional: can be empty
+          type: string
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
@@ -5669,6 +5767,46 @@ components:
       properties:
         update:
           $ref: '#/components/schemas/Update1'
+    JsGetUpdatesPageResponse:
+      title: JsGetUpdatesPageResponse
+      type: object
+      required:
+      - lowestPageOffsetExclusive
+      - highestPageOffsetInclusive
+      properties:
+        updates:
+          description: |-
+            The first max_page_size updates that match the filter in the request.
+            In case descending_order was selected, the order of the updates is in reversed offset order.
+
+            Optional: can be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/JsGetUpdateResponse'
+        lowestPageOffsetExclusive:
+          description: |-
+            Represents the lower bound of this page.
+
+            Required
+          type: integer
+          format: int64
+        highestPageOffsetInclusive:
+          description: |-
+            Represents the upper bound of the page.
+
+            Required
+          type: integer
+          format: int64
+        nextPageToken:
+          description: |-
+            If the value is not populated, this is the last page.
+            If the value is populated, this token can be used to get the next page.
+            If the original ``GetFirstUpdatePageRequest`` end_offset_inclusive was not specified and the request uses
+            ascending order, then this token will always be populated, so you can use it to "tail" the ledger by
+            repeatedly polling with the new page token returned.
+
+            Optional: can be empty
+          type: string
     JsGetUpdatesResponse:
       title: JsGetUpdatesResponse
       type: object

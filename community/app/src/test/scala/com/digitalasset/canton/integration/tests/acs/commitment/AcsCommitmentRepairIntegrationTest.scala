@@ -41,7 +41,6 @@ import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
 
@@ -51,7 +50,6 @@ trait AcsCommitmentRepairIntegrationTest
     with SortedReconciliationIntervalsHelpers
     with CommitmentTestUtil {
 
-  private val iouContract = new AtomicReference[Iou.Contract]
   private val interval: JDuration = JDuration.ofSeconds(5)
   private implicit val intervalDuration: IntervalDuration = IntervalDuration(interval)
 
@@ -121,7 +119,6 @@ trait AcsCommitmentRepairIntegrationTest
       (1 to nContracts.value).map(_ =>
         deployOnTwoParticipantsAndCheckContract(
           synchronizerId,
-          iouContract,
           participant1,
           participant2,
         )

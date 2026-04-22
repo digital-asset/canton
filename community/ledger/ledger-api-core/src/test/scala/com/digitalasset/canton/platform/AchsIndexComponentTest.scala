@@ -4,8 +4,6 @@
 package com.digitalasset.canton.platform
 
 import anorm.SqlParser.long
-import anorm.~
-import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.AcsRangeInfo
@@ -23,7 +21,6 @@ import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.flatspec.AnyFlatSpec
 import org.slf4j.event.Level
 
-import java.sql.Connection
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
@@ -42,24 +39,6 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
   override protected val indexerConfig: IndexerConfig = IndexerConfig(
     achsConfig = Some(achsConfig)
   )
-
-  private val testDbMetrics = DatabaseMetrics.ForTesting("achs-index-component-test")
-
-  /** Executes a sql query through the indexer's dbSupport connection pool (pool size 1 for H2).
-    * This avoids creating a separate H2 connection that could see inconsistent data due to H2's
-    * synchronization bug. See DbType.H2Database and JdbcIndexer for more.
-    */
-  private def withConnection[T](f: Connection => T): T =
-    dbSupport.dbDispatcher
-      .executeSql(testDbMetrics)(f)
-      .futureValue
-
-  private def getLastEventSeqId: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT ledger_end_sequential_id FROM lapi_parameters"
-        .as(long("ledger_end_sequential_id").?.single)
-        .getOrElse(0L)
-    }
 
   private val recordTimeRef = new AtomicReference(CantonTimestamp.now())
   private val nextRecordTime: () => CantonTimestamp =
@@ -826,32 +805,10 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
       achsIds shouldBe activeIds
     }
 
-  private def getAchsSize: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT COUNT(DISTINCT event_sequential_id) AS count FROM lapi_filter_achs_stakeholder"
-        .as(long("count").single)
-    }
-
   private def getAchsValidAt: Long =
     withConnection { implicit connection =>
       SQL"SELECT valid_at FROM lapi_achs_state"
         .as(long("valid_at").single)
-    }
-
-  private def getAchsState: (Long, Long, Long) =
-    withConnection { implicit connection =>
-      SQL"SELECT valid_at, last_populated, last_removed FROM lapi_achs_state"
-        .as((long("valid_at") ~ long("last_populated") ~ long("last_removed")).single)(
-          connection
-        ) match {
-        case v ~ lp ~ lr => (v, lp, lr)
-      }
-    }
-
-  private def getAchsStateRowCount: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT COUNT(*) AS count FROM lapi_achs_state"
-        .as(long("count").single)
     }
 
   private def getAchsEventSeqIds: List[Long] =

@@ -7,6 +7,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable
 import com.digitalasset.canton.sequencing.client.pool.Connection.{ConnectionError, ConnectionState}
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionStub.SequencerConnectionStubError
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import io.grpc.Status
 import org.scalatest.wordspec.AnyWordSpec
@@ -19,7 +20,8 @@ class GrpcConnectionTest
     with ConnectionPoolTestHelpers {
 
   "Connection" should {
-    lazy val stubFactory = new SequencerConnectionStubFactoryImpl(loggerFactory)
+    lazy val stubFactory =
+      new SequencerConnectionStubFactoryImpl(DefaultTestIdentities.participant1, loggerFactory)
 
     "notify on state changes" in {
       withLowLevelConnection() { (connection, listener) =>

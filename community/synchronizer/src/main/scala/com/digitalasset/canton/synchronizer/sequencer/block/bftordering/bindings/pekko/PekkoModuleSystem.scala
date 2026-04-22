@@ -27,6 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
+import com.typesafe.config.ConfigFactory
 import org.apache.pekko.actor.typed.*
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.{BootstrapSetup, Cancellable}
@@ -605,10 +606,12 @@ object PekkoModuleSystem {
             }
           }
           .onFailure(SupervisorStrategy.stop)
+      val config = ConfigFactory.load() // Ensure config is loaded in this thread's classloader
       ActorSystem(
         systemBehavior,
         name,
-        bootstrapSetup = BootstrapSetup().withDefaultExecutionContext(executionContext),
+        bootstrapSetup =
+          BootstrapSetup().withDefaultExecutionContext(executionContext).withConfig(config),
       )
     }
     // The code within Behaviors.setup will be run as soon as the ActorSystem is created, so

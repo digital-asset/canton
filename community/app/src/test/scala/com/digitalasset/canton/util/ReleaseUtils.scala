@@ -5,11 +5,11 @@ package com.digitalasset.canton.util
 
 import better.files.File
 import cats.data.NonEmptyList
-import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.integration.plugins.LAPITTRelease
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.version.{
   ProtocolVersion,
@@ -25,6 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
 object ReleaseUtils {
   final case class TestedRelease(
+      ledgerApiTestTool: LAPITTRelease,
       releaseVersion: ReleaseVersion,
       protocolVersions: NonEmpty[List[ProtocolVersion]],
   )
@@ -37,8 +38,8 @@ object ReleaseUtils {
     *   - Returns [(2.7.9, [3]), (2.7.9, [4]), (2.7.9, [5]), (2.9.0, [5]), (2.9.0, [6])]
     */
   def zipReleasesWithProtocolVersions(releases: List[TestedRelease]): List[TestedRelease] =
-    releases.flatMap { case TestedRelease(v, ps) =>
-      ps.map(e => TestedRelease(v, NonEmpty.mk(List, e)))
+    releases.flatMap { release =>
+      release.protocolVersions.map(e => release.copy(protocolVersions = NonEmpty.mk(List, e)))
     }
 
   /** Given a list of `E` and a number of shards `n` returns a new list with exactly `n` sub-lists
@@ -65,58 +66,23 @@ object ReleaseUtils {
     sharded.toList
   }
 
-  private lazy val previousStableReleases: List[TestedRelease] =
+  // All previous stable releases minus releases that support only deleted protocol versions
+  lazy val previousSupportedStableReleases: List[ReleaseVersion] =
     File("release-notes/")
       .list(file => file.name.startsWith(ReleaseVersion.current.major.toString))
       .map(_.name.replace(".md", ""))
       .map(ReleaseVersion.tryCreate)
-      .collect {
-        case releaseVersion if releaseVersion.isStable =>
-          TestedRelease(
-            releaseVersion,
-            ProtocolVersionCompatibility.supportedProtocols(
-              includeAlphaVersions = false,
-              includeBetaVersions = true,
-              release = releaseVersion,
-            ),
+      .filter { releaseVersion =>
+        val protocolVersions =
+          ProtocolVersionCompatibility.supportedProtocols(
+            includeAlphaVersions = false,
+            includeBetaVersions = true,
+            release = releaseVersion,
           )
+        releaseVersion.isStable && protocolVersions.exists(pv => !pv.isDeleted)
       }
       .toList
-      .sortBy(_.releaseVersion)
-
-  // All previous stable releases minus releases that support only deleted protocol versions
-  lazy val previousSupportedStableReleases: List[TestedRelease] =
-    previousStableReleases.mapFilter { case TestedRelease(releaseVersion, protocolVersions) =>
-      NonEmpty
-        .from(protocolVersions.filterNot(_.isDeleted))
-        .map(TestedRelease(releaseVersion, _))
-    }
-
-  private def reduceToLatestSupportedStablesReleases(releases: List[TestedRelease]) =
-    releases.sortBy(_.releaseVersion).foldLeft(List.empty[TestedRelease]) {
-      case (one :: rest, item)
-          // keep the latest of each patch version
-          if (one.releaseVersion.majorMinorMatches(item.releaseVersion)) =>
-        item :: rest
-      case (acc, item) => item :: acc
-    }
-
-  /** Returns release versions for the latest patch and minor version together with their list of
-    * supported protocol versions for a given range of release versions.
-    *
-    * Example:
-    *   - Latest stable releases for 2.7 and 2.8 are 2.7.9 and 2.8.3
-    *   - Given a range from 2.7.0 to 2.9.0 this function returns the list [(2.7.9, [3, 4, 5]),
-    *     (2.8.3, [3, 4, 5])
-    */
-  def latestSupportedStableReleasesInRange(
-      fromInclusive: ReleaseVersion,
-      toExclusive: ReleaseVersion,
-  ): List[TestedRelease] =
-    reduceToLatestSupportedStablesReleases(previousStableReleases.filter {
-      case TestedRelease(releaseVersion, _) =>
-        releaseVersion >= fromInclusive && releaseVersion < toExclusive
-    })
+      .sorted
 
   /** The first time we attempt to get a release, a future is inserted into the map. This allows to
     * synchronize between different requests for the same release.

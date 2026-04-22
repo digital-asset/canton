@@ -57,6 +57,9 @@ package object logging {
   private[services] def startExclusive(offset: Option[Offset]): LoggingEntry =
     "startExclusive" -> offset.fold(0L)(_.unwrap)
 
+  private[services] def startExclusiveOpt(offset: Option[Option[Offset]]): LoggingEntry =
+    "startExclusiveOpt" -> offset.map(_.fold(0L)(_.unwrap))
+
   private[services] def endInclusive(
       offset: Option[Offset]
   ): LoggingEntry =
@@ -72,6 +75,14 @@ package object logging {
 
   private[services] def commandId(id: String): LoggingEntry =
     "commandId" -> id
+
+  private[services] def maxPageSize(size: Int): LoggingEntry =
+    "maxPageSize" -> size
+
+  private[services] def continueStreamFromIncl(
+      offset: Option[Offset]
+  ): LoggingEntry =
+    "continueStreamFromIncl" -> offset
 
   private[services] def eventFormat(
       eventFormat: EventFormat

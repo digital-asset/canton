@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.environment
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
   CachingConfigs,
   LoggingConfig,
   ProcessingTimeout,
   StartupMemoryCheckConfig,
+  TopologyConfig,
   WatchdogConfig,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
@@ -35,7 +35,7 @@ object CantonNodeParameters {
     def exitOnFatalFailures: Boolean
     def watchdog: Option[WatchdogConfig]
     def startupMemoryCheckConfig: StartupMemoryCheckConfig
-    def dispatchQueueBackpressureLimit: NonNegativeInt
+    def topologyConfig: TopologyConfig
     def sanitizePublicErrorMessages: Boolean
   }
   object General {
@@ -55,7 +55,7 @@ object CantonNodeParameters {
         override val exitOnFatalFailures: Boolean,
         override val watchdog: Option[WatchdogConfig],
         override val startupMemoryCheckConfig: StartupMemoryCheckConfig,
-        override val dispatchQueueBackpressureLimit: NonNegativeInt,
+        override val topologyConfig: TopologyConfig,
         override val sanitizePublicErrorMessages: Boolean,
     ) extends CantonNodeParameters.General
   }
@@ -94,8 +94,7 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
   override def exitOnFatalFailures: Boolean = general.exitOnFatalFailures
   override def watchdog: Option[WatchdogConfig] = general.watchdog
   override def startupMemoryCheckConfig: StartupMemoryCheckConfig = general.startupMemoryCheckConfig
-  override def dispatchQueueBackpressureLimit: NonNegativeInt =
-    general.dispatchQueueBackpressureLimit
+  override def topologyConfig: TopologyConfig = general.topologyConfig
   override def sanitizePublicErrorMessages: Boolean = general.sanitizePublicErrorMessages
 }
 

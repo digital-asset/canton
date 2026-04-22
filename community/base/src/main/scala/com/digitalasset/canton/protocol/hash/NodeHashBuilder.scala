@@ -107,6 +107,7 @@ private class NodeBuilderV1(
     enforceNodeSeedForCreateNodes: Boolean,
 ) extends NodeHashBuilder(purpose, hashTracer) {
 
+  // TODO(#32003): stop hardcoding V2
   override private[hash] def hashNode(
       node: Node,
       nodeSeed: Option[LfHash],

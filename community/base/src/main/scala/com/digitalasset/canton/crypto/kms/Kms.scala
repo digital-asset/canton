@@ -9,7 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
-import com.digitalasset.canton.config.KmsConfig
+import com.digitalasset.canton.config.{ExponentialBackoffConfig, KmsConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.health.CloseableAtomicHealthComponent
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -383,7 +383,7 @@ trait Kms extends FlagCloseable with CloseableAtomicHealthComponent {
 
   private def withKmsBackoffRetryPolicyET[E, T](
       description: String,
-      config: KmsConfig.ExponentialBackoffConfig,
+      config: ExponentialBackoffConfig,
       flagCloseable: FlagCloseable,
       logger: TracedLogger,
   )(task: => EitherT[FutureUnlessShutdown, E, T])(implicit

@@ -23,6 +23,7 @@ import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.Optional
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.Member
 import com.google.protobuf.ByteString
@@ -145,6 +146,10 @@ private[lsu] trait LsuTrafficManagement {
         (
           LogEntryOptionality.OptionalMany,
           _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.shouldBeCantonErrorCode(SequencerErrors.PassedUpgradeTime),
         ),
       )
     } else {

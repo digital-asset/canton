@@ -5,7 +5,6 @@ package com.digitalasset.daml.lf
 package transaction
 
 import com.daml.nameof.NameOf
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 sealed abstract class SerializationVersion(private val idx: Int) extends Serializable with Product {
   def pretty = productPrefix
@@ -16,25 +15,23 @@ sealed abstract class SerializationVersion(private val idx: Int) extends Seriali
 object SerializationVersion {
 
   case object V1 extends SerializationVersion(1)
+  case object V2 extends SerializationVersion(2)
   case object VDev extends SerializationVersion(Int.MaxValue)
 
   implicit val `SerializationVersion Ordering`: Ordering[SerializationVersion] =
     Ordering.by(_.idx)
 
-  private[lf] val All: List[SerializationVersion] = List(V1, VDev)
+  private[lf] val All: List[SerializationVersion] = List(V1, V2, VDev)
 
   private[this] val fromStringMapping = Map(
-    "2.1" -> V1,
+    "2.1" -> V1, // called "2.1" instead of "1" for backwards compatibility with canton <=3.2
+    "2" -> V2,
     "dev" -> VDev,
   )
 
-  private[lf] def assign(lv: LanguageVersion):  SerializationVersion = lv.major match {
-    case LanguageVersion.Major.V2 =>
-      if (lv.minor.isDevVersion) VDev else V1
-    case _ => throw new IllegalArgumentException(
-      s"Mapping failed: LanguageVersion '${lv.pretty}' is not supported by SerializationVersion."
-    )
-  }
+  // FCI instead of lv, if key => v2 else v1, vdev is never returned by this function for now
+  private[lf] def assign(hasKey: Boolean):  SerializationVersion =
+    if (hasKey) SerializationVersion.V2 else SerializationVersion.V1
 
   private[this] val fromIntMapping = All.view.map(v => v.idx -> v).toMap
 
@@ -71,15 +68,11 @@ object SerializationVersion {
   val minVersion: SerializationVersion = All.min
   val maxVersion: SerializationVersion = All.max
 
-  // TODO https://github.com/digital-asset/daml/issues/22365 adopt ranges more thoroughly
-  private[lf] val minContractKeys: SerializationVersion = assign(
-    LanguageVersion.featureContractKeys.versionRange.min
-  )
+  // Only used for encoding/decoding fetch and lookup Nodes. This is NOT used for decoding fat contract instances.
+  private[lf] val minContractKeys: SerializationVersion = SerializationVersion.V2
 
   // TODO https://github.com/digital-asset/daml/issues/22365 adopt ranges more thoroughly
-  private[lf] val minChoiceAuthorizers = assign(
-    LanguageVersion.featureChoiceAuthority.versionRange.min
-  )
+  private[lf] val minChoiceAuthorizers = SerializationVersion.VDev
 
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
     import scala.Ordering.Implicits._
@@ -94,10 +87,7 @@ object SerializationVersion {
   ): VersionedTransaction =
     VersionedTransaction(txVersion(tx), tx.nodes, tx.roots)
 
-  val StableVersions: VersionRange.Inclusive[SerializationVersion] =
-    LanguageVersion.stableLfVersionsRange.map(assign)
-
-  private[lf] val DevVersions: VersionRange.Inclusive[SerializationVersion] =
-    LanguageVersion.allLfVersionsRange.map(assign)
-
+  val StableVersions: VersionRange.Inclusive[SerializationVersion] = {
+    VersionRange.Inclusive(SerializationVersion.V1, SerializationVersion.V2)
+  }
 }

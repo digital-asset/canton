@@ -320,4 +320,25 @@ final class StorageBackendSpecPostgres
     connection1.close()
     connection2.close()
   }
+
+  behavior of "lockExclusivelyPruningProcessingTable"
+
+  it should "block other exclusive locks until released" in withConnections(2) {
+    case List(c1, c2) =>
+      c1.setAutoCommit(false)
+      c2.setAutoCommit(false)
+      backend.event.lockExclusivelyPruningProcessingTable(c1)
+      val blockedCall =
+        Future(backend.event.lockExclusivelyPruningProcessingTable(c2))(parallelExecutionContext)
+      Threading.sleep(1000)
+      blockedCall.value shouldBe None
+      c1.commit()
+      c1.close()
+      eventually {
+        blockedCall.value.isDefined shouldBe true
+      }
+      c2.close()
+
+    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
+  }
 }

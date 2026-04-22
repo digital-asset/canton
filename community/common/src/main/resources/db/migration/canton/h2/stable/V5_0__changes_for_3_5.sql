@@ -16,3 +16,15 @@ alter table par_static_synchronizer_parameters
     alter column is_topology_initialized set default false;
 
 ALTER TABLE par_static_synchronizer_parameters RENAME TO par_synchronizer_connectivity_status;
+
+create table lapi_pruning_candidate_deactivated (
+    deactivate_event_sequential_id bigint not null,
+    activate_event_sequential_id bigint
+);
+create index lapi_pruning_candidate_deactivated_deactivate_idx ON lapi_pruning_candidate_deactivated USING btree (deactivate_event_sequential_id);
+create index lapi_pruning_candidate_deactivated_activate_idx ON lapi_pruning_candidate_deactivated USING btree (activate_event_sequential_id);
+
+create table lapi_pruning_contract_candidate (
+    internal_contract_id bigint not null
+);
+create index lapi_pruning_contract_candidate_idx ON lapi_pruning_contract_candidate USING btree (internal_contract_id);

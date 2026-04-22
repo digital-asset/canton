@@ -51,6 +51,9 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_9_0 -> List(v6)
   ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
+  def contains(releaseVersion: ReleaseVersion): Boolean =
+    majorMinorToStableProtocolVersions.contains(releaseVersion.majorMinor)
+
   def getOrElse(
       releaseVersion: ReleaseVersion,
       default: => NonEmpty[List[ProtocolVersion]],

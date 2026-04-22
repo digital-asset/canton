@@ -3131,7 +3131,7 @@ class EngineTestHelpers(
     loggerFactory: NamedLoggerFactory,
 ) {
   val defaultSerializationVersion =
-    SerializationVersion.assign(LanguageVersion.latestStableLfVersion)
+    SerializationVersion.assign(hasKey = true)
 
   import Matchers._
 

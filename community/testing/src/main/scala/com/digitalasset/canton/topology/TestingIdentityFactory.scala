@@ -541,6 +541,7 @@ class TestingIdentityFactory(
 
     val store = new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(synchronizerId.toPhysical),
+      predecessor = None,
       BaseTest.testedProtocolVersion,
       loggerFactory,
       DefaultProcessingTimeouts.testing,

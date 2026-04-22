@@ -496,7 +496,8 @@ class TopologyTransactionProcessor(
               terminateProcessing.notifyUpgradeAnnouncement(announcement.mapping.successor)
               FutureUnlessShutdown.unit
 
-            case TopologyChangeOp.Remove => terminateProcessing.notifyUpgradeCancellation()
+            case TopologyChangeOp.Remove =>
+              terminateProcessing.notifyUpgradeCancellation(announcement.mapping.successor)
           }
         }
       )

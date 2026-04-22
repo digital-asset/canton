@@ -36,6 +36,11 @@ import scala.concurrent.Future
 trait TestPredicateFiltersFixtureAnyWordSpec {
   this: TestEssentials & FixtureAnyWordSpecLike =>
 
+  @nowarn(
+    "cat=unused"
+  ) // Reason is not used but forces us to identify the reason which can be linked to a T O D O
+  def onlyLocalParty(reason: UnsupportedExternalPartyTest): Boolean = partiesKind == PartyKind.Local
+
   implicit class CheckString(verb: String) {
     def onlyRunWhen(condition: Boolean): OnlyRunWhenWordSpecStringWrapper =
       new OnlyRunWhenWordSpecStringWrapper(verb, condition)
@@ -110,6 +115,9 @@ trait TestPredicateFiltersFixtureAnyWordSpec {
 
     def when(testFun: => Unit /* Assertion */ )(implicit pos: source.Position): Unit =
       if (condition) verb.when(testFun) else verb.ignore(() => testFun)
+
+    def andWhen(otherCondition: => Boolean) =
+      new OnlyRunWhenWordSpecStringWrapper(verb, condition && otherCondition)
   }
 }
 

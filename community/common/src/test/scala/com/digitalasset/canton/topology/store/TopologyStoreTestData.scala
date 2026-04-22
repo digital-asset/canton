@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.syntax.option.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,9 +15,11 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertions.fail
 import org.scalatest.concurrent.ScalaFutures.convertScalaFuture
@@ -29,7 +33,6 @@ class TopologyStoreTestData(
     loggerFactory: NamedLoggerFactory,
     executionContext: ExecutionContext,
 ) {
-
   def makeSignedTx[Op <: TopologyChangeOp, M <: TopologyMapping](
       mapping: M,
       op: Op = TopologyChangeOp.Replace,
@@ -337,4 +340,43 @@ class TopologyStoreTestData(
   val vp_vp3_synchronizer1 = makeSignedTx(
     VettedPackages.tryCreate(vp3Id, Seq())
   )((vp3Key))
+
+  val bootstrapTransactions = StoredTopologyTransactions(
+    Seq[
+      (
+          CantonTimestamp,
+          (GenericSignedTopologyTransaction, Option[CantonTimestamp], Option[String]),
+      )
+    ](
+      ts1 -> (nsd_p1, None, None),
+      ts1 -> (nsd_p2, None, None),
+      ts1 -> (nsd_p3, None, None),
+      ts1 -> (dnd_p1p2, None, None),
+      ts1 -> (dop_synchronizer1_proposal, ts2.some, None),
+      ts2 -> (dop_synchronizer1, None, None),
+      ts2 -> (otk_p1, None, None),
+      ts3 -> (p1_permission_daSynchronizer, ts3.some, None),
+      ts3 -> (p1_permission_daSynchronizer_removal, None, None),
+      ts3 -> (nsd_seq, None, None),
+      ts3 -> (dtc_p1_synchronizer1, None, None),
+      ts3 -> (ptp_fred_p1_proposal, ts5.some, None),
+      ts4 -> (dnd_p1seq, None, None),
+      ts4 -> (otk_p3_proposal, None, None),
+      ts4 -> (otk_p2, None, None),
+      ts5 -> (ptp_fred_p1, None, None),
+      ts5 -> (dtc_p2_synchronizer1, ts6.some, None),
+      ts6 -> (dtc_p2_synchronizer1_update, None, None),
+      ts6 -> (mds_med1_synchronizer1_invalid, ts6.some,
+      // mapping checks run before auth checks, so this will fail with the missing otk check
+      s"Members $med1Id are missing a valid owner to key mapping.".some),
+    ).map { case (from, (tx, until, rejection)) =>
+      StoredTopologyTransaction(
+        SequencedTime(from),
+        EffectiveTime(from),
+        until.map(EffectiveTime(_)),
+        tx,
+        rejection.map(String300.tryCreate(_)),
+      )
+    }
+  )
 }

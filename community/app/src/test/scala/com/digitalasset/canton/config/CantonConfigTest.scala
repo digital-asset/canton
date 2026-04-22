@@ -54,6 +54,10 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
   private lazy val simpleConf: File = examplesDir / "01-simple-topology" / "simple-topology.conf"
   private lazy val simpleConfPath: String = simpleConf.pathAsString
 
+  private lazy val observabilityDir: File = examplesDir / "13-observability" / "canton"
+  private lazy val observabilityNetworkConf: File = observabilityDir / "network.conf"
+  private lazy val observabilitySequencer4Conf: File = observabilityDir / "sequencer4.conf"
+
   private lazy val duplicateStorageWithoutReplicationConfig: File =
     baseDir / "duplicate-storage-without-replication.conf"
 
@@ -307,17 +311,70 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
 
     "13-observability" should {
+      // memory.conf overrides _shared.storage so no Postgres instance is required at parse time
       lazy val config =
-        loadExampleFiles(examplesDir / "13-observability" / "canton" / "network.conf")
-
-      "parse correctly without ConfigTransforms" in {
-        config.participants.size should be >= 1 // triggers lazy evaluation / parse
-      }
+        CantonConfig
+          .parseAndLoad(
+            Seq(
+              confDir / "storage" / "memory.conf",
+              observabilityNetworkConf,
+            ).map(_.toJava),
+            Some(DefaultPorts.create()),
+          )
+          .valueOrFail("failed to load 13-observability/canton/network.conf")
 
       "contain at least 2 participants, 3 sequencers and 2 mediators" in {
         config.participants.size should be >= 2
         config.sequencers.size should be >= 3
         config.mediators.size should be >= 2
+      }
+
+      "expose participant1 on the expected ports" in {
+        val p1 = config.participantsByString("participant1")
+        p1.ledgerApi.port.unwrap shouldBe 10011
+        p1.adminApi.port.unwrap shouldBe 10012
+        p1.httpLedgerApi.port.unwrap shouldBe 10013
+      }
+
+      "expose participant2 on the expected ports" in {
+        val p2 = config.participantsByString("participant2")
+        p2.ledgerApi.port.unwrap shouldBe 10021
+        p2.adminApi.port.unwrap shouldBe 10022
+        p2.httpLedgerApi.port.unwrap shouldBe 10023
+      }
+
+      "expose sequencers on the expected admin ports" in {
+        config.sequencersByString("sequencer1").adminApi.port.unwrap shouldBe 4402
+        config.sequencersByString("sequencer2").adminApi.port.unwrap shouldBe 4412
+        config.sequencersByString("sequencer3").adminApi.port.unwrap shouldBe 4422
+      }
+
+      "expose mediators on the expected admin ports" in {
+        config.mediatorsByString("mediator1").adminApi.port.unwrap shouldBe 4602
+        config.mediatorsByString("mediator2").adminApi.port.unwrap shouldBe 4612
+      }
+    }
+
+    "13-observability sequencer4" should {
+      lazy val config =
+        CantonConfig
+          .parseAndLoad(
+            Seq(
+              confDir / "storage" / "memory.conf",
+              observabilitySequencer4Conf,
+            ).map(_.toJava),
+            Some(DefaultPorts.create()),
+          )
+          .valueOrFail("failed to load 13-observability/canton/sequencer4.conf")
+
+      "contain exactly 1 sequencer" in {
+        config.sequencers.size should be >= 1
+      }
+
+      "expose sequencer4 on the expected ports" in {
+        val s4 = config.sequencersByString("sequencer4")
+        s4.publicApi.port.unwrap shouldBe 4431
+        s4.adminApi.port.unwrap shouldBe 4432
       }
     }
   }
