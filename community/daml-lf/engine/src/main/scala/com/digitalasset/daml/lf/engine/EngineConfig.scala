@@ -43,6 +43,10 @@ import java.nio.file.Path
   *   and upgraded by the engine. Explicit disclosures are assumed to be provided via
   *   ResultNeedContract. This parameter is temporary and will be retired once all client code has
   *   migrated to the new `ResultNeedContract` question.
+  * @param externalCallBaseCost
+  *   Fixed interpreter gas charge applied to each `EXTERNAL_CALL` when gas accounting is enabled.
+  *   This models the local interpreter work only, not the remote execution cost of the external
+  *   service.
   */
 final case class EngineConfig(
     allowedLanguageVersions: VersionRange[language.LanguageVersion],
@@ -58,9 +62,12 @@ final case class EngineConfig(
     paranoid: Boolean = false,
     useDefensiveContractLookup: Boolean = false,
     gasBudget: Option[Long] = None,
+    externalCallBaseCost: Long = speedy.CostModel.DefaultExternalCallBaseCost,
     submissionPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
     validationPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
 ) {
+  require(externalCallBaseCost >= 0L, "externalCallBaseCost must be non-negative")
+
   private[lf] def getCompilerConfig: speedy.Compiler.Config =
     speedy.Compiler.Config(
       allowedLanguageVersions,
@@ -83,4 +90,15 @@ final case class EngineConfig(
 
   private[lf] def authorizationChecker: AuthorizationChecker =
     if (checkAuthorization) DefaultAuthorizationChecker else NoopAuthorizationChecker
+
+  private[lf] def getInterpreterCostModel: speedy.CostModel =
+    gasBudget match {
+      case Some(_) =>
+        new speedy.CostModel.EmptyModel {
+          override val BExternalCall: speedy.CostModel.CostFunction1[speedy.CostModel.Text] =
+            speedy.CostModel.fixedExternalCallCost(externalCallBaseCost)
+        }
+      case None =>
+        speedy.CostModel.Empty
+    }
 }

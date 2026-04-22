@@ -463,6 +463,7 @@ class Engine(
       packageResolution = packageResolution,
       limits = config.limits,
       iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
+      costModel = config.getInterpreterCostModel,
       initialGasBudget = config.gasBudget,
       metricPlugins = metricPlugins,
       logger = machineLogger(validating),

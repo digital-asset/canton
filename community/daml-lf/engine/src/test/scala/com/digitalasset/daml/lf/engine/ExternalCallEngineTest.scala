@@ -49,34 +49,39 @@ class ExternalCallEngineTest
     }
   """
 
-  private val engine = Engine.DevEngine(loggerFactory)
-  engine.preloadPackage(pkgId, pkg).consume() shouldBe Right(())
+  def newEngine(config: EngineConfig = Engine.DevConfig): Engine = {
+    val engine = new Engine(config, loggerFactory)
+    engine.preloadPackage(pkgId, pkg).consume() shouldBe Right(())
+    engine
+  }
+
+  def submit(engine: Engine) =
+    engine.submit(
+      submitters = Set(alice),
+      readAs = Set.empty,
+      cmds = ApiCommands(ImmArray(command), let, "external-call-engine-test"),
+      participantId = participantId,
+      submissionSeed = submissionSeed,
+      contractIdVersion = ContractIdVersion.V1,
+      contractStateMode = transaction.NextGenContractStateMachine.Mode.devDefault,
+      prefetchKeys = Seq.empty,
+    )
 
   private val alice = Ref.Party.assertFromString("Alice")
   private val participantId = Ref.ParticipantId.assertFromString("participant")
   private val submissionSeed = Hash.hashPrivateKey("ExternalCallEngineTest")
   private val let = Time.Timestamp.now()
   private val templateId = Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString("M:T"))
+  private val command = ApiCommand.CreateAndExercise(
+    templateId.toRef,
+    Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
+    Ref.ChoiceName.assertFromString("Call"),
+    Value.ValueUnit,
+  )
 
   "Engine.submit" should {
     "emit ResultNeedExternalCall with the expected payload and continuation" in {
-      val command = ApiCommand.CreateAndExercise(
-        templateId.toRef,
-        Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
-        Ref.ChoiceName.assertFromString("Call"),
-        Value.ValueUnit,
-      )
-
-      val result = engine.submit(
-        submitters = Set(alice),
-        readAs = Set.empty,
-        cmds = ApiCommands(ImmArray(command), let, "external-call-engine-test"),
-        participantId = participantId,
-        submissionSeed = submissionSeed,
-        contractIdVersion = ContractIdVersion.V1,
-        contractStateMode = transaction.NextGenContractStateMachine.Mode.devDefault,
-        prefetchKeys = Seq.empty,
-      )
+      val result = submit(newEngine())
 
       inside(result) {
         case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
@@ -99,6 +104,37 @@ class ExternalCallEngineTest
             )
           }
       }
+    }
+
+    "use the configured external-call base cost when gas accounting is enabled" in {
+      val outOfGas = submit(
+        newEngine(
+          EngineConfig(
+            allowedLanguageVersions = Engine.DevConfig.allowedLanguageVersions,
+            gasBudget = Some(252L),
+            externalCallBaseCost = 250L,
+          )
+        )
+      )
+
+      inside(outOfGas) {
+        case ResultError(
+              Error.Interpretation(Error.Interpretation.Internal(_, message, _), _)
+            ) =>
+          message should include("No more gas")
+      }
+
+      val enoughGas = submit(
+        newEngine(
+          EngineConfig(
+            allowedLanguageVersions = Engine.DevConfig.allowedLanguageVersions,
+            gasBudget = Some(253L),
+            externalCallBaseCost = 250L,
+          )
+        )
+      )
+
+      inside(enoughGas) { case ResultNeedExternalCall("ext", "fun", "0a0b", "c0ff", _) => succeed }
     }
   }
 }
