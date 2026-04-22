@@ -944,26 +944,24 @@ private[lf] object SBuiltinFun {
               val outputHex = responseBodyRaw.trim.toLowerCase(java.util.Locale.ROOT)
               Ref.HexString.fromString(outputHex) match {
                 case Right(_) =>
-                  // Record the external call result in the transaction.
-                  // The value returned to Daml must match the value persisted for replay.
-                  machine.ptx.recordExternalCallResult(
+                  // The external-call question is only issued after confirming that the
+                  // current partial transaction can record a result, so resuming here must
+                  // still be inside an enclosing exercise context.
+                  val updatedPtx = machine.ptx.recordExternalCallResult(
                     extensionId = extensionId,
                     functionId = functionId,
                     configHash = configHex,
                     inputHex = inputHex,
                     outputHex = outputHex,
-                  ) match {
-                    case Some(updatedPtx) =>
-                      machine.ptx = updatedPtx
-                      Control.Value(SText(outputHex))
-                    case None =>
-                      // External calls outside exercise context cannot be recorded
-                      // and would fail during validation/replay
-                      Control.Error(IE.UserError(
-                        s"External calls are only supported within exercise context. " +
-                          s"extensionId=$extensionId, functionId=$functionId"
-                      ))
-                  }
+                  ).getOrElse(
+                    InternalError.runtimeException(
+                      NameOf.qualifiedNameOfCurrentFunc,
+                      s"lost enclosing exercise context while resuming external call " +
+                        s"(extensionId=$extensionId, functionId=$functionId)",
+                    )
+                  )
+                  machine.ptx = updatedPtx
+                  Control.Value(SText(outputHex))
                 case Left(_) =>
                   Control.Error(
                     IE.UserError("External call failed: Invalid hex encoding in external call output")
