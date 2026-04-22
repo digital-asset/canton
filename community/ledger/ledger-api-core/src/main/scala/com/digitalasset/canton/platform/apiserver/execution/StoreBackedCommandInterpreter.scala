@@ -465,12 +465,20 @@ final class StoreBackedCommandInterpreter(
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
 
-        case ResultNeedExternalCall(_, _, _, _, resume) =>
-          val externalCallResult = Left(ExternalCallError(501, "External calls not supported", None))
-          resolveStep(
-            Tracked.value(
-              metrics.execution.engineRunning,
-              trackSyncExecution(interpretationTimeNanos)(resume(externalCallResult)),
+        case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
+          FutureUnlessShutdown.pure(
+            Left(
+              ErrorCause.DamlLf(
+                Error.Interpretation(
+                  Error.Interpretation.Internal(
+                    "StoreBackedCommandInterpreter",
+                    s"External calls are not supported during ledger-api command submission " +
+                      s"(extensionId=$extensionId, functionId=$functionId)",
+                    None,
+                  ),
+                  None,
+                )
+              )
             )
           )
       }
