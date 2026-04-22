@@ -59,6 +59,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
             ubind result: Text <- EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff"
             in throw @(Update Text) @M:Boom (M:Boom {})
           catch e -> Some @(Update Text) (upure @Text "fallback");
+
       };
 
       val run : Party -> Update Text = \(party: Party) ->
@@ -257,6 +258,33 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
         message should include("requestId=req-123")
         message should include("extensionId=ext")
         message should include("functionId=fun")
+      }
+      machine.ptx.externalCallResults shouldBe empty
+    }
+
+    "treat external call failures as uncatchable inside try/catch" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:runInTry"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
+            callback(Left(Question.Update.ExternalCallError(503, "upstream unavailable", Some("req-456"))))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
+        message should include("External call failed: upstream unavailable")
+        message should include("status=503")
+        message should include("requestId=req-456")
       }
       machine.ptx.externalCallResults shouldBe empty
     }
