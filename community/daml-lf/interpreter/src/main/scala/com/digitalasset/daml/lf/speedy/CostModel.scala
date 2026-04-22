@@ -209,8 +209,7 @@ object CostModel {
 
   private[lf] def fixedExternalCallCost(baseCost: Cost): CostFunction1[Text] =
     new CostFunction1[Text] {
-      override def cost(functionId: String): Cost =
-        baseCost + functionId.length.toLong
+      override def cost(functionId: String): Cost = baseCost
     }
 
   abstract class CostFunction2[-X, -Y] {

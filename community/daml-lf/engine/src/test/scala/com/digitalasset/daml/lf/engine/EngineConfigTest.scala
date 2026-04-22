@@ -25,7 +25,7 @@ class EngineConfigTest extends AnyWordSpec with Matchers {
         gasBudget = Some(1000L),
       )
 
-      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 103L
+      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 100L
     }
 
     "use the configured external-call base cost when gas accounting is enabled" in {
@@ -35,7 +35,7 @@ class EngineConfigTest extends AnyWordSpec with Matchers {
         externalCallBaseCost = 250L,
       )
 
-      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 253L
+      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 250L
     }
   }
 }

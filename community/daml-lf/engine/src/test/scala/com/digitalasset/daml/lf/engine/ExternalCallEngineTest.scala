@@ -111,7 +111,7 @@ class ExternalCallEngineTest
         newEngine(
           EngineConfig(
             allowedLanguageVersions = Engine.DevConfig.allowedLanguageVersions,
-            gasBudget = Some(252L),
+            gasBudget = Some(249L),
             externalCallBaseCost = 250L,
           )
         )
@@ -128,7 +128,7 @@ class ExternalCallEngineTest
         newEngine(
           EngineConfig(
             allowedLanguageVersions = Engine.DevConfig.allowedLanguageVersions,
-            gasBudget = Some(253L),
+            gasBudget = Some(250L),
             externalCallBaseCost = 250L,
           )
         )
