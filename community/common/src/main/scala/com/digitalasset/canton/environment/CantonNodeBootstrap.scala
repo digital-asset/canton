@@ -699,6 +699,7 @@ abstract class CantonNodeBootstrapImpl[
             TopologyStoreId.AuthorizedStore,
             storage,
             indexedStringStore,
+            predecessor = None,
             ProtocolVersion.latest,
             bootstrapStageCallback.timeouts,
             parameters.batchingConfig,
@@ -755,6 +756,7 @@ abstract class CantonNodeBootstrapImpl[
       val temporaryTopologyStore =
         new InMemoryTopologyStore(
           TemporaryStore.tryCreate(identifier),
+          predecessor = None,
           ProtocolVersion.latest,
           this.loggerFactory,
           this.timeouts,
@@ -769,6 +771,7 @@ abstract class CantonNodeBootstrapImpl[
         // as we are only expecting namespace delegations that end up in the authorized store, this is fine
         staticSynchronizerParameters = None,
         timeouts = this.timeouts,
+        futureSupervisor = futureSupervisor,
         loggerFactory = this.loggerFactory,
       )
 

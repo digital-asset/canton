@@ -1,23 +1,42 @@
 #!/usr/bin/env bash
 set -o pipefail
+
 ABSDIR="$(cd "$(dirname "${BASH_SOURCE[0]}" )" > /dev/null 2>&1 && pwd )"
 source "$ABSDIR/common.sh" # debug, info, err, colors
 
-_print_header "Wrapper for ${c_lgreen}CI/CD${c_reset} run SBT"
+# GHA MIGRATION: Added environment detection
+IS_GHA="${GITHUB_ACTIONS:-false}"
+IS_CCI="${CIRCLECI:-false}"
 
-# if EXECUTOR_NUM_CPUS is not a number/or empty, set it to CPU count
+if [[ "$IS_GHA" == "true" ]]; then
+    SBT_OUTPUT_FILE="${SBT_OUTPUT_FILE:-sbt_output}"
+    echo "sbt-log-file=${SBT_OUTPUT_FILE}" >> "${GITHUB_OUTPUT}"
+    export BASH_ENV="${GITHUB_ENV:-/dev/null}"
+else
+    SBT_OUTPUT_FILE="sbt_output"
+fi
+
+_print_header "Wrapper for ${c_lgreen}CI/CD${c_reset} run SBT (GHA: $IS_GHA, CCI: $IS_CCI)"
+
+# GHA Migration: Added new condition for GHA
 if [ -z "${EXECUTOR_NUM_CPUS##*[!0-9]*}" ]; then
- if [[ "$(uname -s)" == "Darwin" ]]; then
-    EXECUTOR_NUM_CPUS="$(sysctl hw.ncpu | awk '{print $2}')"
-  elif [[ "$(uname -s)" == "Linux" ]]; then
-    EXECUTOR_NUM_CPUS="$(grep processor /proc/cpuinfo | wc -l)"
+  if [[ "$IS_GHA" == "true" ]]; then
+    EXECUTOR_NUM_CPUS=$(nproc 2>/dev/null || grep processor /proc/cpuinfo | wc -l || echo 4)
+  else
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      EXECUTOR_NUM_CPUS="$(sysctl hw.ncpu | awk '{print $2}')"
+    else
+      EXECUTOR_NUM_CPUS="$(grep processor /proc/cpuinfo | wc -l)"
+    fi
   fi
+  info "Detected ${EXECUTOR_NUM_CPUS} CPUs"
 fi
 
 # if EXECUTION_CONTEXT_SIZE is not a number/or empty, set it to EXECUTOR_NUM_CPUS
 if [ -z "${EXECUTION_CONTEXT_SIZE##*[!0-9]*}" ]; then
   EXECUTION_CONTEXT_SIZE=${EXECUTOR_NUM_CPUS}
 fi
+
 TEMPDIR="${TEMPDIR:-/tmp}"
 # SBT output mode
 DEBUG="${DEBUG:-false}"
@@ -30,10 +49,13 @@ TIMEOUT="${TIMEOUT:-25m}"
 SUCCEED_ON_ERROR="${SUCCEED_ON_ERROR:-0}"
 RETRY_FETCH="${RETRY_FETCH:-0}"
 FAIL_ON_ERROR_IN_OUTPUT="${FAIL_ON_ERROR_IN_OUTPUT:-1}"
+
 if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
   FAIL_ON_ERROR_IN_OUTPUT="false"
 fi
+
 CODE=0
+
 # Print variable and value
 print_var() {
   local value
@@ -57,10 +79,16 @@ print_var() {
         ;;
     esac
 }
+
 # Run on trap EXIT
 on_exit() {
-    # Export exit code for usage in subsequent steps
-    echo "export STATUS=$CODE" >> "${BASH_ENV}"
+    # GHA MIGRATION: Added new CODE export for GHA
+    if [[ "$IS_GHA" == "true" ]]; then
+            echo "STATUS=$CODE" >> "$GITHUB_ENV"
+        fi
+    if [[ "$IS_CCI" == "true" ]]; then
+        echo "export STATUS=$CODE" >> "$BASH_ENV"
+    fi
     # Provide some explanation on exit
     if [ "$CODE" == 0 ]
       then
@@ -93,14 +121,14 @@ on_exit() {
         fi
         python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
     fi
-        # ${variable,,} -- convert value to lowercase (Bash ver > 4)
-        if [[ "${SUCCEED_ON_ERROR,,}" == "true" || "${SUCCEED_ON_ERROR}" == "1" ]]; then
-            warn "Overriding original exit code $CODE with zero."
-            CODE=0
-        fi
- exit $CODE
-  }
-          trap on_exit EXIT
+    # ${variable,,} -- convert value to lowercase (Bash ver > 4)
+    if [[ "${SUCCEED_ON_ERROR,,}" == "true" || "${SUCCEED_ON_ERROR}" == "1" ]]; then
+        warn "Overriding original exit code $CODE with zero."
+        CODE=0
+    fi
+    exit $CODE
+}
+trap on_exit EXIT
 
 # Necessary workaround to prevent sbt from setting default JVM options
 export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
@@ -126,10 +154,11 @@ for i in EXECUTION_CONTEXT_SIZE \
 print_var $i
 done
 info ""
+
 # Define sbt command
 SBT_CMD=("sbt")
 # if running in CI, set properties
-if [[ "${CI}" == "true" || "${CI}" == "!"  ]]; then
+if [[ "${CI}" == "true" || "${CI}" == "!" || "$IS_GHA" == "true" ]]; then
   SBT_CMD+=("-Dsbt.ci=true") # tell sbt that it is running in CI
   # Instructs sbt to use Java's native methods for retrieving file timestamps, which typically offer
   # millisecond resolution. Docker container filesystems might truncate file modification times to
@@ -169,8 +198,9 @@ fi
 # Setup heap size
 SBT_CMD+=("-J-Xmx$EXECUTOR_JVM_HEAP_SIZE" "-J-Xms$EXECUTOR_JVM_HEAP_SIZE")
 
+# GHA Migration: Added more secure conditions for CUSTOM_JAVA_HOME
 # Specify custom java home if supplied
-if [[ -n "${CUSTOM_JAVA_HOME}" ]]; then
+if [[ -n "${CUSTOM_JAVA_HOME}" && -d "${CUSTOM_JAVA_HOME}" && -x "${CUSTOM_JAVA_HOME}/bin/java" ]]; then
   SBT_CMD+=("-java-home" "${CUSTOM_JAVA_HOME}")
 fi
 
@@ -192,18 +222,26 @@ if [[ -n "${EXTRA_PARAMETERS}" ]]; then
   SBT_CMD+=( ${EXTRA_PARAMETERS} )
 fi
 
+# GHA_MIGRATION: Added additional checks for JAVA_HOME_FOR_TESTS
 # Specify custom java home to run tests without compilation
 # Purpose: Run tests with a different (newer) java version that was used for compilation
-if [[ ! -z "${OVERRIDE_JAVA_VERSION_FOR_TESTS}" ]]; then
-  SBT_CMD+=("set Global / compile / skip := true")
-  SBT_CMD+=("-java-home" "$JAVA_HOME_FOR_TESTS")
+if [[ -n "${OVERRIDE_JAVA_VERSION_FOR_TESTS}" ]]; then
+  if [[ -n "${JAVA_HOME_FOR_TESTS}" && -d "${JAVA_HOME_FOR_TESTS}" ]]; then
+    info "Using OVERRIDE_JAVA_VERSION_FOR_TESTS: ${OVERRIDE_JAVA_VERSION_FOR_TESTS}"
+    SBT_CMD+=("set Global / compile / skip := true")
+    SBT_CMD+=("-java-home" "${JAVA_HOME_FOR_TESTS}")
+  else
+    warn "OVERRIDE_JAVA_VERSION_FOR_TESTS is set, but JAVA_HOME_FOR_TESTS is empty or directory does not exist!"
+  fi
 fi
+
 # Add sbt commands.
 # Do not quote this, to allow the caller to pass in several commands.
 # The caller needs to take care of quoting, if a command contains spaces.
 for i in "$@"; do
   SBT_CMD+=( "$(printf "%s\n" "$i")" );
 done
+
 # Run command
 # also send a few newline characters to sbt to ensure we keep on downloading dependencies
 # PIPESTATUS - array with exit codes piped command.
@@ -214,26 +252,26 @@ done
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"
 python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
   timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
-  tee sbt_output
+  tee "${SBT_OUTPUT_FILE}"
 
 # save sbt command exit code for use on exit
 CODE=${PIPESTATUS[1]}
+
 # Use filter 'ansi2txt' to remove control characters starting with '\e' like:
 #   reset text formatting: '\e[m'
 #   colors: '\e[1;34m' '\e[90m' '\e[97m' '\e[0m'
 #   foreground and background colors: '\e[30;41m'
-  cat "sbt_output" | ./scripts/ci/ansi2txt.sh > "temp_sbt_output" && \
-  mv "temp_sbt_output" "sbt_output"
-  info_done "Remove control symbols from \"sbt_output\" logfile"
+cat "${SBT_OUTPUT_FILE}" | ./scripts/ci/ansi2txt.sh > "temp_sbt_output" && \
+  mv "temp_sbt_output" "${SBT_OUTPUT_FILE}" && \
+  info_done "Remove control symbols from logfile"
 
-if [[ "$CODE" != 0 ]]; then
-  err "SBT piped command exit code: PIPESTATUS=${CODE}"
-else
-  # ${variable,,} -- convert value to lowercase (Bash ver > 4)
+if [[ "$CODE" == 0 ]]; then
+  # Check and report whether sbt has output errors
+  # Need to also apply ignore rules for the log, as errors in the log are emitted to stdout by default.
   if [[ "${FAIL_ON_ERROR_IN_OUTPUT,,}" == "true" || "${FAIL_ON_ERROR_IN_OUTPUT}" == "1" ]]; then
-    # Check and report whether sbt has output errors
-    # Need to also apply ignore rules for the log, as errors in the log are emitted to stdout by default.
-    ./scripts/ci/check-sbt-output.sh "sbt_output" "project/errors-in-sbt-output-to-ignore.txt" "project/errors-in-log-to-ignore.txt"
+    ./scripts/ci/check-sbt-output.sh "${SBT_OUTPUT_FILE}" "project/errors-in-sbt-output-to-ignore.txt" "project/errors-in-log-to-ignore.txt"
     CODE=$?
   fi
+else
+  err "SBT piped command exit code: PIPESTATUS=${CODE}"
 fi

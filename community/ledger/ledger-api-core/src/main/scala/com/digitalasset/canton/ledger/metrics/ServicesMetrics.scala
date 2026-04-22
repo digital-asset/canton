@@ -82,6 +82,7 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
   private[metrics] val transactionTrees: Item = extend("transaction_trees", baseInfo)
   private[metrics] val getUpdateByOffset: Item = extend("get_update_by_offset", baseInfo)
   private[metrics] val getUpdateById: Item = extend("get_update_by_id", baseInfo)
+  private[metrics] val getUpdatesPage: Item = extend("get_updates_page", baseInfo)
   private[metrics] val getActiveContracts: Item = extend("get_active_contracts", baseInfo)
   private[metrics] val lookupActiveContract: Item = extend("lookup_active_contract", baseInfo)
   private[metrics] val lookupContractState: Item = extend("lookup_contract_state", baseInfo)
@@ -212,6 +213,7 @@ final class ServicesMetrics private[metrics] (
       openTelemetryMetricsFactory.timer(inventory.getUpdateByOffset.info)
     val getUpdateById: Timer =
       openTelemetryMetricsFactory.timer(inventory.getUpdateById.info)
+    val getUpdatesPage: Timer = openTelemetryMetricsFactory.timer(inventory.getUpdatesPage.info)
     val getActiveContracts: Timer =
       openTelemetryMetricsFactory.timer(inventory.getActiveContracts.info)
     val lookupActiveContract: Timer =

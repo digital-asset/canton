@@ -11,7 +11,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.CantonAppDriver.installGCLogging
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.cli.Command.Sandbox
-import com.digitalasset.canton.cli.{Cli, Command, LogFileAppender}
+import com.digitalasset.canton.cli.{Cli, Command, LogFileAppender, Mode}
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.{
   CantonConfig,
@@ -145,12 +145,12 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
     val sandboxBootstrap = JarResourceUtils.extractFileFromJar(s"sandbox/bootstrap.canton")
 
     val configFiles = cliOptions.command
-      .collect { case Sandbox => sandboxConfig }
+      .collect { case Sandbox(_) => sandboxConfig }
       .toList
       .concat(cliOptions.configFiles)
       .concat(devConfig)
     val bootstrapFile = cliOptions.command
-      .collect { case Sandbox => sandboxBootstrap }
+      .collect { case Sandbox(_) => sandboxBootstrap }
       .orElse(cliOptions.bootstrapScriptPath)
     val configFromMap = {
       import scala.jdk.CollectionConverters.*
@@ -241,13 +241,21 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
 
   val environment = environmentFactory.create(Config.startupConfig, loggerFactory)
   val runner: Runner = cliOptions.command match {
-    case Some(Command.Sandbox) =>
+    case Some(Command.Sandbox(Mode.Deamon)) =>
       startupConfigFileMonitoring(environment)
       new ServerRunner(
         bootstrapScript,
         loggerFactory,
         cliOptions.exitAfterBootstrap,
         cliOptions.dars,
+      )
+    case Some(Command.Sandbox(Mode.Interactive)) =>
+      startupConfigFileMonitoring(environment)
+      new ConsoleInteractiveRunner(
+        cliOptions.noTty,
+        bootstrapScript,
+        environment.writePortsFile(),
+        loggerFactory,
       )
     case Some(Command.Daemon) =>
       startupConfigFileMonitoring(environment)

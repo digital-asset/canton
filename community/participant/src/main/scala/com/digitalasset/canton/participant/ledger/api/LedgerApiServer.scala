@@ -75,6 +75,7 @@ import com.digitalasset.canton.platform.apiserver.{
 import com.digitalasset.canton.platform.config.{
   IdentityProviderManagementConfig,
   IndexServiceConfig,
+  UpdateServiceConfig,
 }
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
@@ -105,6 +106,7 @@ import io.grpc.{BindableService, ServerInterceptor, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.Future
@@ -133,6 +135,7 @@ class LedgerApiServer(
     ledgerApiStore: Eval[LedgerApiStore],
     ledgerApiIndexer: Eval[LedgerApiIndexer],
     pruningConfig: ParticipantStoreConfig,
+    updateServiceConfig: UpdateServiceConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
@@ -281,6 +284,8 @@ class LedgerApiServer(
         participantContractStore = participantContractStore.value,
         pruningOffsetService =
           PruningOffsetServiceImpl(participantPruningStore.value, loggerFactory),
+        materializer = implicitly[Materializer],
+        updateServiceConfig = updateServiceConfig,
       )
       _ = timedSyncService.registerInternalIndexService(new InternalIndexService {
         override def activeContracts(
@@ -322,6 +327,7 @@ class LedgerApiServer(
                 ),
               ),
               descendingOrder = false,
+              skipPruningChecks = false,
             )
             .mapConcat(_.update.topologyTransaction)
       })
@@ -382,6 +388,7 @@ class LedgerApiServer(
         userManagement = serverConfig.userManagementService,
         partyManagementServiceConfig = serverConfig.partyManagementService,
         packageServiceConfig = serverConfig.packageService,
+        updateServiceConfig = serverConfig.updateService,
         stateServiceConfig = serverConfig.stateService,
         tls = serverConfig.tls,
         address = Some(serverConfig.address),
@@ -586,6 +593,7 @@ object LedgerApiServer {
       sync: CantonSyncService,
       pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
+      updateServiceConfig: UpdateServiceConfig,
   )(implicit
       actorSystem: ActorSystem,
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -640,6 +648,7 @@ object LedgerApiServer {
       ledgerApiIndexer = ledgerApiIndexer,
       loggerFactory = loggerFactory,
       pruningConfig = pruningConfig,
+      updateServiceConfig = updateServiceConfig,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

@@ -14,10 +14,7 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseExternalProcess.RunVersion
-import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
-  LAPITTVersion,
-  releasesFromArtifactory,
-}
+import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.{ExcludedTests, LedgerApiConformanceBase}
 import com.digitalasset.canton.integration.util.TestUtils
@@ -31,11 +28,15 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.util.ReleaseUtils.TestedRelease
-import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ProtocolVersionCompatibility,
+  ReleaseVersion,
+  ReleaseVersionToProtocolVersions,
+}
 
 trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
-  protected def ledgerApiTestToolVersions: Seq[String]
+  protected def testedReleases: List[TestedRelease]
 
   protected val oldestVersionToCheck = ReleaseVersion(3, 4, 10, Some("snapshot"))
 
@@ -44,17 +45,17 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
   protected def versionShouldBeChecked(v: ReleaseVersion): Boolean =
     v >= oldestVersionToCheck
 
-  protected val ledgerApiTestToolPlugins: Map[String, UseLedgerApiTestTool] =
-    ledgerApiTestToolVersions
-      .filter { version =>
+  protected val ledgerApiTestToolPlugins: Map[ReleaseVersion, UseLedgerApiTestTool] =
+    testedReleases
+      .filter { release =>
         // This is initial filtering of versions -> done to prevent downloading of too many historic versions
-        versionShouldBeChecked(ReleaseVersion.tryCreate(version))
+        versionShouldBeChecked(release.releaseVersion)
       }
-      .map { version =>
-        version -> new UseLedgerApiTestTool(
+      .map { release =>
+        release.releaseVersion -> new UseLedgerApiTestTool(
           loggerFactory = loggerFactory,
           connectedSynchronizersCount = connectedSynchronizersCount,
-          version = LAPITTVersion.Explicit(version),
+          version = LAPITTVersion.Explicit(release.ledgerApiTestTool),
         )
       }
       .toMap
@@ -69,7 +70,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
   ): String = {
 
     val jsonExclusions = ExcludedTests.findExcludedTests(useJsonApi)
-    ledgerApiTestToolPlugins(version.toString)
+    ledgerApiTestToolPlugins(version)
       .runShardedSuites(
         shard,
         numShards,
@@ -105,10 +106,6 @@ trait ProtocolContinuityConformanceTest
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
-  protected def testedReleases: List[TestedRelease]
-  override lazy val ledgerApiTestToolVersions: List[String] =
-    testedReleases.map(_.releaseVersion.toString)
-
   protected def numShards: Int
   protected def shard: Int
 }
@@ -135,7 +132,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
   registerPlugin(externalSequencer)
   registerPlugin(externalMediator)
 
-  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
+  testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
     lazy val binDir = ReleaseUtils.retrieve(release).futureValue
     lazy val pv = protocolVersions.max1
 
@@ -202,7 +199,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
 
   registerPlugin(external)
 
-  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
+  testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
     lazy val binDir = ReleaseUtils.retrieve(release).futureValue
     lazy val pv = protocolVersions.max1
 
@@ -243,30 +240,28 @@ private[continuity] object ProtocolContinuityConformanceTest {
   // all patch versions that are supported
   def previousSupportedReleases(logger: TracedLogger)(implicit
       tc: TraceContext
-  ): List[TestedRelease] =
-    releasesFromArtifactory(logger)
-      .map(ReleaseVersion.tryCreate)
-      .map { releaseVersion =>
-        TestedRelease(
-          releaseVersion,
-          ProtocolVersionCompatibility.supportedProtocols(
-            includeAlphaVersions = false,
-            includeBetaVersions = true,
-            release = releaseVersion,
-          ),
-        )
-      }
-      // excluding protocol versions that are deleted
-      .flatMap { case TestedRelease(releaseVersion, protocolVersions) =>
-        NonEmpty
-          .from(protocolVersions.filterNot(_.isDeleted))
-          .map(pvs => TestedRelease(releaseVersion, pvs))
-      }
-      .toList
-      .sortBy(_.releaseVersion)
+  ): List[TestedRelease] = {
+    val previousSupportedReleases = for {
+      testToolRelease <- UseLedgerApiTestTool.latestReleases(logger)
+      releaseVersion = ReleaseVersion.tryCreate(testToolRelease.version)
+      // exclude unknown/future versions
+      if ReleaseVersionToProtocolVersions.contains(releaseVersion)
+      testedRelease = TestedRelease(
+        testToolRelease,
+        releaseVersion,
+        ProtocolVersionCompatibility.supportedProtocols(
+          includeAlphaVersions = false,
+          includeBetaVersions = true,
+          release = releaseVersion,
+        ),
+      )
+      filteredPvVersions <- NonEmpty.from(testedRelease.protocolVersions.filterNot(_.isDeleted))
+    } yield testedRelease.copy(protocolVersions = filteredPvVersions)
+    previousSupportedReleases.toList.sortBy(_.releaseVersion)
+  }
 
   def latestSupportedRelease(logger: TracedLogger)(implicit
       tc: TraceContext
-  ): List[TestedRelease] =
-    previousSupportedReleases(logger).takeRight(1)
+  ): Option[TestedRelease] =
+    previousSupportedReleases(logger).lastOption
 }

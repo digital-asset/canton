@@ -67,22 +67,24 @@ object AcsPageToken {
         )
       )
       .ensure(
-        ValidationErrors.invalidPageToken("The page token was prepared by a different participant.")
+        ValidationErrors.invalidAcsPageToken(
+          "The page token was prepared by a different participant."
+        )
       )(proto => proto.participantIdChecksum == participantIdChecksum)
       .ensure(
-        ValidationErrors.invalidPageToken(
+        ValidationErrors.invalidAcsPageToken(
           "The page token was prepared with different page API version."
         )
       )(proto => proto.version == TokenVersion)
       .ensure(
-        ValidationErrors.invalidPageToken(
+        ValidationErrors.invalidAcsPageToken(
           "The page token was prepared with different event_format or active_at_offset."
         )
       )(proto => proto.requestChecksum == expectedRequestChecksum)
     offset <- Offset
       .fromLong(proto.activeAtOffset)
       .left
-      .map(_ => ValidationErrors.invalidPageToken("Invalid token contents."))
+      .map(_ => ValidationErrors.invalidAcsPageToken("Invalid token contents."))
     pointerToTheFirstElem <- AcsContinuationToken
       .decodeAndValidate(AcsContinuationToken.emptyChecksum, proto.continuationToken)
   } yield (offset, pointerToTheFirstElem.decrease)

@@ -127,7 +127,7 @@ commands:
     check_pr_skip_ci:
         steps:
             - run:
-                command: .circleci/abort-if-skip-ci.sh
+                command: .ci/nix-exec ./scripts/ci/abort-if-skip-ci.sh
                 name: Check whether build should be aborted due to `skip ci` label on PR
     checkout_and_restore_caches:
         steps:
@@ -717,22 +717,6 @@ commands:
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
                 name: Run tests
                 no_output_timeout: << parameters.no_output_timeout >>
-    run_temp_nuck_tests:
-        parameters:
-            exclude_unstable_tests:
-                default: true
-                type: boolean
-            num_parallel_tasks:
-                default: "4"
-                type: string
-        steps:
-            - run_tests:
-                command: dumpClassPath "set \`transcode-schema\` / Test / testOnly := {};set \`transcode-daml-lf\` / Test / testOnly := {};set \`transcode-codec-json\` / Test / testOnly := {};set \`transcode-codec-proto-java\` / Test / testOnly := {};set \`transcode-codec-proto-scala\` / Test / testOnly := {};set \`transcode-daml-examples\` / Test / testOnly := {};set \`transcode-test-conformance\` / Test / testOnly := {};set \`transcode-test-utils\` / Test / testOnly := {};$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >> -n com.digitalasset.canton.annotations.NuckTest -n com.digitalasset.canton.annotations.RollbackTest"
-                fail_on_error_in_output: true
-                filter: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
-                num_parallel_tasks: << parameters.num_parallel_tasks >>
-                num_test_buckets: $CIRCLE_NODE_TOTAL
-                succeed_on_error: false
     run_test_coverage_test:
         parameters:
             command:
@@ -1938,7 +1922,7 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
                 report_to_datadog: false
-                timeout: 90m
+                timeout: 120m
             - slack_red_main_with_volunteer:
                 fixed_volunteer: U05KX5V7KJN
     nightly_integration_test:
@@ -2414,17 +2398,6 @@ jobs:
                 command: release/tag-new-releases.sh
                 name: Tag new releases
             - slack_red_main_with_volunteer
-    temp_nuck_tests_pv_dev:
-        executor: canton-xlarge-docker-with-postgres
-        parallelism: 4
-        parameters:
-            override_java_version_for_tests:
-                default: ""
-                type: string
-        steps:
-            - set_canton_protocol_version:
-                protocol_version: DEV
-            - run_temp_nuck_tests
     test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
@@ -2784,6 +2757,9 @@ workflows:
                     - maven-mirror
                     - da-images
                 filters:
+                    branches:
+                        ignore:
+                            - /^gha-migration\/.*/
                     tags:
                         only: /^v.*/
             - package_community:
@@ -2819,6 +2795,10 @@ workflows:
                     - azure-self-cache
                     - maven-mirror
                     - da-images
+                filters:
+                    branches:
+                        ignore:
+                            - /^gha-migration\/.*/
             - protobuf_continuity:
                 context:
                     - datadog
@@ -2932,24 +2912,6 @@ workflows:
                 protocol_version: DEV
                 requires:
                     - test_protocol_version_34
-            - temp_nuck_tests_pv_dev:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - main
-                            - /^release-line.*/
-                            - /^gh-readonly-queue\/main\/.*/
-                name: temp_nuck_tests_pv_dev
-                requires:
-                    - compile
             - unstable_test:
                 context:
                     - datadog

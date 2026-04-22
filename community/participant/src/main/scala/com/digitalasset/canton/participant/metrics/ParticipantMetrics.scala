@@ -11,12 +11,15 @@ import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.noop.NoOpGauge
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TaskSchedulerMetrics
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.http.metrics.{HttpApiHistograms, HttpApiMetrics}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.participant.metrics.PruningMetrics as ParticipantPruningMetrics
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 
 import scala.collection.concurrent.TrieMap
 
@@ -195,6 +198,85 @@ class ParticipantMetrics(
       maxInflightValidationRequestGaugeForDocs.info,
       () => value().getOrElse(-1),
     )
+
+  // Since gauges don't support metrics context per update, create a map with a gauge per successor psid.
+  private val lsuStatus: TrieMap[PhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
+
+  /** Update the value of the metric if the provided value is bigger than the stored value. Create
+    * the metric otherwise.
+    */
+  def setLsuStatus(
+      value: NonNegativeInt,
+      successorPsid: PhysicalSynchronizerId,
+  ): Unit =
+    lsuStatus
+      .updateWith(successorPsid) {
+        case None =>
+          Some(
+            newLsuStatus(
+              MetricsContext("successor_psid" -> successorPsid.toProtoPrimitive),
+              value = value.unwrap,
+            )
+          )
+        case Some(gauge) =>
+          gauge.updateValue(_.max(value.unwrap))
+          Some(gauge)
+      }
+      .discard
+
+  /** Update the value of the metric to zero. Create the metric otherwise.
+    */
+  def resetLsuStatus(
+      successorPsid: PhysicalSynchronizerId
+  ): Unit = {
+    val value = ParticipantMetrics.LsuStatus.NoLsu.unwrap
+
+    lsuStatus
+      .updateWith(successorPsid) {
+        case None =>
+          Some(
+            newLsuStatus(
+              MetricsContext("successor_psid" -> successorPsid.toProtoPrimitive),
+              value = value,
+            )
+          )
+        case Some(gauge) =>
+          gauge.updateValue(value)
+          Some(gauge)
+      }
+      .discard
+  }
+
+  private def newLsuStatus(mc: MetricsContext, value: Int) = openTelemetryMetricsFactory.gauge(
+    info = MetricInfo(
+      name = prefix :+ "lsu_status",
+      summary = "Tracks the state of the LSU for a specific successor",
+      qualification = MetricQualification.Debug,
+      description = """The value represents the progress of LSU from the participant point of view.
+          |0: Unset / initial
+          |1: LSU announcement received
+          |2: Relevant sequencer successors known
+          |3: Handshake with successor done
+          |4: Topology local copy done
+          |5: LSU is done (node ready to connect to new synchronizer)
+          |""".stripMargin,
+      labelsWithDescription = Map(
+        "successor_psid" -> "The physical synchronizer id of the successor"
+      ),
+    ),
+    initial = value,
+  )(mc)
+}
+
+object ParticipantMetrics {
+  object LsuStatus {
+    val NoLsu: NonNegativeInt = NonNegativeInt.zero // Only after a cancellation
+    val LsuAnnounced: NonNegativeInt = NonNegativeInt.one
+    val SequencerSuccessorsKnown: NonNegativeInt = NonNegativeInt.two
+    val HandshakeDone: NonNegativeInt = NonNegativeInt.three
+    val LocalCopyDone: NonNegativeInt = NonNegativeInt.tryCreate(4)
+    val LsuDone: NonNegativeInt = NonNegativeInt.tryCreate(5)
+  }
 }
 
 class ConnectedSynchronizerHistograms private[metrics] (

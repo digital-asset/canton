@@ -1150,6 +1150,7 @@ class TopologyTransactionProcessorTestInMemory extends TopologyTransactionProces
   ): TopologyStore[TopologyStoreId.SynchronizerStore] =
     new InMemoryTopologyStore(
       TopologyStoreId.SynchronizerStore(psid),
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory.appendUnnamedKey("testName", testName),
       timeouts,

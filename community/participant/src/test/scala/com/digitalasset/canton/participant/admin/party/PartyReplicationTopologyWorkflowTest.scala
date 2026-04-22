@@ -149,6 +149,7 @@ class PartyReplicationTopologyWorkflowTest
   private def newTopologyStore() =
     new InMemoryTopologyStore(
       SynchronizerStore(physicalSynchronizerId),
+      predecessor = None,
       testedProtocolVersion,
       loggerFactory,
       DefaultProcessingTimeouts.testing,

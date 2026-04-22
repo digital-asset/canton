@@ -223,6 +223,7 @@ private[platform] class JdbcLedgerDao(
     metrics = metrics,
     tracer = tracer,
     topologyTransactionsStreamReader = topologyTransactionsStreamReader,
+    pruningOffsetService = pruningOffsetService,
     loggerFactory = loggerFactory,
   )(queryExecutionContext)
 

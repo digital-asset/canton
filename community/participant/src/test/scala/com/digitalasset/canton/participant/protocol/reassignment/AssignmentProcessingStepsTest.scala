@@ -195,6 +195,7 @@ final class AssignmentProcessingStepsTest
       SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
       IndexedPhysicalSynchronizer.tryCreate(targetPsid.unwrap, 1),
       defaultStaticSynchronizerParameters,
+      predecessor = None,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,

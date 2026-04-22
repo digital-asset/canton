@@ -58,7 +58,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     EnvironmentDefinition.P3_S2M2
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.automaticallyPerformLsu).replace(false)
+          _.focus(_.parameters.lsu.automaticallyPerformLsu).replace(false)
         )
       )
       .withSetup { env =>
@@ -289,7 +289,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       // Here, we just want to test whether the call works as expected
       participant3.underlying.value.sync.syncPersistentStateManager.get(daId) shouldBe None
       participant3.underlying.value.sync
-        .performPureHandshake(daId)
+        .performPureHandshake(daId, isLsu = true)
         .futureValueUS
 
       eventually() {

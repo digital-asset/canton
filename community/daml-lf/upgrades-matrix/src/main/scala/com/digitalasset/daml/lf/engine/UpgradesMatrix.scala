@@ -204,7 +204,8 @@ class UpgradesMatrixCases(
     if (LanguageVersion.featureLookupBykey.enabledIn(langVersion)) ifTrue else ifFalse
   def whenLookupByKeysOtherwiseEmpty[A](a: => A)(implicit m: Monoid[A]) = ifLookupByKeys(a, m.empty)
 
-  val serializationVersion = SerializationVersion.assign(langVersion)
+  val serializationVersion =
+    SerializationVersion.assign(LanguageVersion.featureContractKeys.enabledIn(langVersion))
 
   def encodeDalfArchive(
       pkgId: PackageId,

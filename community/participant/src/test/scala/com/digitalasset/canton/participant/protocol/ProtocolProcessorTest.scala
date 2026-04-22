@@ -289,6 +289,7 @@ class ProtocolProcessorTest
         crypto.crypto,
         IndexedPhysicalSynchronizer.tryCreate(psid, 1),
         defaultStaticSynchronizerParameters,
+        predecessor = None,
         loggerFactory,
         timeouts,
         futureSupervisor,

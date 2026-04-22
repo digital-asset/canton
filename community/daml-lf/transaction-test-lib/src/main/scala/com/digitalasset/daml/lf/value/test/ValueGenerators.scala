@@ -244,33 +244,34 @@ object ValueGenerators {
     valueGenMapGen,
   )
 
-  private def flatGen = Gen.oneOf(
+  private def flatGen(allowContractIds: Boolean) = Gen.oneOf(
     dateGen.map(ValueDate.apply),
     Gen.alphaStr.map(ValueText.apply),
     unscaledNumGen.map(ValueNumeric.apply),
     arbitrary[Long].map(ValueInt64.apply),
     Gen.alphaStr.map(ValueText.apply),
     timestampGen.map(ValueTimestamp.apply),
-    coidValueGen,
+    coidValueGen.suchThat(_ => allowContractIds),
     party.map(ValueParty.apply),
     Gen.oneOf(ValueTrue, ValueFalse),
     Gen.const(ValueUnit),
   )
 
-  def valueGen(nested: => Gen[Value] = nestedGen): Gen[Value] = Gen.lzy {
-    Gen.sized { size =>
-      for {
-        s <- Gen.choose(0, size)
-        value <-
-          if (s < 1) flatGen
-          else
-            Gen.frequency(
-              5 -> flatGen,
-              1 -> Gen.resize(size / (s + 1), nested),
-            )
-      } yield value
+  def valueGen(allowContractIds: Boolean = true, nested: => Gen[Value] = nestedGen): Gen[Value] =
+    Gen.lzy {
+      Gen.sized { size =>
+        for {
+          s <- Gen.choose(0, size)
+          value <-
+            if (s < 1) flatGen(allowContractIds)
+            else
+              Gen.frequency(
+                5 -> flatGen(allowContractIds),
+                1 -> Gen.resize(size / (s + 1), nested),
+              )
+        } yield value
+      }
     }
-  }
 
   private val simpleChars =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ".toVector
@@ -308,7 +309,7 @@ object ValueGenerators {
       packageName: PackageName,
   ): Gen[GlobalKeyWithMaintainers] =
     for {
-      key <- valueGen()
+      key <- valueGen(allowContractIds = false)
       maintainers <- genNonEmptyParties
       gkey = GlobalKey
         .build(
@@ -468,27 +469,31 @@ object ValueGenerators {
       version = version,
     )
 
-  val queryByKeyNodeGen: Gen[Node.QueryByKey] =
+  def queryByKeyNodeGen: Gen[Node.QueryByKey] =
     for {
       version <- SerializationVersionGen()
       node <- queryByKeyNodeGenWithVersion(version)
     } yield node
 
   def queryByKeyNodeGenWithVersion(version: SerializationVersion): Gen[Node.QueryByKey] =
-    for {
-      pkgName <- pkgNameGen
-      templateId <- idGen
-      key <- keyWithMaintainersGen(templateId, pkgName)
-      contractIds <- Gen.listOf(coidGen).map(_.toVector)
-      exhaustive <- Gen.oneOf(true, contractIds.isEmpty)
-    } yield Node.QueryByKey(
-      packageName = pkgName,
-      templateId = templateId,
-      exhaustive = exhaustive,
-      key = key,
-      result = contractIds,
-      version = version,
-    )
+    if (version < SerializationVersion.minContractKeys) {
+      Gen.fail[Node.QueryByKey]
+    } else {
+      for {
+        pkgName <- pkgNameGen
+        templateId <- idGen
+        key <- keyWithMaintainersGen(templateId, pkgName)
+        contractIds <- Gen.listOf(coidGen).map(_.toVector)
+        exhaustive <- Gen.oneOf(true, contractIds.isEmpty)
+      } yield Node.QueryByKey(
+        packageName = pkgName,
+        templateId = templateId,
+        exhaustive = exhaustive,
+        key = key,
+        result = contractIds,
+        version = version,
+      )
+    }
 
   /** Makes nodes with the problems listed under `malformedCreateNodeGen`, and
     * `malformedGenTransaction` should they be incorporated into a transaction.
@@ -554,6 +559,12 @@ object ValueGenerators {
       roots <- Gen.listOf(Arbitrary.arbInt.arbitrary.map(NodeId(_)))
     } yield Transaction(nodes.toMap, roots.to(ImmArray))
 
+  val noDanglingRefGenTransaction: Gen[Transaction] =
+    for {
+      version <- SerializationVersionGen()
+      tx <- noDanglingRefGenTransaction(version)
+    } yield tx
+
   /*
    * Create a transaction without no dangling nodeId.
    *
@@ -564,8 +575,7 @@ object ValueGenerators {
    *  may not match up.
    *
    */
-
-  val noDanglingRefGenTransaction: Gen[Transaction] = {
+  def noDanglingRefGenTransaction(version: SerializationVersion): Gen[Transaction] = {
 
     def nonDanglingRefNodeGen(
         maxDepth: Int,
@@ -582,7 +592,7 @@ object ValueGenerators {
             rollbackFreq -> danglingRefRollbackNodeGen,
             1 -> malformedCreateNodeGen(),
             2 -> fetchNodeGen,
-            1 -> queryByKeyNodeGen,
+            1 -> queryByKeyNodeGenWithVersion(version),
           )
           nodeWithChildren <- node match {
             case node: Node.Exercise =>

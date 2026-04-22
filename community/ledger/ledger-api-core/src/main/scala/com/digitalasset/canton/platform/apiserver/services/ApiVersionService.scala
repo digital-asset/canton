@@ -11,30 +11,18 @@ import com.daml.ledger.api.v2.version_service.{
   UserManagementFeature,
   *,
 }
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
-import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
-import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
 import com.digitalasset.canton.platform.config.{
   PackageServiceConfig,
   PartyManagementServiceConfig,
   UserManagementServiceConfig,
 }
-import com.digitalasset.canton.tracing.TraceContextGrpc
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.io.Source
-import scala.util.Try
-import scala.util.control.NonFatal
 
 private[apiserver] final class ApiVersionService(
     ledgerFeatures: LedgerFeatures,
@@ -48,7 +36,7 @@ private[apiserver] final class ApiVersionService(
     with GrpcApiService
     with NamedLogging {
 
-  private val apiVersion: Try[String] = VersionFile.readVersion()
+  private val apiVersion: String = BuildInfo.version
 
   private val featuresDescriptor =
     FeaturesDescriptor.of(
@@ -88,23 +76,8 @@ private[apiserver] final class ApiVersionService(
 
   override def getLedgerApiVersion(
       request: GetLedgerApiVersionRequest
-  ): Future[GetLedgerApiVersionResponse] = {
-    implicit val loggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
-    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
-
-    Future
-      .fromTry(apiVersion)
-      .map(apiVersionResponse)
-      .thereafter(logger.logErrorsOnCall[GetLedgerApiVersionResponse])
-      .recoverWith { case NonFatal(_) =>
-        Future.failed(
-          LedgerApiErrors.InternalError
-            .VersionService(message = "Cannot read Ledger API version")
-            .asGrpcError
-        )
-      }
-  }
+  ): Future[GetLedgerApiVersionResponse] =
+    Future.successful(apiVersionResponse(apiVersion))
   private def apiVersionResponse(version: String) =
     GetLedgerApiVersionResponse(version, Some(featuresDescriptor))
 
@@ -113,19 +86,4 @@ private[apiserver] final class ApiVersionService(
 
   override def close(): Unit = ()
 
-}
-
-object VersionFile {
-
-  private val versionFile: String = "VERSION"
-
-  def readVersion(): Try[String] =
-    Try {
-      Source
-        .fromResource(versionFile)
-        .getLines()
-        .toList
-        .headOption
-        .getOrElse(throw new IllegalStateException("Empty version file"))
-    }
 }

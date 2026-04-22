@@ -12,7 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile, SQLActionBuilderChain}
@@ -60,6 +60,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     override protected val storage: DbStorage,
     val storeId: StoreId,
     val storeIndex: IndexedTopologyStoreId,
+    val predecessor: Option[SynchronizerPredecessor],
     override val protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val batchingConfig: BatchingConfig,
@@ -311,7 +312,11 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
 
   }
 
-  override def copyFromPredecessorSynchronizerStore(
+  /** Insert topology transactions by reading a predecessor synchronizer store. Do the insert by
+    * batches and in source id order, so that on crash recovery we can resume from the last source
+    * id present in the target store.
+    */
+  override protected def doCopyFromPredecessorSynchronizerStore(
       sourceStore: TopologyStore[SynchronizerStore]
   )(implicit
       ev: StoreId <:< SynchronizerStore,
@@ -320,15 +325,11 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     implicit val tc = errorLoggingContext.traceContext
     val targetPsid = ev(storeId).psid
     val sourcePsid = sourceStore.storeId.psid
-
     for {
       _ <- ErrorUtil.requireArgumentAsyncShutdown(
-        targetPsid.logical == sourcePsid.logical,
-        s"unexpected logical synchronizer id: expected=${targetPsid.logical}, actual=${sourcePsid.logical}",
-      )
-      _ <- ErrorUtil.requireArgumentAsyncShutdown(
-        sourcePsid < targetPsid,
-        s"source synchronizer [$targetPsid] is not a predecessor of the target synchronizer [$targetPsid]",
+        predecessor.exists(_.psid == sourcePsid),
+        s"source synchronizer [$sourcePsid] does not match the configured predecessor [${predecessor
+            .map(_.psid)}] of the target synchronizer [$targetPsid]",
       )
       sourceDbStore <- sourceStore match {
         case dbStore: DbTopologyStore[SynchronizerStore] => FutureUnlessShutdown.pure(dbStore)

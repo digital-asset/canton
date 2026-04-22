@@ -393,6 +393,23 @@ clients to continue an interrupted ACS stream from the last element which made t
 the `stream_continuation_token` field of the last response element received before the interruption, and the stream will
 continue from the next element after that.
 
+### ACS Ledger API counting
+
+To improve memory efficiency in our large ACS integration tests, we need to count Active Contract Sets (ACS)
+on a participant without downloading the full data set.
+
+Previously, we used the `participant.ledger_api.acs.of_all().size` command. This approach is memory-intensive because it
+downloads the entire ACS before calculating its size.
+
+The new `participant.ledger_api.acs.count()` command solves this by:
+   - Leveraging the same `GetActiveContracts` gRPC call backed by Pekko Stream on the server side.
+   - Utilizing the gRPC output Stream on the client side to count results on the fly.
+   - Depending on the GC, cleaning contract data after counting the active contracts in the stream's chunk,
+     preventing memory bloat.
+
+> Note: This command is currently under the Testing feature flag. It is not a standalone gRPC service call but rather
+> a client-side optimization of an existing stream.
+
 ### ACS pagination
 
 A new, `GetActiveContractsPage` endpoint added to State Service API. This enables the client to retrieve the ACS in
@@ -402,7 +419,12 @@ field. The token can be obtained from the `GetActiveContractsPageResponse` of th
 ### GetUpdates stream in descending order of events
 
 The `GetUpdatesRequest` object has new optional parameter `descending_order`. When this parameter is `true` the events
-are streamed from the newest to the oldest ones.
+are streamed from the newest to the oldest ones. The pages can be accessed sequentially by using the `page_token`
+field.
+
+### GetUpdates pagination
+A new `GetUpdatesPage` endpoint has been added to Update Service API. THis allows retrieval of updates in paginated
+form instead of requesting the stream.
 
 ### Removal of deprecated, legacy ACS export and import endpoints
 
@@ -580,6 +602,10 @@ failing) as `ImportAcs`.
 ### update to GRPC 1.77.0
 
 removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
+
+### BouncyCastle updated to 1.84
+
+BouncyCastle dependencies have been updated to `1.84` in order to address BDSA-2026-7218.
 
 ### Deprecate config key: participant.parameters.initial-protocol-version
 This config key was unused and has been marked as deprecated.

@@ -508,6 +508,7 @@ class StoreBasedTopologySnapshotTestInMemory extends StoreBasedTopologySnapshotT
     behave like topologySnapshot(() =>
       new InMemoryTopologyStore(
         TopologyStoreId.SynchronizerStore(DefaultTestIdentities.physicalSynchronizerId),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,

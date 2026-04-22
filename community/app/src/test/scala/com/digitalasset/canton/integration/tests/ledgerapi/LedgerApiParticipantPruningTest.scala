@@ -16,6 +16,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.ParticipantSynchronizerLimits
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
@@ -23,7 +24,7 @@ import com.digitalasset.canton.damltests.java.test
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByOwner
-import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
@@ -33,12 +34,14 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.ParticipantPruningInProgress
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration as JDuration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
 
 trait LedgerApiParticipantPruningTest
@@ -136,12 +139,30 @@ trait LedgerApiParticipantPruningTest
     val offsetLookupOfLastPrunedEvent =
       participant1.pruning.get_offset_by_time(tsOfLastPrunedEvent.toInstant)
 
+    // Simulate concurrent pruning from another replica by issuing the pruning lock
+    val releasePruningLock = participant1.testing.state_inspection.lockPruning()
+
     // Prune and remember offsets.
-    participant1.pruning.prune(pruningOffset)
+    val pruneF = Future(participant1.pruning.prune(pruningOffset))
     val (participant, offsetToPruneUpTo) = (participant1, pruningOffset)
+    Threading.sleep(1000)
+    pruneF.value shouldBe None
+
+    // If pruning did not finish, we expect ParticipantPruningInProgress error on subsequent API calls
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      participant1.pruning.prune(offsetToPruneUpTo),
+      logEntry => logEntry.errorMessage should include(ParticipantPruningInProgress.id),
+    )
+
+    // As unlocking, pruning finishes
+    pruneF.value shouldBe None
+    releasePruningLock()
+    pruneF.futureValue
+
     // user-manual-entry-begin: ManualPruneParticipantNodePrune
     // The prune() method prunes more comprehensively and should be used in most cases.
-    participant.pruning.prune(offsetToPruneUpTo)
+    participant1.pruning.prune(offsetToPruneUpTo)
+
     // user-manual-entry-end: ManualPruneParticipantNodePrune
     logger.info(s"pruned at $pruningOffset")
 
@@ -503,12 +524,7 @@ trait LedgerApiParticipantPruningTest
   }
 }
 
-class LedgerApiParticipantPruningTestDefault extends LedgerApiParticipantPruningTest {
-  registerPlugin(new UseH2(loggerFactory))
+class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
+  registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
-
-//class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
-//  registerPlugin(new UsePostgres(loggerFactory))
-//  registerPlugin(new UseBftSequencer(loggerFactory))
-//}

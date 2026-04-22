@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.admin.party.OnboardingClearanceSchedu
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.SyncPersistentState
@@ -106,6 +107,7 @@ class TopologyComponentFactory(
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
+      metrics: ParticipantMetrics,
   ): TopologyTransactionProcessor.Factory = new TopologyTransactionProcessor.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[EffectiveTime] => Unit
@@ -127,6 +129,7 @@ class TopologyComponentFactory(
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
+        metrics = metrics,
         loggerFactory,
       )
       val terminateTopologyProcessingFUS =
@@ -273,6 +276,7 @@ class TopologyComponentFactory(
       topology,
       Some(crypto.staticSynchronizerParameters),
       timeouts,
+      futureSupervisor = futureSupervisor,
       loggerFactory,
     )
 

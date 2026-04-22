@@ -292,6 +292,7 @@ class SequencerRuntime(
             clock,
             lsuSequencingBounds,
             localNodeParameters.sanitizePublicErrorMessages,
+            metrics,
             loggerFactory,
           )(ec),
           executionContext,

@@ -180,7 +180,7 @@ sealed trait OnboardingConsortiumPartyIntegrationTest extends ConsortiumPartyInt
           )
 
           logger.debug("Onboarding: Import ACS to P4 (an empty participant)")
-          participant4.ledger_api.state.acs.of_all() shouldBe empty
+          participant4.ledger_api.state.acs.count() shouldEqual 0
           participant4.parties.import_party_acs(daId, Some(consortiumPartyId), acsFilename)
 
           logger.debug(s"Onboarding: Connect P4 to the synchronizer $daName")

@@ -224,9 +224,17 @@ def hub_report_issue(issue: str):
     else:
         hub_create_issue(title)
 
+def hub_create_issue_table_header():
+    return "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+
 def hub_create_issue_line():
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return f"{date_str} job:{os.environ['CIRCLE_JOB']} node_index:{os.environ['CIRCLE_NODE_INDEX']} url:{os.environ['CIRCLE_BUILD_URL']}"
+    commit_hash = os.environ.get('CIRCLE_SHA1', 'unknown')
+    commit_url = f"https://github.com/DACH-NY/canton/commit/{commit_hash}"
+    build_url = os.environ['CIRCLE_BUILD_URL']
+    job = os.environ['CIRCLE_JOB']
+    node_index = os.environ['CIRCLE_NODE_INDEX']
+    return f"| {date_str} | {job} | {node_index} | [link]({build_url}) | [{commit_hash[:8]}]({commit_url}) |"
 
 def gh_assign_release_line(idx: str, project_item_id: str):
     release_line_value = branches_to_report.get(branch, None)
@@ -262,12 +270,16 @@ def hub_create_issue(title: str):
 
 This issue was created automatically by the CI system. Please fix the test before closing the issue.
 
+{hub_create_issue_table_header()}
 {hub_create_issue_line()}
     """
     result = hub_cmd_with_input(["issue", "create", "-M", hub_milestone], msg)
     print(f"Created issue: {result.stdout}")
 
 def hub_update_issue(idx: str, title: str, body: str):
+    header = "| Date | Job | Node | Build | Commit |"
+    if header not in body:
+        body = body + "\n" + hub_create_issue_table_header()
     msg = title + "\n\n" + body + "\n" + hub_create_issue_line()
     hub_cmd_with_input(["issue", "update",  "-s", "open", f"{idx}"], msg)
     print(f"Updated issue: {idx} for {title}")
@@ -279,7 +291,45 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
 
 def self_test():
     test_compute_single_log_failure()
+    test_hub_create_issue_line()
     print("All self-checks passed")
+
+def test_hub_create_issue_line():
+    os.environ['CIRCLE_JOB'] = 'test_with_java17'
+    os.environ['CIRCLE_NODE_INDEX'] = '5'
+    os.environ['CIRCLE_BUILD_URL'] = 'https://circleci.com/gh/DACH-NY/canton/3196076'
+    os.environ['CIRCLE_SHA1'] = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+    header = hub_create_issue_table_header()
+    assert '| Date | Job | Node | Build | Commit |' in header, f"Missing header in: {header}"
+    line = hub_create_issue_line()
+    assert '| test_with_java17 |' in line, f"Missing job in: {line}"
+    assert '| 5 |' in line, f"Missing node_index in: {line}"
+    assert '[link](https://circleci.com/gh/DACH-NY/canton/3196076)' in line, f"Missing build url in: {line}"
+    assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
+
+def test_hub_update_issue_old_format():
+    # Old issues have flat-text lines with no table header — the header must be injected before the new row
+    old_body = (
+        "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
+        "2026-04-14 12:05:05 job:test node_index:1 url:https://circleci.com/gh/DACH-NY/canton/1234\n"
+        "2026-04-14 13:00:00 job:sequential_test node_index:3 url:https://circleci.com/gh/DACH-NY/canton/5678"
+    )
+    header = "| Date | Job | Node | Build | Commit |"
+    assert header not in old_body, "Test setup error: old body should not contain the table header"
+    result_body = old_body + ("\n" + hub_create_issue_table_header() if header not in old_body else "")
+    assert header in result_body, "Table header was not injected into old-format body"
+
+def test_hub_update_issue_new_format():
+    # New issues already have the table header — the new row is simply appended, no duplicate header
+    new_body = (
+        "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n"
+        "| 2026-04-14 12:05:05 | test | 1 | [link](https://circleci.com/gh/DACH-NY/canton/1234) | [a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4) |"
+    )
+    header = "| Date | Job | Node | Build | Commit |"
+    assert header in new_body, "Test setup error: new body should already contain the table header"
+    result_body = new_body + ("\n" + hub_create_issue_table_header() if header not in new_body else "")
+    assert result_body.count(header) == 1, "Table header must appear exactly once in updated new-format body"
 
 def test_compute_single_log_failure():
     # Logs

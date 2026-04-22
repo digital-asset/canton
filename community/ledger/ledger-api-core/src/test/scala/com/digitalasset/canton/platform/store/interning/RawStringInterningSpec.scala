@@ -44,6 +44,13 @@ class RawStringInterningSpec extends AnyFlatSpec with Matchers {
     current.lastId shouldBe 3
   }
 
+  it should "complain about negative IDs" in {
+    val current = RawStringInterning.from(List(1 -> "one"))
+    an[IllegalArgumentException] shouldBe thrownBy(
+      RawStringInterning.from(List(-1 -> "minus one"), current)
+    )
+  }
+
   behavior of "RawStringInterning.newEntries"
 
   it should "return an empty result if the input and previous state is empty" in {
@@ -91,6 +98,16 @@ class RawStringInterningSpec extends AnyFlatSpec with Matchers {
     )
     newEntries shouldBe Vector(3 -> "three", 4 -> "four")
   }
+
+  it should "detect overflows" in {
+    val current =
+      RawStringInterning(Map("max" -> Int.MaxValue), Map(Int.MaxValue -> "max"), Int.MaxValue)
+    an[ArithmeticException] shouldBe thrownBy(
+      RawStringInterning.newEntries(Vector("overflow"), current)
+    )
+  }
+
+  behavior of "RawStringInterning.resetTo"
 
   it should "remove entries after the lastPersistedStringInterningId on `resetTo`" in {
     val current = RawStringInterning(Map("one" -> 1, "two" -> 2), Map(1 -> "one", 2 -> "two"), 2)

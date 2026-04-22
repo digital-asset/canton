@@ -3,13 +3,24 @@
 
 package com.digitalasset.transcode.codec.proto
 
+import com.digitalasset.transcode.MissingFieldsException
 import com.digitalasset.transcode.codec.proto.Value.Sum
 import com.digitalasset.transcode.schema.*
 import com.digitalasset.transcode.schema.CodecVisitor.*
 import com.google.protobuf.empty.Empty
 
-/** This codec converts Ledger API GRPC values. */
-object ProtobufCodec extends CodecVisitor[Value]:
+object ProtobufCodec
+    extends ProtobufCodecConfigured(
+      allowMissingFields = false
+    )
+
+/** This codec converts Ledger API GRPC values.
+  *
+  * allowMissingFields provided to retain compatibility with a previous logic (3.4 and before ->
+  * allowMissingFields = true)
+  */
+// TODO(i31732) remove this option and missingFields mandatory check (allowMissingFields = false)
+class ProtobufCodecConfigured(allowMissingFields: Boolean) extends CodecVisitor[Value]:
   override def record(fields: Seq[(FieldName, Type)]): Type = new Type:
     private val codecs = fields.map(_._2)
     override def fromDynamicValue(dv: DynamicValue)(using VarMap[Encoder[Value]]): Value =
@@ -21,9 +32,19 @@ object ProtobufCodec extends CodecVisitor[Value]:
       Value(Sum.Record(Record(fields = fs.toSeq)))
     override def toDynamicValue(a: Value)(using VarMap[Decoder[Value]]): DynamicValue =
       val record = a.sum.record.getOrElse(unexpectedCase(a))
-      DynamicValue.Record(
-        record.fields.view zip codecs map ((f, c) => c.toDynamicValue(f.getValue))
-      )
+      if allowMissingFields then
+        DynamicValue.Record(
+          record.fields.view zip codecs map ((f, c) => c.toDynamicValue(f.getValue))
+        )
+      else
+        val zippedFields = fields.zipAll(record.fields.view.map(Some(_)), None, None)
+        val missingFields = zippedFields.collect {
+          case ((name, codec), None) if !codec.isOptional => name.fieldName
+        }.toSet
+        if missingFields.nonEmpty then throw MissingFieldsException(missingFields)
+        DynamicValue.Record(zippedFields.collect { case ((_, codec), Some(f)) =>
+          codec.toDynamicValue(f.getValue)
+        })
   end record
 
   override def variant(cases: Seq[(VariantConName, Type)]): Type = new Type:
@@ -60,6 +81,7 @@ object ProtobufCodec extends CodecVisitor[Value]:
   end list
 
   override def optional(elem: Type): Type = new Type:
+    override def isOptional(using VarMap[Decoder[Value]]): Boolean = true
     override def fromDynamicValue(dv: DynamicValue)(using VarMap[Encoder[Value]]): Value =
       Value(Sum.Optional(Optional(value = dv.optional.map(elem.fromDynamicValue))))
     override def toDynamicValue(a: Value)(using VarMap[Decoder[Value]]): DynamicValue =
@@ -147,4 +169,4 @@ object ProtobufCodec extends CodecVisitor[Value]:
   private def unexpectedCase(v: Value): Nothing = throw Exception(
     s"Unexpected case: ${v.sum.number}"
   )
-end ProtobufCodec
+end ProtobufCodecConfigured

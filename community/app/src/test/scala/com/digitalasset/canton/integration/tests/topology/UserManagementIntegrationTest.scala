@@ -8,8 +8,10 @@ import com.digitalasset.canton.admin.api.client.data.{
   User,
   UserRights,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
+import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -21,6 +23,8 @@ import com.digitalasset.canton.ledger.error.groups.UserManagementServiceErrors.{
   UserNotFound,
 }
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import monocle.macros.syntax.lens.*
 
 import java.util.UUID
@@ -29,17 +33,15 @@ private object UserManagementIntegrationTest {
   val extraAdmin: String = "this-is-extra-admin-user" + UUID.randomUUID().toString
 }
 
-// TODO(#10819)
-// The API participant1.parties.enable is asynchronous, and the allocation of the party may not occur immediately
-// after the API call returns. This is due to the complexity of synchronizing a number of party storages within
-// the canton's landscape. After the issue is resolved, the `eventually()` function within this test and eager
-// party notification can be removed.
-trait UserManagementIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
+trait UserManagementIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with EntitySyntax {
   import UserManagementIntegrationTest.*
 
-  private var alice: PartyId = _
-  private var bob: PartyId = _
-  private var charlie: PartyId = _
+  @volatile private var alice: PartyId = _
+  @volatile private var bob: PartyId = _
+  @volatile private var charlie: PartyId = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -48,13 +50,26 @@ trait UserManagementIntegrationTest extends CommunityIntegrationTest with Shared
           _.focus(_.ledgerApi.userManagementService.additionalAdminUserId).replace(Some(extraAdmin))
         )
       )
-      .withSetup { env =>
+      .withSetup { implicit env =>
         import env.*
         participant1.synchronizers.connect_local(sequencer1, daName)
 
-        alice = participant1.parties.enable("alice")
-        bob = participant1.parties.enable("bob")
-        charlie = participant1.parties.enable("charlie")
+        val partyHints = Seq("alice", "bob", "charlie")
+
+        PartiesAllocator(participants.all.toSet)(
+          newParties = partyHints.map(_ -> participant1),
+          targetTopology = partyHints
+            .map(party =>
+              party -> Map(
+                daId -> (PositiveInt.one, Set((participant1.id, Submission: ParticipantPermission)))
+              )
+            )
+            .toMap,
+        )
+
+        alice = "alice".toPartyId(participant1)
+        bob = "bob".toPartyId(participant1)
+        charlie = "charlie".toPartyId(participant1)
       }
 
   "managing users" should {

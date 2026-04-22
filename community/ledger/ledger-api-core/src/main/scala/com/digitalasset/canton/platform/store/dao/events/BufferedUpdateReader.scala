@@ -44,6 +44,7 @@ private[events] class BufferedUpdateReader(
       endInclusive: Offset,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
+      skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] =
@@ -60,6 +61,7 @@ private[events] class BufferedUpdateReader(
             directEC,
           ),
         descendingOrder = descendingOrder,
+        skipPruningChecks = skipPruningChecks,
       )
 
   def lookupUpdateBy(
@@ -108,6 +110,7 @@ private[platform] object BufferedUpdateReader {
               endInclusive: Offset,
               descendingOrder: Boolean,
               filter: InternalUpdateFormat,
+              skipPruningChecks: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, GetUpdatesResponse), NotUsed] =
@@ -117,6 +120,7 @@ private[platform] object BufferedUpdateReader {
                 endInclusive = endInclusive,
                 internalUpdateFormat = filter,
                 descendingOrder = descendingOrder,
+                skipPruningChecks = skipPruningChecks,
               )
         },
         bufferedStreamEventsProcessingParallelism = eventProcessingParallelism,

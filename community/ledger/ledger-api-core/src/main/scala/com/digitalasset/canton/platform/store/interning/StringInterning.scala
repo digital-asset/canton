@@ -88,7 +88,7 @@ object StringInterningDomain {
 }
 
 /** The main interface for using string-interning. Client code can use this to map between interned
-  * id-s and string-domain objects back and forth
+  * id-s and string-domain objects back and forth. All interned ids are non-negative.
   *
   * @tparam T
   *   is the type of the string-related domain object which is interned

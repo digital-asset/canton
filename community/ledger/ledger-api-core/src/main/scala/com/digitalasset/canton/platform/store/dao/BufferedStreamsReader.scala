@@ -86,6 +86,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
       bufferFilter: TransactionLogUpdate => Option[BufferOut],
       toApiResponse: BufferOut => Future[ApiResponse],
       descendingOrder: Boolean,
+      skipPruningChecks: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, ApiResponse), NotUsed] = {
@@ -132,6 +133,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
                       endInclusive = end,
                       filter = persistenceFetchArgs,
                       descendingOrder = true,
+                      skipPruningChecks = skipPruningChecks,
                     ),
                   )
               })
@@ -168,6 +170,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
                       endInclusive = bufferedStartExclusive,
                       filter = persistenceFetchArgs,
                       descendingOrder = false,
+                      skipPruningChecks = skipPruningChecks,
                     )(loggingContext)
                       .concat(toApiResponseStream(slice))
                   Some(endInclusive.increment -> sourceFromBuffer)
@@ -194,6 +197,7 @@ private[platform] object BufferedStreamsReader {
         endInclusive: Offset,
         descendingOrder: Boolean,
         filter: FILTER,
+        skipPruningChecks: Boolean,
     )(implicit
         loggingContext: LoggingContextWithTrace
     ): Source[(Offset, ApiResponse), NotUsed]

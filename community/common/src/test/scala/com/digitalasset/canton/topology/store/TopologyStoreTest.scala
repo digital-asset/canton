@@ -88,45 +88,6 @@ trait TopologyStoreTest
       mk: (PhysicalSynchronizerId, String) => TopologyStore[TopologyStoreId.SynchronizerStore]
   ): Unit = {
 
-    val bootstrapTransactions = StoredTopologyTransactions(
-      Seq[
-        (
-            CantonTimestamp,
-            (GenericSignedTopologyTransaction, Option[CantonTimestamp], Option[String]),
-        )
-      ](
-        ts1 -> (nsd_p1, None, None),
-        ts1 -> (nsd_p2, None, None),
-        ts1 -> (nsd_p3, None, None),
-        ts1 -> (dnd_p1p2, None, None),
-        ts1 -> (dop_synchronizer1_proposal, ts2.some, None),
-        ts2 -> (dop_synchronizer1, None, None),
-        ts2 -> (otk_p1, None, None),
-        ts3 -> (p1_permission_daSynchronizer, ts3.some, None),
-        ts3 -> (p1_permission_daSynchronizer_removal, None, None),
-        ts3 -> (nsd_seq, None, None),
-        ts3 -> (dtc_p1_synchronizer1, None, None),
-        ts3 -> (ptp_fred_p1_proposal, ts5.some, None),
-        ts4 -> (dnd_p1seq, None, None),
-        ts4 -> (otk_p3_proposal, None, None),
-        ts4 -> (otk_p2, None, None),
-        ts5 -> (ptp_fred_p1, None, None),
-        ts5 -> (dtc_p2_synchronizer1, ts6.some, None),
-        ts6 -> (dtc_p2_synchronizer1_update, None, None),
-        ts6 -> (mds_med1_synchronizer1_invalid, ts6.some,
-        // mapping checks run before auth checks, so this will fail with the missing otk check
-        s"Members $med1Id are missing a valid owner to key mapping.".some),
-      ).map { case (from, (tx, until, rejection)) =>
-        StoredTopologyTransaction(
-          SequencedTime(from),
-          EffectiveTime(from),
-          until.map(EffectiveTime(_)),
-          tx,
-          rejection.map(String300.tryCreate(_)),
-        )
-      }
-    )
-
     "topology store" should {
 
       "clear all data without affecting other stores" in {
@@ -483,6 +444,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory = loggerFactory.appendUnnamedKey("TestName", "case6"),
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -646,6 +608,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -858,6 +821,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
               cleanupTopologySnapshot = false,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
@@ -1919,99 +1883,6 @@ trait TopologyStoreTest
               ()
             }
           } yield succeed
-        }
-      }
-
-      "copyFromPredecessorSynchronizerStore" should {
-        "correctly work" in {
-          val sourceStore = mk(synchronizer1_p1p2_physicalSynchronizerId, "case12")
-          val successor = synchronizer1_p1p2_physicalSynchronizerId.incrementSerial
-          val targetStore = mk(successor, "case12")
-
-          val storeWithUnrelatedLsid = mk(da_vp123_physicalSynchronizerId, "case12")
-
-          for {
-            // flip source and target to trigger the not predecessor error
-            notPredecessor <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-              sourceStore.copyFromPredecessorSynchronizerStore(targetStore).failed,
-              _.loneElement.throwable.value.getMessage should include(
-                "is not a predecessor of the target synchronizer"
-              ),
-            )
-            // attempt to copy from a non-matching lsid
-            unexpectedLsid <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-              targetStore
-                .copyFromPredecessorSynchronizerStore(storeWithUnrelatedLsid)
-                .failed,
-              _.loneElement.throwable.value.getMessage should include(
-                "unexpected logical synchronizer id"
-              ),
-            )
-
-            _ <- new InitialTopologySnapshotValidator(
-              pureCrypto = testData.factory.syncCryptoClient.crypto.pureCrypto,
-              store = sourceStore,
-              topologyCacheAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
-              topologyConfig = TopologyConfig.forTesting,
-              staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
-              timeouts,
-              loggerFactory = loggerFactory.appendUnnamedKey("TestName", "case12"),
-              cleanupTopologySnapshot = true,
-            ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
-              .valueOrFail("topology bootstrap")
-
-            targetDataBeforeCopy <- targetStore.dumpStoreContent()
-            _ = targetDataBeforeCopy.result shouldBe empty
-
-            _ <- targetStore.copyFromPredecessorSynchronizerStore(sourceStore)
-            sourceData <- sourceStore.dumpStoreContent()
-            targetData <- targetStore.dumpStoreContent()
-
-            // verify that the copy is idempotent
-            _ <- targetStore.copyFromPredecessorSynchronizerStore(sourceStore)
-            targetData2 <- targetStore.dumpStoreContent()
-
-          } yield {
-            notPredecessor.getMessage should include(
-              "is not a predecessor of the target synchronizer"
-            )
-            unexpectedLsid.getMessage should include("unexpected logical synchronizer id")
-
-            val actual = targetData.result
-            val expected = sourceData.result.view
-              .filter(_.rejectionReason.isEmpty)
-              .filter((stored => !stored.transaction.isProposal || stored.validUntil.isEmpty))
-              .toSeq
-
-            actual should contain theSameElementsInOrderAs expected
-            targetData2.result should contain theSameElementsInOrderAs expected
-          }
-        }
-
-        "resume copyFromPredecessorSynchronizerStore from the last imported transaction" in {
-          val sourceStore =
-            mk(testData.synchronizer1_p1p2_physicalSynchronizerId, "dbtestResume")
-          val successor = testData.synchronizer1_p1p2_physicalSynchronizerId.incrementSerial
-          val targetStore = mk(successor, "dbtestResume")
-
-          val prefix = StoredTopologyTransactions(largeTestSnapshot.result.take(10))
-
-          for {
-            _ <- sourceStore.bulkInsert(largeTestSnapshot)
-            // simulate a previous, partial copy by pre-inserting a prefix into the target
-            _ <- targetStore.bulkInsert(prefix)
-
-            _ <- targetStore.copyFromPredecessorSynchronizerStore(sourceStore)
-
-            sourceData <- sourceStore.dumpStoreContent()
-            targetData <- targetStore.dumpStoreContent()
-          } yield {
-            val expected = sourceData.result.view
-              .filter(_.rejectionReason.isEmpty)
-              .filter(stored => !stored.transaction.isProposal || stored.validUntil.isEmpty)
-              .toSeq
-            targetData.result should contain theSameElementsInOrderAs expected
-          }
         }
       }
 

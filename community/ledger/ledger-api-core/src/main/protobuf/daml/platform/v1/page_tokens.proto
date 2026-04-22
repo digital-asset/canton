@@ -32,3 +32,18 @@ message ListVettedPackagesPageTokenPayload {
   string synchronizer_id = 1;
   string participant_id = 2;
 }
+
+// Describes the payload of a page token for fetching update pages
+// Not intended to be handled directly by clients and should be presented to them as opaque bytes.
+message UpdatesPageToken {
+  // from the current GetUpdatePageResponse (last returned page)
+  int64 lowest_page_offset_exclusive = 1;
+  // from the current GetUpdatePageResponse (last returned page)
+  int64 highest_page_offset_inclusive = 2;
+  // to verify version difference
+  int32 version = 3;
+  // to verify participant difference
+  bytes participant_id_checksum = 4;
+  // to verify difference in request (update_format, begin_offset_exclusive, end_offset_inclusive, descending_order)
+  bytes request_checksum = 5;
+}

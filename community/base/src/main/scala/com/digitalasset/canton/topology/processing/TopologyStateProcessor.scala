@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.topology.*
@@ -25,7 +25,6 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.checks.TopologyMappingChecks
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -112,10 +111,10 @@ class TopologyStateProcessorImpl private[processing] (
 
     type Lft = Seq[GenericValidatedTopologyTransaction]
 
-    val lockP = cache.acquireEvictionLock()
+    val (lock, unlockPromise) = cache.acquireEvictionLock()
     val ret = for {
       // synchronise with any pending cache eviction and lock the cache
-      _ <- EitherT.right(lockP)
+      _ <- EitherT.right(lock)
       // first, preload the currently existing state for the given transactions
       _ <- EitherT.right[Lft](preloadCaches(effective, transactions, storeIsEmpty))
 
@@ -193,11 +192,12 @@ class TopologyStateProcessorImpl private[processing] (
     ret
       .leftMap(_ -> AsyncResult.immediateUnit)
       .merge
-      .thereafter { _ =>
+      .transform { res =>
         // Unlock the Topology state cache eviction lock (cache is thread safe / eviction not)
-        lockP.map { promise =>
-          promise.outcome(()).discard
-        }.discard
+        unlockPromise
+          .complete(res.map(_ => UnlessShutdown.unit).recover(_ => UnlessShutdown.unit))
+          .discard
+        res
       }
   }
 
@@ -477,6 +477,7 @@ object TopologyStateProcessor {
       topologyMappingChecksFactory: TopologyStateLookup => TopologyMappingChecks,
       pureCrypto: PureCrypto,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactoryParent: NamedLoggerFactory,
   )(implicit ec: ExecutionContext) =
     new TopologyStateProcessorImpl(
@@ -488,7 +489,7 @@ object TopologyStateProcessor {
         maxCacheSize = topologyConfig.maxTopologyStateCacheItems,
         enableConsistencyChecks = topologyConfig.enableTopologyStateCacheConsistencyChecks,
         metrics = TopologyStateWriteThroughCache.noOpCacheMetrics,
-        FutureSupervisor.Noop,
+        futureSupervisor,
         timeouts,
         loggerFactoryParent.append("purpose", "initial-validation"),
       ),

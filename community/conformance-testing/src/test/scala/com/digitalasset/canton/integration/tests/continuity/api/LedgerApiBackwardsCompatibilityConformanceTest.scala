@@ -8,7 +8,6 @@ import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
 }
 import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvironments}
-import com.digitalasset.canton.version.ReleaseVersion
 
 /** Tests various TestTools (as external processes) against the current canton. No canton is
   * downloaded from a zip; the current build is used directly.
@@ -16,10 +15,8 @@ import com.digitalasset.canton.version.ReleaseVersion
 trait LedgerApiBackwardsCompatibilityConformanceTest
     extends MultiVersionLedgerApiConformanceBase
     with IsolatedEnvironments {
-  lazy val testedReleases =
+  override lazy val testedReleases =
     ProtocolContinuityConformanceTest.previousSupportedReleases(logger)
-
-  override lazy val ledgerApiTestToolVersions = testedReleases.map(_.releaseVersion.toString)
 
   override def connectedSynchronizersCount = 2
 
@@ -37,8 +34,8 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
 
   private val api: Seq[Boolean] = Seq(true, false)
   api.foreach { useJsonApi =>
-    val allowedTestTools = ledgerApiTestToolVersions
-      .map(ReleaseVersion.tryCreate)
+    val allowedTestTools = testedReleases
+      .map(_.releaseVersion)
       .filter(versionShouldBeChecked)
       .sorted
       .reverse

@@ -35,7 +35,7 @@ scrape_configs:
         labels:
           job: canton
           namespace: docker-compose
-          __path__: /var/log/promtail/canton.log
+          __path__: /var/log/promtail/{canton,sequencer4,sequencer5}.log
       - targets:
           - localhost
         labels:

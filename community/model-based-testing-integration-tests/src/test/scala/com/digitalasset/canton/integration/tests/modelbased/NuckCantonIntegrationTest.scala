@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.modelbased
 
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.NuckSupport
 import com.digitalasset.canton.integration.util.PartiesAllocator
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -46,7 +47,9 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
 
   "Canton" should {
 
-    "run a simple scenario without keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "run a simple scenario without keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
             |Scenario
             |  Topology
@@ -61,9 +64,10 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "run a simple scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario("""
+    "run a simple scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario("""
             |Scenario
             |  Topology
             |    Participant 0 pkgs={0} parties={1}
@@ -76,12 +80,13 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
             |        QueryByKey [1] exhaustive=true
             |""".stripMargin)
 
-        run(scenario)
+      run(scenario)
     }
 
-    "run a complex scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario("""
+    "run a complex scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario("""
           |Scenario
           |  Topology
           |    Participant 0 pkgs={0} parties={1,3}
@@ -107,10 +112,12 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |        LookupByKey Success 3
           |""".stripMargin)
 
-        run(scenario)
+      run(scenario)
     }
 
-    "run create/exercise" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "run create/exercise" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       run(Parser.assertParseScenario("""
         |Scenario
         |  Topology
@@ -123,7 +130,9 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
         |""".stripMargin))
     }
 
-    "run create with key/exercise by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "run create with key/exercise by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
         |Scenario
         |  Topology
@@ -136,7 +145,9 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "run create with key/query by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "run create with key/query by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
         |Scenario
         |  Topology
@@ -154,7 +165,9 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
     }
 
     // TODO(#31527): SPM why does this test take so long (1 min, vs 1 sec for the other tests)
-    "return contracts in observed order" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "return contracts in observed order" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
         |Scenario
         |  Topology
@@ -170,7 +183,9 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "consuming exercise by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "consuming exercise by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
        |Scenario
        |  Topology
@@ -184,9 +199,10 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "key resolutions may reference contract ids outside the core inputs" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario("""
+    "key resolutions may reference contract ids outside the core inputs" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario("""
           |Scenario
           |  Topology
           |    Participant 0 pkgs={0} parties={1}
@@ -198,12 +214,13 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |      ExerciseByKey NonConsuming 5 ctl={3} cobs={}
           |        ExerciseByKey NonConsuming 5 ctl={2} cobs={1}
           |          QueryByKey [5,3] exhaustive=false""".stripMargin)
-        run(scenario)
+      run(scenario)
     }
 
-    "expired with evidence of key via query by id" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario("""
+    "expired with evidence of key via query by id" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario("""
           |Scenario
           |  Topology
           |    Participant 1 pkgs={0} parties={2,3}
@@ -214,10 +231,12 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |      CreateWithKey 1 key=(1, {3}) sigs={3} obs={}
           |      ExerciseByKey Consuming 1 ctl={2} cobs={}
           |        Fetch 0""".stripMargin)
-        run(scenario)
+      run(scenario)
     }
 
-    "example with keyed contract used by id" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { _ =>
+    "example with keyed contract used by id" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
       val scenario = Parser.assertParseScenario("""
           |Scenario
           |  Topology
@@ -245,10 +264,11 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "two QueryByKeys for the same key in the same view" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario(
-          """
+    "two QueryByKeys for the same key in the same view" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      NuckSupport
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario(
+        """
                                                   |Scenario
                                                   |  Topology
                                                   |    Participant 0 pkgs={0} parties={1}
@@ -263,8 +283,8 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
                                                   |      Exercise NonConsuming 0 ctl={1} cobs={}
                                                   |        QueryByKey [1,2] exhaustive=false
                                                   |        QueryByKey [1,2,3,4] exhaustive=true""".stripMargin
-        )
-        run(scenario)
+      )
+      run(scenario)
     }
 
   }

@@ -240,7 +240,7 @@ abstract class AbstractSynchronizerChangeRealClockIntegrationTest
         includeCreatedEventBlob = true,
       )
       .find(_.event.contractId == paintOffer.value.data.iouId.contractId)
-    iouCreated should not be (empty)
+    iouCreated should not be empty
     val iouCreatedEventBlob = iouCreated.value.event.createdEventBlob
     val iouDisclosed = DisclosedContract(
       templateId = Some(iouTemplateId.toIdentifier),

@@ -523,7 +523,7 @@ final class GrpcRequestLoggingInterceptorTest
 
     val observer = new RecordingStreamObserver[Hello.Response]
     client.helloStreamed(Request, observer)
-    assertClientFailure(observer.result, serverStatus, serverTrailers, clientCause)
+    assertClientFailure(observer.result(), serverStatus, serverTrailers, clientCause)
     if (checkResponses) {
       observer.responses should have size 2
     }
@@ -583,7 +583,7 @@ final class GrpcRequestLoggingInterceptorTest
 
         val observer = new RecordingStreamObserver[Hello.Response]
         client.helloStreamed(Request, observer)
-        observer.result.futureValue
+        observer.result().futureValue
         observer.responses should have size 2
 
         assertRequestAndResponsesLogged
@@ -851,7 +851,7 @@ final class GrpcRequestLoggingInterceptorTest
 
           val observer = new RecordingStreamObserver[Hello.Response]
           client.helloStreamed(Request, observer)
-          observer.result.futureValue
+          observer.result().futureValue
           observer.responses should have size 2
 
           assertRequestAndResponsesLogged

@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import io.grpc.stub.StreamObserver
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
 
 /** Stream observer that records all incoming events.
@@ -15,32 +15,26 @@ import scala.jdk.CollectionConverters.*
 class RecordingStreamObserver[RespT](
     completeAfter: PositiveInt = PositiveInt.MaxValue,
     filter: RespT => Boolean = (_: RespT) => true,
-) extends StreamObserver[RespT] {
+) extends BaseStreamObserver[RespT, Seq[RespT]] {
 
-  val responseQueue: java.util.concurrent.BlockingQueue[RespT] =
+  private val responseQueue: java.util.concurrent.BlockingQueue[RespT] =
     new java.util.concurrent.LinkedBlockingDeque[RespT](completeAfter.value)
 
   def responses: Seq[RespT] = responseQueue.asScala.toSeq
-
-  private val completionP: Promise[Unit] = Promise[Unit]()
-  val completion: Future[Unit] = completionP.future
-  def result(implicit executionContext: ExecutionContext): Future[Seq[RespT]] =
-    completionP.future.map(_ => responses)
 
   val responseCount: AtomicInteger = new AtomicInteger()
 
   override def onNext(value: RespT): Unit = if (filter(value)) {
     responseQueue.offer(value)
     if (responseCount.incrementAndGet() >= completeAfter.value) {
-      val _ = completionP.trySuccess(())
+      promise.trySuccess(responses).discard
     }
   }
 
-  override def onError(t: Throwable): Unit = {
-    val _ = completionP.tryFailure(t)
-  }
+  override protected def finalizeResult(): Seq[RespT] = responses
 
-  override def onCompleted(): Unit = {
-    val _ = completionP.trySuccess(())
-  }
+  override def onTimeout(
+      timeout: config.NonNegativeDuration
+  ): Either[String, Seq[RespT]] =
+    Right(responses)
 }

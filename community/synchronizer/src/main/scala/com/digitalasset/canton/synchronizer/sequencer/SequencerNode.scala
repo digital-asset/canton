@@ -328,6 +328,7 @@ class SequencerNodeBootstrap(
           SynchronizerStore(synchronizerId),
           storage,
           indexedStringStore,
+          predecessor = None,
           synchronizerId.protocolVersion,
           timeouts,
           parameters.batchingConfig,
@@ -472,6 +473,7 @@ class SequencerNodeBootstrap(
                   config.topology,
                   Some(crypto.staticSynchronizerParameters),
                   timeouts,
+                  futureSupervisor = futureSupervisor,
                   loggerFactory,
                   // only filter out completed proposals if this is a bootstrap from genesis.
                   cleanupTopologySnapshot = sequencerSnapshot.isEmpty,
@@ -870,7 +872,8 @@ class SequencerNodeBootstrap(
             topologyConfig = config.topology,
             store = synchronizerTopologyStore,
             outboxQueue = new SynchronizerOutboxQueue(timeouts, synchronizerLoggerFactory),
-            dispatchQueueBackpressureLimit = parameters.dispatchQueueBackpressureLimit,
+            dispatchQueueBackpressureLimit =
+              parameters.topologyConfig.dispatchQueueBackpressureLimit,
             disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
             exitOnFatalFailures = parameters.exitOnFatalFailures,
             timeouts = timeouts,

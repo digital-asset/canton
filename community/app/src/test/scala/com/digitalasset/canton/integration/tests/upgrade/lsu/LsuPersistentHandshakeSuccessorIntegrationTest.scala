@@ -177,13 +177,8 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
           participant1.start(),
           logs => {
-            forExactly(1, logs)(_.warningMessage should include(failedHandshakeError))
-
-            forExactly(1, logs)(
-              _.errorMessage should (include(
-                s"Failed to resume pending LSU operation for ${fixture.newPsid}"
-              ) and include(failedHandshakeError))
-            )
+            // Once in the synchronizer connection manager and once in the pool
+            forExactly(2, logs)(_.warningMessage should include(failedHandshakeError))
           },
         )
     }

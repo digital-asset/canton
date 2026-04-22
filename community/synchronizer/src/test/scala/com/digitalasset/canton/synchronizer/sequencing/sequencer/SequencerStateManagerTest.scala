@@ -293,6 +293,7 @@ class SequencerStateManagerTest
     val topologyStore =
       new InMemoryTopologyStore(
         SynchronizerStore(synchronizerId),
+        predecessor = None,
         testedProtocolVersion,
         loggerFactory,
         timeouts,

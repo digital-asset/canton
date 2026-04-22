@@ -1383,16 +1383,22 @@ class AvailabilityModuleConsensusProposalRequestTest
       }
     }
 
-  "it receives multiple Consensus.CreateProposal (from local consensus), " +
-    "then Dissemination.LocalBatchStoredSigned (from self) and " +
-    "the active membership is different from the signing one" should {
-      "update the acks and progress" in {
+  "it receives Consensus.CreateProposal (from local consensus), " +
+    "then Dissemination.LocalBatchStoredSigned (from self), " +
+    "the active membership is different from the signing one and" +
+    "it has rotated the key of the disseminator" should {
+      "update the acks and re-sign" in {
         val disseminationProtocolState = new DisseminationProtocolState()
         implicit val context
             : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
           new ProgrammableUnitTestContext
+        val availabilityStore =
+          new FakeAvailabilityStore[ProgrammableUnitTestEnv](
+            TrieMap[BatchId, OrderingRequestBatch](ABatchId -> ABatch)
+          )
         val availability =
           createAndStartAvailability[ProgrammableUnitTestEnv](
+            availabilityStore = availabilityStore,
             disseminationProtocolState = disseminationProtocolState,
             consensus = fakeIgnoringModule,
           )
@@ -1438,6 +1444,11 @@ class AvailabilityModuleConsensusProposalRequestTest
             .changeMembership(newMembership)
             .toEither
             .leftOrFail("Progress was not updated with new membership"))
+
+        context.runPipedMessages() should contain only Availability.LocalDissemination
+          .LocalBatchesStored(
+            Seq(Traced(ABatchId) -> ABatch)
+          )
       }
     }
 }

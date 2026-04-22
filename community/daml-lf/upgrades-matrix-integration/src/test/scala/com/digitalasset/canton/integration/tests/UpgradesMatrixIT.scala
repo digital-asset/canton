@@ -159,9 +159,7 @@ abstract class UpgradesMatrixIntegration(
 
   def testFilter(
       testHelper: UpgradesMatrixCases#TestHelper
-  ): Boolean = {
-    import UpgradesMatrixCases.*
-    import cases.*
+  ): Boolean =
     (
       testHelper.testCase,
       testHelper.operation,
@@ -169,26 +167,9 @@ abstract class UpgradesMatrixIntegration(
       testHelper.entryPoint,
       testHelper.contractOrigin,
     ) match {
-      // TODO(#31762) Fix issue with LookupByKey
-      case (
-            ValidDowngradeAdditionalFieldInRecordArg | UnchangedPrecondition |
-            AdditionalTemplateArg | AddingInterfaceInstance | AdditionalChoices |
-            AdditionalConstructorInEnumArg | AdditionalConstructorInVariantArg |
-            AdditionalFieldInRecordArg | AdditionalTemplates | UnchangedKey | UnchangedMaintainers |
-            UnchangedObservers | UnchangedSignatories |
-            ValidDowngradeAdditionalConstructorInEnumArg |
-            ValidDowngradeAdditionalConstructorInVariantArg | ValidDowngradeAdditionalTemplateArg |
-            ValidKeyDowngradeAdditionalField | ValidKeyUpgradeAdditionalField,
-            LookupByKey,
-            AttemptCatch | NoCatch,
-            ChoiceBody,
-            Local,
-          ) =>
-        false
       case _ =>
         true
     }
-  }
 
   override def testHelperToDeclaration(
       testHelper: UpgradesMatrixCases#TestHelper,

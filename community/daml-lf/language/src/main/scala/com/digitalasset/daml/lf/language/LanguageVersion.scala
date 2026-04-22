@@ -4,8 +4,6 @@
 package com.digitalasset.daml.lf
 package language
 
-import io.circe.{Decoder, Json}
-
 import scala.math.Ordered.orderingToOrdered
 
 final case class LanguageVersion private[lf] (
@@ -24,53 +22,11 @@ final case class LanguageVersion private[lf] (
 }
 
 object LanguageVersion extends LanguageFeaturesGenerated {
-
-  /** Decode a LanguageVersion from a JSON string produced by the sbt plugin's Circe encoding of
-    * LanguageVersionDto. Expected format: {"major":2,"minor":{"Stable":{"version":1}}}
-    * {"major":2,"minor":{"Staging":{"version":3,"revision":1}}} {"major":2,"minor":{"Dev":{}}}
-    *
-    * Unchecked because it does not verify the parsed version is a known/released version.
-    */
-  def fromDTOJson(jsonStr: String): Either[String, LanguageVersion] =
-    io.circe.parser.decode[LanguageVersion](jsonStr)(dtoDecoder).left.map(_.getMessage)
-
-  def assertFromDTOJson(jsonStr: String): LanguageVersion = data.assertRight(fromDTOJson(jsonStr))
-
-  private implicit lazy val minorDecoder: Decoder[Minor] = Decoder.instance { cursor =>
-    cursor
-      .downField("Stable")
-      .as[Json]
-      .flatMap(_.hcursor.downField("version").as[Int])
-      .map(Minor.Stable(_))
-      .orElse(
-        cursor
-          .downField("Staging")
-          .as[Json]
-          .flatMap { json =>
-            for {
-              version <- json.hcursor.downField("version").as[Int]
-              revision <- json.hcursor.downField("revision").as[Int]
-            } yield Minor.Staging(version, revision)
-          }
-      )
-      .orElse(
-        cursor.downField("Dev").as[Json].map(_ => Minor.Dev)
-      )
-  }
-
-  private lazy val dtoDecoder: Decoder[LanguageVersion] = Decoder.instance { cursor =>
-    for {
-      majorInt <- cursor.downField("major").as[Int]
-      minor <- cursor.downField("minor").as[Minor]
-    } yield {
-      val major = majorInt match {
-        case 2 => Major.V2
-        case unsupported =>
-          throw new IllegalArgumentException(s"Unsupported major version: $unsupported")
-      }
-      LanguageVersion(major, minor)
-    }
-  }
+  // ranges hardcoded (for now)
+  lazy val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)
+  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_2)
+  lazy val earlyAccessLfVersionsRange: VersionRange.Inclusive[LanguageVersion] =
+    VersionRange(v2_1, v2_2)
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 

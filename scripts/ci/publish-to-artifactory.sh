@@ -137,22 +137,6 @@ if [[ "$nightly_release" == "false" || $(date +"%u") -eq 2 ]]; then
 
   echo "Done publishing internal tgz apidocs artifact"
 
-  list=("2.1" "2.dev")
-  for lf_version in "${list[@]}"
-  do
-    module="ledger-api-test-tool"
-    local_path="community/ledger-test-tool/tool/lf-v${lf_version}"
-    echo "Publishing canton ${module} jar release"
-    repo="canton-internal"
-    package="com/digitalasset/canton"
-    ending=".jar"
-    ending_with_version="${current_version}${ending}"
-
-    publish "$(ls /tmp/workspace/${local_path}/target/scala-2.13/${module}*${ending_with_version} | tail -n 1)" \
-            "${artifactory_url}/${repo}/${package}/${module}_2.13/${current_version}/${module}-${lf_version}_2.13-${ending_with_version}" \
-            "${current_version}"
-  done
-
   # publish all releases to our assembly repo
   echo "Publishing community .tar.gz to artifactory/assembly/canton/..."
   list=("open-source community")

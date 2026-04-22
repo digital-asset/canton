@@ -5,6 +5,17 @@ package com.digitalasset.canton.cli
 
 import java.io.File
 
+sealed trait Mode
+
+object Mode {
+
+  /** Run the process in interactive mode (i.e., a repl) */
+  object Interactive extends Mode
+
+  /** Run the process in non-interactive mode (i.e., execute a command and exit) */
+  object Deamon extends Mode
+}
+
 sealed trait Command {}
 
 object Command {
@@ -20,7 +31,7 @@ object Command {
     */
   final case class RunScript(scriptPath: File) extends Command
 
-  object Sandbox extends Command
+  final case class Sandbox(mode: Mode) extends Command
 
   final case class Generate(target: Generate.Target) extends Command
 

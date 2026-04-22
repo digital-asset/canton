@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.platform
 
+import anorm.SqlParser.long
+import anorm.~
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import com.daml.metrics.DatabaseMetrics
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
@@ -38,12 +41,14 @@ import com.digitalasset.canton.participant.ledger.api.LedgerApiJdbcUrl
 import com.digitalasset.canton.participant.store.ContractStore
 import com.digitalasset.canton.platform.IndexComponentTest.TestServices
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole}
+import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
+import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.StringInterningView
@@ -81,6 +86,7 @@ import com.google.protobuf.ByteString
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
 
+import java.sql.Connection
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
@@ -112,6 +118,8 @@ trait IndexComponentTest
   protected val indexerConfig: IndexerConfig = IndexerConfig()
 
   protected val indexServiceConfig: IndexServiceConfig = IndexServiceConfig()
+
+  protected val updateServiceConfig: UpdateServiceConfig = UpdateServiceConfig()
 
   protected val indexReadConnectionPoolSize: Int = 10
 
@@ -243,6 +251,42 @@ trait IndexComponentTest
 
   protected def dbSupport: DbSupport = testServices.dbSupport
 
+  private val indexComponentTestDbMetrics = DatabaseMetrics.ForTesting("index-component-test")
+
+  protected def withConnection[T](f: Connection => T): T =
+    dbSupport.dbDispatcher
+      .executeSql(indexComponentTestDbMetrics)(f)
+      .futureValue
+
+  protected def getLastEventSeqId: Long =
+    withConnection { implicit connection =>
+      SQL"SELECT ledger_end_sequential_id FROM lapi_parameters"
+        .as(long("ledger_end_sequential_id").?.single)
+        .getOrElse(0L)
+    }
+
+  protected def getAchsState: (Long, Long, Long) =
+    withConnection { implicit connection =>
+      SQL"SELECT valid_at, last_populated, last_removed FROM lapi_achs_state"
+        .as((long("valid_at") ~ long("last_populated") ~ long("last_removed")).single)(
+          connection
+        ) match {
+        case v ~ lp ~ lr => (v, lp, lr)
+      }
+    }
+
+  protected def getAchsSize: Long =
+    withConnection { implicit connection =>
+      SQL"SELECT COUNT(DISTINCT event_sequential_id) AS count FROM lapi_filter_achs_stakeholder"
+        .as(long("count").single)
+    }
+
+  protected def getAchsStateRowCount: Long =
+    withConnection { implicit connection =>
+      SQL"SELECT COUNT(*) AS count FROM lapi_achs_state"
+        .as(long("count").single)
+    }
+
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
   @scala.annotation.unused
@@ -259,7 +303,7 @@ trait IndexComponentTest
   private lazy val pruningOffsetService = new PruningOffsetService {
     override def pruningOffset(implicit
         traceContext: TraceContext
-    ): Future[Option[Offset]] = Future.successful(None)
+    ): Future[Option[Offset]] = index.indexDbPrunedUpto
   }
 
   implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
@@ -322,6 +366,9 @@ trait IndexComponentTest
             connectionPool = ConnectionPoolConfig(
               connectionPoolSize = indexReadConnectionPoolSize,
               connectionTimeout = 250.millis,
+            ),
+            postgres = PostgresDataSourceConfig(
+              clientConnectionCheckInterval = None
             ),
           ),
           loggerFactory = loggerFactory,
@@ -394,6 +441,8 @@ trait IndexComponentTest
         ) => FutureUnlessShutdown.pure(Left("not used")),
         participantContractStore = participantContractStore,
         pruningOffsetService = pruningOffsetService,
+        materializer = materializer,
+        updateServiceConfig = updateServiceConfig,
       )
     } yield (indexService, indexer, participantContractStore, dbSupport)
 

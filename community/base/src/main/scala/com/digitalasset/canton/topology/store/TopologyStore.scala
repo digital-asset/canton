@@ -13,8 +13,13 @@ import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -48,6 +53,8 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
@@ -61,6 +68,7 @@ import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
@@ -247,6 +255,8 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   def storeId: StoreID
 
   def protocolVersion: ProtocolVersion
+
+  def predecessor: Option[SynchronizerPredecessor]
 
   /** fetch the effective time updates greater than or equal to a certain timestamp
     *
@@ -566,12 +576,59 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
 
   def deleteAllData()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
-  /** Copies the topology state from an existing topology store. Should only be done if the local
-    * copy is functionally equivalent to downloading the topology state from the sequencer.
+  /** Dedups concurrent copies from the predecessor (handshake + connect paths can both trigger
+    * one). The first caller runs it, and subsequent callers await the same promise. The reference
+    * is cleared once the copy completes (success, failure, or shutdown) so a later caller can
+    * always trigger a fresh copy — the dedup only prevents concurrent runs.
+    */
+  private val ongoingCopyFromPredecessor: AtomicReference[Option[PromiseUnlessShutdown[Unit]]] =
+    new AtomicReference(None)
+
+  /** Copies the topology state from an existing topology store. If two calls to this method are
+    * made concurrently, only one will perform the copy, and the other will wait for the same copy
+    * to complete. Should only be done if the local copy is functionally equivalent to downloading
+    * the topology state from the sequencer.
     * @param sourceStore
     *   The store from which the topology state should be copied.
     */
-  def copyFromPredecessorSynchronizerStore(sourceStore: TopologyStore[SynchronizerStore])(implicit
+  final def copyFromPredecessorSynchronizerStore(
+      sourceStore: TopologyStore[SynchronizerStore]
+  )(implicit
+      ev: StoreID <:< SynchronizerStore,
+      errorLoggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[Unit] = {
+    val newPromise = PromiseUnlessShutdown.unsupervised[Unit]()
+    val newRef = Some(newPromise)
+    if (!predecessor.exists(_.psid == sourceStore.storeId.psid)) {
+      ErrorUtil.invalidArgumentAsyncShutdown(
+        s"source synchronizer [${sourceStore.storeId.psid}] does not match the configured predecessor [${predecessor
+            .map(_.psid)}]"
+      )
+    } else if (ongoingCopyFromPredecessor.compareAndSet(None, newRef)) {
+      val work = doCopyFromPredecessorSynchronizerStore(sourceStore)
+      newPromise
+        .completeWithUS(
+          work.thereafter(_ => ongoingCopyFromPredecessor.compareAndSet(newRef, None).discard)
+        )
+        .discard
+      newPromise.futureUS
+    } else {
+      ongoingCopyFromPredecessor.get() match {
+        case Some(existing) => existing.futureUS
+        // if the reference is cleared, we retry the copy
+        case None => copyFromPredecessorSynchronizerStore(sourceStore)
+      }
+    }
+  }
+
+  /** Actual implementation of copying the topology state from the predecessor synchronizer store.
+    * This is separated from `copyFromPredecessorSynchronizerStore` to allow for deduplication of
+    * concurrent calls to be handled in the public method, while this method can focus on the actual
+    * copy logic.
+    */
+  protected def doCopyFromPredecessorSynchronizerStore(
+      sourceStore: TopologyStore[SynchronizerStore]
+  )(implicit
       ev: StoreID <:< SynchronizerStore,
       errorLoggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[Unit]
@@ -598,6 +655,7 @@ object TopologyStore {
       storeId: StoreID,
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      predecessor: Option[SynchronizerPredecessor],
       protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       batchingConfig: BatchingConfig,
@@ -610,12 +668,19 @@ object TopologyStore {
       val storeLoggerFactory = loggerFactory.append("store", storeId.toString)
       storage match {
         case _: MemoryStorage =>
-          new InMemoryTopologyStore(storeId, protocolVersion, storeLoggerFactory, timeouts)
+          new InMemoryTopologyStore(
+            storeId,
+            predecessor,
+            protocolVersion,
+            storeLoggerFactory,
+            timeouts,
+          )
         case dbStorage: DbStorage =>
           new DbTopologyStore(
             dbStorage,
             storeId,
             storeIndex,
+            predecessor,
             protocolVersion,
             timeouts,
             batchingConfig,
