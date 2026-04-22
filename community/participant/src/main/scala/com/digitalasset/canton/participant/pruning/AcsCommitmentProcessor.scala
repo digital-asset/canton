@@ -3137,17 +3137,29 @@ object AcsCommitmentProcessor extends HasLoggerName {
   private[pruning] def computeCommitmentsPerParticipant(
       cmts: Map[ParticipantId, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType]],
       cachedCommitments: CachedCommitments,
-  ): Map[ParticipantId, AcsCommitment.CommitmentType] =
-    cmts.map { case (p, hashes) =>
-      (
-        p,
-        cachedCommitments
-          .computeCmtFromCached(p, hashes)
-          .getOrElse(
-            commitmentsFromStkhdCmts(hashes.values.toSeq.filter(_ != emptyCommitment))
-          ),
-      )
+  ): Map[ParticipantId, AcsCommitment.CommitmentType] = {
+    // Parallelize across counter-participants. Each participant's commitment hash
+    // is computed independently (LtHash16 XOR of its stakeholder group commitments).
+    // With 50+ counter-participants this removes a sequential bottleneck at each
+    // reconciliation interval.
+    import java.util.concurrent.{ConcurrentHashMap, ForkJoinPool}
+    val result = new ConcurrentHashMap[ParticipantId, AcsCommitment.CommitmentType]()
+    val tasks = cmts.map { case (p, hashes) =>
+      ForkJoinPool.commonPool().submit(new Runnable {
+        def run(): Unit = {
+          val cmt = cachedCommitments
+            .computeCmtFromCached(p, hashes)
+            .getOrElse(
+              commitmentsFromStkhdCmts(hashes.values.toSeq.filter(_ != emptyCommitment))
+            )
+          result.put(p, cmt)
+        }
+      })
     }
+    tasks.foreach(_.get()) // wait for all
+    import scala.jdk.CollectionConverters.*
+    result.asScala.toMap
+  }
 
   @VisibleForTesting
   private[pruning] def commitmentsFromStkhdCmts(

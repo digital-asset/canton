@@ -25,7 +25,7 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.util.UUID
 import scala.collection.immutable.{SortedMap, SortedSet}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 object InteractiveSubmission {
@@ -219,19 +219,28 @@ object InteractiveSubmission {
             )
         )
 
-        (invalidSignatures, validSignatures) = signatures.map { signature =>
-          signingKeysWithThreshold.keys
-            .find(_.fingerprint == signature.authorizingLongTermKey)
-            .toRight(
-              s"Signing key ${signature.authorizingLongTermKey} is not a valid key for $party"
-            )
-            .flatMap(key =>
-              cryptoPureApi
-                .verifySignature(hash.unwrap, key, signature, SigningKeyUsage.ProtocolOnly)
-                .map(_ => key.fingerprint)
-                .leftMap(_.toString)
-            )
-        }.separate
+        // Parallelize per-signature verification within a party. Each verification is
+        // pure CPU (ECDSA/Ed25519) with no data dependency between signatures.
+        verificationResults <- EitherT.right[String](
+          FutureUnlessShutdown.outcomeF(
+            Future.traverse(signatures.toList) { signature =>
+              Future {
+                signingKeysWithThreshold.keys
+                  .find(_.fingerprint == signature.authorizingLongTermKey)
+                  .toRight(
+                    s"Signing key ${signature.authorizingLongTermKey} is not a valid key for $party"
+                  )
+                  .flatMap(key =>
+                    cryptoPureApi
+                      .verifySignature(hash.unwrap, key, signature, SigningKeyUsage.ProtocolOnly)
+                      .map(_ => key.fingerprint)
+                      .leftMap(_.toString)
+                  )
+              }
+            }
+          )
+        )
+        (invalidSignatures, validSignatures) = verificationResults.separate
         validSignaturesSet = validSignatures.toSet
         _ = {
           // Log invalid signatures at info level because it is unexpected,
