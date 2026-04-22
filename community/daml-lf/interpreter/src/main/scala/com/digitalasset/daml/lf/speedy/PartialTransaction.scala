@@ -649,9 +649,9 @@ private[speedy] case class PartialTransaction(
         val result = ExternalCallResult(
           extensionId = extensionId,
           functionId = functionId,
-          config = data.Bytes.fromString(configHash).getOrElse(data.Bytes.Empty),
-          input = data.Bytes.fromString(inputHex).getOrElse(data.Bytes.Empty),
-          output = data.Bytes.fromString(outputHex).getOrElse(data.Bytes.Empty),
+          config = data.Bytes.assertFromString(configHash),
+          input = data.Bytes.assertFromString(inputHex),
+          output = data.Bytes.assertFromString(outputHex),
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))

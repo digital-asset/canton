@@ -934,25 +934,34 @@ private[lf] object SBuiltinFun {
             configHash = configHex,
             input = inputHex,
           ) {
-            case Right(responseBody) =>
-              // Record the external call result in the transaction
-              machine.ptx.recordExternalCallResult(
-                extensionId = extensionId,
-                functionId = functionId,
-                configHash = configHex,
-                inputHex = inputHex,
-                outputHex = responseBody,
-              ) match {
-                case Some(updatedPtx) =>
-                  machine.ptx = updatedPtx
-                  Control.Value(SText(responseBody))
-                case None =>
-                  // External calls outside exercise context cannot be recorded
-                  // and would fail during validation/replay
-                  Control.Error(IE.UserError(
-                    s"External calls are only supported within exercise context. " +
-                      s"extensionId=$extensionId, functionId=$functionId"
-                  ))
+            case Right(responseBodyRaw) =>
+              val outputHex = responseBodyRaw.trim.toLowerCase(java.util.Locale.ROOT)
+              Ref.HexString.fromString(outputHex) match {
+                case Right(_) =>
+                  // Record the external call result in the transaction.
+                  // The value returned to Daml must match the value persisted for replay.
+                  machine.ptx.recordExternalCallResult(
+                    extensionId = extensionId,
+                    functionId = functionId,
+                    configHash = configHex,
+                    inputHex = inputHex,
+                    outputHex = outputHex,
+                  ) match {
+                    case Some(updatedPtx) =>
+                      machine.ptx = updatedPtx
+                      Control.Value(SText(outputHex))
+                    case None =>
+                      // External calls outside exercise context cannot be recorded
+                      // and would fail during validation/replay
+                      Control.Error(IE.UserError(
+                        s"External calls are only supported within exercise context. " +
+                          s"extensionId=$extensionId, functionId=$functionId"
+                      ))
+                  }
+                case Left(_) =>
+                  Control.Error(
+                    IE.UserError("External call failed: Invalid hex encoding in external call output")
+                  )
               }
             case Left(error) =>
               // Propagate error with full context for proper error handling

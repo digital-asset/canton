@@ -6,6 +6,7 @@ package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SValue.{SParty, SText}
@@ -145,6 +146,30 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
             output = Bytes.assertFromString("beef"),
           )
         )
+      }
+    }
+
+    "reject non-hex external call outputs" in {
+      val machine = Speedy.Machine.fromUpdateSExpr(
+        pkgs,
+        transactionSeed,
+        SEApp(pkgs.compiler.unsafeCompile(e"M:run"), ArraySeq(SParty(alice))),
+        Set(alice),
+        MachineLogger(),
+      )
+
+      val result = SpeedyTestLib.runTxQ[Question.Update](
+        {
+          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
+            callback(Right("hello"))
+          case other =>
+            fail(s"Unexpected question: $other")
+        },
+        machine,
+      )
+
+      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
+        message should include("Invalid hex encoding in external call output")
       }
     }
   }
