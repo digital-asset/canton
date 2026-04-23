@@ -74,6 +74,11 @@ object SerializationVersion {
   // TODO https://github.com/digital-asset/daml/issues/22365 adopt ranges more thoroughly
   private[lf] val minChoiceAuthorizers = SerializationVersion.VDev
 
+  // Minimum version that supports external call results in exercise nodes
+  private[lf] val minExternalCallResults = assign(
+    LanguageVersion.featureExternalCall.versionRange.min
+  )
+
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
     import scala.Ordering.Implicits._
     tx.nodes.valuesIterator.foldLeft(SerializationVersion.minVersion) {

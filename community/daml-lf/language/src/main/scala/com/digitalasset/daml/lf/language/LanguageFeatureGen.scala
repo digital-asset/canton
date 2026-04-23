@@ -153,6 +153,11 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
+  val featureExternalCall: Feature = Feature(
+    name = "External Call",
+    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+  )
+
   val featureUnsafeFromInterface: Feature = Feature(
     name = "UnsafeFromInterface builtin",
     versionRange = VersionRange.Until(v2_1),
@@ -182,6 +187,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     featureExperimental,
     featurePackageUpgrades,
     featureChoiceAuthority,
+    featureExternalCall,
     featureUnsafeFromInterface,
   )
 
