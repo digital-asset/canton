@@ -179,7 +179,7 @@ object CostModel {
     val MaxValue: Cost = Long.MaxValue
   }
 
-  val DefaultExternalCallBaseCost: Cost = 100L
+  val DefaultExternalCallBaseCost: Cost = 0L
 
   val NotDefined = CostConstant.Null
   type NotDefined = NotDefined.type

@@ -19,13 +19,13 @@ class EngineConfigTest extends AnyWordSpec with Matchers {
       config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 0L
     }
 
-    "use the default external-call base cost when gas accounting is enabled" in {
+    "use zero as the default external-call base cost when gas accounting is enabled" in {
       val config = EngineConfig(
         allowedLanguageVersions = allowedLanguageVersions,
         gasBudget = Some(1000L),
       )
 
-      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 100L
+      config.getInterpreterCostModel.BExternalCall.cost("fun") shouldBe 0L
     }
 
     "use the configured external-call base cost when gas accounting is enabled" in {
