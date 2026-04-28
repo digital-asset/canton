@@ -21,25 +21,6 @@ import scala.annotation.tailrec
 
 class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
 
-  "reject EXTERNAL_CALL until interpreter support exists" in {
-    val phase1 = {
-      def signatures: PartialFunction[PackageId, PackageSignature] = Map.empty
-      def interface = new PackageInterface(signatures)
-      def config =
-        PhaseOne.Config(
-          profiling = Compiler.NoProfile,
-          stacktracing = Compiler.FullStackTrace,
-        )
-      new PhaseOne(interface, config)
-    }
-
-    val err = the[Compiler.CompilationError] thrownBy {
-      phase1.translateFromLF(PhaseOne.Env.Empty, EBuiltinFun(BExternalCall))
-    }
-
-    err.error shouldBe "EXTERNAL_CALL is not yet supported by the interpreter"
-  }
-
   "compilation (stack-safety)" - {
 
     val phase1 = {

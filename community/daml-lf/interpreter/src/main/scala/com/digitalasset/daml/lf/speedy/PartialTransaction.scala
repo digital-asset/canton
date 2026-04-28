@@ -631,9 +631,13 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Record an external call result in the current exercise context.
-    * Returns None if not in an exercise context.
+  /** Record an external call result in the nearest enclosing exercise context.
+    * Walks up through try/catch scopes and returns None only when not inside any
+    * exercise context.
     */
+  def canRecordExternalCallResult: Boolean =
+    findEnclosingExercise(context.info).nonEmpty
+
   def recordExternalCallResult(
       extensionId: String,
       functionId: String,
@@ -641,16 +645,16 @@ private[speedy] case class PartialTransaction(
       inputHex: String,
       outputHex: String,
   ): Option[PartialTransaction] = {
-    context.info match {
-      case ec: ExercisesContextInfo =>
+    findEnclosingExercise(context.info) match {
+      case Some(ec) =>
         val nodeId = ec.nodeId
         val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
         val result = ExternalCallResult(
           extensionId = extensionId,
           functionId = functionId,
-          config = data.Bytes.fromString(configHash).getOrElse(data.Bytes.Empty),
-          input = data.Bytes.fromString(inputHex).getOrElse(data.Bytes.Empty),
-          output = data.Bytes.fromString(outputHex).getOrElse(data.Bytes.Empty),
+          config = data.Bytes.assertFromString(configHash),
+          input = data.Bytes.assertFromString(inputHex),
+          output = data.Bytes.assertFromString(outputHex),
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
@@ -658,6 +662,15 @@ private[speedy] case class PartialTransaction(
         // External calls outside of exercise context are not stored
         // (they would be at the root level, which is not supported)
         None
+    }
+  }
+
+  @scala.annotation.tailrec
+  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] = {
+    info match {
+      case ec: ExercisesContextInfo => Some(ec)
+      case tc: TryContextInfo => findEnclosingExercise(tc.parent.info)
+      case _: RootContextInfo => None
     }
   }
 

@@ -179,6 +179,8 @@ object CostModel {
     val MaxValue: Cost = Long.MaxValue
   }
 
+  val DefaultExternalCallBaseCost: Cost = 0L
+
   val NotDefined = CostConstant.Null
   type NotDefined = NotDefined.type
 
@@ -204,6 +206,11 @@ object CostModel {
 
     def CostAware = Null
   }
+
+  private[lf] def fixedExternalCallCost(baseCost: Cost): CostFunction1[Text] =
+    new CostFunction1[Text] {
+      override def cost(functionId: String): Cost = baseCost
+    }
 
   abstract class CostFunction2[-X, -Y] {
     def cost(x: X, y: Y): Cost
@@ -855,12 +862,8 @@ object CostModel {
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(64))
     override val BKECCAK256Text: CostFunction1[Text] =
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(64))
-    override val BExternalCall: CostFunction1[Text] = new CostFunction1[Text] {
-      override def cost(functionId: String): Cost = {
-        // Base cost plus small per-character cost for the function ID
-        100L + functionId.length.toLong
-      }
-    }
+    override val BExternalCall: CostFunction1[Text] =
+      fixedExternalCallCost(DefaultExternalCallBaseCost)
     override val BSECP256K1Bool: CostFunction3[Text, Text, Text] =
       CostFunction3.Constant(SBoolSize)
     override val BSECP256K1WithEcdsaBool: CostFunction3[Text, Text, Text] =

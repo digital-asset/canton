@@ -463,6 +463,7 @@ class Engine(
       packageResolution = packageResolution,
       limits = config.limits,
       iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
+      costModel = config.getInterpreterCostModel,
       initialGasBudget = config.gasBudget,
       metricPlugins = metricPlugins,
       logger = machineLogger(validating),
@@ -779,7 +780,6 @@ class Engine(
                 functionId,
                 configHash,
                 input,
-                storedResult = None, // During initial interpretation, no stored result
                 { (result: Either[ExternalCallError, String]) =>
                   val speedyResult = result.left.map(e =>
                     Question.Update.ExternalCallError(e.statusCode, e.message, e.requestId)

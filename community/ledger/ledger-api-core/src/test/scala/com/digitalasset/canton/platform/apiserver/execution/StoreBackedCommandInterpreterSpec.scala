@@ -26,12 +26,17 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestEngine
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPartyId, LfValue}
+import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
+import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
@@ -70,6 +75,86 @@ class StoreBackedCommandInterpreterSpec
 
   private val createCycleApiCommand: Commands =
     testEngine.validateCommand(new Cycle("id", alice).create().commands.loneElement, alice)
+
+  implicit private val parserParameters: ParserParameters[this.type] =
+    ParserParameters(
+      defaultPackageId = Ref.PackageId.assertFromString("-ext-pkg-"),
+      languageVersion = LanguageVersion.v2_dev,
+    )
+
+  private val externalCallPkgId = parserParameters.defaultPackageId
+  private val externalCallPkg = p"""
+    metadata ( '-ext-pkg-' : '1.0.0' )
+
+    module M {
+      record @serializable T = { party: Party };
+
+      template (this: T) = {
+        precondition True;
+        signatories Cons @Party [M:T {party} this] (Nil @Party);
+        observers Nil @Party;
+
+        choice Call (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
+      };
+    }
+  """
+
+  private val externalCallTemplateId =
+    Ref.Identifier(externalCallPkgId, Ref.QualifiedName.assertFromString("M:T"))
+
+  private def mkExternalCallEngine(): Engine = {
+    val engine = new Engine(
+      EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange),
+      loggerFactory,
+    )
+    testEngine.consume(engine.preloadPackage(externalCallPkgId, externalCallPkg)) shouldBe ()
+    engine
+  }
+
+  private val externalCallPackageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: Ref.PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[com.digitalasset.daml.lf.language.Ast.Package]] =
+      FutureUnlessShutdown.pure(Option.when(packageId == externalCallPkgId)(externalCallPkg))
+  }
+
+  private val externalCallCommands: Commands =
+    Commands(
+      workflowId = None,
+      userId = Ref.UserId.assertFromString("app"),
+      commandId = com.digitalasset.canton.ledger.api.CommandId(
+        Ref.CommandId.assertFromString("external-call-cmd")
+      ),
+      submissionId = None,
+      actAs = Set(alice),
+      readAs = Set.empty,
+      submittedAt = Time.Timestamp.Epoch,
+      deduplicationPeriod = com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration(
+        Duration.ZERO
+      ),
+      commands = ApiCommands(
+        commands = ImmArray(
+          ApiCommand.CreateAndExercise(
+            externalCallTemplateId.toRef,
+            Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
+            Ref.ChoiceName.assertFromString("Call"),
+            Value.ValueUnit,
+          )
+        ),
+        ledgerEffectiveTime = Time.Timestamp.Epoch,
+        commandsReference = "external-call-store-backed-test",
+      ),
+      disclosedContracts = ImmArray.empty,
+      synchronizerId = None,
+      packagePreferenceSet = Set(externalCallPkgId),
+      packageMap = Map(
+        externalCallPkgId -> (externalCallPkg.metadata.name, externalCallPkg.metadata.version)
+      ),
+      prefetchKeys = Seq.empty,
+      tapsMaxPasses = None,
+    )
 
   private def repeatCycleApiCommand(
       cid: ContractId,
@@ -137,12 +222,13 @@ class StoreBackedCommandInterpreterSpec
       contractStore: ContractStore = mock[ContractStore],
       contractAuthenticator: ContractAuthenticatorFn = (_, _) => Left("Not authorized"),
       tolerance: NonNegativeFiniteDuration = NonNegativeFiniteDuration.tryOfSeconds(60),
+      packageResolver: PackageResolver = testEngine.packageResolver,
   ) =
     new StoreBackedCommandInterpreter(
       engine = engine,
       contractStateMode = ContractStateMachine.Mode.default,
       participant = Ref.ParticipantId.assertFromString("anId"),
-      packageResolver = testEngine.packageResolver,
+      packageResolver = packageResolver,
       contractStore = contractStore,
       contractAuthenticator = contractAuthenticator,
       metrics = LedgerApiServerMetrics.ForTesting,
@@ -201,6 +287,32 @@ class StoreBackedCommandInterpreterSpec
         .map {
           case Left(InterpretationTimeExceeded(`let`, `tolerance`, _)) => succeed
           case other => fail(s"Did not expect: $other")
+        }
+    }
+
+    "reject external calls directly instead of surfacing a synthetic external service error" in {
+      val sut = mkSut(
+        mkExternalCallEngine(),
+        packageResolver = externalCallPackageResolver,
+      )
+
+      sut
+        .interpret(externalCallCommands, submissionSeed)(
+          LoggingContextWithTrace(loggerFactory),
+          executionContext,
+        )
+        .map {
+          case Left(
+                ErrorCause.DamlLf(
+                  engine.Error.Interpretation(
+                    engine.Error.Interpretation.Internal(_, message, _),
+                    _,
+                  )
+                )
+              ) =>
+            message should include("External calls are not supported")
+          case other =>
+            fail(s"Expected direct internal rejection, got $other")
         }
     }
   }

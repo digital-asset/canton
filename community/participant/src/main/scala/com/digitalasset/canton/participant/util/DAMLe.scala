@@ -395,6 +395,21 @@ class DAMLe(
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(resume())
+        case ResultNeedExternalCall(_, _, _, _, _) =>
+          FutureUnlessShutdown.pure(
+            Left(
+              EngineError(
+                Error.Interpretation(
+                  Error.Interpretation.Internal(
+                    "reinterpretation",
+                    "External calls are not supported during reinterpretation",
+                    None,
+                  ),
+                  None,
+                )
+              )
+            )
+          )
       }
     }
 

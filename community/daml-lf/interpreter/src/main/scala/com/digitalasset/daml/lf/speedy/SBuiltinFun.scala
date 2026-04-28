@@ -927,6 +927,12 @@ private[lf] object SBuiltinFun {
       // Validate hex encoding before making the external call
       (Ref.HexString.fromString(configHex), Ref.HexString.fromString(inputHex)) match {
         case (Right(_), Right(_)) =>
+          if (!machine.ptx.canRecordExternalCallResult) {
+            Control.Error(IE.UserError(
+              s"External calls are only supported within exercise context. " +
+                s"extensionId=$extensionId, functionId=$functionId"
+            ))
+          } else
           // Use question/answer pattern - participant handles the actual HTTP call
           machine.needExternalCall(
             extensionId = extensionId,
@@ -934,25 +940,32 @@ private[lf] object SBuiltinFun {
             configHash = configHex,
             input = inputHex,
           ) {
-            case Right(responseBody) =>
-              // Record the external call result in the transaction
-              machine.ptx.recordExternalCallResult(
-                extensionId = extensionId,
-                functionId = functionId,
-                configHash = configHex,
-                inputHex = inputHex,
-                outputHex = responseBody,
-              ) match {
-                case Some(updatedPtx) =>
+            case Right(responseBodyRaw) =>
+              val outputHex = responseBodyRaw.trim.toLowerCase(java.util.Locale.ROOT)
+              Ref.HexString.fromString(outputHex) match {
+                case Right(_) =>
+                  // The external-call question is only issued after confirming that the
+                  // current partial transaction can record a result, so resuming here must
+                  // still be inside an enclosing exercise context.
+                  val updatedPtx = machine.ptx.recordExternalCallResult(
+                    extensionId = extensionId,
+                    functionId = functionId,
+                    configHash = configHex,
+                    inputHex = inputHex,
+                    outputHex = outputHex,
+                  ).getOrElse(
+                    InternalError.runtimeException(
+                      NameOf.qualifiedNameOfCurrentFunc,
+                      s"lost enclosing exercise context while resuming external call " +
+                        s"(extensionId=$extensionId, functionId=$functionId)",
+                    )
+                  )
                   machine.ptx = updatedPtx
-                  Control.Value(SText(responseBody))
-                case None =>
-                  // External calls outside exercise context cannot be recorded
-                  // and would fail during validation/replay
-                  Control.Error(IE.UserError(
-                    s"External calls are only supported within exercise context. " +
-                      s"extensionId=$extensionId, functionId=$functionId"
-                  ))
+                  Control.Value(SText(outputHex))
+                case Left(_) =>
+                  Control.Error(
+                    IE.UserError("External call failed: Invalid hex encoding in external call output")
+                  )
               }
             case Left(error) =>
               // Propagate error with full context for proper error handling
