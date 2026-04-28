@@ -40,10 +40,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentVal
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
 }
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   InFlightSubmissionSynchronizerTracker,
@@ -1089,15 +1086,15 @@ final class AssignmentProcessingStepsTest
           sessionKeyStore,
         )
         .valueOrFailShutdown("cannot generate encryption key for transfer-in request")
-      ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(tree.viewHash)
       encryptedTree <- EncryptedViewMessageFactory
-        .create(AssignmentViewType)(
+        .encryptView(AssignmentViewType)(
           tree,
-          (viewKey, viewKeyMap),
+          viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
           cryptoSnapshot,
           None,
           testedProtocolVersion,
         )
         .valueOrFailShutdown("cannot encrypt assignment request")
+
     } yield encryptedTree
 }

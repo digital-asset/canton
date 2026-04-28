@@ -24,8 +24,13 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
-import com.digitalasset.canton.protocol.messages.{EncryptedView, EncryptedViewMessage}
+import com.digitalasset.canton.protocol.messages.{
+  EncryptedMultipleViews,
+  EncryptedMultipleViewsMessage,
+  EncryptedSingleViewMessage,
+  EncryptedView,
+  EncryptedViewMessage,
+}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   MemberRecipient,
@@ -44,6 +49,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId, SynchronizerId}
+import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*
@@ -265,34 +271,53 @@ trait SessionKeyIntegrationTest
         .envelopes
         .map(_.protocolMessage)
 
-      messages.exists {
-        case encryptedViewMessage: EncryptedViewMessage[?] =>
-          val attemptDecryptionOfTransactionView = for {
-            encryptedTransactionViewMessage <-
-              encryptedViewMessage.traverse(_.select(TransactionViewType))
-            _ <- EncryptedView
-              .decrypt(
-                pureCrypto,
-                sessionKeyGroupTx,
-                encryptedTransactionViewMessage.encryptedView,
-              )(
-                bytes => {
-                  LightTransactionViewTree
-                    .fromByteString(
-                      (pureCrypto, computeRandomnessLength(pureCrypto)),
-                      testedProtocolVersion,
-                    )(bytes)
-                    .leftMap(err => DefaultDeserializationError(err.message))
-                },
-                defaultMaxBytesToDecompress,
-              )
-              .toOption
-          } yield ()
-          attemptDecryptionOfTransactionView.isDefined
-        case _ =>
-          false
-      } shouldBe true
+      def deserialize(
+          bytes: ByteString
+      ): Either[DefaultDeserializationError, LightTransactionViewTree] =
+        LightTransactionViewTree
+          .fromByteString(
+            (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+            testedProtocolVersion,
+          )(bytes)
+          .leftMap(err => DefaultDeserializationError(err.message))
 
+      val encryptedViewMessages = messages.collect { case m: EncryptedViewMessage[?] =>
+        m
+      }
+
+      encryptedViewMessages.length shouldBe 1
+
+      val isCorrectlyDecrypted = encryptedViewMessages.head match {
+        case viewMessage: EncryptedSingleViewMessage[?] =>
+          val message = viewMessage.asInstanceOf[EncryptedSingleViewMessage[TransactionViewType]]
+
+          EncryptedView
+            .decrypt[LightTransactionViewTree](
+              pureCrypto,
+              sessionKeyGroupTx,
+              message.encryptedView.viewTree,
+            )(
+              deserialize,
+              defaultMaxBytesToDecompress,
+            )
+            .isRight
+        case multiViewMessage: EncryptedMultipleViewsMessage[?] =>
+          val message = multiViewMessage
+            .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType]]
+
+          EncryptedMultipleViews
+            .decrypt[LightTransactionViewTree](
+              pureCrypto,
+              sessionKeyGroupTx,
+              message.encryptedViews.viewTrees,
+            )(
+              deserialize,
+              defaultMaxBytesToDecompress,
+            )
+            .isRight
+      }
+
+      assert(isCorrectlyDecrypted, "The view has not been decrypted correctly")
     }
 
     "be replaced if encryption key is changed" in { implicit env =>

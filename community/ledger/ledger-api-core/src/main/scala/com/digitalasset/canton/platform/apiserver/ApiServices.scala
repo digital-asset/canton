@@ -44,7 +44,6 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import io.grpc.BindableService
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
 import io.opentelemetry.api.trace.Tracer
@@ -94,7 +93,6 @@ object ApiServices {
       partyRecordStore: PartyRecordStore,
       authorizer: Authorizer,
       engine: Engine,
-      contractStateMode: ContractStateMachine.Mode,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
       transactionSubmissionTracker: SubmissionTracker,
@@ -278,7 +276,6 @@ object ApiServices {
       val commandInterpreter =
         new StoreBackedCommandInterpreter(
           engine = engine,
-          contractStateMode = contractStateMode,
           participant = participantId,
           packageResolver = packageResolver,
           contractStore = contractStore,

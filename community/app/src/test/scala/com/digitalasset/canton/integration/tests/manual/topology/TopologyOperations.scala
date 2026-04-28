@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperations.TransactionProgress
 import com.digitalasset.canton.integration.{ConfigTransform, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 
 import scala.concurrent.Future
 
@@ -56,6 +56,10 @@ trait TopologyOperations extends TopologyChaosLogging with TopologyOperationsHel
       env: TestConsoleEnvironment,
       globalReservations: Reservations,
   ): Unit = ()
+
+  /** The psid of the active synchronizer. Is constant except for LSU tests.
+    */
+  def activePsid(implicit env: TestConsoleEnvironment): PhysicalSynchronizerId = env.daId
 
   /** @param transactionProgress
     *   Result of the progress checker:

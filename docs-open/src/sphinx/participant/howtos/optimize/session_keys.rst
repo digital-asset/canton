@@ -12,10 +12,17 @@ Canton uses session keys to reduce expensive cryptographic operations during pro
 There are two types: session encryption keys, which reduce the number of asymmetric encryptions, and
 session signing keys, which help avoid frequent calls to external signers such as a KMS.
 
-You can read more about the rationale and security considerations in :ref:`Session Keys <canton-security>`.
+You can read more about the rationale and security considerations
+in :externalref:`Session Keys <overview_session_signing_keys>`.
 
-Extending the lifetime of session keys minimizes the need for repeated key negotiation or remote signing—but it also
-increases the window during which keys are stored in memory, raising the risk of compromise.
+Currently, **session encryption keys are enabled by default**, whereas **session signing keys**, being directly tied to
+a KMS, are **disabled by default**. However, the latter can be enabled when using an external KMS to store private keys
+via a configuration parameter.
+
+.. important::
+
+    Extending the lifetime of session keys minimizes the need for repeated key negotiation or remote signing/encryption,
+    but it also increases the window during which keys are stored in memory, raising the risk of compromise.
 
 Increase session **encryption** keys lifetime
 ---------------------------------------------
@@ -30,17 +37,46 @@ increase the ``expire-after-timeout`` for both the ``sender-cache`` and ``receiv
    :end-before: user-manual-entry-end: SessionEncryptionKeyConfig
    :dedent:
 
-Increase session **signing** keys lifetime
-------------------------------------------
+.. _enable_session_signing_keys:
 
-When using :ref:`external KMS (Key Management Service) provider <external_key_storage>` you can control how
-long a session signing key remains active by adjusting the ``key-validity-duration``
-and the ``key-eviction-period``. The ``key-eviction-period`` should always be longer than the ``key-validity-duration``
-and at least as long as the sum of ``confirmation_response_timeout`` and ``mediator_reaction_timeout``, as configured
-in the :externalref:`dynamic Synchronizer parameters <dynamic_synchronizer_parameters>`.
+Enable session **signing** keys
+-------------------------------
+
+Much like session encryption keys, enabling session signing keys introduces a trade-off: short-lived keys are kept in
+memory and therefore outside of direct protection by the KMS. Therefore, operators should evaluate this performance
+and cost benefit against their security requirements and threat model before enabling this feature.
+
+When using :ref:`external KMS (Key Management Service) provider <external_key_storage>` you can enable session signing
+keys by setting:
 
 .. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
    :language: scala
-   :start-after: user-manual-entry-begin: SessionSigningKeyConfig
-   :end-before: user-manual-entry-end: SessionSigningKeyConfig
+   :start-after: user-manual-entry-begin: EnableSessionSigningKeyConfig
+   :end-before: user-manual-entry-end: EnableSessionSigningKeyConfig
    :dedent:
+
+Increase session **signing** keys lifetime
+------------------------------------------
+
+Increasing the lifetime of session signing keys is also a trade-off: longer lifetimes improves performance and reduce KMS
+load, but extends the time window during which key material remains in memory.
+Security best practice guidance (e.g. OWASP) recommends using short-lived sensitive key material, typically on the order
+of around 5 minutes: `OWASP (Token Lifetime / Access Tokens) <https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/05.1-Testing_for_OAuth_Authorization_Server_Weaknesses>`_
+This is also the current default value.
+
+You can increase the lifetime of session signing keys via the ``key-validity-duration`` config parameter:
+
+.. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
+   :language: scala
+   :start-after: user-manual-entry-begin: ConfigureSessionSigningKeyConfig
+   :end-before: user-manual-entry-end: ConfigureSessionSigningKeyConfig
+   :dedent:
+
+The ``key-validity-duration`` **must always** be shorter than the ``key-eviction-period``.
+The ``key-validity-duration`` should also be at least as long as the ``defaultMaxSequencingTimeOffset``, as well as
+the sum of ``confirmation_response_timeout`` and ``mediator_reaction_timeout``, as configured in
+the :externalref:`dynamic Synchronizer parameters <dynamic_synchronizer_parameters>`.
+
+If you want to know more about each configurable parameter and the factors to consider when modifying them,
+you can refer to the session signing keys' :externalref:`Configurable Parameters <parametrization_session_signing_keys>`
+section.

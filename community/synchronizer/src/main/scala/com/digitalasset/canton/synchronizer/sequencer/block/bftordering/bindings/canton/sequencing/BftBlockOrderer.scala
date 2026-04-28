@@ -676,13 +676,14 @@ final class BftBlockOrderer(
       (maybeServerAuthenticatingFilter.map(_.closeAsync()).getOrElse(Seq.empty) ++
         blockSubscription.closeAsync() ++
         Seq[AsyncOrSyncCloseable](
+          // Shut down the actors so they stop processing and release resources thereafter
+          SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
           SyncCloseable("epochStore.close()", epochStore.close()),
           SyncCloseable("outputStore.close()", outputStore.close()),
           SyncCloseable("availabilityStore.close()", availabilityStore.close()),
           SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
           SyncCloseable("pruningScheduler.close()", pruningScheduler.close()),
           SyncCloseable("pruningSchedulerStore.close()", pruningSchedulerStore.close()),
-          SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
         ) ++
         // Shutdown the dedicated local storage if present
         Option

@@ -7,7 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric.Subtractio
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.ApplicationHandler
 import com.digitalasset.canton.sequencing.handlers.ThrottlingApplicationEventHandler.{
@@ -70,11 +70,19 @@ class ThrottlingApplicationEventHandler(
 
     handler.replace { tracedEvents =>
       import tracedEvents.traceContext
+      implicit val errorLoggingContext: ErrorLoggingContext =
+        ErrorLoggingContext.fromTracedLogger(logger)
       val newState = state.updateAndGet(acquirePermit)
       newState.continuation
+        .tapOnShutdown(
+          logger.debug("throttling continuation aborted due to shutdown")
+        )
         .flatMap { _ =>
           metrics.handler.actualInFlightEventBatches.inc()
           handler(tracedEvents)
+            .tapOnShutdown(
+              logger.debug("inner handler aborted due to shutdown")
+            )
             .map(asyncResult =>
               asyncResult.thereafter { _ =>
                 val oldState = state.getAndUpdate(releasePermit)

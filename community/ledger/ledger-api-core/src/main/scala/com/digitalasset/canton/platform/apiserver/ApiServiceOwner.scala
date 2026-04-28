@@ -48,7 +48,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Engine
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
@@ -95,7 +94,6 @@ object ApiServiceOwner {
       otherServices: immutable.Seq[BindableService] = immutable.Seq.empty,
       otherInterceptors: List[ServerInterceptor] = List.empty,
       engine: Engine,
-      contractStateMode: ContractStateMachine.Mode,
       queryExecutionContext: ExecutionContextExecutor,
       commandExecutionContext: ExecutionContextExecutor,
       checkOverloaded: TraceContext => Option[state.SubmissionResult] =
@@ -176,7 +174,6 @@ object ApiServiceOwner {
         indexService = indexService,
         authorizer = authorizer,
         engine = engine,
-        contractStateMode = contractStateMode,
         timeProvider = timeServiceBackend.getOrElse(TimeProvider.UTC),
         timeProviderType =
           timeServiceBackend.fold[TimeProviderType](TimeProviderType.WallClock)(_ =>

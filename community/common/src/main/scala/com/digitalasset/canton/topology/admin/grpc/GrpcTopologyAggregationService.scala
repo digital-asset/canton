@@ -202,13 +202,13 @@ class GrpcTopologyAggregationService(
       })
       v30.ListKeyOwnersResponse(
         results = mapped.toSeq.flatMap { case (owner, keyPerSynchronizer) =>
-          keyPerSynchronizer.map { case (synchronizerId, keys) =>
+          keyPerSynchronizer.map { case (psid, keys) =>
             v30.ListKeyOwnersResponse.Result(
               keyOwner = owner.toProtoPrimitive,
-              synchronizerId = synchronizerId.logical.toProtoPrimitive,
+              synchronizerId = psid.logical.toProtoPrimitive,
               signingKeys = keys.signingKeys.map(_.toProtoV30),
               encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
-              physicalSynchronizerId = synchronizerId.toProtoPrimitive,
+              physicalSynchronizerId = psid.toProtoPrimitive,
             )
           }
         }

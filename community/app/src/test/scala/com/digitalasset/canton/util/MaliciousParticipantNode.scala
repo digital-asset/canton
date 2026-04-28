@@ -30,10 +30,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -200,11 +197,10 @@ class MaliciousParticipantNode(
             sessionKeyStore,
           )
           .leftMap(_.show)
-        ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
         viewMessage <- EncryptedViewMessageFactory
-          .create(UnassignmentViewType)(
+          .encryptView(UnassignmentViewType)(
             fullTree,
-            (viewKey, viewKeyMap),
+            viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
             cryptoSnapshot,
             signingTimestampOverrides,
             sourceProtocolVersion.unwrap,
@@ -355,11 +351,10 @@ class MaliciousParticipantNode(
             sessionKeyStore,
           )
           .leftMap(_.show)
-        ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
         viewMessage <- EncryptedViewMessageFactory
-          .create(AssignmentViewType)(
+          .encryptView(AssignmentViewType)(
             fullTree,
-            (viewKey, viewKeyMap),
+            viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
             cryptoSnapshot,
             signingTimestampOverrides,
             targetProtocolVersion.unwrap,

@@ -293,7 +293,7 @@ class NextGenTransactionTreeFactory(
 
     // Process core nodes and subviews
     val coreCreatedBuilder =
-      List.newBuilder[(LfNodeCreate, RollbackScope)] // contract IDs have already been suffixed
+      List.newBuilder[LfNodeCreate] // contract IDs have already been suffixed
 
     // contract IDs have not yet been suffixed
     val coreOtherBuilder = List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
@@ -371,7 +371,7 @@ class NextGenTransactionTreeFactory(
                   state,
                   topologySnapshot,
                 ).map { suffixedNode =>
-                  coreCreatedBuilder += (suffixedNode -> rbScope)
+                  coreCreatedBuilder += suffixedNode
                   createIndex += 1
                   suffixedNode
                 }
@@ -406,15 +406,15 @@ class NextGenTransactionTreeFactory(
       }
       childViews = childViewsBuilder.result()
 
-      suffixedRootNode = coreOtherNodes.headOption
+      suffixedRootNode: LfActionNode = coreOtherNodes.headOption
+        .map(_._1)
         .orElse(coreCreatedNodes.headOption)
-        .map { case (node, _) => node }
         .getOrElse(
           throw new IllegalArgumentException(s"The received view has no core nodes. $view")
         )
 
       createdContractIds: Set[LfContractId] = childViews.foldLeft(
-        coreCreatedNodes.map(_._1.coid).toSet
+        coreCreatedNodes.map(_.coid).toSet
       )((acc, tv) => acc ++ tv.createdContracts.keySet)
 
       // Compute the parameters of the view
@@ -609,7 +609,7 @@ class NextGenTransactionTreeFactory(
     )
 
   private def createViewParticipantData(
-      coreCreatedNodes: List[(LfNodeCreate, RollbackScope)],
+      coreCreatedNodes: List[LfNodeCreate],
       coreOtherNodes: List[(LfActionNode, RollbackScope)],
       childViews: Seq[TransactionView],
       createdContractInfo: collection.Map[LfContractId, NewContractInstance],
@@ -624,7 +624,7 @@ class NextGenTransactionTreeFactory(
       coreOtherNodes.flatMap { case (an, _) =>
         LfTransactionUtil.consumedContractId(an)
       }.toSet
-    val created = coreCreatedNodes.map { case (n, rbScopeCreate) =>
+    val created = coreCreatedNodes.map { n =>
       val cid = n.coid
       // The preconditions of tryCreate are met as we have created all contract IDs of created contracts in this class.
       checked(
@@ -632,7 +632,7 @@ class NextGenTransactionTreeFactory(
           .tryCreate(
             createdContractInfo(cid),
             consumedInCore = consumedInCore.contains(cid),
-            rolledBack = rbScopeCreate != rbContextCore.rollbackScope,
+            rolledBack = false,
           )
       )
     }
@@ -732,7 +732,15 @@ class NextGenTransactionTreeFactory(
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
       )
+
+    val rolledBackEffect = rbContext.inRollback && transactionEffectful(transaction.unwrap)
+
     for {
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        !rolledBackEffect,
+        (),
+        RolledBackEffect(rbContext, rootPosition),
+      )
       decompositions <- EitherT.right(decompositionsF)
       decomposition = checked(decompositions.head)
       view <- createTransactionView(
@@ -811,6 +819,13 @@ class NextGenTransactionTreeFactory(
 }
 
 object NextGenTransactionTreeFactory {
+
+  // TODO(#31527): SPM add test for RolledBackEffect
+  private def transactionEffectful(tx: LfVersionedTransaction): Boolean =
+    tx.nodes.values.exists {
+      case n: LfActionNode => LfTransactionUtil.isEffectful(n)
+      case _: LfNodeRollback => false
+    }
 
   private class State(
       val mediator: MediatorGroupRecipient,

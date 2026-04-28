@@ -59,15 +59,17 @@ For better protection of secrets that Canton needs to persist, Canton allows for
   Similarly, when Canton needs to decrypt some data, it sends the ciphertext to the KMS, the KMS decrypts the ciphertext,
   and sends the plaintext back to Canton.
 
+.. _overview_session_signing_keys:
+
 KMS with session signing keys
 """""""""""""""""""""""""""""
 
-As the option "full KMS" comes with substantial latency, Canton offers an option with lower signing latency at the cost
-of slightly weaker protection of private signing keys.
-A node stores its long-term private signing key in a KMS.
-For signing, it uses a session signing key instead of the long-term signing key in the KMS.
-Alongside with the signature, it also ships (1) the public key corresponding to the private session signing key
-and (2) a certificate demonstrating that the session key is a legitimate replacement of the long-term key during a defined period of time.
+As the "full KMS" option comes with substantial latency, Canton offers an alternative, which must be
+:externalref:`explicitly enabled <enable_session_signing_keys>`, that provides lower signing latency at the cost of
+slightly weaker protection of private signing keys. In this mode, a node stores its long-term private signing key in
+a KMS, but, for signing, it uses a session signing key instead of the long-term key. To do that, alongside with the
+signature, it also ships (1) the public key corresponding to the private session signing key and (2) a certificate
+demonstrating that the session key is a legitimate replacement of the long-term key during a defined period of time.
 The long-term key needs to sign this certificate.
 
 This approach limits the overhead of KMS operations, as the node accesses the KMS only when rolling the session key
@@ -75,7 +77,68 @@ This approach limits the overhead of KMS operations, as the node accesses the KM
 
 The node keeps the session signing key in memory in plaintext for a configurable lifetime.
 The node does not store session signing keys on disk nor in the database.
-To limit the impact of a potential key compromise, a node does not accept signatures from a session signing key outside of the time period defined in the certificate.
+To limit the impact of a potential key compromise, a node does not accept signatures from a session signing key
+outside of the time period defined in the certificate.
+Session signing keys are only used to sign :externalref:`protocol messages <signing-key-usage-restrictions>`.
+
+.. _parametrization_session_signing_keys:
+
+Configurable parameters
++++++++++++++++++++++++
+
+Session signing keys have a validity period associated with them every time they are created, and they are only valid
+during that period. This period can be adapted through Canton's configuration files. This section lists the
+configurable parameters, what they control, and what to keep in mind when modifying them. Throughout this section
+``ts`` denotes the timestamp at which we are signing.
+
+- **enabled**
+
+  - Enables the usage of session signing keys in the protocol. This option can only be used when a KMS is deployed and the private keys are stored within it.
+
+- **keyValidityDuration**
+
+  - Specifies the validity duration for each session signing key. Its lifespan **must** satisfy: ``keyValidityDuration > 2 * cutoffDuration``.
+
+  - The validity duration should also not be too short, so that a session signing key can cover the lifespan of a message (i.e., its maximum sequencing time) and be reused across multiple submission requests.
+
+  - Recommended (optional) constraints. If these are not satisfied, the operator should be aware that some messages may need to be signed with the long-term key, which may lead to increased load on the KMS and more frequent calls to the KMS:
+
+     1. ``keyValidityDuration > defaultMaxSequencingTimeOffset``
+     2. ``keyValidityDuration > setBalanceRequestSubmissionWindowSize``
+     3. ``keyValidityDuration > confirmationResponseTimeout + mediatorReactionTimeout``
+
+- **toleranceShiftDuration**
+
+  - Shifts the validity interval from ``[ts, ts+keyValidityDuration]`` to ``[ts-toleranceShiftDuration, ts+keyValidityDuration-toleranceShiftDuration]``.
+
+  - It **must** respect the following constraints:
+
+     1. ``toleranceShiftDuration < keyValidityDuration - cutoffDuration``
+     2. ``toleranceShiftDuration > cutoffDuration``
+
+  - We use this tolerance to minimize the number of intervals (i.e., session signing keys) created. For example, without a shift, a sequence of timestamps ``ts, ts-1us, ts-2us, ts-3us`` would generate multiple keys. The value can be adjusted depending on whether timestamps are mostly increasing or decreasing. A shift of around 50% of the ``keyValidityDuration`` is generally recommended.
+
+- **cutoffDuration**
+
+  - Measures the tolerable clock skew and should be longer than ``ledgerRecordTimeTolerance``. This ensures that submissions do not fail verification due to clock skew.
+
+  - The node uses an existing session signing key only if the key’s validity period fully covers the required time range, with a buffer/margin applied on both sides.
+
+- **keyEvictionPeriod**
+
+  - Defines how long the private session signing key remains in memory.
+
+  - **Must be longer** than ``keyValidityDuration``.
+
+- **signingAlgorithmSpec**
+
+  - Defines the signing algorithm for session signing keys. Defaults to ``Ed25519``.
+
+- **signingKeySpec**
+
+  - Defines the key scheme for session signing keys. Defaults to ``EcCurve25519``.
+
+  - Both algorithm and key scheme must be supported and allowed by the node.
 
 .. _session-encryption-keys:
 

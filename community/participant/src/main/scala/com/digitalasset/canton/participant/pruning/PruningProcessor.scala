@@ -199,8 +199,8 @@ class PruningProcessor(
       .flatMap {
         case Some(beforeOrAtOffset) =>
           // under the hood this computation not only pushes back the boundInclusive bound according to the beforeOrAt publication timestamp, but also pushes it back before the ledger-end
-          val rewoundBoundInclusive: Offset =
-            if (beforeOrAtOffset >= boundInclusive) boundInclusive else beforeOrAtOffset
+          val rewoundBoundInclusive: Offset = boundInclusive.min(beforeOrAtOffset)
+
           // wiring through, needed
           firstUnsafeOffsetComputation
             .perform(rewoundBoundInclusive, safeToPruneCommitmentState)
@@ -208,9 +208,8 @@ class PruningProcessor(
               val result = firstUnsafeOffset
                 .map(_.offset)
                 .flatMap(_.decrement)
-                .map(safeOffset =>
-                  if (safeOffset > rewoundBoundInclusive) rewoundBoundInclusive else safeOffset
-                )
+                .map(safeOffset => safeOffset.min(rewoundBoundInclusive))
+
               logger.debug(
                 s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
               )

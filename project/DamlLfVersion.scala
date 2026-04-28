@@ -42,14 +42,15 @@ object DamlLfVersion {
   private val v2_1 = DamlLfVersion(2, Stable(1))
   private val v2_2 = DamlLfVersion(2, Stable(2))
   private val v2_3_1 = DamlLfVersion(2, Staging(3, 1))
-  // keep v2_3 pointed to latest revision
-  private val v2_3 = v2_3_1
+  private val v2_3_2 = DamlLfVersion(2, Staging(3, 2))
+  private val v2_3 = DamlLfVersion(2, Stable(3))
   private val v2_dev = DamlLfVersion(2, Dev)
 
   val explicitVersions: Map[String, DamlLfVersion] = Map(
     "v2_1" -> v2_1,
     "v2_2" -> v2_2,
     "v2_3_1" -> v2_3_1,
+    "v2_3_2" -> v2_3_2,
     "v2_3" -> v2_3,
     "v2_dev" -> v2_dev,
   )
@@ -57,14 +58,17 @@ object DamlLfVersion {
     "defaultLfVersion" -> v2_2,
     "devLfVersion" -> v2_dev,
     "latestStableLfVersion" -> v2_2,
+    "stagingLfVersion" -> v2_3_2,
   )
 
-  val allLfVersions = List(v2_1, v2_2, v2_3, v2_dev)
-  private val stableLfVersions = List(v2_1, v2_2)
+  val allLfVersions = List(v2_1, v2_2, v2_3_2, v2_3, v2_dev)
+  private val discontinuedLfVersions = List(v2_3_1)
+  private val stableLfVersions = List(v2_1, v2_2, v2_3)
   private val compilerLfVersions = allLfVersions
 
   val versionLists: Map[String, List[DamlLfVersion]] = Map(
     "allLfVersions" -> allLfVersions,
+    "discontinuedLfVersions" -> discontinuedLfVersions,
     "stableLfVersions" -> stableLfVersions,
     "compilerInputLfVersions" -> compilerLfVersions,
     "compilerOutputLfVersions" -> compilerLfVersions,

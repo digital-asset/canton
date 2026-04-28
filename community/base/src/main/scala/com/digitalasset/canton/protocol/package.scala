@@ -120,7 +120,9 @@ package object protocol {
   val LfChoiceName: Ref.ChoiceName.type = Ref.ChoiceName
 
   type RequestProcessor[VT <: ViewType, Event] =
-    Phase37Processor[RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[VT]]], Event]
+    Phase37Processor[RequestAndRootHashMessage[
+      OpenEnvelope[EncryptedViewMessage[VT]]
+    ], Event]
 
   def maxSerializationVersion(
       versions: NonEmpty[Seq[LfSerializationVersion]]

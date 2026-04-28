@@ -823,7 +823,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicStartEndAscending",
     "Requesting update pages in ascending order with dynamic start end end should yield all transactions",
     allocate(SingleParty),
-    repeated = 10,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       contracts <- MonadUtil
@@ -874,7 +873,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicStartEndDescending",
     "Requesting update pages in descending order with dynamic start end end should yield all transactions in descending order",
     allocate(SingleParty),
-    repeated = 10,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       contracts <- MonadUtil
@@ -915,7 +913,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicPruningStartEndDescending",
     "Requesting update pages in descending order with dynamic start end end should yield all transactions until pruning is reached",
     allocate(SingleParty),
-    repeated = 1,
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -971,7 +968,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicPruningInJustAfterThePageDescending",
     "Requesting update pages in descending order with dynamic start end end should yield all transactions until reaching the pruning offset after the last page",
     allocate(SingleParty),
-    repeated = 1,
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -1033,7 +1029,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicPruningStartEndInPageBoundaryDescending",
     "Requesting update pages in descending order with dynamic start end end should yield all transactions until pruning is reached in page boundary",
     allocate(SingleParty),
-    repeated = 1,
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -1097,7 +1092,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedDynamicStartAscendingPruning",
     "Ascending page update stream should start at pruning offset",
     allocate(SingleParty),
-    repeated = 1,
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -1150,7 +1144,6 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
     "TXPagedAscendingPruningCatchesUp",
     "Ascending page fetch should fail if pruning catches it",
     allocate(SingleParty),
-    repeated = 1,
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -1193,6 +1186,60 @@ class UpdateServiceStreamsIT extends LedgerTestSuite {
         )
     } yield {
       compareContractIds("First page contains two elements", firstPage.updates, Seq(dummy1, dummy2))
+      assertGrpcError(
+        err,
+        RequestValidationErrors.ParticipantPrunedDataAccessed,
+        Some("precedes pruned offset"),
+      )
+    }
+  })
+
+  test(
+    "TXPagedAscendingPruningBehindEnd",
+    "Ascending page fetch should fail if pruning offset goes beyond query end",
+    allocate(SingleParty),
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      // Move the ledger end forward
+      beginExclusive <- ledger.currentEnd()
+      dummy1 <- ledger.create(party, new Dummy(party))
+      dummy2 <- ledger.create(party, new Dummy(party))
+      endInclusive <- ledger.currentEnd()
+      dummy3 <- ledger.create(party, new Dummy(party))
+      dummy4 <- ledger.create(party, new Dummy(party))
+      pruningOffset <- ledger.currentEnd()
+      dummy5 <- ledger.create(party, new Dummy(party)) // One more to make pruning possible
+      transactionFormat = ledger.transactionFormat(
+        Some(Seq(party)),
+        transactionShape = LedgerEffects,
+        templateIds = Seq(Dummy.TEMPLATE_ID),
+      )
+      request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(beginExclusive),
+        endOffsetInclusive = Some(endInclusive),
+        maxPageSize = Some(2),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(transactionFormat),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+        descendingOrder = false,
+        pageToken = None,
+      )
+      _ <- ledger.pruneCantonSafe(
+        pruningOffset,
+        party,
+        p => new Dummy(p).create.commands,
+      )
+      err <- ledger
+        .getUpdatesPageRaw(request)
+        .mustFail(
+          s"First strict page fetch should fail as it interferes with pruning"
+        )
+    } yield {
       assertGrpcError(
         err,
         RequestValidationErrors.ParticipantPrunedDataAccessed,

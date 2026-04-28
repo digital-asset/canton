@@ -173,4 +173,4 @@ To disable **session signing keys**:
    :dedent:
 
 Please note that **session signing keys** are only used with an
-:ref:`external KMS (Key Management Service) provider <external_key_storage>`.
+:ref:`external KMS (Key Management Service) provider <external_key_storage>` and are already disabled by default.

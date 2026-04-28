@@ -57,7 +57,23 @@ final case class AnnouncedLsu(
       }
     }
 
-  def maybeOffsetTime(
+  def subtractOffsetAfterUpgradeTime(
+      timestampO: Option[CantonTimestamp]
+  )(implicit elc: ErrorLoggingContext): Option[CantonTimestamp] = timestampO.map { timestamp =>
+    if (LogicalUpgradeTime.canProcessKnowingSuccessor(Some(successor), timestamp)) {
+      timestamp
+    } else {
+      timestamp - postUpgradeTimeOffset
+        .get()
+        .getOrElse(
+          ErrorUtil.invalidState(
+            "postUpgradeTimeOffset is expected to be initialized at this point."
+          )
+        )
+    }
+  }
+
+  def addOffsetAfterUpgradeTime(
       timestamp: CantonTimestamp
   )(implicit elc: ErrorLoggingContext): CantonTimestamp =
     if (LogicalUpgradeTime.canProcessKnowingSuccessor(Some(successor), timestamp)) {
@@ -72,8 +88,8 @@ final case class AnnouncedLsu(
         )
     }
 
-  def maybeOffsetTime(timestamp: Option[CantonTimestamp])(implicit
+  def addOffsetAfterUpgradeTime(timestamp: Option[CantonTimestamp])(implicit
       elc: ErrorLoggingContext
   ): Option[CantonTimestamp] =
-    timestamp.map(maybeOffsetTime)
+    timestamp.map(addOffsetAfterUpgradeTime)
 }

@@ -48,10 +48,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentVal
   CommonValidationResult,
   ReassigningParticipantValidationResult,
 }
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
@@ -1265,11 +1262,11 @@ final class UnassignmentProcessingStepsTest
           sessionKeyStore,
         )
         .valueOrFailShutdown("cannot generate encryption key for unassignment request")
-      ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(tree.viewHash)
+
       encryptedTree <- EncryptedViewMessageFactory
-        .create(UnassignmentViewType)(
+        .encryptView(UnassignmentViewType)(
           tree,
-          (viewKey, viewKeyMap),
+          viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
           cryptoSnapshot,
           None,
           testedProtocolVersion,

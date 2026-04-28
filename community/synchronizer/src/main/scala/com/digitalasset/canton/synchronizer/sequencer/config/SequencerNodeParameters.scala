@@ -62,6 +62,7 @@ final case class SequencerNodeParameters(
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
+    delayRequestsBeforeLsuTrafficInit: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

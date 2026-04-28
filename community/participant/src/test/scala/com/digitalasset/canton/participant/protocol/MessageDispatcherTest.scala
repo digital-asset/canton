@@ -9,7 +9,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   AsymmetricEncrypted,
-  Encrypted,
   EncryptionAlgorithmSpec,
   Fingerprint,
   SecureRandomness,
@@ -38,7 +37,6 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.{
   LocalRejectError,
@@ -310,28 +308,23 @@ trait MessageDispatcherTest {
 
   private val dummySignature = SymbolicCrypto.emptySignature
 
-  private def emptyEncryptedViewTree =
-    Encrypted.fromByteString[CompressedView[MockViewTree]](ByteString.EMPTY)
-
-  private val encryptedTestView = EncryptedView(TestViewType)(emptyEncryptedViewTree)
-  private val encryptedTestViewMessage =
-    EncryptedViewMessage(
-      None,
-      ViewHash(TestHash.digest(9000)),
+  private val encryptedTestViewMessage: EncryptedViewMessage[TestViewType] =
+    EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
+      submittingParticipantSignature = None,
+      viewHash = ViewHash(TestHash.digest(9000)),
       viewEncryptionKeyRandomness = sessionKeyMapTest,
-      encryptedTestView,
-      psid,
-      SymmetricKeyScheme.Aes128Gcm,
-      testedProtocolVersion,
+      encryptedViewBytes = ByteString.EMPTY,
+      synchronizerId = psid,
+      viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+      protocolVersion = testedProtocolVersion,
     )
 
-  private val encryptedOtherTestView = EncryptedView(OtherTestViewType)(emptyEncryptedViewTree)
-  private val encryptedOtherTestViewMessage =
-    EncryptedViewMessage(
+  private val encryptedOtherTestViewMessage: EncryptedViewMessage[OtherTestViewType] =
+    EncryptedViewMessageUtils.exampleEncryptedSingleView(OtherTestViewType)(
       submittingParticipantSignature = None,
       viewHash = ViewHash(TestHash.digest(9001)),
       viewEncryptionKeyRandomness = sessionKeyMapTest,
-      encryptedView = encryptedOtherTestView,
+      encryptedViewBytes = ByteString.EMPTY,
       synchronizerId = psid,
       viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
       protocolVersion = testedProtocolVersion,
@@ -718,17 +711,18 @@ trait MessageDispatcherTest {
 
     "complain about unknown view types in a request" in {
       val sut = mk(initRc = RequestCounter(-12))
-      val encryptedUnknownTestView = EncryptedView(UnknownTestViewType)(emptyEncryptedViewTree)
+
       val encryptedUnknownTestViewMessage =
-        EncryptedViewMessage(
-          None,
-          ViewHash(TestHash.digest(9002)),
+        EncryptedViewMessageUtils.exampleEncryptedSingleView(UnknownTestViewType)(
+          submittingParticipantSignature = None,
+          viewHash = ViewHash(TestHash.digest(9002)),
           viewEncryptionKeyRandomness = sessionKeyMapTest,
-          encryptedUnknownTestView,
-          psid,
-          SymmetricKeyScheme.Aes128Gcm,
-          testedProtocolVersion,
+          encryptedViewBytes = ByteString.EMPTY,
+          synchronizerId = psid,
+          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+          protocolVersion = testedProtocolVersion,
         )
+
       val rootHashMessage =
         RootHashMessage(
           rootHash(1),

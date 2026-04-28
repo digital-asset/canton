@@ -5,12 +5,16 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
-import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkDistance
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.{
+  AchsWorkDistance,
+  AchsWorkRange,
+}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   AchsState,
@@ -29,9 +33,12 @@ import com.digitalasset.canton.platform.store.interning.UpdatingStringInterningV
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.NotUsed
+import org.apache.pekko.actor.Cancellable
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 private[platform] final case class InitializeParallelIngestion(
@@ -123,11 +130,6 @@ private[platform] final case class InitializeParallelIngestion(
     *     ACHS to catch up when new events will be indexed (work distance will be negative,
     *     representing debt).
     *
-    * After computing the initial work, it runs AchsMaintenancePipe as a one-shot stream to eagerly
-    * populate the ACHS snapshot. The remaining work distance is then recalculated from the updated
-    * in-memory ACHS state, which correctly accounts for both the aggregation threshold (positive
-    * remainder that didn't reach a full chunk) and debt (negative work when ACHS is ahead).
-    *
     * If ACHS is disabled, it clears any existing ACHS data from the database.
     */
   private def initializeAchs(
@@ -200,9 +202,10 @@ private[platform] final case class InitializeParallelIngestion(
     * By splitting into two phases, the copy phase only adds entries that are still active after all
     * removals and validAt located at its final position.
     *
-    * After both phases complete, the remaining work distance is recalculated from the updated
-    * in-memory ACHS state, which correctly accounts for both the aggregation threshold (positive
-    * remainder that didn't reach a full chunk) and debt (negative work when ACHS is ahead).
+    * The pipe runs in fullDrain mode, flushing any sub-threshold remainder when the finite init
+    * stream completes, so all positive initial work is fully processed. After both phases complete,
+    * the remaining work distance is recalculated from the updated in-memory ACHS state, which
+    * correctly accounts for debt (negative work when ACHS is ahead).
     */
   private def createAchsSnapshot(
       initialState: AchsState,
@@ -218,17 +221,42 @@ private[platform] final case class InitializeParallelIngestion(
     achsStateCache.set(initialState)
     logger.info(s"Initializing ACHS snapshot with initial work distance: $initialWork")
 
+    val lastPointers = new AtomicReference[AchsLastPointers](initialState.lastPointers)
+    val cancellable =
+      logProgress[AchsLastPointers](
+        action = "ACHS initialization",
+        targetState = AchsLastPointers(
+          lastPopulated = initialState.lastPointers.lastPopulated +
+            initialWork.populate.max(0L),
+          lastRemoved = initialState.lastPointers.lastRemoved +
+            initialWork.remove.max(0L),
+        ),
+        state = lastPointers,
+        calcProgress = (from, to) =>
+          (to.lastPopulated - from.lastPopulated) + (to.lastRemoved - from.lastRemoved),
+      )
+
     achsMaintenancePipeSource(
       initialWork = initialWork,
       dbDispatcher = dbDispatcher,
       achsConfig = config,
     )
+      .map { elem =>
+        lastPointers.set(
+          AchsLastPointers(
+            lastPopulated = elem.activationsPopulation.endInclusive,
+            lastRemoved = elem.deactivatedRemoval.endInclusive,
+          )
+        )
+        elem
+      }
       .runWith(Sink.ignore)
       .map { _ =>
+        cancellable.cancel().discard
         // After both phases, the in-memory ACHS state reflects the actual pointers
-        // advanced by the pipe. Recalculate remaining work from the updated state to correctly
-        // account for the aggregation threshold (positive remainder < threshold) and debt
-        // (negative work that couldn't be consumed).
+        // advanced by the pipe (including the flushed sub-threshold remainder via fullDrain).
+        // Recalculate remaining work from the updated state to correctly account for
+        // debt (negative work that couldn't be consumed).
         val updatedAchsState = achsStateCache.get()
         val remainingWork =
           AchsMaintenancePipe.initialWork(updatedAchsState, lastEventSeqId, config)
@@ -239,7 +267,40 @@ private[platform] final case class InitializeParallelIngestion(
       }
   }
 
-  // TODO(#30245) convert to Source[AchsWorkRange, _] and add logging of progress
+  private def logProgress[S](
+      action: String,
+      targetState: S,
+      state: AtomicReference[S],
+      calcProgress: (S, S) => Long,
+      interval: FiniteDuration = 10.seconds,
+  )(implicit loggingContext: LoggingContextWithTrace): Cancellable = {
+    val startTime = System.currentTimeMillis()
+    val initialState = state.get()
+    val totalDist = calcProgress(initialState, targetState)
+    val prevReportedState = new AtomicReference[S](initialState)
+
+    materializer.system.scheduler.scheduleWithFixedDelay(
+      initialDelay = interval,
+      delay = interval,
+    ) { () =>
+      val currentState = state.get()
+      val prevState = prevReportedState.getAndSet(currentState)
+      val delta = calcProgress(prevState, currentState)
+      val currentDist = calcProgress(initialState, currentState)
+      val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
+      val intervalSeconds = interval.toSeconds.max(1)
+      val reportRate = delta / intervalSeconds
+      val avgRate = if (elapsedSeconds > 0) currentDist / elapsedSeconds else 0L
+      val percentage = if (totalDist > 0) s"${100 * currentDist / totalDist}%" else "N/A"
+      val minutesLeft =
+        if (avgRate > 0 && totalDist > 0) s"${(totalDist - currentDist) / avgRate / 60}"
+        else "N/A"
+      logger.info(
+        s"$action current: $currentState, target: $targetState $currentDist/$totalDist events processed, $percentage, (since last: $delta, $reportRate events/s) (avg: $avgRate events/s, estimated minutes left: $minutesLeft)"
+      )
+    }(materializer.executionContext)
+  }
+
   private def achsMaintenancePipeSource(
       initialWork: AchsWorkDistance,
       dbDispatcher: DbDispatcher,
@@ -247,7 +308,7 @@ private[platform] final case class InitializeParallelIngestion(
   )(implicit
       ec: ExecutionContext,
       loggingContext: LoggingContextWithTrace,
-  ): Source[Unit, NotUsed] = {
+  ): Source[AchsWorkRange, NotUsed] = {
     // Split initialWork into two phases:
     //   Phase 1 (Removal): removes deactivated entries and bumps validAt, no population.
     //   Phase 2 (Copy): copies over activations using the updated validAt from Phase 1.
@@ -268,6 +329,7 @@ private[platform] final case class InitializeParallelIngestion(
           metrics = metrics,
           executionContext = ec,
           logger = logger,
+          fullDrain = true,
         )
       )
   }

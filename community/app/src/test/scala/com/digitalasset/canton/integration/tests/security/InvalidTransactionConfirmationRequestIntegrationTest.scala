@@ -44,13 +44,15 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
+  EncryptedMultipleViews,
   EncryptedView,
   EncryptedViewMessage,
   RootHashMessage,
   TransactionConfirmationRequest,
+  TransactionMultiViewMessage,
+  TransactionSingleViewMessage,
 }
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -67,6 +69,7 @@ import com.digitalasset.canton.util.{MaliciousParticipantNode, MaxBytesToDecompr
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.TransactionCoder
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueText}
+import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.Tag
 import org.slf4j.event.Level
@@ -638,10 +641,10 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
         ): TransactionConfirmationRequest = {
 
           val envelope = tcr.viewEnvelopes.headOption.valueOrFail("retrieve first view envelopes")
+
           val message = envelope.protocolMessage
           val recipients = envelope.recipients
 
-          val encryptedViewTree = message.encryptedView
           val encryptedViewRandomness =
             message.viewEncryptionKeyRandomness.headOption.valueOrFail("retrieve view key")
           val viewRandomness = participant1.crypto.privateCrypto
@@ -655,19 +658,39 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             .createSymmetricKey(viewRandomness, message.viewEncryptionScheme)
             .valueOrFail("create view key")
 
-          val viewTree = EncryptedView
-            .decrypt(pureCrypto, viewKey, encryptedViewTree)(
-              bytes => {
-                LightTransactionViewTree
-                  .fromByteString(
-                    (pureCrypto, computeRandomnessLength(pureCrypto)),
-                    testedProtocolVersion,
-                  )(bytes)
-                  .leftMap(err => DefaultDeserializationError(err.message))
-              },
-              MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
-            )
-            .value
+          def deserialize(
+              bytes: ByteString
+          ): Either[DefaultDeserializationError, LightTransactionViewTree] =
+            LightTransactionViewTree
+              .fromByteString(
+                (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+                testedProtocolVersion,
+              )(bytes)
+              .leftMap(err => DefaultDeserializationError(err.message))
+
+          val viewTree = message match {
+            case singleViewMessage: TransactionSingleViewMessage =>
+              val encryptedViewTree = singleViewMessage.encryptedView.viewTree
+
+              EncryptedView
+                .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTree)(
+                  deserialize,
+                  MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                )
+                .value
+            case multipleViewsMessage: TransactionMultiViewMessage =>
+              val encryptedViewTrees = multipleViewsMessage.encryptedViews.viewTrees
+
+              val viewTrees = EncryptedMultipleViews
+                .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTrees)(
+                  deserialize,
+                  MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                )
+                .value
+
+              viewTrees.viewTrees.length shouldBe 1
+              viewTrees.viewTrees.head1
+          }
 
           // change the randomness assigned to the first subview in the view tree
           val subviewHash =
@@ -692,8 +715,8 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             .currentSnapshotApproximation
             .futureValueUS
 
-          val newEncryptedViewMessage = EncryptedViewMessageFactory
-            .create(TransactionViewType)(
+          val newMessage = EncryptedViewMessageFactory
+            .encryptView(TransactionViewType)(
               newLtvt,
               (viewKey, message.viewEncryptionKeyRandomness),
               crypto,
@@ -704,7 +727,8 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             )
             .valueOrFail("create new envelope")
             .futureValueUS
-          val newEnvelope = OpenEnvelope(newEncryptedViewMessage, recipients)(testedProtocolVersion)
+
+          val newEnvelope = OpenEnvelope(newMessage, recipients)(testedProtocolVersion)
 
           tcr.focus(_.viewEnvelopes).modify(_.updated(0, newEnvelope))
         }

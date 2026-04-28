@@ -68,7 +68,6 @@ services:
     depends_on:
       - db
 
-
   synchronizer:
     build:
       context: ./synchronizer

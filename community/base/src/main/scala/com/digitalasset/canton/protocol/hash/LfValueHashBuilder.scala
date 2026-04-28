@@ -7,6 +7,7 @@ import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{HashBuilderFromMessageDigest, HashPurpose}
 import com.digitalasset.canton.protocol.hash.LfValueHashBuilder.TypeTag
 import com.digitalasset.canton.protocol.hash.LfValueHashBuilder.TypeTag.*
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value
 
@@ -38,13 +39,14 @@ object LfValueHashBuilder {
   }
 
   // For testing only
-  private[hash] def valueBuilderForV1Node(
+  private[hash] def valueBuilderForV2Scheme(
       hashTracer: HashTracer = HashTracer.NoOp
   ): LfValueHashBuilder =
-    new NodeBuilderV1(
+    NodeHashBuilder(
       HashPurpose.PreparedSubmission,
       hashTracer,
       enforceNodeSeedForCreateNodes = false,
+      HashingSchemeVersion.V2,
     )
 }
 
@@ -52,8 +54,6 @@ object LfValueHashBuilder {
   */
 private[hash] class LfValueHashBuilder(purpose: HashPurpose, hashTracer: HashTracer)
     extends HashBuilderFromMessageDigest(Sha256, purpose, hashTracer) {
-  protected def formatByteToHexString(byte: Byte): String = String.format("%02X", byte)
-
   private def addDottedName(name: Ref.DottedName): this.type =
     addArray(name.segments)(_ addString _)
 

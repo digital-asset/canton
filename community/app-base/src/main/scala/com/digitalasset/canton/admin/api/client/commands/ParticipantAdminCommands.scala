@@ -11,18 +11,8 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   ServerEnforcedTimeout,
   TimeoutType,
 }
+import com.digitalasset.canton.admin.api.client.data as admin
 import com.digitalasset.canton.admin.api.client.data.PackageDescription.PackageContents
-import com.digitalasset.canton.admin.api.client.data.{
-  DarContents,
-  DarDescription,
-  InFlightCount,
-  ListConnectedSynchronizersResult,
-  NodeStatus,
-  PackageDescription,
-  ParticipantPruningSchedule,
-  ParticipantStatus,
-  PartyOnboardingFlagStatus,
-}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.PackageServiceGrpc.PackageServiceStub
 import com.digitalasset.canton.admin.participant.v30.ParticipantInspectionServiceGrpc.ParticipantInspectionServiceStub
@@ -35,6 +25,7 @@ import com.digitalasset.canton.admin.participant.v30.PruningServiceGrpc.PruningS
 import com.digitalasset.canton.admin.participant.v30.ResourceManagementServiceGrpc.ResourceManagementServiceStub
 import com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityServiceGrpc.SynchronizerConnectivityServiceStub
 import com.digitalasset.canton.admin.participant.v30.{
+  PerformManualLsuRequest,
   RepairCommitmentsUsingAcsRequest,
   RepairCommitmentsUsingAcsResponse,
 }
@@ -97,6 +88,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, MILLISECONDS}
+import scala.util.chaining.*
 
 object ParticipantAdminCommands {
 
@@ -113,7 +105,7 @@ object ParticipantAdminCommands {
 
     final case class List(filterName: String, limit: PositiveInt)
         extends PackageCommand[v30.ListPackagesRequest, v30.ListPackagesResponse, Seq[
-          PackageDescription
+          admin.PackageDescription
         ]] {
       override protected def createRequest() = Right(
         v30.ListPackagesRequest(limit = limit.value, filterName = filterName)
@@ -127,8 +119,10 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.ListPackagesResponse
-      ): Either[String, Seq[PackageDescription]] =
-        response.packageDescriptions.traverse(PackageDescription.fromProto).leftMap(_.toString)
+      ): Either[String, Seq[admin.PackageDescription]] =
+        response.packageDescriptions
+          .traverse(admin.PackageDescription.fromProto)
+          .leftMap(_.toString)
     }
 
     final case class GetContents(packageId: String)
@@ -157,7 +151,7 @@ object ParticipantAdminCommands {
           response
         (for {
           desc <- ProtoConverter.parseRequired(
-            PackageDescription.fromProto,
+            admin.PackageDescription.fromProto,
             "description",
             descriptionP,
           )
@@ -175,7 +169,7 @@ object ParticipantAdminCommands {
         extends PackageCommand[
           v30.GetPackageReferencesRequest,
           v30.GetPackageReferencesResponse,
-          Seq[DarDescription],
+          Seq[admin.DarDescription],
         ] {
       override protected def createRequest() = Right(v30.GetPackageReferencesRequest(packageId))
 
@@ -187,11 +181,11 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.GetPackageReferencesResponse
-      ): Either[String, Seq[DarDescription]] = {
+      ): Either[String, Seq[admin.DarDescription]] = {
         val v30.GetPackageReferencesResponse(darsP) =
           response
         (for {
-          dars <- darsP.traverse(DarDescription.fromProtoV30)
+          dars <- darsP.traverse(admin.DarDescription.fromProtoV30)
         } yield dars).leftMap(_.toString)
       }
     }
@@ -411,7 +405,11 @@ object ParticipantAdminCommands {
     }
 
     final case class GetDarContents(mainPackageId: String)
-        extends PackageCommand[v30.GetDarContentsRequest, v30.GetDarContentsResponse, DarContents] {
+        extends PackageCommand[
+          v30.GetDarContentsRequest,
+          v30.GetDarContentsResponse,
+          admin.DarContents,
+        ] {
       override protected def createRequest() = Right(v30.GetDarContentsRequest(mainPackageId))
 
       override protected def submitRequest(
@@ -422,8 +420,8 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.GetDarContentsResponse
-      ): Either[String, DarContents] =
-        DarContents.fromProtoV30(response).leftMap(_.toString)
+      ): Either[String, admin.DarContents] =
+        admin.DarContents.fromProtoV30(response).leftMap(_.toString)
 
     }
 
@@ -484,7 +482,11 @@ object ParticipantAdminCommands {
     }
 
     final case class ListDars(filterName: String, limit: PositiveInt)
-        extends PackageCommand[v30.ListDarsRequest, v30.ListDarsResponse, Seq[DarDescription]] {
+        extends PackageCommand[
+          v30.ListDarsRequest,
+          v30.ListDarsResponse,
+          Seq[admin.DarDescription],
+        ] {
       override protected def createRequest(): Either[String, v30.ListDarsRequest] = Right(
         v30.ListDarsRequest(limit = limit.value, filterName = filterName)
       )
@@ -497,8 +499,8 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.ListDarsResponse
-      ): Either[String, Seq[DarDescription]] =
-        response.dars.traverse(DarDescription.fromProtoV30).leftMap(_.toString)
+      ): Either[String, Seq[admin.DarDescription]] =
+        response.dars.traverse(admin.DarDescription.fromProtoV30).leftMap(_.toString)
     }
 
   }
@@ -770,7 +772,7 @@ object ParticipantAdminCommands {
     ) extends GrpcAdminCommand[
           v30.ClearPartyOnboardingFlagRequest,
           v30.ClearPartyOnboardingFlagResponse,
-          PartyOnboardingFlagStatus,
+          admin.PartyOnboardingFlagStatus,
         ] {
 
       override type Svc = PartyManagementServiceStub
@@ -795,8 +797,8 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.ClearPartyOnboardingFlagResponse
-      ): Either[String, PartyOnboardingFlagStatus] =
-        PartyOnboardingFlagStatus.fromProtoV30(response).leftMap(_.message)
+      ): Either[String, admin.PartyOnboardingFlagStatus] =
+        admin.PartyOnboardingFlagStatus.fromProtoV30(response).leftMap(_.message)
     }
   }
 
@@ -1357,7 +1359,7 @@ object ParticipantAdminCommands {
           v30.ListConnectedSynchronizersRequest,
           v30.ListConnectedSynchronizersResponse,
           Seq[
-            ListConnectedSynchronizersResult
+            admin.ListConnectedSynchronizersResult
           ],
         ] {
 
@@ -1375,9 +1377,9 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.ListConnectedSynchronizersResponse
-      ): Either[String, Seq[ListConnectedSynchronizersResult]] =
+      ): Either[String, Seq[admin.ListConnectedSynchronizersResult]] =
         response.connectedSynchronizers.traverse(
-          ListConnectedSynchronizersResult.fromProtoV30(_).leftMap(_.toString)
+          admin.ListConnectedSynchronizersResult.fromProtoV30(_).leftMap(_.toString)
         )
 
     }
@@ -1541,21 +1543,44 @@ object ParticipantAdminCommands {
         currentPsid: PhysicalSynchronizerId,
         successorPsid: PhysicalSynchronizerId,
         upgradeTime: Option[CantonTimestamp],
-        sequencerSuccessors: Map[SequencerId, GrpcConnection],
+        /*
+         Either the successors or the new config.
+         This is abusing a bit the right-biased either but introducing a trait just for this call was overkill.
+         */
+        successorConnectionConfiguration: Either[
+          Map[SequencerId, GrpcConnection],
+          SynchronizerConnectionConfig,
+        ],
     ) extends Base[v30.PerformManualLsuRequest, v30.PerformManualLsuResponse, Unit] {
 
-      override protected def createRequest(): Either[String, v30.PerformManualLsuRequest] =
+      override protected def createRequest(): Either[String, v30.PerformManualLsuRequest] = {
+        val conf: PerformManualLsuRequest.SuccessorConnectionConfiguration =
+          successorConnectionConfiguration.fold(
+            successors =>
+              v30.PerformManualLsuRequest.SuccessorConnectionConfiguration
+                .SequencerSuccessors(
+                  successors
+                    .map { case (sequencerId, connection) =>
+                      sequencerId.toProtoPrimitive -> connection.toProtoV30
+                        .transformInto[v30.PerformManualLsuRequest.SequencerConnection]
+                    }
+                    .pipe(v30.PerformManualLsuRequest.SequencerSuccessors(_))
+                ),
+            newConfig =>
+              v30.PerformManualLsuRequest.SuccessorConnectionConfiguration.Config(
+                newConfig.toProtoV30
+              ),
+          )
+
         v30
           .PerformManualLsuRequest(
             physicalSynchronizerId = currentPsid.toProtoPrimitive,
             successorPhysicalSynchronizerId = successorPsid.toProtoPrimitive,
             upgradeTime = upgradeTime.map(_.toProtoTimestamp),
-            sequencerSuccessors = sequencerSuccessors.map { case (sequencerId, connection) =>
-              sequencerId.toProtoPrimitive -> connection.toProtoV30
-                .transformInto[v30.PerformManualLsuRequest.SequencerConnection]
-            },
+            successorConnectionConfiguration = conf,
           )
           .asRight
+      }
 
       override protected def submitRequest(
           service: SynchronizerConnectivityServiceStub,
@@ -2088,7 +2113,7 @@ object ParticipantAdminCommands {
         extends Base[
           v30.CountInFlightRequest,
           v30.CountInFlightResponse,
-          InFlightCount,
+          admin.InFlightCount,
         ] {
 
       override protected def createRequest(): Either[String, v30.CountInFlightRequest] =
@@ -2102,7 +2127,7 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.CountInFlightResponse
-      ): Either[String, InFlightCount] =
+      ): Either[String, admin.InFlightCount] =
         for {
           pendingSubmissions <- ProtoConverter
             .parseNonNegativeInt("CountInFlight.pending_submissions", response.pendingSubmissions)
@@ -2111,7 +2136,7 @@ object ParticipantAdminCommands {
             .parseNonNegativeInt("CountInFlight.pending_transactions", response.pendingTransactions)
             .leftMap(_.toString)
         } yield {
-          InFlightCount(pendingSubmissions, pendingTransactions)
+          admin.InFlightCount(pendingSubmissions, pendingTransactions)
         }
     }
 
@@ -2470,7 +2495,7 @@ object ParticipantAdminCommands {
         extends Base[
           pruning.v30.GetParticipantScheduleRequest,
           pruning.v30.GetParticipantScheduleResponse,
-          Option[ParticipantPruningSchedule],
+          Option[admin.ParticipantPruningSchedule],
         ] {
       override protected def createRequest()
           : Right[String, pruning.v30.GetParticipantScheduleRequest] =
@@ -2486,10 +2511,10 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: pruning.v30.GetParticipantScheduleResponse
-      ): Either[String, Option[ParticipantPruningSchedule]] =
+      ): Either[String, Option[admin.ParticipantPruningSchedule]] =
         response.schedule.fold(
-          Right(None): Either[String, Option[ParticipantPruningSchedule]]
-        )(ParticipantPruningSchedule.fromProtoV30(_).bimap(_.message, Some(_)))
+          Right(None): Either[String, Option[admin.ParticipantPruningSchedule]]
+        )(admin.ParticipantPruningSchedule.fromProtoV30(_).bimap(_.message, Some(_)))
     }
   }
 
@@ -2565,7 +2590,7 @@ object ParticipantAdminCommands {
         extends GrpcAdminCommand[
           v30.ParticipantStatusRequest,
           v30.ParticipantStatusResponse,
-          NodeStatus[ParticipantStatus],
+          admin.NodeStatus[admin.ParticipantStatus],
         ] {
 
       override type Svc = ParticipantStatusServiceStub
@@ -2585,8 +2610,8 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.ParticipantStatusResponse
-      ): Either[String, NodeStatus[ParticipantStatus]] =
-        ParticipantStatus.fromProtoV30(response).leftMap(_.message)
+      ): Either[String, admin.NodeStatus[admin.ParticipantStatus]] =
+        admin.ParticipantStatus.fromProtoV30(response).leftMap(_.message)
     }
   }
 

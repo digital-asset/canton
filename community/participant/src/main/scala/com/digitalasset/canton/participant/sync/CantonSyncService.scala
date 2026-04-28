@@ -1546,12 +1546,15 @@ class CantonSyncService(
               )
           )
           _ <- reassign(connectedSynchronizer, topologySnapshot)
-            .leftMap(error =>
-              RequestValidationErrors.InvalidArgument
-                .Reject(
-                  error.message
-                ): RpcError // TODO(i13240): Improve reassignment-submission Ledger API errors
-            )
+            .leftMap {
+              case rpcError: RpcError =>
+                // Pass Canton errors (like PartyCurrentlyOnboarding) straight through
+                rpcError
+              case error =>
+                // Fallback for older ReassignmentProcessorErrors, to be addressed by:
+                // TODO(#13240): Improve reassignment-submission Ledger API errors
+                RequestValidationErrors.InvalidArgument.Reject(error.message): RpcError
+            }
             .mapK(FutureUnlessShutdown.outcomeK)
             .semiflatMap(Predef.identity)
             .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error()))

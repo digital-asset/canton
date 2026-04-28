@@ -7,7 +7,6 @@ import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -89,21 +88,25 @@ final class LsuPruningIntegrationTest extends LsuBase {
 
       val fixture = fixtureWithDefaults()
 
+      // Activity before LSU
       participant1.health.ping(participant2)
-
       val alice = participant1.parties.enable("Alice")
       val bank = participant2.parties.enable("Bank")
-      val tempIou = IouSyntax.createIou(participant2)(bank, alice)
+      val tempIou = IouSyntax.createIou(participant2)(bank, alice, 1.0)
       IouSyntax.archive(participant2)(tempIou, bank)
-      IouSyntax.createIou(participant2)(bank, alice).discard
+      IouSyntax.createIou(participant2)(bank, alice, 2.0)
 
-      performSynchronizerNodesLsu(fixture)
+      clue("perform lsu") {
+        performSynchronizerNodesLsu(fixture)
+        environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+        transferTraffic()
+        eventually() {
+          environment.simClock.value.advance(Duration.ofSeconds(1))
+          participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+        }
 
-      environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-      transferTraffic()
-      eventually() {
-        environment.simClock.value.advance(Duration.ofSeconds(1))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+        oldSynchronizerNodes.all.stop()
       }
 
       // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments)
@@ -113,35 +116,31 @@ final class LsuPruningIntegrationTest extends LsuBase {
         noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
       }
 
-      oldSynchronizerNodes.all.stop()
+      clue("activity after LSU") {
+        val aliceIou =
+          participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
 
-      environment.simClock.value.advance(Duration.ofSeconds(1))
+        val bob = participant1.parties.enable("Bob")
 
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+        participant1.ledger_api.javaapi.commands
+          .submit(Seq(alice), aliceIou.id.exerciseTransfer(bob.toLf).commands().asScala.toSeq)
 
-      val aliceIou =
-        participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
-      val bob = participant1.parties.enable("Bob")
+        val bobIou = participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(bob)
 
-      participant1.ledger_api.javaapi.commands
-        .submit(Seq(alice), aliceIou.id.exerciseTransfer(bob.toLf).commands().asScala.toSeq)
+        participant2.ledger_api.javaapi.commands
+          .submit(Seq(bank), bobIou.id.exerciseArchive().commands().asScala.toSeq)
 
-      val bobIou = participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(bob)
-
-      participant2.ledger_api.javaapi.commands
-        .submit(Seq(bank), bobIou.id.exerciseArchive().commands().asScala.toSeq)
-
-      environment.simClock.value.advance(1.hour.toJava)
-      participants.local.foreach(_.testing.fetch_synchronizer_times())
-      IouSyntax.createIou(participant2)(bank, alice)
-      environment.simClock.value.advance(1.hour.toJava)
-      participants.local.foreach(_.testing.fetch_synchronizer_times())
+        environment.simClock.value.advance(1.hour.toJava)
+        participants.local.foreach(_.testing.fetch_synchronizer_times())
+        IouSyntax.createIou(participant2)(bank, alice, 3.0)
+      }
 
       eventually() {
         environment.simClock.value.advance(1.hour.toJava)
         participants.local.foreach(_.testing.fetch_synchronizer_times())
         val offset =
           participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
+
         logger.debug(s"safe to prune: $offset")
         offset should be > 2L
         logger.debug(s"pcs before pruning: ${participant2.testing.pcs_search(daName)}")
@@ -153,6 +152,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
       val now = environment.clock.now.toInstant
       // reconciliation interval = 1s
       val rounded = CantonTimestamp.assertFromInstant(now.truncatedTo(ChronoUnit.SECONDS))
+      logger.info(s"Checking outstanding commitments with now=$now, rounded to $rounded")
       eventually() {
         noOutstandingCommitments(participant1, rounded) shouldBe rounded
         noOutstandingCommitments(participant2, rounded) shouldBe rounded

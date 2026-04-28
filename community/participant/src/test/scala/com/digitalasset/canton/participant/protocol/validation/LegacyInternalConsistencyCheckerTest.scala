@@ -3,76 +3,18 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.syntax.either.*
-import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.data.FullTransactionViewTree
-import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
-import com.digitalasset.canton.participant.protocol.validation.LegacyInternalConsistencyChecker.checkRollbackScopeOrder
-import com.digitalasset.canton.protocol.*
-import org.scalatest.wordspec.AnyWordSpec
+import com.digitalasset.canton.topology.ParticipantId
 
-import scala.concurrent.ExecutionContext
-import scala.util.Random
-
-class LegacyInternalConsistencyCheckerTest extends AnyWordSpec with BaseTest {
-
-  implicit val ec: ExecutionContext = directExecutionContext
-
-  private val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
-
-  private def check(
-      icc: InternalConsistencyChecker,
-      views: Seq[FullTransactionViewTree],
-  ): Either[ErrorWithInternalConsistencyCheck, Unit] =
-    icc.check(NonEmptyUtil.fromUnsafe(views))
-
-  "Rollback scope ordering" when {
-
-    "checkRollbackScopeOrder should validate sequences of scopes" in {
-      val ops: Seq[RollbackContext => RollbackContext] = Seq(
-        _.enterRollback,
-        _.enterRollback,
-        _.exitRollback,
-        _.enterRollback,
-        _.exitRollback,
-        _.exitRollback,
-        _.enterRollback,
-        _.exitRollback,
-      )
-
-      val (_, testScopes) = ops.foldLeft((RollbackContext.empty, Seq(RollbackContext.empty))) {
-        case ((c, seq), op) =>
-          val nc = op(c)
-          (nc, seq :+ nc)
-      }
-
-      Random.shuffle(testScopes).sorted shouldBe testScopes
-      checkRollbackScopeOrder(testScopes) shouldBe Either.unit
-      checkRollbackScopeOrder(testScopes.reverse).isLeft shouldBe true
-    }
-  }
+class LegacyInternalConsistencyCheckerTest extends InternalConsistencyCheckerTest {
 
   "Internal consistency checker" when {
 
-    val relevantExamples = factory.standardHappyCases.filter(_.rootTransactionViewTrees.nonEmpty)
+    val participantId: ParticipantId = ParticipantId("test")
+    val sut = new NextGenInternalConsistencyChecker(participantId, loggerFactory)
 
-    forEvery(relevantExamples) { example =>
-      s"checking $example" must {
+    "rollback scope order" should checkRollbackScopeOrder()
 
-        val sut = new LegacyInternalConsistencyChecker(loggerFactory)
-
-        "yield the correct result" in {
-          check(sut, example.rootTransactionViewTrees).isRight shouldBe true
-        }
-
-        "reinterpret views individually" in {
-          example.transactionViewTrees.foreach { viewTree =>
-            check(sut, Seq(viewTree)) shouldBe Either.unit
-          }
-        }
-      }
-    }
+    "standard happy cases" should checkStandardHappyCases(sut)
 
   }
 }

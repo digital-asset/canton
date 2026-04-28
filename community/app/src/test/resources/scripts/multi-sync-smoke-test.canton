@@ -53,9 +53,8 @@ try {
   logger.info(s"MULTI-SYNC: Submitted reassignment command to move contract $contractId from synchronizer $sync1 to synchronizer $sync2")
 
   logger.info(s"MULTI-SYNC: Smoke test success")
-
 } catch {
   case e: Throwable =>
     logger.info("MULTI-SYNC: Smoke test failed", e)
-    exit
 }
+exit

@@ -141,6 +141,7 @@ class BlockSequencer(
     loggerFactory: NamedLoggerFactory,
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
+    delayRequestsBeforeLsuTrafficInit: Boolean,
 )(implicit executionContext: ExecutionContext, materializer: Materializer, val tracer: Tracer)
     extends DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
@@ -531,8 +532,13 @@ class BlockSequencer(
     )
 
     for {
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
+        TrafficControlErrors.LsuTrafficNotInitialized.Error(),
+      )
       _ <-
-        if (!skipLsuChecks) EitherT.right(lsuTrafficInitialized.futureUS)
+        if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
+          EitherT.right(lsuTrafficInitialized.futureUS)
         else EitherTUtil.unitUS
       _ <-
         if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
@@ -725,7 +731,7 @@ class BlockSequencer(
                 val viewHashes = openEnvelope.protocolMessage match {
                   // For encrypted view messages, extract the view hash
                   case message: EncryptedViewMessage[?] =>
-                    List(message.viewHash.unwrap.getCryptographicEvidence)
+                    message.viewHashes.forgetNE.map(_.unwrap.getCryptographicEvidence)
                   case _ => List.empty
                 }
                 EnvelopeTrafficSummary(
@@ -1214,7 +1220,7 @@ class BlockSequencer(
       // We use the topology snapshot at upgrade time to await the processing of member registrations,
       // so that traffic state doesn't miss any members.
       // Technically this should not be necessary due to the topology freeze around LSU.
-      _ <- EitherT.right[LsuSequencerError](
+      snapshot <- EitherT.right[LsuSequencerError](
         SyncCryptoClient.getSnapshotForTimestamp(
           cryptoApi,
           ts,
@@ -1226,6 +1232,9 @@ class BlockSequencer(
       allMembers <- EitherT.right[LsuSequencerError](
         dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive = ts)
       )
+      allKnownMembers <- EitherT.right[LsuSequencerError](
+        snapshot.ipsSnapshot.areMembersKnown(allMembers)
+      )
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
         blockRateLimitManager.trafficConsumedStore
@@ -1235,7 +1244,7 @@ class BlockSequencer(
       // TODO(#29997): This doesn't scale to millions of traffic accounts, need a batch method or a different approach
       trafficStates <-
         MonadUtil
-          .parTraverseWithLimit(batchingConfig.parallelism)(allMembers.toList) { member =>
+          .parTraverseWithLimit(batchingConfig.parallelism)(allKnownMembers.toList) { member =>
             val trafficConsumedO = consumedRecordsPerMember.get(member)
             val trafficPurchasedET =
               blockRateLimitManager.trafficPurchasedManager.getTrafficPurchasedAt(

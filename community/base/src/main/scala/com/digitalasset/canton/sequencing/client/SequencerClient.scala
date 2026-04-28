@@ -216,6 +216,12 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   /** For participant nodes, the predecessor synchronizer if any.
     */
   protected def synchronizerPredecessor: Option[SynchronizerPredecessor]
+
+  /** The timestamp for a subsription. If none, uses the previous upgrade time if defined or
+    * fallback to MinValue.
+    */
+  protected def subscriptionTimestamp(ts: Option[CantonTimestamp]): CantonTimestamp =
+    ts.orElse(synchronizerPredecessor.map(_.upgradeTime)).getOrElse(CantonTimestamp.MinValue)
 }
 
 trait RichSequencerClient extends SequencerClient {
@@ -915,9 +921,9 @@ abstract class SequencerClientImpl(
       onCleanHandler: Traced[SequencerCounterCursorPrehead] => Unit = _ => (),
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     sequencerCounterTrackerStore.preheadSequencerCounter.flatMap { cleanPrehead =>
-      val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(
-        _.timestamp
-      ) // Sequencer client will feed events right after this ts to the handler.
+      // Sequencer client will feed events right after this ts to the handler.
+      val priorTimestamp = subscriptionTimestamp(cleanPrehead.map(_.timestamp))
+
       val cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         sequencerCounterTrackerStore,
         onCleanHandler,
@@ -1343,9 +1349,9 @@ class RichSequencerClientImpl(
         }
 
         // bulk-feed the event handler with everything that we already have in the SequencedEventStore
-        replayStartTimeInclusive = initialPriorEventO
-          .fold(CantonTimestamp.MinValue)(_.timestamp)
-          .immediateSuccessor
+        replayStartTimeInclusive = subscriptionTimestamp(
+          initialPriorEventO.map(_.timestamp)
+        ).immediateSuccessor
         _ = logger.info(
           s"Processing events from the SequencedEventStore from $replayStartTimeInclusive on"
         )
@@ -1636,15 +1642,18 @@ class RichSequencerClientImpl(
                     future.transformIntoSuccess { innerResult =>
                       innerResult match {
                         case Success(value) =>
-                          value.onShutdown(
+                          value.onShutdown {
+                            logger
+                              .debug("Unthrottled async event processing aborted due to shutdown")
                             putApplicationHandlerFailure(ApplicationHandlerShutdown).discard
-                          )
+                          }
                         case Failure(error) =>
                           handleException(error, eventType = "Unthrottled").discard
                       }
                       UnlessShutdown.unit
                     }
                   case Success(AbortedDueToShutdown) =>
+                    logger.debug("Async event processing aborted due to shutdown")
                     FutureUnlessShutdown
                       .pure(putApplicationHandlerFailure(ApplicationHandlerShutdown).discard)
                   case Failure(error) =>
@@ -1658,6 +1667,7 @@ class RichSequencerClientImpl(
                 UnlessShutdown.Outcome(Either.unit)
 
               case Success(UnlessShutdown.AbortedDueToShutdown) =>
+                logger.debug("Synchronous event processing aborted due to shutdown")
                 putApplicationHandlerFailure(ApplicationHandlerShutdown).discard
                 UnlessShutdown.Outcome(Left(ApplicationHandlerShutdown))
               case Failure(ex) =>
@@ -1895,9 +1905,9 @@ class SequencerClientImplPekko[E: Pretty](
         }
 
         // bulk-feed the event handler with everything that we already have in the SequencedEventStore
-        replayStartTimeInclusive = initialPriorEventO
-          .fold(CantonTimestamp.MinValue)(_.timestamp)
-          .immediateSuccessor
+        replayStartTimeInclusive = subscriptionTimestamp(
+          initialPriorEventO.map(_.timestamp)
+        ).immediateSuccessor
         _ = logger.info(
           s"Processing events from the SequencedEventStore from $replayStartTimeInclusive on"
         )

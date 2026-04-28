@@ -10,6 +10,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{
   ConfigTransform,
@@ -20,14 +21,27 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 
-final class LsuSessionSigningKeysIntegrationTest extends LsuBase {
-  registerPlugin(
-    new UseBftSequencer(
+/** Tests that a logical synchronizer upgrade (LSU) works correctly when KMS and session signing
+  * keys are enabled. Session signing keys are only supposed to be used together with an external
+  * KMS, so it makes sense to test both together. We use a mock KMS here to save on resources, but
+  * the test should be valid for any KMS provider.
+  */
+final class LsuSessionSigningKeysIntegrationTest
+    extends LsuBase
+    with MockKmsDriverCryptoIntegrationTestBase {
+
+  setupPlugins(
+    withAutoInit = true,
+    storagePlugin = Some(new UsePostgres(loggerFactory)),
+    sequencerPlugin = new UseBftSequencer(
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
-    )
+    ),
   )
-  registerPlugin(new UsePostgres(loggerFactory))
+
+  // Nodes configured to run with a mock KMS driver.
+  override protected lazy val protectedNodes: Set[String] =
+    Set("participant1")
 
   override protected def testName: String = "lsu-session-signing-keys"
   override protected lazy val newOldSequencers: Map[String, String] = Map(
@@ -51,6 +65,10 @@ final class LsuSessionSigningKeysIntegrationTest extends LsuBase {
     "work with session signing keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       implicit env =>
         import env.*
+
+        withClue(s"${participant1.id} should have KMS enabled before LSU") {
+          participant1.config.crypto.kms.isDefined shouldBe true
+        }
 
         Seq[LocalInstanceReference](participant1, sequencer1, mediator1).foreach { node =>
           withClue(s"${node.id} should have session signing keys enabled before LSU") {

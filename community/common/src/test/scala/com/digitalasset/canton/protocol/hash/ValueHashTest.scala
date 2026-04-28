@@ -17,7 +17,7 @@ class ValueHashTest extends BaseTest with AnyWordSpecLike with HashUtilsTest {
   "ValueBuilder" should {
     def withValueBuilder(f: (LfValueHashBuilder, HashTracer.StringHashTracer) => Assertion) = {
       val hashTracer = HashTracer.StringHashTracer()
-      val builder = LfValueHashBuilder.valueBuilderForV1Node(hashTracer)
+      val builder = LfValueHashBuilder.valueBuilderForV2Scheme(hashTracer)
       f(builder, hashTracer)
     }
 

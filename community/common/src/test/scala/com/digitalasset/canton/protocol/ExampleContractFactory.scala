@@ -136,7 +136,7 @@ object ExampleContractFactory extends EitherValues {
     GlobalKeyWithMaintainers.assertBuild(
       templateId,
       value,
-      crypto.Hash.hashPrivateKey("dummy-key-hash"),
+      crypto.Hash.assertHashContractKey(templateId, packageName, value),
       maintainers,
       packageName,
     )

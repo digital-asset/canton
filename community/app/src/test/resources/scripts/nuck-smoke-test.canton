@@ -1,0 +1,25 @@
+try {
+
+  logger.info("NUCK: Starting smoke test")
+
+  val darPath = Option(System.getProperty("nuck-smoke-test.dar-path")).get
+  val packageName = Option(System.getProperty("nuck-smoke-test.package-name")).get
+
+  logger.info("NUCK: darPath: " + darPath)
+
+  sandbox.ledger_api.packages.upload_dar(darPath)
+
+  logger.info(s"NUCK: DAR containing keys has been uploaded")
+
+  val names = sandbox.ledger_api.packages.list().map(_.name).foreach(name => logger.info(s"NUCK: Package name: $name"))
+
+  sandbox.ledger_api.packages.list().filter(_.name==packageName).head
+
+  logger.info(s"NUCK: DAR containing keys has been found in the package list")
+
+  logger.info(s"NUCK: Smoke test success")
+} catch {
+  case e: Throwable =>
+    logger.info("NUCK: Smoke test failed", e)
+}
+exit

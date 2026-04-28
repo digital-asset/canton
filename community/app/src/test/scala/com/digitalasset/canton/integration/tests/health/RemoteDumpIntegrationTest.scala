@@ -46,6 +46,12 @@ final class RemoteDumpIntegrationTest
     with HasExecutionContext
     with StatusIntegrationTestUtil {
 
+  // Avoid I/O bottlenecks: Use an isolated dummy log file instead of the potentially massive global canton_test.log.
+  private val suiteLog = s"log/canton_test_${this.getClass.getSimpleName}.log"
+
+  // Flake prevention: Generous timeout to account for CI latency spikes.
+  private val testDumpTimeout = config.NonNegativeDuration.ofMinutes(2)
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S1M1_Config
       .addConfigTransform(
@@ -54,10 +60,19 @@ final class RemoteDumpIntegrationTest
       .withSetup { implicit env =>
         import env.*
         nodes.remote.foreach(_.health.wait_for_running())
+
+        val dummyLog = File(suiteLog)
+        dummyLog.parent.createDirectories()
+
+        // Generate ~440 KB of dummy text to ensure the zip file exceeds the 10 KB chunkSize,
+        // which forces the remote gRPC chunking loop to be tested.
+        val dummyLine = "Dummy log line for fast health dump testing.\n"
+        dummyLog.overwrite(dummyLine * 10_000)
+
         // This is normally done when running the Canton binary, and sets system properties that are then used in the
         // health dump code to figure out the location of the log file. Doing it here manually, otherwise the health dump
-        // code will miss the log file, which is called "canton_test.log" in tests instead of the default "canton.log"
-        Cli(logFileName = Some("log/canton_test.log")).installLogging()
+        // code will miss the log file, which is called `${suiteLog}` in tests instead of the default "canton.log"
+        Cli(logFileName = Some(suiteLog)).installLogging()
 
         bootstrap.synchronizer(
           "remote-health-synchronizer",
@@ -74,7 +89,7 @@ final class RemoteDumpIntegrationTest
         Seq[InstanceReference](rs(sequencer1Name), rm(mediator1Name)).foreach { owner =>
           owner.topology.synchronizer_parameters.propose_update(
             rs(sequencer1Name).physical_synchronizer_id,
-            _.update(confirmationRequestsMaxRate = NonNegativeInt.tryCreate(2000000)),
+            _.update(confirmationRequestsMaxRate = NonNegativeInt.tryCreate(2_000_000)),
           )
         }
         utils.synchronize_topology()
@@ -118,7 +133,7 @@ final class RemoteDumpIntegrationTest
       // Check that the local zip contains the correct files
       File.usingTemporaryDirectory() { localUnzip =>
         localZip.unzipTo(localUnzip)
-        (localUnzip / "canton_test.log").exists shouldBe true
+        (localUnzip / File(suiteLog).name).exists shouldBe true
         val json = localUnzip.glob("canton-dump*.json").nextOption().value
         val parsed = io.circe.parser.decode[JsonDump](json.contentAsString).value
 
@@ -183,7 +198,7 @@ final class RemoteDumpIntegrationTest
           .value
           .toInt
           .value
-        confirmationRequestsMaxRateValue shouldBe 2000000
+        confirmationRequestsMaxRateValue shouldBe 2_000_000
       }
 
       // Check that the sequencer zip contains the correct files
@@ -243,7 +258,7 @@ final class RemoteDumpIntegrationTest
 
   "get a remote health dump" in { implicit env =>
     File.usingTemporaryFile() { f =>
-      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath))
+      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath, timeout = testDumpTimeout))
       dumpFile.pathAsString shouldBe f.pathAsString
       verifyHealthDumpContent(dumpFile, env)
     }
@@ -251,8 +266,11 @@ final class RemoteDumpIntegrationTest
 
   "stream health dump in multiple chunks" in { implicit env =>
     File.usingTemporaryFile() { f =>
-      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath, chunkSize = Option(10000)))
-      dumpFile.size > 10000 shouldBe true // Make sure the file was actually larger than 10000 bytes
+      val dumpFile = File(
+        env.health
+          .dump(outputFile = f.canonicalPath, timeout = testDumpTimeout, chunkSize = Option(10_000))
+      )
+      dumpFile.size > 10_000 shouldBe true // Make sure the file was actually larger than 10'000 bytes
       verifyHealthDumpContent(dumpFile, env)
     }
   }
@@ -262,8 +280,11 @@ final class RemoteDumpIntegrationTest
       val p1LogFile = File(external.logFile(participant1Name))
       p1LogFile.parent.createChild(p1LogFile.name + ".1.gz")
 
-      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath, chunkSize = Option(10000)))
-      dumpFile.size > 10000 shouldBe true // Make sure the file was actually larger than 10000 bytes
+      val dumpFile = File(
+        env.health
+          .dump(outputFile = f.canonicalPath, timeout = testDumpTimeout, chunkSize = Option(10_000))
+      )
+      dumpFile.size > 10_000 shouldBe true // Make sure the file was actually larger than 10'000 bytes
       verifyHealthDumpContent(dumpFile, env, withRollingFile = true)
     }
   }
@@ -285,7 +306,8 @@ final class RemoteDumpIntegrationTest
 
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       File.usingTemporaryFile() { f =>
-        val dumpFile = File(env.health.dump(outputFile = f.canonicalPath))
+        val dumpFile =
+          File(env.health.dump(outputFile = f.canonicalPath, timeout = testDumpTimeout))
         dumpFile.pathAsString shouldBe f.pathAsString
         verifyHealthDumpContent(dumpFile, env)
       },

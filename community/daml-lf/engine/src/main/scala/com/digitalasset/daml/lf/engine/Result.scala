@@ -194,10 +194,11 @@ final case class ResultNeedKey[A](
 
 /** Indicates that the interpretation will likely need to resolve the given contract keys.
   * The caller may resolve the keys in parallel to the interpretation, but does not have to.
+  * The keys map associates each key with the maximum number of contracts to prefetch for it.
   */
 final case class ResultPrefetch[A](
     contractIds: Seq[ContractId],
-    keys: Seq[GlobalKey],
+    keys: Map[GlobalKey, Int],
     resume: () => Result[A],
 ) extends Result[A]
 

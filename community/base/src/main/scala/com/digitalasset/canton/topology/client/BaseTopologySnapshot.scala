@@ -136,22 +136,26 @@ abstract class BaseTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages = {
     def isValid(pkg: PackageId): Boolean =
       vettedPackages.get(pkg).exists(_.validAt(ledgerTime))
 
     val invalidPackages = packages.filterNot(isValid)
     val validPackages = packages -- invalidPackages
-    packageDependencyResolver.packageDependencies(validPackages) match {
+
+    packageDependencyResolver.resolvePackagesAndDependencies(validPackages) match {
       case Left(unknownPackages) =>
         UnknownOrUnvettedPackages(
           unknown = Map(unknownPackages),
           unvetted = if (invalidPackages.isEmpty) Map.empty else Map(participant -> invalidPackages),
         )
-      case Right(dependencies) =>
+      case Right(resolvedPackagesAndDependencies) =>
         UnknownOrUnvettedPackages.unvetted(
-          participant,
-          invalidPackages ++ dependencies.filterNot(isValid),
+          participantId = participant,
+          packageIds = invalidPackages ++ resolvedPackagesAndDependencies
+            .packageIds(withDependencies = checkDependencyVetting)
+            .filterNot(isValid),
         )
     }
   }

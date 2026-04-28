@@ -19,9 +19,13 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.store.PackageDependencyResolver
+import com.digitalasset.canton.topology.store.{
+  PackageDependencyResolver,
+  ResolvedPackagesAndDependencies,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TestContractHasher
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine
@@ -33,7 +37,8 @@ import scala.concurrent.Future
 final class NextGenTransactionTreeFactoryTest
     extends AsyncWordSpec
     with BaseTest
-    with HasExecutionContext {
+    with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec {
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id =>
     EitherT.fromEither[FutureUnlessShutdown](
@@ -157,25 +162,18 @@ final class NextGenTransactionTreeFactoryTest
               snapshot = defaultTestingTopology.withPackages(Map.empty).build().topologySnapshot(),
             ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
           }
-          "fail if some dependency is not vetted" in {
 
+          "accept a package if it has a non-vetted dependency" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
             val example = factory.standardHappyCases(2)
-            for {
-              err <- createTransactionTree(
-                treeFactory,
-                example.wellFormedUnsuffixedTransaction,
-                successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
-                snapshot = defaultTestingIdentityFactory.topologySnapshot(
-                  packageDependencyResolver = TestPackageDependencyResolver
-                ),
-              ).value
-            } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
-              forEvery(unknownTo) {
-                _.packageId shouldBe TestPackageDependencyResolver.exampleDependency
-              }
-              unknownTo should not be empty
-            }
+            createTransactionTree(
+              treeFactory,
+              example.wellFormedUnsuffixedTransaction,
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+              snapshot = defaultTestingIdentityFactory.topologySnapshot(
+                packageDependencyResolver = TestPackageDependencyResolver
+              ),
+            ).value.flatMap(_ should equal(Right(example.transactionTree)))
           }
 
           "fail gracefully if the present participant is misconfigured and somehow doesn't have a package that it should have" in {
@@ -206,19 +204,21 @@ final class NextGenTransactionTreeFactoryTest
 
   object TestPackageDependencyResolver extends PackageDependencyResolver {
     val exampleDependency: IdString.PackageId = PackageId.assertFromString("example-dependency")
-    override def packageDependencies(packageIds: Set[PackageId])(implicit
+    override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
         traceContext: TraceContext
-    ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] =
-      if (packageIds.contains(ExampleTransactionFactory.packageId)) Right(Set(exampleDependency))
-      else Right(Set.empty[PackageId])
+    ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] =
+      if (packages.contains(ExampleTransactionFactory.packageId))
+        Right(ResolvedPackagesAndDependencies(packages, Set(exampleDependency)))
+      else Right(ResolvedPackagesAndDependencies(packages, Set.empty))
   }
 
   object MisconfiguredPackageDependencyResolver extends PackageDependencyResolver {
     private val participantId = ParticipantId("MisconfiguredPackageDependencyResolver")
 
-    override def packageDependencies(packageIds: Set[PackageId])(implicit
+    override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
         traceContext: TraceContext
-    ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] = Left(participantId -> packageIds)
+    ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] = Left(
+      participantId -> packages
+    )
   }
-
 }

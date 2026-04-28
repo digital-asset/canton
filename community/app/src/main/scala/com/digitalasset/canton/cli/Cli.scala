@@ -61,6 +61,7 @@ final case class Cli(
     manualStart: Boolean = false,
     exitAfterBootstrap: Boolean = false,
     devProtocol: Boolean = false,
+    nuck: Boolean = false,
     multiSync: Boolean = false,
     dars: Seq[String] = Seq.empty,
 ) {
@@ -471,6 +472,14 @@ object Cli {
           )
         } else success
       )
+      checkConfig(cli =>
+        if (cli.devProtocol && cli.nuck) {
+          failure(
+            // Remove the restriction when NUCK no longer needs alpha features to run.
+            "NUCK and dev protocol options cannot be used together"
+          )
+        } else success
+      )
       checkConfig { cli =>
         val badFiles = cli.dars.filter(fileName => !new File(fileName).exists())
         if (badFiles.nonEmpty)
@@ -487,6 +496,9 @@ object Cli {
         opt[Unit]("dev")
           .text("Run sandbox with dev version of the protocol")
           .action((_, cli) => cli.copy(devProtocol = true)),
+        opt[Unit]("nuck")
+          .text("Run sandbox with NUCK support")
+          .action((_, cli) => cli.copy(nuck = true)),
         opt[Unit]("multi-sync")
           .text("Run sandbox in a multi-synchronizer constellation")
           .action((_, cli) => cli.copy(multiSync = true)),

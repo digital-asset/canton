@@ -42,11 +42,24 @@ import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
 object DAMLe {
+
+  /** @param allUsedPackageIds
+    *   All the packages used by the Daml Engine during reinterpretation: action node packages and
+    *   all their direct and transitive dependencies
+    * @param actionNodePackageIds
+    *   Only the packages directly referenced by action nodes. This is a subset of
+    *   `allUsedPackageIds`
+    */
+  final case class UsedPackages(
+      allUsedPackageIds: Set[PackageId],
+      actionNodePackageIds: Set[PackageId],
+  )
+
   final case class ReInterpretationResult(
       transaction: LfVersionedTransaction,
       metadata: TransactionMetadata,
       legacyKeyResolver: LfGlobalKeyMapping,
-      usedPackages: Set[PackageId],
+      usedPackages: UsedPackages,
       timeBoundaries: LedgerTimeBoundaries,
   )
 
@@ -296,11 +309,18 @@ class DAMLe(
       )
     } yield {
       ReInterpretationResult(
-        txNoRootRollback,
-        TransactionMetadata.fromLf(ledgerTime, metadata),
-        metadata.globalKeyMapping,
-        metadata.usedPackages,
-        LedgerTimeBoundaries(metadata.timeBoundaries),
+        transaction = txNoRootRollback,
+        metadata = TransactionMetadata.fromLf(ledgerTime, metadata),
+        legacyKeyResolver = metadata.globalKeyMapping,
+        usedPackages = UsedPackages(
+          // TODO(#29834): Optimization: Do not unnecessarily compute both sets if we know we only need one
+          actionNodePackageIds = tx.nodes.values.view
+            .collect { case node: LfActionNode => node.packageIds }
+            .flatten
+            .toSet,
+          allUsedPackageIds = metadata.usedPackages,
+        ),
+        timeBoundaries = LedgerTimeBoundaries(metadata.timeBoundaries),
       )
     }
   }
