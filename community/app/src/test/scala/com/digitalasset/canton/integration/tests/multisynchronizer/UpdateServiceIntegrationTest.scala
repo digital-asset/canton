@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
 import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.examples.java.iou.{Dummy, GetCash, Iou}
@@ -18,8 +19,10 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.util.{
+  EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
+  PartiesAllocator,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -30,6 +33,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{Party, PartyId, SynchronizerId}
 
 import scala.jdk.CollectionConverters.*
@@ -38,7 +42,8 @@ abstract class UpdateServiceIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasReassignmentCommandsHelpers
-    with HasCommandRunnersHelpers {
+    with HasCommandRunnersHelpers
+    with EntitySyntax {
 
   private val otherPartyName = "otherParty"
 
@@ -59,8 +64,17 @@ abstract class UpdateServiceIntegrationTest
         participant1.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
 
         // Allocate parties
-        otherParty = participant1.parties.enable(otherPartyName, synchronizer = daName)
-        participant1.parties.enable(otherPartyName, synchronizer = acmeName)
+        PartiesAllocator(Set(participant1))(
+          Seq(otherPartyName -> participant1),
+          Map(
+            otherPartyName -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            )
+          ),
+        )
+
+        otherParty = otherPartyName.toPartyId(participant1)
 
       }
 

@@ -91,6 +91,8 @@ This will be downloaded during the test run, so running the tests locally requir
 
 To list the dumps, run `aws s3 ls s3://canton-public-releases/data-continuity-dumps/ --no-sign-request`.
 
+To list the contents of a data continuity dump, run `aws s3 ls --recursive s3://canton-public-releases/data-continuity-dumps/<version> --no-sign-request`.
+
 If the data continuity tests fail, it means that we have introduced a breaking change within the same protocol version,
 which would require a new protocol version and therefore new dumps.
 
@@ -105,6 +107,9 @@ Canton team leads have "delete" permissions on the bucket. In order to do this:
 2. Type "S3" in the search and select it.
 3. Search for the bucket `canton-public-releases`.
 4. Navigate and select what you need to delete, then click on the "Delete" button, then confirm the deletion.
+
+If you need to inspect the contents of a data continuity dump, you can use `aws s3 cp --recursive` to copy the
+contents locally by running `aws s3 cp --recursive s3://canton-public-releases/data-continuity-dumps/<version> <local_dir> --no-sign-request`.
 
 ### Data continuity test and CI
 **Postgres**

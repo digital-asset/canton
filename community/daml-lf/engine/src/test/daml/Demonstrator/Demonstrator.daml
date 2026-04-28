@@ -32,10 +32,12 @@ template TransferRequest
     signatory operator
     observer investor
 
-    choice AcceptTransferRequest : ()
+    nonconsuming choice AcceptTransferRequest : ()
       controller operator
       do
-        assert False
+        if False
+          then exercise self Archive
+          else assert False
 
     choice CancelTransferRequest : ContractId CancelledTransfer
       controller operator

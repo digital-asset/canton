@@ -13,13 +13,18 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.api.v2.update_service.{
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
+  GetUpdatesPageRequest,
   GetUpdatesRequest,
 }
 import com.daml.ledger.api.v2.value.Identifier
+import com.daml.platform.v1.page_tokens.UpdatesPageToken
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, InterfaceFilter, TemplateFilter}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.platform.config.UpdateServiceConfig
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
+import com.google.protobuf.ByteString
 import io.grpc.Status.Code.*
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AnyWordSpec
@@ -73,35 +78,41 @@ class UpdateServiceRequestValidatorTest
     GetUpdatesRequest(
       beginExclusive = 0L,
       endInclusive = Some(offsetLong),
-      updateFormat = Some(
-        UpdateFormat(
-          includeTransactions = transactionTemplateIdsO
-            .map(getFiltersByParty)
-            .map(filtersByParty =>
-              TransactionFormat(
-                eventFormat = Some(
-                  EventFormat(
-                    filtersByParty = filtersByParty,
-                    filtersForAnyParty = None,
-                    verbose = verbose,
-                  )
-                ),
-                transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
-              )
-            ),
-          includeReassignments = reassignmentsTemplateIdsO
-            .map(getFiltersByParty)
-            .map(filtersByParty =>
-              EventFormat(
-                filtersByParty = filtersByParty,
-                filtersForAnyParty = None,
-                verbose = false,
-              )
-            ),
-          includeTopologyEvents = None,
-        )
-      ),
+      updateFormat = buildUpdateFormat(transactionTemplateIdsO, reassignmentsTemplateIdsO),
       descendingOrder = false,
+    )
+
+  private def buildUpdateFormat(
+      transactionTemplateIdsO: Option[Seq[Identifier]],
+      reassignmentsTemplateIdsO: Option[Seq[Identifier]],
+  ) =
+    Some(
+      UpdateFormat(
+        includeTransactions = transactionTemplateIdsO
+          .map(getFiltersByParty)
+          .map(filtersByParty =>
+            TransactionFormat(
+              eventFormat = Some(
+                EventFormat(
+                  filtersByParty = filtersByParty,
+                  filtersForAnyParty = None,
+                  verbose = verbose,
+                )
+              ),
+              transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+            )
+          ),
+        includeReassignments = reassignmentsTemplateIdsO
+          .map(getFiltersByParty)
+          .map(filtersByParty =>
+            EventFormat(
+              filtersByParty = filtersByParty,
+              filtersForAnyParty = None,
+              verbose = false,
+            )
+          ),
+        includeTopologyEvents = None,
+      )
     )
 
   private val txReq = updatesReqBuilder(Some(Seq(templateId)))
@@ -678,5 +689,312 @@ class UpdateServiceRequestValidatorTest
       }
 
     }
+  }
+
+  "UpdateServiceRequestValidator.validateUpdatesPageRequest" should {
+    val participant = Ref.ParticipantId.assertFromString("participant")
+
+    def requestWithMatchingToken(
+        beginOffsetExclusive: Option[Long],
+        endOffsetInclusive: Option[Long],
+        maxPageSize: Option[Int],
+        updateFormat: Option[UpdateFormat],
+        descendingOrder: Boolean,
+        tokenLowestOffsetExclusive: Long = 5,
+        tokenHighestOffsetExclusive: Long = 10,
+    ): (GetUpdatesPageRequest, UpdatesPageToken) = {
+      val request = GetUpdatesPageRequest(
+        beginOffsetExclusive = beginOffsetExclusive,
+        endOffsetInclusive = endOffsetInclusive,
+        maxPageSize = maxPageSize,
+        updateFormat = updateFormat,
+        descendingOrder = descendingOrder,
+        pageToken = None,
+      )
+      val participantChecksum = com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .participantChecksum(participant)
+      val requestChecksum = com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .requestChecksum(request)
+      val token = UpdatesPageToken(
+        lowestPageOffsetExclusive = tokenLowestOffsetExclusive,
+        highestPageOffsetInclusive = tokenHighestOffsetExclusive,
+        version = com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken.Version,
+        participantIdChecksum = participantChecksum,
+        requestChecksum = requestChecksum,
+      )
+      (request, token)
+    }
+
+    "accept request with matching page token" in {
+      val (request, token) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request.update(
+          _.pageToken := token.toByteString
+        ),
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+
+      result.isRight shouldBe true
+    }
+
+    "reject request with pager token that cannot be parsed" in {
+      val (request, _) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request.update(
+          _.pageToken := ByteString.copyFrom(Array[Byte](1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+        ),
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field page_token: Invalid page token for GetUpdatesPageRequest",
+        Map.empty,
+      )
+    }
+
+    "reject request with wrong version of page token" in {
+      val (requestInitial, tokenInitial) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val request =
+        requestInitial.update(_.pageToken := tokenInitial.update(_.version := 1024).toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was generated by a different Canton version",
+        Map.empty,
+      )
+    }
+
+    "reject request with wrong participant checksum" in {
+      val participant = Ref.ParticipantId.assertFromString("participant")
+      val (requestInitial, tokenInitial) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val token = tokenInitial.update(
+        _.participantIdChecksum := com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+          .participantChecksum(Ref.ParticipantId.assertFromString("otherparticipant"))
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was obtained from an other participant node",
+        Map.empty,
+      )
+    }
+
+    "reject request with wrong request checksum" in {
+      val (requestInitial, _) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val (_, token) = requestWithMatchingToken(
+        beginOffsetExclusive = Some(0),
+        endOffsetInclusive = Some(200),
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was obtained with different request parameters",
+        Map.empty,
+      )
+    }
+
+    "reject request with strict upper bound exceeding ledger end" in {
+      val (requestInitial, token) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = Some(200L),
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+
+      requestMustFailWith(
+        result,
+        code = OUT_OF_RANGE,
+        "OFFSET_AFTER_LEDGER_END(12,0): endOffsetInclusive offset (200) is after ledger end (100)",
+        Map.empty,
+      )
+    }
+
+    "reject request with begin larger than end" in {
+      val (requestInitial, token) = requestWithMatchingToken(
+        beginOffsetExclusive = Some(50L),
+        endOffsetInclusive = Some(10L),
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: beginOffsetExclusive is after endOffsetInclusive",
+        Map.empty,
+      )
+    }
+
+    "generate validated output without continueStreamFromIncl for request without page token" in {
+      val request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(0L),
+        endOffsetInclusive = Some(20L),
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+        pageToken = None,
+      )
+
+      inside(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = request,
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      ) { case Right(validated) =>
+        validated.startExclusive shouldBe Some(None)
+        validated.endInclusive shouldBe Some(Offset.tryFromLong(20L))
+        validated.continueStreamFromIncl shouldBe None
+        validated.maxPageSize shouldBe UpdateServiceConfig().defaultUpdatesPageSize.value
+        validated.descendingOrder shouldBe false
+        validated.requestChecksum shouldBe com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+          .requestChecksum(request)
+        validated.participantChecksum shouldBe com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+          .participantChecksum(participant)
+        validated.updateFormat.includeTransactions.value.eventFormat.filtersByParty should have size 1
+      }
+    }
+
+    "generate validated output for ascending request with page token and max page size" in {
+      val (requestInitial, token) = requestWithMatchingToken(
+        beginOffsetExclusive = Some(3L),
+        endOffsetInclusive = Some(20L),
+        maxPageSize = Some(17),
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+        tokenLowestOffsetExclusive = 5L,
+        tokenHighestOffsetExclusive = 10L,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      inside(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = request,
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      ) { case Right(validated) =>
+        validated.startExclusive shouldBe Some(Some(Offset.tryFromLong(3L)))
+        validated.endInclusive shouldBe Some(Offset.tryFromLong(20L))
+        validated.continueStreamFromIncl shouldBe Some(Offset.tryFromLong(11L))
+        validated.maxPageSize shouldBe 17
+        validated.descendingOrder shouldBe false
+        validated.requestChecksum shouldBe token.requestChecksum
+        validated.participantChecksum shouldBe token.participantIdChecksum
+      }
+    }
+
+    "generate validated output for descending request with page token" in {
+      val (requestInitial, token) = requestWithMatchingToken(
+        beginOffsetExclusive = Some(3L),
+        endOffsetInclusive = Some(20L),
+        maxPageSize = Some(17),
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = true,
+        tokenLowestOffsetExclusive = 5L,
+        tokenHighestOffsetExclusive = 10L,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      inside(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = request,
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      ) { case Right(validated) =>
+        validated.startExclusive shouldBe Some(Some(Offset.tryFromLong(3L)))
+        validated.endInclusive shouldBe Some(Offset.tryFromLong(20L))
+        validated.continueStreamFromIncl shouldBe Some(Offset.tryFromLong(5L))
+        validated.maxPageSize shouldBe 17
+        validated.descendingOrder shouldBe true
+        validated.requestChecksum shouldBe token.requestChecksum
+        validated.participantChecksum shouldBe token.participantIdChecksum
+      }
+    }
+
   }
 }

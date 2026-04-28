@@ -35,6 +35,13 @@ class ContractStoreHistograms(val prefix: MetricName)(implicit
     description = "The time to enqueue and execute batched internal id lookup.",
     qualification = MetricQualification.Debug,
   )
+  val reInsertContracts: Item = Item(
+    prefix :+ "re_insert_contracts",
+    summary =
+      "The time to execute batched contract insertion in DB in case the contracts have got pruned by the time needed by the Indexer.",
+    description = "The time to conduct the DB operation for storing the contracts missing.",
+    qualification = MetricQualification.Debug,
+  )
 }
 
 class ContractStoreMetrics private[metrics] (
@@ -45,4 +52,5 @@ class ContractStoreMetrics private[metrics] (
   val lookupBatched: Timer = factory.timer(inventory.lookupBatched.info)
   val lookupBatchedContractIds: Timer = factory.timer(inventory.lookupBatchedContractIds.info)
   val lookupBatchedInternalIds: Timer = factory.timer(inventory.lookupBatchedInternalIds.info)
+  val reInsertContracts: Timer = factory.timer(inventory.reInsertContracts.info)
 }

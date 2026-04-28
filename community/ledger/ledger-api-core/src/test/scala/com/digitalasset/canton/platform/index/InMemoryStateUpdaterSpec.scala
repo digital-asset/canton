@@ -31,6 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
@@ -57,7 +58,13 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
-import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  ExampleContractFactory,
+  ReassignmentId,
+  TestUpdateId,
+  UpdateId,
+}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
@@ -66,18 +73,12 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateSerializationVersion
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
-import com.digitalasset.daml.lf.transaction.{
-  CommittedTransaction,
-  Node,
-  NodeId,
-  SerializationVersion as LfSerializationVersion,
-}
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, Node, NodeId}
 import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
@@ -344,7 +345,8 @@ class InMemoryStateUpdaterSpec
     "prepare" should s"produce ${if (isAcsDelta) "non-empty"
       else "empty"} flatEventWitnesses for created and consuming exercised events with isAcsDelta $isAcsDelta" in new Scope {
       private val builder = TxBuilder()
-      private val createNode = genCreateNode
+      private val contract = genContract
+      private val createNode = contract.inst.toCreateNode
       private val exerciseNode = TestNodeBuilder.exercise(
         contract = createNode,
         choice = "someChoice",
@@ -363,7 +365,7 @@ class InMemoryStateUpdaterSpec
         t = 0L,
         transaction = tx,
         synchronizerId = synchronizerId1,
-        contractAuthenticationData = Map(createNode.coid -> someContractMetadataBytes),
+        contracts = Seq(contract),
         contractActivenessChanged = isAcsDelta,
       )
 
@@ -754,12 +756,12 @@ object InMemoryStateUpdaterSpec {
         ),
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
-            ledgerEffectiveTime = Timestamp.assertFromLong(12222),
-            createNode = someCreateNode,
-            contractAuthenticationData = someContractMetadataBytes,
             reassignmentCounter = 15L,
             nodeId = 0,
-            internalContractId = 1,
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId = 1,
+              inst = someContract.inst,
+            ),
           )
         ),
         synchronizerId = synchronizerId2.toProtoPrimitive,
@@ -782,7 +784,7 @@ object InMemoryStateUpdaterSpec {
         ),
         reassignment = Reassignment.Batch(
           Reassignment.Unassign(
-            contractId = someCreateNode.coid,
+            contractId = someContract.contractId,
             templateId = templateId2,
             packageName = packageName,
             stakeholders = Set(party2),
@@ -918,7 +920,7 @@ object InMemoryStateUpdaterSpec {
         events = (1 to 3)
           .map(i =>
             toCreatedEvent(
-              genCreateNode,
+              genContract.inst.toCreateNode,
               tx_accepted_withCompletionStreamResponse_offset,
               TestUpdateId(tx_accepted_updateId),
               NodeId(i),
@@ -942,7 +944,7 @@ object InMemoryStateUpdaterSpec {
         offset = tx_accepted_withFlatEventWitnesses_offset,
         events = Vector(
           toCreatedEvent(
-            genCreateNode,
+            genContract.inst.toCreateNode,
             tx_accepted_withFlatEventWitnesses_offset,
             TestUpdateId(tx_accepted_updateId),
             NodeId(0),
@@ -955,7 +957,7 @@ object InMemoryStateUpdaterSpec {
         offset = tx_accepted_withoutFlatEventWitnesses_offset,
         events = Vector(
           toCreatedEvent(
-            genCreateNode,
+            genContract.inst.toCreateNode,
             tx_accepted_withoutFlatEventWitnesses_offset,
             TestUpdateId(tx_accepted_updateId),
             NodeId(0),
@@ -1030,6 +1032,7 @@ object InMemoryStateUpdaterSpec {
           eventCount = 0L,
           batchTraceContext = tc,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         ): Batch[?]
       })
         .via(inMemoryStateUpdater(false))
@@ -1037,20 +1040,14 @@ object InMemoryStateUpdaterSpec {
         .futureValue
   }
 
-  private def genCreateNode = {
-    val contractId = TransactionBuilder.newCid
-    TestNodeBuilder
-      .create(
-        id = contractId,
-        packageName = packageName,
-        templateId = templateId,
-        argument = Value.ValueUnit,
-        signatories = Set(party1),
-        observers = Set(party2),
-        version = CreateSerializationVersion.Version(LfSerializationVersion.VDev),
-      )
-  }
-  private val someCreateNode = genCreateNode
+  private def genContract =
+    ExampleContractFactory.build(
+      stakeholders = Set(party1, party2),
+      signatories = Set(party1),
+      templateId = templateId,
+      argument = Value.ValueUnit,
+    )
+  private val someContract = genContract
 
   private def toCreatedEvent(
       createdNode: Node.Create,
@@ -1091,7 +1088,7 @@ object InMemoryStateUpdaterSpec {
         NonEmptyVector.one(
           InMemoryStateUpdater.convertLogToStateEvent(
             toCreatedEvent(
-              genCreateNode,
+              genContract.inst.toCreateNode,
               Offset.firstOffset,
               TestUpdateId("yolo"),
               NodeId(0),
@@ -1262,6 +1259,7 @@ object InMemoryStateUpdaterSpec {
           eventCount = 0L,
           batchTraceContext = emptyTraceContext,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         )
       )
       .via(
@@ -1287,7 +1285,7 @@ object InMemoryStateUpdaterSpec {
       synchronizerId: SynchronizerId,
       externalTransactionHash: Option[Hash] = None,
       transaction: CommittedTransaction = CommittedTransaction(TransactionBuilder.Empty),
-      contractAuthenticationData: Map[Value.ContractId, Bytes] = Map.empty,
+      contracts: Seq[ContractInstance] = Seq.empty,
       contractActivenessChanged: Boolean = true,
       completionInfoO: Option[CompletionInfo] = None,
   ): Update.TransactionAccepted =
@@ -1300,10 +1298,12 @@ object InMemoryStateUpdaterSpec {
       recordTime = CantonTimestamp(Timestamp(t)),
       externalTransactionHash = externalTransactionHash,
       acsChangeFactory = TestAcsChangeFactory(contractActivenessChanged),
-      contractInfos = contractAuthenticationData.zipWithIndex.map { case ((cid, bytes), idx) =>
-        cid -> ContractInfo(
-          internalContractId = idx.toLong,
-          contractAuthenticationData = bytes,
+      contractInfos = contracts.zipWithIndex.map { case (c, idx) =>
+        c.contractId -> ContractInfo(
+          persistedContractInstance = PersistedContractInstance(
+            inst = c.inst,
+            internalContractId = idx.toLong,
+          ),
           representativePackageId = SameAsContractPackageId,
         )
       }.toMap,
@@ -1328,12 +1328,12 @@ object InMemoryStateUpdaterSpec {
       ),
       reassignment = Reassignment.Batch(
         Reassignment.Assign(
-          ledgerEffectiveTime = Timestamp.assertFromLong(12222),
-          createNode = someCreateNode,
-          contractAuthenticationData = someContractMetadataBytes,
           reassignmentCounter = 15L,
           nodeId = 0,
-          internalContractId = 1,
+          persistedContractInstance = PersistedContractInstance(
+            inst = someContract.inst,
+            internalContractId = 1,
+          ),
         )
       ),
       recordTime = CantonTimestamp(Timestamp(t)),
@@ -1360,7 +1360,7 @@ object InMemoryStateUpdaterSpec {
       ),
       reassignment = Reassignment.Batch(
         Reassignment.Unassign(
-          contractId = someCreateNode.coid,
+          contractId = someContract.contractId,
           templateId = templateId2,
           packageName = packageName,
           stakeholders = Set(party2),

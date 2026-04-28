@@ -166,7 +166,10 @@ class ACSReader(
     val localPayloadQueriesLimiter =
       new QueueBasedConcurrencyLimiter(config.maxParallelPayloadCreateQueries, executionContext)
     val idQueryPageSizing = IdPageSizing.calculateFrom(
-      maxIdPageSize = config.maxIdsPerIdPage,
+      maxIdPageSize = Math.min(
+        rangeInfo.limit.map(_.toInt).getOrElse(config.maxIdsPerIdPage),
+        config.maxIdsPerIdPage,
+      ),
       workingMemoryInBytesForIdPages = config.maxWorkingMemoryInBytesForIdPages,
       numOfDecomposedFilters = decomposedFilters.size,
       numOfPagesInIdPageBuffer = config.maxPagesPerIdPagesBuffer,
@@ -195,12 +198,21 @@ class ACSReader(
     def fetchActiveIds(initialFromIdExclusive: Long)(
         filter: DecomposedFilter
     ): Source[Long, NotUsed] =
-      if (achsStateCache.get().lastPointers.lastPopulated == 0 || !achsIsValid)
+      if (achsStateCache.get().lastPointers.lastPopulated == 0 || !achsIsValid) {
+        if (!achsIsValid) {
+          val achsState = achsStateCache.get()
+          metrics.index.achsSkips.inc()
+          logger.info(
+            s"ACHS for $filter skipped since " +
+              s"validAt (${achsState.validAt}) already surpassed requested activeAt ($activeAtEventSeqId), " +
+              s"falling back to filter tables"
+          )
+        }
         fetchActiveIdsFromFilterTables(
           achsLastInput = None,
           initialFromIdExclusive = initialFromIdExclusive,
         )(filter)
-      else {
+      } else {
         val achsLastInputPromise = Promise[Option[PaginationInput]]()
         paginatingAsyncStream
           .streamIdPagesFromSeekPaginationWithIdFilter(
@@ -244,11 +256,21 @@ class ACSReader(
           .concat(
             Source.futureSource(
               achsLastInputPromise.future.map { achsLastInput =>
-                logger.debug(
-                  s"ACHS stream for $filter terminated, falling back to activate filter tables from ${achsLastInput
-                      .map(_.fromTo.toInclusive)
-                      .getOrElse(0L)}"
-                )
+                val resumeFrom = achsLastInput
+                  .map(_.fromTo.toInclusive)
+                  .getOrElse(0L)
+                if (!achsIsValid) {
+                  val achsState = achsStateCache.get()
+                  metrics.index.achsMidstreamFallbacks.inc()
+                  logger.info(
+                    s"ACHS stream for $filter fell back to filter tables from $resumeFrom since " +
+                      s"validAt (${achsState.validAt}) surpassed activeAtEventSeqId ($activeAtEventSeqId), "
+                  )
+                } else {
+                  logger.debug(
+                    s"ACHS stream for $filter completed, continuing with filter tables from $resumeFrom"
+                  )
+                }
                 fetchActiveIdsFromFilterTables(
                   achsLastInput = achsLastInput,
                   initialFromIdExclusive = initialFromIdExclusive,
@@ -489,7 +511,8 @@ class ACSReader(
           rawUnassignEvent.deactivatedEventSeqId match {
             case Some(deactivatedEventSeqId) => Some(rawUnassignEvent -> deactivatedEventSeqId)
             case None =>
-              logger.warn(
+              // TODO(i12904): Review the impact of this
+              logger.info(
                 s"For an IncompleteUnassigned event (offset:${rawUnassignEvent.reassignmentProperties.commonEventProperties.offset} workflow-id:${rawUnassignEvent.reassignmentProperties.commonEventProperties.workflowId} contract-id:${rawUnassignEvent.contractId} template-id:${rawUnassignEvent.templateId} reassignment-counter:${rawUnassignEvent.reassignmentProperties.reassignmentCounter} synchronizer id:${rawUnassignEvent.reassignmentProperties.commonEventProperties.synchronizerId} event-sequential-id:${rawUnassignEvent.reassignmentProperties.commonEventProperties.eventSequentialId}) there is neither CreatedEvent nor AssignedEvent available. This entry will be dropped from the result."
               )
               None
@@ -588,12 +611,12 @@ class ACSReader(
               )
               .mapConcat(identity)
               .dropWhile(_ <= sequentialIdToContinueFrom)
+              .grouped(config.maxIncompletePageSize)
+              .mapAsync(config.maxParallelPayloadCreateQueries)(
+                fetchAssignPayloads
+              )
+              .mapConcat(_.filter(assignMeetsConstraints))
           )
-            .grouped(config.maxIncompletePageSize)
-            .mapAsync(config.maxParallelPayloadCreateQueries)(
-              fetchAssignPayloads
-            )
-            .mapConcat(_.filter(assignMeetsConstraints))
             .mapAsync(config.contractProcessingParallelism)(
               toApiResponseIncompleteAssigned(eventProjectionProperties, rangeInfo.requestChecksum)
             )
@@ -607,17 +630,17 @@ class ACSReader(
               )
               .mapConcat(identity)
               .dropWhile(_ <= sequentialIdToContinueFrom)
+              .grouped(config.maxIncompletePageSize)
+              .mapAsync(config.maxParallelPayloadCreateQueries)(
+                fetchUnassignPayloads
+              )
+              .mapConcat(_.filter(unassignMeetsConstraints))
+              .grouped(config.maxIncompletePageSize)
+              .mapAsync(config.maxParallelPayloadCreateQueries)(
+                fetchActivationEventsForUnassignedBatch
+              )
+              .mapConcat(identity)
           )
-            .grouped(config.maxIncompletePageSize)
-            .mapAsync(config.maxParallelPayloadCreateQueries)(
-              fetchUnassignPayloads
-            )
-            .mapConcat(_.filter(unassignMeetsConstraints))
-            .grouped(config.maxIncompletePageSize)
-            .mapAsync(config.maxParallelPayloadCreateQueries)(
-              fetchActivationEventsForUnassignedBatch
-            )
-            .mapConcat(identity)
             .mapAsync(config.contractProcessingParallelism)(
               toApiResponseIncompleteUnassigned(
                 eventProjectionProperties,

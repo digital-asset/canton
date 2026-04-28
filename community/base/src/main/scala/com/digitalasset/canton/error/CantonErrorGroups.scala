@@ -50,6 +50,11 @@ object CantonErrorGroups {
       abstract class LocalRejectionGroup extends ErrorGroup()
     }
 
+    object ReassignmentErrorGroup extends ErrorGroup() {
+      // Reassignment submission errors resulting from the reassignment processor
+      abstract class SubmissionErrorGroup extends ErrorGroup()
+    }
+
     // replicated participant errors
     abstract class ReplicationErrorGroup extends ErrorGroup()
 

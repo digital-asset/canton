@@ -87,7 +87,6 @@ import org.scalatest.wordspec.AsyncWordSpec
 import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
 import scala.annotation.nowarn
-import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.{Seq, Set, SortedSet}
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
@@ -974,6 +973,7 @@ class AcsCommitmentProcessorTest
       Map.empty,
       Map.empty,
       Set.empty,
+      0L,
     )
     val ch1 = AcsChange(
       activations = Map(
@@ -2069,7 +2069,7 @@ class AcsCommitmentProcessorTest
 
     "running commitments work as expected" in {
       val rc =
-        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
+        new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)
 
       rc.watermark shouldBe RecordTime.MinValue
       rc.snapshot() shouldBe CommitmentSnapshot[InternedPartyId](
@@ -2077,6 +2077,7 @@ class AcsCommitmentProcessorTest
         Map.empty,
         Map.empty,
         Set.empty,
+        0L,
       )
       val ch1 = AcsChange(
         activations = Map(
@@ -2106,6 +2107,7 @@ class AcsCommitmentProcessorTest
         SortedSet(internalizedBob, internalizedCarol),
       )
       snap1.deleted shouldBe Set.empty
+      snap1.groupCountDelta shouldBe 2L
 
       val ch2 = AcsChange(
         deactivations = Map(
@@ -2132,6 +2134,7 @@ class AcsCommitmentProcessorTest
       )
       snap2.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedCarol))
       snap2.deleted shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
+      snap2.groupCountDelta shouldBe 0L
 
       val ch3 = AcsChange(
         deactivations = Map.empty,
@@ -2152,13 +2155,14 @@ class AcsCommitmentProcessorTest
       )
       snap3.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedCarol))
       snap3.deleted shouldBe Set.empty
+      snap3.groupCountDelta shouldBe 0L
     }
 
     "contracts differing by reassignment counter result in different commitments if the PV support reassignment counters" in {
       val rc1 =
-        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
+        new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)
       val rc2 =
-        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
+        new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)
       val reassignmentCounter2 = initialReassignmentCounter + 1
 
       val (activeCommitment1, deltaAddedCommitment1) =
@@ -2237,7 +2241,8 @@ class AcsCommitmentProcessorTest
       // 1. compute stakeholder commitments by repeatedly applying acs changes (obtained from a commit set)
       // to an empty snapshot using AcsCommitmentProcessor.update
       // and then compute counter-participant commitments by adding together stakeholder commitments
-      val rc = new RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+      val rc =
+        new RunningCommitments(RecordTime.MinValue, Seq.empty)
 
       rc.update(rt(2, 0), acsChanges(ts(2)))
       rc.watermark shouldBe rt(2, 0)

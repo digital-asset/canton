@@ -222,6 +222,13 @@ commands:
                     printf '%s\n' "$ACCESS_TOKEN" | \
                       docker login -u oauth2accesstoken --password-stdin "https://$OCI_REGISTRY" >/dev/null
                 name: Log Docker into GCR
+    enable_session_signing_keys:
+        steps:
+            - run:
+                command: |
+                    echo 'export SESSION_SIGNING_KEYS_ENABLED=true' >> "$BASH_ENV"
+                    echo "Session signing keys enabled for tests"
+                name: Enable session signing keys
     execute_sbt_command:
         description: |
             A context within which SBT commands can be run correctly for Cantons needs
@@ -711,7 +718,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-af2f75525f1c \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1040,48 +1047,7 @@ commands:
                     if [ -n "$FIXED" ]; then
                       SELECTED_VOLUNTEER="$FIXED"
                     else
-                      members=(
-                        # Architecture
-                        "U9AGNADBJ" # Andreas L.
-                        "U056R7C1H1A" # Cristina
-                        # Security
-                        "U03RK2ZNZFH" # Christian
-                        "U03A208N537" # João Sá
-                        "U990L3H0R" # Matthias
-                        "U0A0VU32CS0" # Simran
-                        "U276HDDB6" # Soren
-                        "U03NCGBFCDP" # Thibault
-                        "UPED4TSGN" # Simon
-                        # Protocol
-                        "U5LC1FB6D" # Gerolf
-                        "U046D8XGD7H" # Kirill
-                        "U03FH83LRNH" # Meriam
-                        "UF766DLN4" # Oliver
-                        "U020XUXADCP" # Raf
-                        "UDDVDCKD0" # Raphael
-                        "U04DC4NAK1S" # Yves
-                        # LAPI
-                        "U08LBV2U75H" # Adrien
-                        "U03HVEFHGLU" # Andreas T.
-                        "U9AM249RP" # Andris
-                        "U1CNLNUV7" # Gergely
-                        "U029VGVV25Q" # Jarek
-                        "U57BTEKR9" # Marcin
-                        "U01A2K1NWAX" # Marton
-                        "U01B2BD2CP4" # Tudor
-                        # BFT
-                        "U04S25SG9D5" # Daniel
-                        "U04TG4XMJ" # Danilo
-                        "USE2D5GB1" # Fabio
-                        "U04P9CS4F6Z" # Tom
-                        # QA
-                        "U0AHRL04HPV" #Tbo
-                      )
-
-                      # Takes the first bytes of the sha and convert to and int
-                      WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
-
-                      SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+                      SELECTED_VOLUNTEER=$(bash scripts/ci/select_volunteer.sh)
                     fi
 
                     echo "$SELECTED_VOLUNTEER"
@@ -1667,12 +1633,8 @@ jobs:
                 is_nightly_workflow: << parameters.is_nightly_workflow >>
             - package:
                 artifact_suffix: .jar
-                cmd: ledger-test-tool-2-dev/assembly
-                location: community/ledger-test-tool/lf-v2.dev/target/scala-2.13
-            - package:
-                artifact_suffix: .jar
-                cmd: ledger-test-tool-2-1/assembly
-                location: community/ledger-test-tool/lf-v2.1/target/scala-2.13
+                cmd: ledger-test-tool/assembly
+                location: community/ledger-test-tool/target/scala-2.13
             - cleanup_build_job
     benchmark:
         executor: canton-xlarge-plus-docker-with-postgres
@@ -1894,7 +1856,7 @@ jobs:
                 name: Abort if data continuity have been already generated or for nightly non-weekly releases
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
-                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.Create.\*DataContinuityDumpsPostgres_all.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.manual\.ProtobufCompatibilityWriterTest '
+                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.Create.\*DataContinuityDumpsPostgres_all.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.ProtobufCompatibilityWriterTest '
                 num_test_buckets: "1"
                 timeout: 1h
             - run:
@@ -1925,12 +1887,22 @@ jobs:
                 timeout: 120m
             - slack_red_main_with_volunteer:
                 fixed_volunteer: U05KX5V7KJN
+    nightly_cn_topology_snapshot_test_only:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 4
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
+                num_parallel_tasks: "1"
+                num_test_buckets: "4"
+                timeout: 120m
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
-                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
     nightly_integration_test_bftordering_only:
@@ -1952,6 +1924,15 @@ jobs:
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.sequencer
+                num_parallel_tasks: "1"
+                num_test_buckets: "2"
+    nightly_integration_test_with_session_keys:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - enable_session_signing_keys
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
     nightly_reporting:
@@ -2983,6 +2964,23 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
+            - protocol_continuity_test_latest:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - da-images
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
             - scalafix:
                 context:
                     - datadog
@@ -3128,6 +3126,29 @@ workflows:
         when:
             equal:
                 - build-canton-local-cache
+                - << pipeline.parameters.manual_job >>
+    manual_cn_topology_snapshot_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - nightly_cn_topology_snapshot_test_only:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - gcp_topology_testing
+                requires:
+                    - compile
+        when:
+            equal:
+                - cn-topology-snapshot-test
                 - << pipeline.parameters.manual_job >>
     manual_docs_replication_prod:
         jobs:
@@ -3323,7 +3344,7 @@ workflows:
                     equal:
                         - main
                         - << pipeline.git.branch >>
-    manual_nightly_integration_tests:
+    manual_nightly_integration_test:
         jobs:
             - compile:
                 context:
@@ -3347,7 +3368,7 @@ workflows:
                     - compile
         when:
             equal:
-                - nightly-integration-tests
+                - nightly-integration-test
                 - << pipeline.parameters.manual_job >>
     manual_nightly_test_bftordering:
         jobs:

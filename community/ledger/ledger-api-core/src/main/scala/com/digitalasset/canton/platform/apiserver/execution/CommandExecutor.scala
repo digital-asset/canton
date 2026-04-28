@@ -12,7 +12,10 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.version.EngineMode
 import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 
 import scala.concurrent.ExecutionContext
 
@@ -79,6 +82,17 @@ private[execution] class DefaultCommandExecutor(
 ) extends NamedLogging
     with CommandExecutor {
 
+  private def establishMode(
+      synchronizerId: Option[SynchronizerId],
+      candidateSynchronizers: Set[PhysicalSynchronizerId],
+  ): NextGenContractStateMachine.Mode =
+    synchronizerId
+      .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
+      .map(_.protocolVersion)
+      .maxOption
+      .map(pv => EngineMode.forProtocolVersion(pv))
+      .getOrElse(NextGenContractStateMachine.Mode.default)
+
   override def execute(
       commands: Commands,
       submissionSeed: Hash,
@@ -93,9 +107,16 @@ private[execution] class DefaultCommandExecutor(
         s"Ignoring taps_max_passes=$value because Topology-Aware Package Selection is disabled."
       )
     }
+
+    val mode: NextGenContractStateMachine.Mode = establishMode(
+      commands.synchronizerId,
+      routingSynchronizerState.topologySnapshots.keySet,
+    )
+
     for {
+
       commandInterpretationResult <- EitherT(
-        commandInterpreter.interpret(commands, submissionSeed)
+        commandInterpreter.interpret(commands, mode, submissionSeed)
       )
       synchronizerRank <- syncService
         .selectRoutingSynchronizer(
@@ -113,4 +134,5 @@ private[execution] class DefaultCommandExecutor(
       routingSynchronizerState,
     )
   }
+
 }

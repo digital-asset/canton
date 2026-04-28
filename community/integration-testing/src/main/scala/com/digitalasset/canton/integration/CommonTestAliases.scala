@@ -68,6 +68,7 @@ trait CommonTestAliases {
 
   lazy val remoteParticipant1: RemoteParticipantReference = rp("participant1")
   lazy val remoteParticipant2: RemoteParticipantReference = rp("participant2")
+  lazy val remoteParticipant3: RemoteParticipantReference = rp("participant3")
 
   // synchronizer1
   lazy val daName: SynchronizerAlias = SynchronizerAlias.tryCreate("synchronizer1")

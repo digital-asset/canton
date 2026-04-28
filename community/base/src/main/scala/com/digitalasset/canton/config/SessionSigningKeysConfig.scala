@@ -97,7 +97,7 @@ final case class SessionSigningKeysConfig(
 
 object SessionSigningKeysConfig {
   val disabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = false)
-  val default: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = true)
+  val enabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = true)
 
   /** Short test-only configuration: durations are small enough to trigger key rotation and validity
     * edge cases within a test.

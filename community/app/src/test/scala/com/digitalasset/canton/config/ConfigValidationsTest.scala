@@ -689,7 +689,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
               ),
               kms = Some(KmsConfig.Aws.defaultTestConfig),
               sessionSigningKeys =
-                SessionSigningKeysConfig.default.copy(signingAlgorithmSpec = signingAlgorithmSpec),
+                SessionSigningKeysConfig.enabled.copy(signingAlgorithmSpec = signingAlgorithmSpec),
             )
           )
         ),
@@ -750,7 +750,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
               ),
               kms = Some(KmsConfig.Aws.defaultTestConfig),
               sessionSigningKeys =
-                SessionSigningKeysConfig.default.copy(signingKeySpec = sessionSigningKeySpec),
+                SessionSigningKeysConfig.enabled.copy(signingKeySpec = sessionSigningKeySpec),
             )
           )
         )
@@ -767,16 +767,16 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         crypto = CryptoConfig(
           provider = Kms,
           kms = Some(KmsConfig.Aws.defaultTestConfig),
-          sessionSigningKeys = SessionSigningKeysConfig.default,
+          sessionSigningKeys = SessionSigningKeysConfig.enabled,
         )
       )
       val config =
         CantonConfig(participants = Map(InstanceName.tryCreate("p1") -> participantNodeConfig))
 
-      val defaultKeyValidityDuration = SessionSigningKeysConfig.default.keyValidityDuration
-      val defaultToleranceShiftDuration = SessionSigningKeysConfig.default.toleranceShiftDuration
-      val defaultCutOffDuration = SessionSigningKeysConfig.default.cutOffDuration
-      val defaultKeyEvictionPeriod = SessionSigningKeysConfig.default.keyEvictionPeriod
+      val defaultKeyValidityDuration = SessionSigningKeysConfig.enabled.keyValidityDuration
+      val defaultToleranceShiftDuration = SessionSigningKeysConfig.enabled.toleranceShiftDuration
+      val defaultCutOffDuration = SessionSigningKeysConfig.enabled.cutOffDuration
+      val defaultKeyEvictionPeriod = SessionSigningKeysConfig.enabled.keyEvictionPeriod
 
       def changeSessionSigningKeyParams(
           keyValidityDuration: Option[PositiveFiniteDuration],
@@ -784,7 +784,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           cutOffDuration: Option[NonNegativeFiniteDuration] = None,
           keyEvictionPeriod: Option[PositiveFiniteDuration] = None,
       ) = {
-        val params = SessionSigningKeysConfig.default.copy(
+        val params = SessionSigningKeysConfig.enabled.copy(
           keyValidityDuration = keyValidityDuration.getOrElse(defaultKeyValidityDuration),
           toleranceShiftDuration = toleranceShiftDuration.getOrElse(defaultToleranceShiftDuration),
           cutOffDuration = cutOffDuration.getOrElse(defaultCutOffDuration),
@@ -832,7 +832,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )(
         s"participant p1: The selected session signing key tolerance shift duration " +
           s"of $invalidToleranceShiftDuration must be longer than the cut-off " +
-          s"(${SessionSigningKeysConfig.default.cutOffDuration})."
+          s"(${SessionSigningKeysConfig.enabled.cutOffDuration})."
       )
 
       assertErrors(
@@ -845,14 +845,14 @@ class ConfigValidationsTest extends BaseTestWordSpec {
                   .focus(_.sequencerClient.defaultMaxSequencingTimeOffset)
                   .replace(
                     NonNegativeFiniteDuration.ofMinutes(
-                      SessionSigningKeysConfig.default.keyValidityDuration.duration.toMinutes
+                      SessionSigningKeysConfig.enabled.keyValidityDuration.duration.toMinutes
                     )
                   )
             )
           )
       )(
         s"participant p1: The selected session signing key validity parameters do not align with " +
-          s"the current default max sequencing time offset (${SessionSigningKeysConfig.default.keyValidityDuration}). " +
+          s"the current default max sequencing time offset (${SessionSigningKeysConfig.enabled.keyValidityDuration}). " +
           s"Parameters must be chosen so that " +
           s"`keyValidityDuration` - `cutOffDuration` > `defaultMaxSequencingTimeOffset`."
       )
@@ -866,13 +866,13 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )(
         s"participant p1: The selected session signing key eviction period " +
           s"of $invalidKeyEvictionPeriod must be longer than the key validity duration " +
-          s"(${SessionSigningKeysConfig.default.keyValidityDuration})."
+          s"(${SessionSigningKeysConfig.enabled.keyValidityDuration})."
       )
 
     }
 
     "pass config validation with parameters out of bounds and checks disabled" in {
-      val invalidKeyValidityDuration = SessionSigningKeysConfig.default.keyEvictionPeriod
+      val invalidKeyValidityDuration = SessionSigningKeysConfig.enabled.keyEvictionPeriod
       val config = CantonConfig(
         parameters = CantonParameters(nonStandardConfig = true),
         participants = Map(
@@ -881,7 +881,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
               crypto = CryptoConfig(
                 provider = Kms,
                 kms = Some(KmsConfig.Aws.defaultTestConfig),
-                sessionSigningKeys = SessionSigningKeysConfig.default.copy(
+                sessionSigningKeys = SessionSigningKeysConfig.enabled.copy(
                   keyValidityDuration = invalidKeyValidityDuration,
                   disableBoundChecks = true,
                 ),

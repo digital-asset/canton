@@ -99,6 +99,30 @@ class IndexMetrics(
 
   val db = new IndexDBMetrics(inventory.db, openTelemetryMetricsFactory)
 
+  val achsMidstreamFallbacks: Counter =
+    openTelemetryMetricsFactory.counter(
+      MetricInfo(
+        prefix :+ "achs_midstream_fallbacks",
+        summary = "The number of mid-stream fallbacks from ACHS to filter tables.",
+        description = """Counts the number of times the active contracts stream fell back from the
+                      |ACHS to the filter tables because the ACHS validAt was bumped past the
+                      |requested activeAt while streaming was in progress.""",
+        qualification = MetricQualification.Debug,
+      )
+    )
+
+  val achsSkips: Counter =
+    openTelemetryMetricsFactory.counter(
+      MetricInfo(
+        prefix :+ "achs_skips",
+        summary = "The number of times the ACHS was skipped entirely.",
+        description = """Counts the number of times the active contracts stream skipped the ACHS
+                      |entirely because the ACHS validAt had already surpassed the requested
+                      |activeAtEventSeqId before streaming started.""",
+        qualification = MetricQualification.Debug,
+      )
+    )
+
   val ledgerEndSequentialId: Gauge[Long] =
     openTelemetryMetricsFactory.gauge(
       MetricInfo(

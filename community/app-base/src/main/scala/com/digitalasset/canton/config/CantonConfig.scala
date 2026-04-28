@@ -115,7 +115,6 @@ import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.canton.version.ParticipantProtocolVersion
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
   Config,
@@ -543,7 +542,10 @@ final case class CantonConfig(
         drSequencingTimeUpperBound =
           sequencerNodeConfig.parameters.lsuRepair.globalMaxSequencingTimeExclusive
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
+        delayRequestsBeforeLsuTrafficInit =
+          sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
       )
+
     }
 
   private[canton] def sequencerNodeParameters(name: InstanceName): SequencerNodeParameters =
@@ -1466,13 +1468,6 @@ object CantonConfig {
           )
         }
 
-      implicit val modeConfigReader: ConfigReader[NextGenContractStateMachine.Mode] =
-        ConfigReader.fromString[NextGenContractStateMachine.Mode] { str =>
-          NextGenContractStateMachine.Mode
-            .fromString(str)
-            .toRight(CannotConvert(str, "Mode", "Not a valid contract state machine mode"))
-        }
-
       implicit val cantonEngineConfigReader: ConfigReader[CantonEngineConfig] = {
         implicit val engineLoggingConfigReader: ConfigReader[EngineLoggingConfig] =
           deriveReader[EngineLoggingConfig]
@@ -2199,10 +2194,6 @@ object CantonConfig {
 
     lazy implicit final val participantNodeParameterConfigWriter
         : ConfigWriter[ParticipantNodeParameterConfig] = {
-      implicit val modeConfigWriter: ConfigWriter[NextGenContractStateMachine.Mode] =
-        ConfigWriter.fromFunction[NextGenContractStateMachine.Mode](mode =>
-          ConfigWriter[String].to(mode.toString)
-        )
       implicit val cantonEngineConfigWriter: ConfigWriter[CantonEngineConfig] = {
         implicit val engineLoggingConfigWriter: ConfigWriter[EngineLoggingConfig] =
           deriveWriter[EngineLoggingConfig]

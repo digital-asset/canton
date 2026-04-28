@@ -135,35 +135,43 @@ final class ProtobufCompatibilityReaderTest
   // modified message:
   // my.proto:Field "3" with name "bar" on message "Foo" changed type from "bytes" to "string".
   //         ^ notice the removed line and column numbers
-  val acceptedBreakingChanges = Seq(
-    // Contract id recomputation had to be removed
-    """com/digitalasset/canton/admin/participant/v30/acs_import.proto:Previously present enum value "3" on enum "ContractImportMode" was deleted.""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present field "1" with name "contract_id_mappings" on message "ImportAcsResponse" was deleted.""",
-    // Internal classes that should have been marked as alpha/unsable
-    """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "3" with name "message_id" on message "OrderingRequest" changed type from "bytes" to "string".""",
-    """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed cardinality from "optional with explicit presence" to "optional with implicit presence".""",
-    """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed type from "message" to "bytes".""",
-    // LastErrorsAppender was removed, along with the corresponding Admin API endpoints
-    """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrorTrace" on service "StatusService" was deleted.""",
-    """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrors" on service "StatusService" was deleted.""",
-    // Reviewed, expected breaking changes w.r.t. to 3.4.11
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present RPC "ExportAcsOld" on service "ParticipantRepairService" was deleted.""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present RPC "ImportAcsOld" on service "ParticipantRepairService" was deleted.""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Field "2" with name "workflow_id_prefix" on message "ImportAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
-    """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Field "3" with name "contract_import_mode" on message "ImportAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
-    """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "2" with name "synchronizer_id" on message "ImportPartyAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
-    """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "3" with name "workflow_id_prefix" on message "ImportPartyAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
-    """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "3" with name "workflow_id_prefix" on message "ImportPartyAcsRequest" changed type from "enum" to "string".""",
-    """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "4" with name "contract_import_mode" on message "ImportPartyAcsRequest" changed type from "message" to "enum".""",
-    """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Field "1" with name "verdict" on message "VerdictsResponse" moved from outside to inside a oneof.""",
-    """com/digitalasset/canton/protocol/v30/topology.proto:Field "17" with name "synchronizer_upgrade_announcement" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.SynchronizerUpgradeAnnouncement" to "com.digitalasset.canton.protocol.v30.LsuAnnouncement".""",
-    """com/digitalasset/canton/protocol/v30/topology.proto:Field "18" with name "sequencer_connection_successor" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.SequencerConnectionSuccessor" to "com.digitalasset.canton.protocol.v30.LsuSequencerConnectionSuccessor".""",
-    """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromPredecessor" on service "SequencerInitializationService" was deleted.""",
-    """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "failure" on message "HandshakeResponse" was deleted.""",
-    """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "2" with name "failure" on message "VerifyActiveResponse" was deleted.""",
-    """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSequencerConnectionSuccessor" on service "TopologyManagerReadService" was deleted.""",
-    """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSynchronizerUpgradeAnnouncement" on service "TopologyManagerReadService" was deleted.""",
-    """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "LogicalUpgradeState" on service "TopologyManagerReadService" was deleted.""",
+  val acceptedBreakingChangesByVersion = Map(
+    (3, 4) -> Seq(
+      // Contract id recomputation had to be removed
+      """com/digitalasset/canton/admin/participant/v30/acs_import.proto:Previously present enum value "3" on enum "ContractImportMode" was deleted.""",
+      """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present field "1" with name "contract_id_mappings" on message "ImportAcsResponse" was deleted.""",
+      // Internal classes that should have been marked as alpha/unstable
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "3" with name "message_id" on message "OrderingRequest" changed type from "bytes" to "string".""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed cardinality from "optional with explicit presence" to "optional with implicit presence".""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed type from "message" to "bytes".""",
+      // LastErrorsAppender was removed, along with the corresponding Admin API endpoints
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrorTrace" on service "StatusService" was deleted.""",
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrors" on service "StatusService" was deleted.""",
+      // Reviewed, expected breaking changes w.r.t. to 3.4.11
+      """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present RPC "ExportAcsOld" on service "ParticipantRepairService" was deleted.""",
+      """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Previously present RPC "ImportAcsOld" on service "ParticipantRepairService" was deleted.""",
+      """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Field "2" with name "workflow_id_prefix" on message "ImportAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
+      """com/digitalasset/canton/admin/participant/v30/participant_repair_service.proto:Field "3" with name "contract_import_mode" on message "ImportAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "2" with name "synchronizer_id" on message "ImportPartyAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "3" with name "workflow_id_prefix" on message "ImportPartyAcsRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "3" with name "workflow_id_prefix" on message "ImportPartyAcsRequest" changed type from "enum" to "string".""",
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Field "4" with name "contract_import_mode" on message "ImportPartyAcsRequest" changed type from "message" to "enum".""",
+      """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Field "1" with name "verdict" on message "VerdictsResponse" moved from outside to inside a oneof.""",
+      """com/digitalasset/canton/protocol/v30/topology.proto:Field "17" with name "synchronizer_upgrade_announcement" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.SynchronizerUpgradeAnnouncement" to "com.digitalasset.canton.protocol.v30.LsuAnnouncement".""",
+      """com/digitalasset/canton/protocol/v30/topology.proto:Field "18" with name "sequencer_connection_successor" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.SequencerConnectionSuccessor" to "com.digitalasset.canton.protocol.v30.LsuSequencerConnectionSuccessor".""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromPredecessor" on service "SequencerInitializationService" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "failure" on message "HandshakeResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "2" with name "failure" on message "VerifyActiveResponse" was deleted.""",
+      """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSequencerConnectionSuccessor" on service "TopologyManagerReadService" was deleted.""",
+      """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSynchronizerUpgradeAnnouncement" on service "TopologyManagerReadService" was deleted.""",
+      """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "LogicalUpgradeState" on service "TopologyManagerReadService" was deleted.""",
+    ),
+    (3, 5) -> Seq(
+      // LSU changes. Fine because not released yet.
+      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed cardinality from "map" to "optional with explicit presence".""",
+      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" moved from outside to inside a oneof.""",
+      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed type from "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessorsEntry" to "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessors".""",
+    ),
   )
 
   "protobuf" should {
@@ -181,7 +189,7 @@ final class ProtobufCompatibilityReaderTest
         .map(_.majorMinor)
         .toList ::: previousSupportedMinors
 
-    versionsToTest.foreach { case majorMinor @ (major, minor) =>
+    versionsToTest.foreach { majorMinor =>
       S3Dump.getDumpBaseDirectoriesForVersion(Some(majorMinor)).foreach { case (dumpRef, version) =>
         s"be compatible with $version" in {
           val protoImageFile = dumpRef.localDownloadPath / protobufImageFileName
@@ -200,6 +208,8 @@ final class ProtobufCompatibilityReaderTest
             )
             val errorOutput =
               processLogger.outputLines().map(_.replaceAll(raw".proto:\d+:\d+:", ".proto:"))
+
+            val acceptedBreakingChanges = acceptedBreakingChangesByVersion(majorMinor)
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

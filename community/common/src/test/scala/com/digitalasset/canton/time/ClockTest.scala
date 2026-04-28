@@ -7,6 +7,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.time.Clock.SystemClockRunningBackwards
 import com.digitalasset.canton.topology.admin.v30.IdentityInitializationServiceGrpc.IdentityInitializationService
@@ -27,10 +28,12 @@ import org.slf4j.event.Level
 
 import java.time.Clock as JClock
 import java.time.temporal.ChronoUnit
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future, Promise}
+import scala.jdk.CollectionConverters.*
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
@@ -88,6 +91,102 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       val task = sim.scheduleAt(testTask(_), now).onShutdown(fail())
       val res = Await.ready(task, timeout.value)
       assert(res.isCompleted)
+    }
+
+    "support task cancellation" in {
+      val executed = new AtomicBoolean(false)
+      val (future, handle) = sim.scheduleAtCancellable(
+        _ => executed.set(true),
+        sim.now.plusSeconds(10),
+      )
+
+      handle.cancel(UnlessShutdown.AbortedDueToShutdown)
+      sim.advanceTo(sim.now.plusSeconds(20))
+
+      executed.get() shouldBe false
+      future.unwrap.futureValue shouldBe UnlessShutdown.AbortedDueToShutdown
+    }
+
+    "remove cancelled tasks immediately from queue" in {
+      val handles = (1 to 100).map { i =>
+        sim.scheduleAtCancellable(_ => (), sim.now.plusSeconds(i.toLong))._2
+      }
+
+      sim.numberOfScheduledTasks shouldBe 100
+      handles.take(50).foreach(_.cancel(UnlessShutdown.unit))
+
+      // Tasks removed immediately upon cancellation
+      sim.numberOfScheduledTasks shouldBe 50
+
+      // Flush executes remaining 50 tasks
+      sim.advanceTo(sim.now.plusSeconds(101))
+      sim.numberOfScheduledTasks shouldBe 0
+    }
+
+    "handle mixed cancelled and active tasks" in {
+      val results = new ConcurrentLinkedQueue[Int]()
+
+      val (f1, h1) = sim.scheduleAtCancellable(_ => results.add(1), sim.now.plusSeconds(1))
+      val (f2, h2) = sim.scheduleAtCancellable(_ => results.add(2), sim.now.plusSeconds(2))
+      val (f3, h3) = sim.scheduleAtCancellable(_ => results.add(3), sim.now.plusSeconds(3))
+
+      h2.cancel(UnlessShutdown.AbortedDueToShutdown)
+      sim.advanceTo(sim.now.plusSeconds(5))
+
+      results.asScala.toSet shouldBe Set(1, 3)
+    }
+
+    "handle cancellation of immediately-executed tasks" in {
+      val (future, handle) = sim.scheduleAtCancellable(_ => 42, sim.now)
+
+      handle.cancel(UnlessShutdown.AbortedDueToShutdown) // Should be no-op since task already ran
+      future.futureValueUS shouldBe 42
+    }
+
+    "handle cancellation with scheduleAfterCancellable" in {
+      val executed = new AtomicBoolean(false)
+      val (future, handle) = sim.scheduleAfterCancellable(
+        _ => executed.set(true),
+        java.time.Duration.ofSeconds(10),
+      )
+
+      handle.cancel(UnlessShutdown.AbortedDueToShutdown)
+      sim.advanceTo(sim.now.plusSeconds(20))
+
+      executed.get() shouldBe false
+      future.unwrap.futureValue shouldBe UnlessShutdown.AbortedDueToShutdown
+    }
+
+    "independently cancel tasks with same action and timestamp" in {
+      val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+
+      // Use the same action reference for both, this would make Queued instances equal if Queued was a case class
+      val sharedAction = (_: CantonTimestamp) => counter.incrementAndGet()
+      val timestamp = sim.now.plusSeconds(5)
+
+      // Schedule the same action instance at the same timestamp twice
+      val (future1, handle1) = sim.scheduleAtCancellable(sharedAction, timestamp)
+      val (future2, handle2) = sim.scheduleAtCancellable(sharedAction, timestamp)
+
+      // Each handle must be a distinct object so cancel() targets only the specific task.
+      // With case class: identical action/timestamp would make handle1 == handle2, causing
+      // cancel(handle1) to potentially remove handle2 instead.
+      handle1 should not equal handle2
+
+      sim.numberOfScheduledTasks shouldBe 2
+
+      // Cancel only the first handle
+      handle1.cancel(UnlessShutdown.AbortedDueToShutdown)
+
+      sim.numberOfScheduledTasks shouldBe 1
+      future1.unwrap.futureValue shouldBe UnlessShutdown.AbortedDueToShutdown
+
+      // Advance time, handle2 should execute
+      sim.advanceTo(timestamp.plusSeconds(1))
+      future2.futureValueUS shouldBe 1
+
+      // Counter should be 1 (only handle2 executed, handle1 was cancelled)
+      counter.get() shouldBe 1
     }
 
   }

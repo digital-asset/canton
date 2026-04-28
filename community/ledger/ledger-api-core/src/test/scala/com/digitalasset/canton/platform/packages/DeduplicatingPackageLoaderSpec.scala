@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.platform.packages
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.daml.testing.utils.TestResourceContext
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.testing.utils.TestModels
-import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.apache.pekko.actor.{ActorSystem, Scheduler}
@@ -20,7 +19,6 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{Await, Future}
-import scala.util.chaining.*
 
 class DeduplicatingPackageLoaderSpec
     extends AsyncWordSpec
@@ -33,10 +31,7 @@ class DeduplicatingPackageLoaderSpec
   private[this] val metric =
     NoOpMetricsFactory.timer(MetricInfo(MetricName("test-metric"), "", MetricQualification.Debug))
 
-  private[this] val dar =
-    TestModels.com_daml_ledger_test_ModelTestDar_path
-      .pipe(JarResourceUtils.resourceFile)
-      .pipe(DarParser.assertReadArchiveFromFile(_))
+  private[this] val dar = DarParser.assertReadArchiveFromFile(TestDars.v2_2.SemanticTestDar.file)
 
   private[this] def delayedLoad(duration: FiniteDuration): Future[Option[DamlLf.Archive]] = {
     implicit val scheduler: Scheduler = actorSystem.scheduler

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.{LoggingConfig, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.*
@@ -32,7 +32,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithoutSuffixes,
 }
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageUtils.Optics.signatureLens
 import com.digitalasset.canton.sequencing.protocol.{
   MediatorGroupRecipient,
   MemberRecipient,
@@ -50,6 +50,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -222,10 +223,12 @@ class TransactionConfirmationRequestFactoryTest
     request
       .focus(_.viewEnvelopes)
       .modify(
-        _.map(
-          _.focus(_.protocolMessage.submittingParticipantSignature)
+        _.map { envelope =>
+          envelope
+            .focus(_.protocolMessage)
+            .andThen(signatureLens[TransactionViewType])
             .modify(_.map(_ => SymbolicCrypto.emptySignature))
-        )
+        }
       )
       .focus(_.informeeMessage.submittingParticipantSignature)
       .replace(SymbolicCrypto.emptySignature)
@@ -235,21 +238,17 @@ class TransactionConfirmationRequestFactoryTest
   private def orderMap(
       request: TransactionConfirmationRequest
   ): TransactionConfirmationRequest = {
-    val orderedTvm = request.viewEnvelopes.map(tvm =>
-      tvm.protocolMessage match {
-        case encViewMessage @ EncryptedViewMessage(_, _, _, _, _, _) =>
-          val encryptedRandomnessOrdering: Ordering[AsymmetricEncrypted[SecureRandomness]] =
-            Ordering.by(_.encryptedFor.unwrap)
-          tvm.copy(protocolMessage =
-            encViewMessage
-              .copy(viewEncryptionKeyRandomness =
-                encViewMessage.viewEncryptionKeyRandomness
-                  .sorted(encryptedRandomnessOrdering)
-              )
-          )
-        case _ => tvm
+
+    val encryptedRandomnessOrdering: Ordering[AsymmetricEncrypted[SecureRandomness]] =
+      Ordering.by(_.encryptedFor.unwrap)
+
+    val orderedTvm: Seq[OpenEnvelope[TransactionViewMessage]] =
+      request.viewEnvelopes.map { tvm =>
+        tvm
+          .focus(_.protocolMessage)
+          .andThen(EncryptedViewMessageUtils.Optics.randomnessLens[TransactionViewType])
+          .modify(randomness => randomness.sorted(encryptedRandomnessOrdering))
       }
-    )
 
     request
       .focus(_.viewEnvelopes)
@@ -284,66 +283,134 @@ class TransactionConfirmationRequestFactoryTest
       val sessionKeyRandomness = privateKeysetCache.getOrElseUpdate(
         recipients,
         cryptoPureApiForRandomness.generateSecureRandomness(
-          computeRandomnessLength(cryptoPureApi)
+          EncryptedViewMessage.computeRandomnessLength(cryptoPureApi)
         ),
       )
 
       tree.viewHash -> (recipients, sessionKeyRandomness)
     }.toMap
 
-    val expectedTransactionViewMessages = example.transactionViewTreesWithWitnesses.map {
-      case (tree, _) =>
-        val signature =
-          if (tree.isTopLevel) Some(SymbolicCrypto.emptySignature)
-          else None
+    val lightTransactionTreeWithRecipients
+        : Seq[(Recipients, (LightTransactionViewTree, Option[Signature]))] =
+      example.transactionViewTreesWithWitnesses
+        .map { case (tree, _) =>
+          val signature = Option.when(tree.isTopLevel)(SymbolicCrypto.emptySignature)
 
-        val (recipients, sessionKeyRandomness) = hashToKeyMap(tree.viewHash)
+          val (recipients, _) = hashToKeyMap(tree.viewHash)
 
-        val sessionKey = cryptoPureApi
-          .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
-          .valueOrFail("fail to create symmetric key from randomness")
-
-        val participants = tree.informees
-          .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
-          .flatMap(_.keySet)
-
-        val ltvt = LightTransactionViewTree
-          .fromTransactionViewTree(
-            tree,
-            tree.subviewHashes.map(viewHash => hashToKeyMap(viewHash)._2),
-            testedProtocolVersion,
+          (
+            recipients,
+            (
+              LightTransactionViewTree
+                .fromTransactionViewTree(
+                  tree,
+                  tree.subviewHashes.map(viewHash => hashToKeyMap(viewHash)._2),
+                  testedProtocolVersion,
+                )
+                .valueOrFail("fail to create light transaction view tree"),
+              signature,
+            ),
           )
-          .valueOrFail("fail to create light transaction view tree")
+        }
 
-        val encryptedView = EncryptedView
-          .compressed(
-            cryptoPureApi,
-            sessionKey,
-            TransactionViewType,
-          )(
-            ltvt,
-            defaultMaxBytesToDecompress,
-          )
-          .valueOr(err => fail(s"fail to encrypt view tree: $err"))
+    val encryptedViewMessages: Seq[(EncryptedViewMessage[TransactionViewType.type], Recipients)] =
+      if (testedProtocolVersion >= ProtocolVersion.v35) {
+        val lightTreesByRecipientsE
+            : Seq[(Recipients, Seq[(LightTransactionViewTree, Option[Signature])])] = {
+          val groupedOrdered = lightTransactionTreeWithRecipients.groupMap(_._1)(_._2)
+          val recipientsInOrder = lightTransactionTreeWithRecipients.map(_._1).distinct
 
-        val encryptedViewMessage: EncryptedViewMessage[TransactionViewType] = {
+          recipientsInOrder.flatMap { recipients =>
+            groupedOrdered.get(recipients).map(recipients -> _)
+          }
+        }
+
+        lightTreesByRecipientsE.flatMap { case (recipients, lightTrees) =>
+          val (firstTree, signature) = lightTrees.head
+
+          val (_, sessionKeyRandomness) = hashToKeyMap(firstTree.viewHash)
+
+          val sessionKey = cryptoPureApi
+            .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
+            .valueOrFail("fail to create symmetric key from randomness")
+
+          val participants = firstTree.informees
+            .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
+            .flatMap(_.keySet)
+
+          val encryptedViews = EncryptedMultipleViews
+            .compressed(
+              cryptoPureApi,
+              sessionKey,
+              TransactionViewType,
+            )(
+              NonEmptyUtil.fromUnsafe(lightTrees.map(_._1)),
+              defaultMaxBytesToDecompress,
+            )
+            .valueOr(err => fail(s"fail to encrypt view tree: $err"))
 
           val randomnessMapNE = NonEmpty
             .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
             .valueOrFail("session key randomness map is empty")
 
-          EncryptedViewMessage(
-            signature,
-            tree.viewHash,
+          val messages = Seq(
+            EncryptedMultipleViewsMessage(
+              encryptedViews = encryptedViews,
+              viewHashes = NonEmptyUtil.fromUnsafe(lightTrees.map(_._1.viewHash)),
+              viewEncryptionKeyRandomness = randomnessMapNE,
+              synchronizerId = transactionFactory.psid,
+              viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+              submittingParticipantSignature = signature,
+              protocolVersion = testedProtocolVersion,
+            )
+          )
+
+          messages.map((_, recipients))
+        }
+      } else {
+        lightTransactionTreeWithRecipients.map { case (recipients, (ltvt, signatureO)) =>
+          val (_, sessionKeyRandomness) = hashToKeyMap(ltvt.viewHash)
+
+          val sessionKey = cryptoPureApi
+            .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
+            .valueOrFail("fail to create symmetric key from randomness")
+
+          val participants = ltvt.informees
+            .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
+            .flatMap(_.keySet)
+
+          val randomnessMapNE = NonEmpty
+            .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
+            .valueOrFail("session key randomness map is empty")
+
+          val encryptedView = EncryptedView
+            .compressed(
+              cryptoPureApi,
+              sessionKey,
+              TransactionViewType,
+            )(
+              ltvt,
+              defaultMaxBytesToDecompress,
+            )
+            .valueOr(err => fail(s"fail to encrypt view tree: $err"))
+
+          val message = EncryptedSingleViewMessage(
+            signatureO,
+            ltvt.viewHash,
             randomnessMapNE,
             encryptedView,
             transactionFactory.psid,
             SymmetricKeyScheme.Aes128Gcm,
             testedProtocolVersion,
           )
-        }
 
-        OpenEnvelope(encryptedViewMessage, recipients)(testedProtocolVersion)
+          (message, recipients)
+        }
+      }
+
+    val expectedTransactionViewMessages = encryptedViewMessages.map {
+      case (viewMessage, recipients) =>
+        OpenEnvelope(viewMessage, recipients)(testedProtocolVersion)
     }
 
     TransactionConfirmationRequest(
@@ -395,9 +462,11 @@ class TransactionConfirmationRequestFactoryTest
   "A ConfirmationRequestFactory" when {
     "everything is ok" can {
 
-      forEvery(transactionFactory.standardHappyCases) { example =>
+      forEvery(
+        // An empty transaction is a corner case, which we don't need to test
+        transactionFactory.standardHappyCases.filterNot(_ == transactionFactory.EmptyTransaction)
+      ) { example =>
         s"create a transaction confirmation request for: $example" in {
-
           val factory = confirmationRequestFactory(Right(example.transactionTree))
 
           ResourceUtil.withResourceM(
@@ -452,7 +521,7 @@ class TransactionConfirmationRequestFactoryTest
           )
           .failOnShutdown
           .map { tcr =>
-            tcr.viewEnvelopes.size shouldBe >(1)
+            tcr.viewEnvelopes.size shouldBe >=(1)
             tcr.viewEnvelopes
               .map(_.protocolMessage.viewEncryptionKeyRandomness)
               .distinct

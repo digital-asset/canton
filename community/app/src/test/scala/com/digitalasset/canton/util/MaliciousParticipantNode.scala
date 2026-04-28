@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
@@ -30,10 +30,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -65,8 +62,8 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.digitalasset.daml.lf.data.Ref.UserId
-import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.*
 
@@ -200,11 +197,10 @@ class MaliciousParticipantNode(
             sessionKeyStore,
           )
           .leftMap(_.show)
-        ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
         viewMessage <- EncryptedViewMessageFactory
-          .create(UnassignmentViewType)(
+          .encryptView(UnassignmentViewType)(
             fullTree,
-            (viewKey, viewKeyMap),
+            viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
             cryptoSnapshot,
             signingTimestampOverrides,
             sourceProtocolVersion.unwrap,
@@ -355,11 +351,10 @@ class MaliciousParticipantNode(
             sessionKeyStore,
           )
           .leftMap(_.show)
-        ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
         viewMessage <- EncryptedViewMessageFactory
-          .create(AssignmentViewType)(
+          .encryptView(AssignmentViewType)(
             fullTree,
-            (viewKey, viewKeyMap),
+            viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
             cryptoSnapshot,
             signingTimestampOverrides,
             targetProtocolVersion.unwrap,
@@ -551,6 +546,10 @@ object MaliciousParticipantNode extends FutureHelpers {
         MediatorGroupIndex.zero
       ),
       testSubmissionServiceOverrideO: Option[TestSubmissionService] = None,
+      resolveContractOverride: LfContractId => OptionT[
+        FutureUnlessShutdown,
+        GenContractInstance,
+      ] = _ => OptionT(FutureUnlessShutdown.pure[Option[GenContractInstance]](None)),
   )(implicit
       env: TestConsoleEnvironment,
       traceContext: TraceContext,
@@ -569,10 +568,28 @@ object MaliciousParticipantNode extends FutureHelpers {
         // Switch off authorization, so we can also test unauthorized commands.
         checkAuthorization = false,
         enableLfDev = true,
+        resolveContractOverride = resolveContractOverride(_)
+          .mapK(
+            FutureUnlessShutdown.failOnShutdownToAbortExceptionK("MaliciousParticipantNode")
+          )
+          .map[FatContractInstance](_.inst),
       )
     )
     val seedGenerator = new SeedGenerator(participantNode.cryptoPureApi)
-    val contractOfId = TransactionTreeFactory.contractInstanceLookup(contractStore)
+
+    def contractOfId(cid: LfContractId): EitherT[
+      FutureUnlessShutdown,
+      TransactionTreeFactory.ContractLookupError,
+      GenContractInstance,
+    ] = {
+      val lookupFromStore = TransactionTreeFactory.contractInstanceLookup(contractStore)
+      resolveContractOverride(cid)
+        .toRight(())
+        .orElse[TransactionTreeFactory.ContractLookupError, GenContractInstance](
+          lookupFromStore(cid)
+        )
+    }
+
     val confirmationRequestFactory = connectedSynchronizer.requestGenerator
     val sequencerClient = connectedSynchronizer.sequencerClient
 

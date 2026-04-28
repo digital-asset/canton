@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.tests.toxiproxy.ToxiproxyHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
+  EnvironmentSetup,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
@@ -40,67 +41,16 @@ import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import scala.concurrent.duration.*
 
-/** Try to load CN genesis state and ensure that the history state can still be loaded with the
-  * stricter checks in Canton's topology management.
-  *
-  * Specifically, we're testing that we can import OTKs with missing signing key signatures:
-  *   - into a temporary topology store
-  *   - as part of the genesis state, i.e. sequencing timestamp is
-  *     [[SignedTopologyTransaction.InitialTopologySequencingTime]]
-  */
-final class CantonNetworkTopologyStateIntegrationTest
-    extends CommunityIntegrationTest
-    with SharedEnvironment {
-
-  private val enablePostgres = true
-  private val toxiProxyLatency = 0 // in ms, 0 to disable
-  private val timeout = 30.seconds
-
-  private val participant1Proxy = "participant1-to-postgres"
-  // using toxi-proxy to simulate database latency
-  private val toxiproxyPlugin = new UseToxiproxy(
-    ToxiproxyConfig(proxies = Seq(ParticipantToPostgres(participant1Proxy, "participant1")))
-  )
-  if (enablePostgres) {
-    registerPlugin(new UsePostgres(loggerFactory))
-  }
-  if (toxiProxyLatency > 0) {
-    if (!enablePostgres)
-      throw new IllegalStateException("ToxiProxy for Postgres enabled, but Postgres is disabled")
-    registerPlugin(toxiproxyPlugin)
-  }
-
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1S1M1_Manual
-      .withSetup { env =>
-        import env.*
-        participant1.start()
-      }
-      .withTeardown { _ =>
-        if (toxiProxyLatency > 0) {
-          ToxiproxyHelpers.removeAllProxies(
-            toxiproxyPlugin.runningToxiproxy.controllingToxiproxyClient
-          )
-        }
-      }
-
-  private lazy val genesisFileName: String = "CN-genesis-state-20250410.gz"
-
-  private lazy val genesisBytes = {
-    val genesisStateZip = File(JarResourceUtils.resourceFile(genesisFileName).toURI)
-    genesisStateZip.gzipInputStream()(ByteString.readFrom)
-  }
-  private lazy val genesisSnapshot =
-    StoredTopologyTransactions.fromTrustedByteString(genesisBytes).value
-  private val disableDebugLogging = false
-
-  private var topologyStoreAfterImport: Option[TopologyStore[?]] = None
-
-  private def runValidation(
+trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest {
+  this: EnvironmentSetup =>
+  protected def runValidation(
       topoStoreIdx: Int,
       txs: GenericStoredTopologyTransactions,
       cleanupTopologyState: Boolean,
-  )(implicit env: TestConsoleEnvironment) = {
+      timeout: FiniteDuration,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): (TopologyStore[TopologyStoreId], InitialTopologySnapshotValidator) = {
     import env.*
 
     val synchronizerId = txs
@@ -149,6 +99,63 @@ final class CantonNetworkTopologyStateIntegrationTest
       .value
     (store, validator)
   }
+}
+
+/** Try to load CN genesis state and ensure that the history state can still be loaded with the
+  * stricter checks in Canton's topology management.
+  *
+  * Specifically, we're testing that we can import OTKs with missing signing key signatures:
+  *   - into a temporary topology store
+  *   - as part of the genesis state, i.e. sequencing timestamp is
+  *     [[SignedTopologyTransaction.InitialTopologySequencingTime]]
+  */
+final class CantonNetworkTopologyStateIntegrationTest
+    extends CantonNetworkTopologyIntegrationTestBase
+    with SharedEnvironment {
+
+  private val enablePostgres = true
+  private val toxiProxyLatency = 0 // in ms, 0 to disable
+  private val timeout = 30.seconds
+
+  private val participant1Proxy = "participant1-to-postgres"
+  // using toxi-proxy to simulate database latency
+  private val toxiproxyPlugin = new UseToxiproxy(
+    ToxiproxyConfig(proxies = Seq(ParticipantToPostgres(participant1Proxy, "participant1")))
+  )
+  if (enablePostgres) {
+    registerPlugin(new UsePostgres(loggerFactory))
+  }
+  if (toxiProxyLatency > 0) {
+    if (!enablePostgres)
+      throw new IllegalStateException("ToxiProxy for Postgres enabled, but Postgres is disabled")
+    registerPlugin(toxiproxyPlugin)
+  }
+
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P1S1M1_Manual
+      .withSetup { env =>
+        import env.*
+        participant1.start()
+      }
+      .withTeardown { _ =>
+        if (toxiProxyLatency > 0) {
+          ToxiproxyHelpers.removeAllProxies(
+            toxiproxyPlugin.runningToxiproxy.controllingToxiproxyClient
+          )
+        }
+      }
+
+  private lazy val genesisFileName: String = "CN-genesis-state-20250410.gz"
+
+  private lazy val genesisBytes = {
+    val genesisStateZip = File(JarResourceUtils.resourceFile(genesisFileName).toURI)
+    genesisStateZip.gzipInputStream()(ByteString.readFrom)
+  }
+  private lazy val genesisSnapshot =
+    StoredTopologyTransactions.fromTrustedByteString(genesisBytes).value
+  private val disableDebugLogging = false
+
+  private var topologyStoreAfterImport: Option[TopologyStore[?]] = None
 
   "Canton node " can {
     "load topology transactions from Canton Network genesis state to a temporary store" in {
@@ -192,7 +199,7 @@ final class CantonNetworkTopologyStateIntegrationTest
         client.toxics().latency("participant-db", ToxicDirection.UPSTREAM, toxiProxyLatency.toLong)
       }
 
-      val (store1, _) = runValidation(11, genesisSnapshot, cleanupTopologyState = true)
+      val (store1, _) = runValidation(11, genesisSnapshot, cleanupTopologyState = true, timeout)
       topologyStoreAfterImport = Some(store1)
 
     }
@@ -211,7 +218,7 @@ final class CantonNetworkTopologyStateIntegrationTest
             .futureValue
         )
 
-        runValidation(12, stateAfterImport, cleanupTopologyState = false)
+        runValidation(12, stateAfterImport, cleanupTopologyState = false, timeout)
       }
     }
 

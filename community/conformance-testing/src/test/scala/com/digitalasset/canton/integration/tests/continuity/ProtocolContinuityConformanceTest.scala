@@ -15,9 +15,12 @@ import com.digitalasset.canton.integration.bootstrap.{
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseExternalProcess.RunVersion
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
+  ApiUserManagementServiceSuppressionRule,
+  DbActiveContractStoreConsistencyCheckSuppressionRule,
+}
 import com.digitalasset.canton.integration.tests.ledgerapi.{ExcludedTests, LedgerApiConformanceBase}
-import com.digitalasset.canton.integration.util.TestUtils
+import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
@@ -28,11 +31,11 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.util.ReleaseUtils.TestedRelease
-import com.digitalasset.canton.version.{
-  ProtocolVersionCompatibility,
-  ReleaseVersion,
-  ReleaseVersionToProtocolVersions,
-}
+import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.majorMinorToStableProtocolVersions
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import org.scalatest.concurrent.PatienceConfiguration
+
+import scala.concurrent.duration.DurationInt
 
 trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
@@ -67,8 +70,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       useJsonApi: Boolean,
   )(shard: Int, numShards: Int)(
       env: TestConsoleEnvironment
-  ): String = {
-
+  ): Unit = {
     val jsonExclusions = ExcludedTests.findExcludedTests(useJsonApi)
     ledgerApiTestToolPlugins(version)
       .runShardedSuites(
@@ -101,10 +103,9 @@ trait ProtocolContinuityConformanceTest
   override def connectedSynchronizersCount = 1
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1S1M1_Manual
+    EnvironmentDefinition.P3S1M1_Manual
       .addConfigTransforms(ConfigTransforms.clearMinimumProtocolVersion*)
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
-      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected def numShards: Int
   protected def shard: Int
@@ -112,95 +113,100 @@ trait ProtocolContinuityConformanceTest
 
 /** For a given release R, the Ledger API conformance test suites at release R are run against:
   *   - 1x synchronizer of release R with the latest protocol version of release R
-  *   - 4x participants based on current main
+  *   - 2x participants based on current main
   */
 trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityConformanceTest {
-  private lazy val externalSequencer =
+  private lazy val externalSynchronizer =
     new UseExternalProcess(
       loggerFactory,
       externalSequencers = Set("sequencer1"),
-      fileNameHint = this.getClass.getSimpleName,
-    )
-
-  private lazy val externalMediator =
-    new UseExternalProcess(
-      loggerFactory,
       externalMediators = Set("mediator1"),
       fileNameHint = this.getClass.getSimpleName,
+      removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
     )
 
-  registerPlugin(externalSequencer)
-  registerPlugin(externalMediator)
+  registerPlugin(externalSynchronizer)
 
   testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
-    lazy val binDir = ReleaseUtils.retrieve(release).futureValue
+    lazy val binDir = ReleaseUtils
+      .retrieve(release)
+      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
     lazy val pv = protocolVersions.max1
 
-    s"run conformance tests of shard $shard with release $release and protocol $pv" in { env =>
-      import env.*
+    s"run conformance tests of shard $shard with release $release and protocol $pv" in {
+      implicit env =>
+        import env.*
 
-      val cantonReleaseVersion = RunVersion.Release(binDir)
+        val cantonReleaseVersion = RunVersion.Release(binDir)
 
-      externalMediator.start(remoteMediator1.name, cantonReleaseVersion)
-      externalSequencer.start(remoteSequencer1.name, cantonReleaseVersion)
+        externalSynchronizer.start(remoteMediator1.name, cantonReleaseVersion)
+        externalSynchronizer.start(remoteSequencer1.name, cantonReleaseVersion)
+        participants.local.start()
 
-      remoteSequencer1.health.wait_for_ready_for_initialization()
-      remoteMediator1.health.wait_for_ready_for_initialization()
+        remoteSequencer1.health.wait_for_ready_for_initialization()
+        remoteMediator1.health.wait_for_ready_for_initialization()
 
-      val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
-      NetworkBootstrapper(
-        Seq(
-          NetworkTopologyDescription.createWithStaticSynchronizerParameters(
-            daName,
-            synchronizerOwners = Seq(remoteSequencer1),
-            synchronizerThreshold = PositiveInt.one,
-            sequencers = Seq(remoteSequencer1),
-            mediators = Seq(remoteMediator1),
-            staticSynchronizerParameters = staticParams,
+        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        NetworkBootstrapper(
+          Seq(
+            NetworkTopologyDescription.createWithStaticSynchronizerParameters(
+              daName,
+              synchronizerOwners = Seq(remoteSequencer1),
+              synchronizerThreshold = PositiveInt.one,
+              sequencers = Seq(remoteSequencer1),
+              mediators = Seq(remoteMediator1),
+              staticSynchronizerParameters = staticParams,
+            )
           )
+        )(env).bootstrap()
+
+        remoteSequencer1.health.wait_for_initialized()
+        remoteMediator1.health.wait_for_initialized()
+        participants.local.foreach(_.health.wait_for_initialized())
+
+        setupLedgerApiConformanceEnvironment(env)
+
+        TrafficControlUtils.applyTrafficControl(
+          TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+          TrafficControlUtils.predictableTraffic,
+          topUpAllMembers = true,
+          disableCommitments = true,
         )
-      )(env).bootstrap()
 
-      remoteSequencer1.health.wait_for_initialized()
-      remoteMediator1.health.wait_for_initialized()
-      participant1.health.wait_for_initialized()
+        loggerFactory.suppress(
+          ApiUserManagementServiceSuppressionRule ||
+            DbActiveContractStoreConsistencyCheckSuppressionRule
+        ) {
+          runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
+        }
 
-      setupLedgerApiConformanceEnvironment(env)
+        // Shutdown
+        shutdownLedgerApiConformanceEnvironment(env)
 
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
-      }
-
-      // Shutdown
-      shutdownLedgerApiConformanceEnvironment(env)
-
-      externalMediator.stop(remoteMediator1.name)
+        externalSynchronizer.kill(remoteMediator1.name)
+        externalSynchronizer.kill(remoteSequencer1.name)
     }
   }
 }
 
 /** For a given release R, these tests run the Ledger API compatibility tests against
   *   - 1x synchronizer based on current main with the latest protocol version of release R
-  *   - 1x participant of release R
+  *   - 3x participants of release R
   */
 trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityConformanceTest {
   val external = new UseExternalProcess(
     loggerFactory,
-    externalParticipants = Set("participant1"),
+    externalParticipants = Set("participant1", "participant2", "participant3"),
     fileNameHint = this.getClass.getSimpleName,
+    removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
   )
-
-  // TODO(i9548): Run with a single participant because currently there is no way to set a participant when using the Ledger API test tool.
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition
-      .buildBaseEnvironmentDefinition(1, 1, 1)
-      .withManualStart
-      .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   registerPlugin(external)
 
   testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
-    lazy val binDir = ReleaseUtils.retrieve(release).futureValue
+    lazy val binDir = ReleaseUtils
+      .retrieve(release)
+      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
     lazy val pv = protocolVersions.max1
 
     s"run conformance tests of shard $shard with release $release and protocol $pv" in {
@@ -221,47 +227,94 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
           )
         ).bootstrap()
 
-        // Run the participant from the release binary
+        // Run the participants from the release binary
         external.start(remoteParticipant1.name, cantonReleaseVersion)
+        external.start(remoteParticipant2.name, cantonReleaseVersion)
+        external.start(remoteParticipant3.name, cantonReleaseVersion)
         remoteParticipant1.health.wait_for_initialized()
+        remoteParticipant2.health.wait_for_initialized()
+        remoteParticipant3.health.wait_for_initialized()
 
         setupLedgerApiConformanceEnvironment(env)
 
+        TrafficControlUtils.applyTrafficControl(
+          TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+          TrafficControlUtils.predictableTraffic,
+          topUpAllMembers = true,
+          disableCommitments = true,
+        )
         runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
 
         // Shutdown
         shutdownLedgerApiConformanceEnvironment(env)
-        external.stop(remoteParticipant1.name)
+        external.kill(remoteParticipant1.name)
+        external.kill(remoteParticipant2.name)
+        external.kill(remoteParticipant3.name)
     }
   }
 }
 
 private[continuity] object ProtocolContinuityConformanceTest {
-  // all patch versions that are supported
+
+  /** Computes the list of previous Canton releases that should be tested against the current
+    * release for protocol continuity.
+    *
+    * A previous release is considered supported if its `(major, minor)` shares at least one stable
+    * protocol version with the stable protocol versions supported by the current release.
+    *
+    * @return
+    *   the latest patch of each previous supported `(major, minor)`, sorted ascending
+    */
   def previousSupportedReleases(logger: TracedLogger)(implicit
       tc: TraceContext
-  ): List[TestedRelease] = {
+  ): NonEmpty[List[TestedRelease]] = {
+    val current = ReleaseVersion.current
+    val protocolVersions = ProtocolVersion.stable
+    // previous minor versions that share at least one protocol version with the current release
+    val eligibleMinors: Map[(Int, Int), NonEmpty[List[ProtocolVersion]]] =
+      majorMinorToStableProtocolVersions
+        .flatMap { case (minor, pvs) =>
+          NonEmpty.from(pvs.intersect(protocolVersions)).map(minor -> _)
+        }
+
     val previousSupportedReleases = for {
       testToolRelease <- UseLedgerApiTestTool.latestReleases(logger)
       releaseVersion = ReleaseVersion.tryCreate(testToolRelease.version)
-      // exclude unknown/future versions
-      if ReleaseVersionToProtocolVersions.contains(releaseVersion)
-      testedRelease = TestedRelease(
-        testToolRelease,
-        releaseVersion,
-        ProtocolVersionCompatibility.supportedProtocols(
-          includeAlphaVersions = false,
-          includeBetaVersions = true,
-          release = releaseVersion,
-        ),
+      if releaseVersion < current
+      pvs <- eligibleMinors.get(releaseVersion.majorMinor).toList
+    } yield TestedRelease(testToolRelease, releaseVersion, pvs)
+    // Keep only the latest patch per (major, minor)
+    val latestPatchPerMinor = previousSupportedReleases
+      .groupBy(_.releaseVersion.majorMinor)
+      .values
+      .map(_.maxBy(_.releaseVersion))
+      .toList
+      .sortBy(_.releaseVersion)
+    logger.info(
+      s"Previous supported releases: ${latestPatchPerMinor.map(_.releaseVersion).mkString(", ")}"
+    )
+    NonEmpty.from(latestPatchPerMinor).getOrElse {
+      throw new IllegalStateException(
+        s"No previous supported releases found for current release ${current.toProtoPrimitive}."
       )
-      filteredPvVersions <- NonEmpty.from(testedRelease.protocolVersions.filterNot(_.isDeleted))
-    } yield testedRelease.copy(protocolVersions = filteredPvVersions)
-    previousSupportedReleases.toList.sortBy(_.releaseVersion)
+    }
   }
 
   def latestSupportedRelease(logger: TracedLogger)(implicit
       tc: TraceContext
-  ): Option[TestedRelease] =
-    previousSupportedReleases(logger).lastOption
+  ): TestedRelease =
+    previousSupportedReleases(logger).last1
+
+  private[continuity] val removeConfigPaths: Set[(String, Option[(String, Any)])] =
+    (1 to 3)
+      .flatMap(p =>
+        Seq(
+          s"participants.participant$p.parameters.ledger-api-server.indexer.achs-config.buffer-size",
+          s"participants.participant$p.ledger-api.index-service.contract-pruning-delay-before-retry",
+          s"participants.participant$p.ledger-api.index-service.contract-pruning-max-retries",
+        )
+      )
+      .map(_ -> Option.empty[(String, Any)])
+      .toSet
+
 }

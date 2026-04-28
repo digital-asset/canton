@@ -22,14 +22,16 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event
 
 trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
-  protected def lfVersion: UseLedgerApiTestTool.LfVersion = UseLedgerApiTestTool.LfVersion.Stable
+  protected def lfVersion: LanguageVersion = LanguageVersion.v2_2
 
-  protected def lapittVersion: LAPITTVersion = LAPITTVersion.LocalJar
+  protected def lapittVersion: LAPITTVersion = LAPITTVersion.Local
 
   protected val ledgerApiTestToolPlugin =
     new UseLedgerApiTestTool(
@@ -42,7 +44,7 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   def runShardedTests(shard: Int, numShards: Int)(
       env: TestConsoleEnvironment
-  ): String =
+  ): Unit =
     ledgerApiTestToolPlugin.runShardedSuites(
       shard,
       numShards,
@@ -66,7 +68,10 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
   ): Unit = {
     import env.*
 
-    require(env.environment.config.sequencers.sizeIs == connectedSynchronizersCount)
+    require(
+      (env.environment.config.sequencers.size + env.environment.config.remoteSequencers.size)
+        == connectedSynchronizersCount
+    )
 
     implicit val e: TestConsoleEnvironment = env
 
@@ -84,6 +89,8 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
     )
 
     participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
+
+    participants.all.foreach(_.resources.set_resource_limits(ResourceLimits.noLimit))
   }
 
   def shutdownLedgerApiConformanceEnvironment(env: TestConsoleEnvironment): Unit = {
@@ -122,8 +129,8 @@ class LedgerApiConformanceMultiSynchronizerTest
     new UseLedgerApiTestTool(
       loggerFactory,
       connectedSynchronizersCount = connectedSynchronizersCount,
-      lfVersion = UseLedgerApiTestTool.LfVersion.Stable,
-      version = LAPITTVersion.LocalJar,
+      lfVersion = LanguageVersion.v2_2,
+      version = LAPITTVersion.Local,
     )
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(ledgerApiTestToolPlugin)
@@ -175,6 +182,7 @@ object LedgerApiConformanceBase {
     "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndInPageBoundaryDescending",
     "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
     "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
+    "UpdateServiceStreamsIT:TXPagedAscendingPruningBehindEnd",
     // Exclude ContractIdIT tests except: RejectNonSuffixedV1Cid, AcceptSuffixedV1Cid
     "ContractIdIT:AcceptNonSuffixedV1Cid",
     "ContractIdIT:AcceptSuffixedV1CidExerciseTarget", // Racy with: ABORTED: CONTRACT_NOT_FOUND(14,0): Contract could not be found with id
@@ -183,6 +191,8 @@ object LedgerApiConformanceBase {
     "UserManagementServiceIT:RaceConditionCreateUsers", // See LedgerApiConformanceSuppressedLogs
     // Following value normalisation (https://github.com/digital-asset/daml/pull/19912), this throws a different, equally correct, error
     "CommandServiceIT:CSRefuseBadParameter",
+    // TODO(i31186): enable this once the issue is fixed
+    "TransactionServiceVisibilityIT:TXLedgerEffectsHideCommandIdToNonSubmittingStakeholders",
   )
 }
 
@@ -281,7 +291,7 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
 }
 
 trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase {
-  override def lfVersion = UseLedgerApiTestTool.LfVersion.V23
+  override def lfVersion = LanguageVersion.v2_3_2
 
   override def connectedSynchronizersCount = 1
 
@@ -329,7 +339,7 @@ class LedgerApiKeysConformanceTest_Postgres extends LedgerApiKeysConformanceTest
 
 trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConformanceBase {
 
-  override def lfVersion = UseLedgerApiTestTool.LfVersion.Dev
+  override def lfVersion = LanguageVersion.devLfVersion
 
   override def connectedSynchronizersCount = 1
 
@@ -404,6 +414,7 @@ trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiC
         "UpdateServiceStreamsIT:TXPagedDynamicPruningStartEndInPageBoundaryDescending",
         "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
         "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
+        "UpdateServiceStreamsIT:TXPagedAscendingPruningBehindEnd",
       )
 
       ledgerApiTestToolPlugin.runSuitesSerially(

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -14,8 +15,10 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
+  PartiesAllocator,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -27,12 +30,14 @@ import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.LocalRejectError
 import com.digitalasset.canton.protocol.LocalRejectError.UnassignmentRejects
 import com.digitalasset.canton.synchronizer.sequencer.*
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
 import com.google.rpc.status.Status
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
 
 trait ReassignmentServiceConcurrentReassignmentsIntegrationTest
@@ -41,7 +46,8 @@ trait ReassignmentServiceConcurrentReassignmentsIntegrationTest
     with AcsInspection
     with HasReassignmentCommandsHelpers
     with HasCommandRunnersHelpers
-    with HasProgrammableSequencer {
+    with HasProgrammableSequencer
+    with EntitySyntax {
 
   private val party1a = "party1"
   private val party1b = "party1b"
@@ -80,12 +86,31 @@ trait ReassignmentServiceConcurrentReassignmentsIntegrationTest
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
-        party1aId = participant1.parties.enable(party1a, synchronizer = daName)
-        participant1.parties.enable(party1a, synchronizer = acmeName)
-        participant1.parties.enable(party1b, synchronizer = daName)
-        participant1.parties.enable(party1b, synchronizer = acmeName)
-        party2Id = participant2.parties.enable(party2, synchronizer = daName)
-        participant2.parties.enable(party2, synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            party1a -> participant1,
+            party1b -> participant1,
+            party2 -> participant2,
+          ),
+          Map(
+            party1a -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            party1b -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            party2 -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+          timeout = config.NonNegativeDuration.tryFromDuration(2.minutes),
+        )
+
+        party1aId = party1a.toPartyId(participant1)
+        party2Id = party2.toPartyId(participant2)
 
         programmableSequencers.put(
           daName,

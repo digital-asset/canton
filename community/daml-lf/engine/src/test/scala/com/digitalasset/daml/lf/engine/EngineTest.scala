@@ -3050,25 +3050,50 @@ class EngineTestExceptions(
 
     val seedId = Identifier(exceptionsPkgId, "Exceptions:NodeSeeds")
 
-    if (contractStateMode == ContractStateMachine.Mode.NoKey)
-      "Only create and exercise nodes end up in actionNodeSeeds" in {
+    contractStateMode match {
+      case ContractStateMachine.Mode.NoKey =>
+        "Only create and exercise nodes end up in actionNodeSeeds" in {
 
-        val command = ApiCommand.CreateAndExercise(
-          seedId.toRef,
-          ValueRecord(None, ImmArray((None, ValueParty(party)))),
-          "CreateAllTypes",
-          ValueRecord(None, ImmArray((None, ValueContractId(contractT.contractId)))),
-        )
-        inside(run(command)) { case Right((tx, meta, _)) =>
-          tx.nodes.size shouldBe 7
-          tx.nodes(NodeId(0)) shouldBe a[Node.Create]
-          tx.nodes(NodeId(1)) shouldBe a[Node.Exercise]
-          tx.nodes(NodeId(2)) shouldBe a[Node.Fetch]
-          tx.nodes(NodeId(3)) shouldBe a[Node.Create]
-          tx.nodes(NodeId(4)) shouldBe a[Node.Rollback]
-          tx.nodes(NodeId(5)) shouldBe a[Node.Fetch]
-          tx.nodes(NodeId(6)) shouldBe a[Node.Create]
-          meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 6)
+          val command = ApiCommand.CreateAndExercise(
+            seedId.toRef,
+            ValueRecord(None, ImmArray((None, ValueParty(party)))),
+            "CreateAllTypesNoKey",
+            ValueRecord(None, ImmArray((None, ValueContractId(contractT.contractId)))),
+          )
+          inside(run(command)) { case Right((tx, meta, _)) =>
+            tx.nodes.size shouldBe 7
+            tx.nodes(NodeId(0)) shouldBe a[Node.Create]
+            tx.nodes(NodeId(1)) shouldBe a[Node.Exercise]
+            tx.nodes(NodeId(2)) shouldBe a[Node.Fetch]
+            tx.nodes(NodeId(3)) shouldBe a[Node.Create]
+            tx.nodes(NodeId(4)) shouldBe a[Node.Rollback]
+            tx.nodes(NodeId(5)) shouldBe a[Node.Fetch]
+            tx.nodes(NodeId(6)) shouldBe a[Node.Create]
+            meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 6)
+          }
+        }
+      case ContractStateMachine.Mode.NUCK =>
+        "Only create and exercise nodes end up in actionNodeSeeds" in {
+
+          val command = ApiCommand.CreateAndExercise(
+            seedId.toRef,
+            ValueRecord(None, ImmArray((None, ValueParty(party)))),
+            "CreateAllTypes",
+            ValueRecord(None, ImmArray((None, ValueContractId(contractK.contractId)))),
+          )
+          inside(run(command)) { case Right((tx, meta, _)) =>
+            tx.nodes.size shouldBe 9
+            tx.nodes(NodeId(0)) shouldBe a[Node.Create]
+            tx.nodes(NodeId(1)) shouldBe a[Node.Exercise]
+            tx.nodes(NodeId(2)) shouldBe a[Node.Fetch]
+            tx.nodes(NodeId(3)) shouldBe a[Node.Create]
+            tx.nodes(NodeId(4)) shouldBe a[Node.Create]
+            tx.nodes(NodeId(5)) shouldBe a[Node.Rollback]
+            tx.nodes(NodeId(6)) shouldBe a[Node.Fetch]
+            tx.nodes(NodeId(7)) shouldBe a[Node.Fetch]
+            tx.nodes(NodeId(8)) shouldBe a[Node.QueryByKey]
+            meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 4)
+          }
         }
       }
   }

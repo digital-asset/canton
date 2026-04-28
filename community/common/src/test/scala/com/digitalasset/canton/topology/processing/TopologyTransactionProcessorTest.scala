@@ -28,7 +28,6 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{FailOnShutdown, SequencerCounter}
 import org.scalatest.Assertion
 
@@ -418,15 +417,11 @@ abstract class TopologyTransactionProcessorTest
           runScenarios(
             "out-of-band proposal without any existing state",
             List(prop),
-            if (this.testedProtocolVersion < ProtocolVersion.v35) List()
-            else List("does not match the expected serial"),
+            // TODO(#32311): adapt when restoring validation that newly added proposals start with serial 1
           ) { store =>
             val txs = fetchTx(store, ts(10), isProposal = true).result.map(_.transaction)
-            if (this.testedProtocolVersion < ProtocolVersion.v35) {
-              txs shouldBe List(prop)
-            } else {
-              txs shouldBe empty
-            }
+            // TODO(#32311): adapt when restoring validation that newly added proposals start with serial 1
+            txs shouldBe List(prop)
           }
         }
 
@@ -534,19 +529,15 @@ abstract class TopologyTransactionProcessorTest
           runScenarios(
             "update tx with gap between serials",
             List(tx, tx2),
-            if (testedProtocolVersion < ProtocolVersion.v35) List()
-            else List("does not match the expected serial"),
+            // TODO(#32311): adapt when restoring validation that newly added proposals start with serial 1
           ) { store =>
-            // the second tx should bounce
+            // TODO(#32311): adapt when restoring validation that newly added proposals start with serial 1
             validate(
               fetch(store, ts(10), isProposal = true),
-              // older PVs allowed out of order proposals
-              if (testedProtocolVersion < ProtocolVersion.v35)
-                List(
-                  tx,
-                  tx2,
-                )
-              else List(tx),
+              List(
+                tx,
+                tx2,
+              ),
             )
           }
         }

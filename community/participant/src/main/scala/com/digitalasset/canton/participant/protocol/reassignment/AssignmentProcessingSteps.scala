@@ -25,10 +25,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidation.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -39,17 +36,20 @@ import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.TooManyViews
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeserializationError}
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, EitherTUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.google.protobuf.ByteString
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -242,11 +242,11 @@ private[reassignment] class AssignmentProcessingSteps(
         .leftMap[ReassignmentProcessorError](
           EncryptionError(contractIds, _)
         )
-      ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
+
       viewMessage <- EncryptedViewMessageFactory
-        .create(AssignmentViewType)(
+        .encryptView(AssignmentViewType)(
           fullTree,
-          (viewKey, viewKeyMap),
+          viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
           recentSnapshot,
           Some(signingTimestampOverrides),
           protocolVersion.unwrap,
@@ -254,6 +254,7 @@ private[reassignment] class AssignmentProcessingSteps(
         .leftMap[ReassignmentProcessorError](
           EncryptionError(contractIds, _)
         )
+
       rootHashMessage =
         RootHashMessage(
           rootHash,
@@ -297,6 +298,31 @@ private[reassignment] class AssignmentProcessingSteps(
     )
   }
 
+  override def validateSubmittersNotOnboarding(
+      submissionParam: SubmissionParam,
+      topologySnapshot: TopologySnapshot,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
+    val submitter = submissionParam.submitterLf
+
+    EitherT(
+      topologySnapshot.hostedOn(Set(submitter), participantId).map { hosted =>
+        val isOnboarding = hosted.get(submitter).exists(_.onboarding)
+
+        if (isOnboarding) {
+          Left(
+            ReassignmentProcessingSteps.ReassignmentSubmissionErrors.PartyCurrentlyOnboarding
+              .Reject(submitter)
+          )
+        } else {
+          Right(())
+        }
+      }
+    )
+  }
+
   override def createSubmissionResult(
       deliver: Deliver[Envelope[?]],
       pendingSubmission: PendingSubmissionData,
@@ -314,24 +340,34 @@ private[reassignment] class AssignmentProcessingSteps(
     FutureUnlessShutdown,
     EncryptedViewMessageError,
     (WithRecipients[FullAssignmentTree], Option[Signature]),
-  ] =
+  ] = {
+    val message = envelope.protocolMessage
+
+    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullAssignmentTree] =
+      FullAssignmentTree
+        .fromByteString(snapshot.pureCrypto, protocolVersion)(bytes)
+        .leftMap(e => DefaultDeserializationError(e.toString))
+
     EncryptedViewMessage
       .decryptFor(
         snapshot,
         sessionKeyStore,
-        envelope.protocolMessage,
+        message,
         participantId,
-      ) { bytes =>
-        FullAssignmentTree
-          .fromByteString(snapshot.pureCrypto, protocolVersion)(bytes)
-          .leftMap(e => DefaultDeserializationError(e.toString))
-      }
-      .map(fullTree =>
-        (
-          WithRecipients(fullTree, envelope.recipients),
-          envelope.protocolMessage.submittingParticipantSignature,
+      )(deserializeTree)
+      .flatMap { multiView =>
+        EitherT.cond(
+          multiView.viewTrees.lengthIs == 1,
+          (
+            WithRecipients(multiView.viewTrees.head1, envelope.recipients),
+            message.submittingParticipantSignature,
+          ),
+          TooManyViews(
+            s"Exactly 1 view is expected for Assignment, ${multiView.viewTrees.length} given."
+          ),
         )
-      )
+      }
+  }
 
   override def computeActivenessSet(
       parsedRequest: ParsedReassignmentRequest[FullAssignmentTree]

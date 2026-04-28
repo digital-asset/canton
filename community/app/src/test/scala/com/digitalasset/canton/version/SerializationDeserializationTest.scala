@@ -17,7 +17,6 @@ import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackin
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.pruning.*
 import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.channel.{
@@ -161,7 +160,12 @@ final class SerializationDeserializationTest
         // InformeeMessage become large due to the embedded ExternalAuthorization (quadratic list)
         // on top of transaction view trees, so give this test more time.
         testContext(InformeeMessage, (TestHash, version), version)(informeeMessageArb)
-        test(EncryptedViewMessage, version)(encryptedViewMessage)
+
+        if (version >= ProtocolVersion.v35) {
+          test(EncryptedMultipleViewsMessage, version)(encryptedMultipleViewsMessage)
+        } else {
+          test(EncryptedSingleViewMessage, version)(encryptedSingleViewMessage)
+        }
 
         test(TopologyTransaction, version)
         testContext(TopologyTransactionsBroadcast, version, version)
@@ -217,7 +221,8 @@ final class SerializationDeserializationTest
           ),
           version,
         )
-        val randomnessLength = computeRandomnessLength(ExampleTransactionFactory.pureCrypto)
+        val randomnessLength =
+          EncryptedViewMessage.computeRandomnessLength(ExampleTransactionFactory.pureCrypto)
         testContext(LightTransactionViewTree, ((TestHash, randomnessLength), version), version)
         testContextTaggedProtocolVersion(AssignmentViewTree, TestHash, Target(version))
         testContext(

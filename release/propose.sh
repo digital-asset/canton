@@ -91,8 +91,9 @@ stage_version_updates() {
   run "Stage version.sbt update" "$_GIT" add "$REPO_ROOT/version.sbt"
   run "Stage VERSION update" "$_GIT" add "$REPO_ROOT/VERSION"
 
-  # stage our daml.yaml changes
-  run "Staging daml project updates" "$_GIT" add "**/daml.yaml"
+  # stage JSON API golden files
+  run "Stage OpenAPI golden file" "$_GIT" add "$REPO_ROOT/community/ledger/ledger-json-api/src/test/resources/json-api-docs/openapi.yaml"
+  run "Stage AsyncAPI golden file" "$_GIT" add "$REPO_ROOT/community/ledger/ledger-json-api/src/test/resources/json-api-docs/asyncapi.yaml"
 }
 
 update_release_notes() {
@@ -147,11 +148,6 @@ create_release_commit() {
   update_version "$release_version"
   stage_version_updates
 
-  # JSON API golden files
-  run "Generate Ledger JSON Api documentation" sbt packageJsonApiDocsArtifacts
-  git add "community/ledger/ledger-json-api/src/test/resources/json-api-docs/openapi.yaml"
-  git add "community/ledger/ledger-json-api/src/test/resources/json-api-docs/asyncapi.yaml"
-
   run "Commit release commit" "$_GIT" commit -m "release: $release_version"
   local -r sha=$("$_GIT" log -1 --format=format:%H)
   info "Committed [$release_version] release with SHA [$sha]"
@@ -178,10 +174,6 @@ create_next_snapshot_commit() {
   update_version "$next_version"
   stage_version_updates
 
-  # JSON API golden files
-  run "Generate Ledger JSON Api documentation" sbt packageJsonApiDocsArtifacts
-  git add "community/ledger/ledger-json-api/src/test/resources/json-api-docs/openapi.yaml"
-  git add "community/ledger/ledger-json-api/src/test/resources/json-api-docs/asyncapi.yaml"
 
   run "Commit next version" "$_GIT" commit -m "chore: prepare for work on $next_version"
 
@@ -208,9 +200,8 @@ update_main_after_release_branch() {
 
   # Update version.sbt
   info "Updating version.sbt and VERSION to $next_version"
-  update_version_sbt_and_VERSION "$next_version"
-  run "Stage version.sbt" "$_GIT" add "$REPO_ROOT/version.sbt"
-  run "Stage VERSION" "$_GIT" add "$REPO_ROOT/VERSION"
+  update_version "$next_version"
+  stage_version_updates
 
   # Add the new version to the list of ReleaseVersion
   info "Adding $next_version to the versions list"

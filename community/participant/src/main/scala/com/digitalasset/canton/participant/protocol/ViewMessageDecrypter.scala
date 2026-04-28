@@ -26,13 +26,17 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedVie
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.ViewHash
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   EncryptedViewMessageError,
   TransactionViewMessage,
 }
-import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, OpenEnvelope, WithRecipients}
+import com.digitalasset.canton.sequencing.protocol.{
+  MemberRecipient,
+  OpenEnvelope,
+  Recipients,
+  WithRecipients,
+}
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.ParticipantId
@@ -67,10 +71,15 @@ class ViewMessageDecrypter(
     // view. The promise gets fulfilled once the randomness of that view has been extracted,
     // either from EncryptedViewMessage.sessionKeys or from LightTransactionViewTree.subviewHashesAndKeys.
 
+    val messagesWithRecipients = batch.map { envelope =>
+      envelope.protocolMessage -> envelope.recipients
+    }
+
     val randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]] =
       batch
-        .map(envelope =>
-          envelope.protocolMessage.viewHash -> PromiseUnlessShutdown.supervised[SecureRandomness](
+        .flatMap(_.protocolMessage.viewHashes)
+        .map(viewHash =>
+          viewHash -> PromiseUnlessShutdown.supervised[SecureRandomness](
             "secure-randomness",
             futureSupervisor,
           )
@@ -80,24 +89,38 @@ class ViewMessageDecrypter(
 
     EitherT.right(for {
       // Extract randomness from EncryptedViewMessages
-      _ <- batch.toNEF.parTraverse { envelope =>
-        val viewHash = envelope.protocolMessage.viewHash
-        extractRandomnessFromEnvelope(envelope).map(
-          _.foreach(storeRandomness(viewHash, _, checked(randomnessMap(viewHash))))
-        )
+      _ <- messagesWithRecipients.toNEF.parTraverse { case (message, recipients) =>
+        // For multi-view messages, let's put the randomness for all the hashes
+        val viewHashes = message.viewHashes
+        extractRandomnessFromEnvelope(message, recipients).map { randomnessO =>
+          randomnessO.foreach { randomness =>
+            viewHashes.foreach { viewHash =>
+              storeRandomness(viewHash, randomness, checked(randomnessMap(viewHash)))
+            }
+          }
+        }
       }
+
       // Decrypt LightTransactionViewTrees and keep adding randomness to randomnessMap whenever they become available.
-      decryptionResult <- batch.toNEF.parTraverse(
-        decryptView(randomnessMap, _)
-      )
+      decryptionResult <- messagesWithRecipients.toNEF
+        .parTraverse { case (message, recipients) =>
+          // Transform single view to a list for a compatibility with the v35+ multi-view result
+          decryptViews(randomnessMap, message, recipients).map {
+            case Left(error) => Seq(Left(error))
+            case Right(views) =>
+              views.forgetNE.map(view => Right(view))
+          }
+        }
+        .map(_.forgetNE.flatten)
+
     } yield DecryptedViews(decryptionResult))
   }
 
   private def extractRandomnessFromEnvelope(
-      envelope: OpenEnvelope[TransactionViewMessage]
+      message: TransactionViewMessage,
+      recipients: Recipients,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SecureRandomness]] =
-    if (envelope.recipients.leafRecipients.contains(MemberRecipient(participantId))) {
-      val message = envelope.protocolMessage
+    if (recipients.leafRecipients.contains(MemberRecipient(participantId))) {
       EncryptedViewMessage
         .decryptRandomness(
           snapshot,
@@ -108,7 +131,7 @@ class ViewMessageDecrypter(
         .valueOr { e =>
           ErrorUtil.internalError(
             new IllegalArgumentException(
-              s"Can't decrypt the randomness of the view with hash ${message.viewHash} " +
+              s"Can't decrypt the randomness of the message with hash(es) ${message.viewHashes} " +
                 s"where I'm allegedly an informee. $e"
             )
           )
@@ -116,35 +139,43 @@ class ViewMessageDecrypter(
         .map(Some(_))
     } else FutureUnlessShutdown.pure(None)
 
-  private def decryptView(
+  private def decryptViews(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
-      transactionViewEnvelope: OpenEnvelope[TransactionViewMessage],
+      message: TransactionViewMessage,
+      recipients: Recipients,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[
     EncryptedViewMessageError,
-    (WithRecipients[LightTransactionViewTree], Option[Signature]),
+    NonEmpty[Seq[(WithRecipients[LightTransactionViewTree], Option[Signature])]],
   ]] =
     for {
-      randomness <- randomnessMap(transactionViewEnvelope.protocolMessage.viewHash).futureUS
-      lightViewTreeE <- decryptViewWithRandomness(
+      // For the multiple views, we can take randomness from any hash from list, it should be the same
+      // TODO(#31213): Handle multiple views with the same view hash during decryption
+      randomness <- randomnessMap(message.viewHashes.head1).futureUS
+      decryptionResult <- decryptViewsWithRandomness(
         randomnessMap,
-        transactionViewEnvelope.protocolMessage,
+        message,
         randomness,
       ).value
-    } yield lightViewTreeE.map { case (view, signature) =>
-      (WithRecipients(view, transactionViewEnvelope.recipients), signature)
+    } yield decryptionResult.map { case (viewTrees, signature) =>
+      viewTrees.map { viewTree =>
+        (WithRecipients(viewTree, recipients), signature)
+      }
     }
 
-  private def decryptViewWithRandomness(
+  private def decryptViewsWithRandomness(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
       viewMessage: TransactionViewMessage,
       randomness: SecureRandomness,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     EncryptedViewMessageError,
-    (LightTransactionViewTree, Option[Signature]),
+    (
+        NonEmpty[Seq[LightTransactionViewTree]],
+        Option[Signature],
+    ),
   ] =
     for {
-      lightTransactionViewTree <- EncryptedViewMessage.decryptFor(
+      lightTransactionMultiViewTree <- EncryptedViewMessage.decryptFor(
         snapshot,
         sessionKeyStore,
         viewMessage,
@@ -153,21 +184,26 @@ class ViewMessageDecrypter(
       )(
         lightTransactionViewTreeDeserializer
       )
-      _ = lightTransactionViewTree.subviewHashesAndKeys
-        .foreach { case ViewHashAndKey(subviewHash, subviewKey) =>
-          randomnessMap.get(subviewHash) match {
-            case Some(promise) => storeRandomness(subviewHash, subviewKey, promise)
-            case None =>
-              // It is enough to alarm here.
-              // The view will be filtered out when attempting to construct a FullTransactionViewTree.
-              SyncServiceAlarm
-                .Warn(
-                  s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
-                )
-                .report()
+
+      viewTrees = lightTransactionMultiViewTree.viewTrees
+
+      _ = viewTrees.forgetNE.foreach { viewTree =>
+        viewTree.subviewHashesAndKeys
+          .foreach { case ViewHashAndKey(subviewHash, subviewKey) =>
+            randomnessMap.get(subviewHash) match {
+              case Some(promise) => storeRandomness(subviewHash, subviewKey, promise)
+              case None =>
+                // It is enough to alarm here.
+                // The view will be filtered out when attempting to construct a FullTransactionViewTree.
+                SyncServiceAlarm
+                  .Warn(
+                    s"View ${viewTree.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
+                  )
+                  .report()
+            }
           }
-        }
-    } yield (lightTransactionViewTree, viewMessage.submittingParticipantSignature)
+      }
+    } yield (viewTrees, viewMessage.submittingParticipantSignature)
 
   private def storeRandomness(
       viewHash: ViewHash,
@@ -191,7 +227,10 @@ class ViewMessageDecrypter(
       bytes: ByteString
   ): Either[DefaultDeserializationError, LightTransactionViewTree] =
     LightTransactionViewTree
-      .fromByteString((pureCrypto, computeRandomnessLength(pureCrypto)), protocolVersion)(
+      .fromByteString(
+        (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+        protocolVersion,
+      )(
         bytes
       )
       .leftMap(err => DefaultDeserializationError(err.message))

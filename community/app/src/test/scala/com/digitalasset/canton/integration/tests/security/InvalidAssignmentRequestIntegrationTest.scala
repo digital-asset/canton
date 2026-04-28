@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.security
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.{ContractsReassignmentBatch, UnassignmentData}
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.AcsInspection
+import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -27,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   ProgrammableSequencer,
 }
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.daml.lf.transaction.CreationTime
 import org.scalatest.Assertion
@@ -49,7 +51,8 @@ final class InvalidAssignmentRequestIntegrationTest
     with HasProgrammableSequencer
     with HasCycleUtils
     with AcsInspection
-    with SecurityTestHelpers {
+    with SecurityTestHelpers
+    with EntitySyntax {
 
   private var signatory: PartyId = _
   private var observer: PartyId = _
@@ -73,10 +76,25 @@ final class InvalidAssignmentRequestIntegrationTest
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
 
-        signatory = participant1.parties.enable("signatory", synchronizer = daName)
-        participant1.parties.enable("signatory", synchronizer = acmeName)
-        observer = participant2.parties.enable("observer", synchronizer = daName)
-        participant2.parties.enable("observer", synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            "signatory" -> participant1,
+            "observer" -> participant2,
+          ),
+          Map(
+            "signatory" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            "observer" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+        )
+
+        signatory = "signatory".toPartyId(participant1)
+        observer = "observer".toPartyId(participant2)
 
         // acme (target for reassignments)
         pureCryptoRef.set(sequencer2.crypto.pureCrypto)

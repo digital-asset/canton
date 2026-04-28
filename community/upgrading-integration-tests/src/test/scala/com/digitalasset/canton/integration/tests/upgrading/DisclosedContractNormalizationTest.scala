@@ -115,7 +115,6 @@ class DisclosedContractNormalizationTest
     val underTest =
       new StoreBackedCommandInterpreter(
         engine = testEngine.engine,
-        contractStateMode = NextGenContractStateMachine.Mode.default,
         participant = Ref.ParticipantId.assertFromString("anId"),
         packageResolver = testEngine.packageResolver,
         contractStore = mock[ContractStore],
@@ -134,7 +133,7 @@ class DisclosedContractNormalizationTest
       val commands = testEngine.validateCommand(command, alice, disclosedContracts = Seq(fat))
 
       val result = underTest
-        .interpret(commands, testEngine.randomHash())(
+        .interpret(commands, NextGenContractStateMachine.Mode.default, testEngine.randomHash())(
           LoggingContextWithTrace(loggerFactory),
           ec,
         )

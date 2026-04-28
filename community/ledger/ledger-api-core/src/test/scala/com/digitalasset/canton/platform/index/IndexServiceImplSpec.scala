@@ -5,9 +5,11 @@ package com.digitalasset.canton.platform.index
 
 import cats.implicits.catsSyntaxSemigroup
 import cats.syntax.either.*
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.AcsDelta
+import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{
   CumulativeFilter,
   EventFormat,
@@ -18,7 +20,12 @@ import com.digitalasset.canton.ledger.api.{
   UpdateFormat,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NoLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.platform.index.IndexServiceImpl.*
 import com.digitalasset.canton.platform.index.IndexServiceImplSpec.Scope
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
@@ -48,6 +55,9 @@ import com.digitalasset.daml.lf.data.Ref.{
   Party,
   QualifiedName,
 }
+import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
+import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
@@ -58,6 +68,7 @@ import org.scalatest.concurrent.ScalaFutures.convertScalaFuture
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{EitherValues, OptionValues}
+import org.slf4j.helpers.NOPLogger
 
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
@@ -1491,6 +1502,178 @@ class IndexServiceImplSpec
         (Offset.tryFromLong(o.toLong), elem)
       }
   }
+
+  behavior of "IndexServiceImpl.processAscendingPageData"
+
+  val allUpdatesFormat = updateFormatForTransactions(eventFormat =
+    EventFormat(
+      filtersByParty = Map.empty,
+      filtersForAnyParty = None,
+      verbose = false,
+    )
+  )
+
+  it should "trim updates exceeding page size" in {
+    val getUpdatesPageRequest = GetUpdatesPageRequest(
+      startExclusive = None,
+      endInclusive = None,
+      continueStreamFromIncl = None,
+      maxPageSize = 2,
+      updateFormat = allUpdatesFormat,
+      descendingOrder = false,
+      requestChecksum = ByteString.copyFrom(Array[Byte](1)),
+      participantChecksum = ByteString.copyFrom(Array[Byte](2)),
+    )
+
+    val response = IndexServiceImpl.processAscendingPageData(
+      getUpdatesPageRequest = getUpdatesPageRequest,
+      loggingContext = LoggingContextWithTrace.ForTesting,
+      isFirstPageOfAscendingDynamicLowerBound = true,
+      limit = 8,
+      calculatedBeginExclusive = Some(Offset.tryFromLong(1)),
+      calculatedEndInclusive = Some(Offset.tryFromLong(100)),
+      transactions = Vector(
+        mockTransaction(1L),
+        mockTransaction(2L),
+        mockTransaction(3L),
+        mockTransaction(5L),
+        mockTransaction(6L),
+      ),
+      pruningOffsetAfterFetch = Some(Offset.tryFromLong(2)),
+      logger = mock[TracedLogger],
+    )
+
+    response.updates should contain theSameElementsInOrderAs Seq(
+      mockTransaction(3L),
+      mockTransaction(5L),
+    )
+    response.nextPageToken should not be empty
+    response.lowestPageOffsetExclusive should equal(2L)
+    response.highestPageOffsetInclusive should equal(5L)
+  }
+
+  it should "fail if pruning offset advance does not allow to generate full page" in {
+    val getUpdatesPageRequest = GetUpdatesPageRequest(
+      startExclusive = None,
+      endInclusive = None,
+      continueStreamFromIncl = None,
+      maxPageSize = 2,
+      updateFormat = allUpdatesFormat,
+      descendingOrder = false,
+      requestChecksum = ByteString.copyFrom(Array[Byte](1)),
+      participantChecksum = ByteString.copyFrom(Array[Byte](2)),
+    )
+
+    assertThrows[StatusRuntimeException](
+      IndexServiceImpl.processAscendingPageData(
+        getUpdatesPageRequest = getUpdatesPageRequest,
+        loggingContext = LoggingContextWithTrace.ForTesting,
+        isFirstPageOfAscendingDynamicLowerBound = true,
+        limit = 6,
+        calculatedBeginExclusive = Some(Offset.tryFromLong(1)),
+        calculatedEndInclusive = Some(Offset.tryFromLong(100)),
+        transactions = Vector(
+          mockTransaction(1L),
+          mockTransaction(2L),
+          mockTransaction(3L),
+          mockTransaction(4L),
+          mockTransaction(5L),
+          mockTransaction(6L),
+        ),
+        pruningOffsetAfterFetch = Some(Offset.tryFromLong(5)),
+        logger = TracedLogger(NOPLogger.NOP_LOGGER),
+      )
+    )
+  }
+
+  it should "succeed if pruning offset advance does not allow to generate full page, but the whole range was fetched" in {
+    val getUpdatesPageRequest = GetUpdatesPageRequest(
+      startExclusive = None,
+      endInclusive = None,
+      continueStreamFromIncl = None,
+      maxPageSize = 2,
+      updateFormat = allUpdatesFormat,
+      descendingOrder = false,
+      requestChecksum = ByteString.copyFrom(Array[Byte](1)),
+      participantChecksum = ByteString.copyFrom(Array[Byte](2)),
+    )
+
+    val response =
+      IndexServiceImpl.processAscendingPageData(
+        getUpdatesPageRequest = getUpdatesPageRequest,
+        loggingContext = LoggingContextWithTrace.ForTesting,
+        isFirstPageOfAscendingDynamicLowerBound = true,
+        limit = 6,
+        calculatedBeginExclusive = Some(Offset.tryFromLong(1)),
+        calculatedEndInclusive = Some(Offset.tryFromLong(100)),
+        transactions = Vector(
+          mockTransaction(1L),
+          mockTransaction(2L),
+          mockTransaction(50L), // Simulate a lot of filtered offsets
+        ),
+        pruningOffsetAfterFetch = Some(Offset.tryFromLong(2)),
+        logger = mock[TracedLogger],
+      )
+
+    response.nextPageToken should not be empty
+    response.updates should contain theSameElementsInOrderAs Seq(mockTransaction(50L))
+    response.lowestPageOffsetExclusive should equal(2L)
+    response.highestPageOffsetInclusive should equal(100L)
+  }
+
+  it should "succeed if pruning offset advance does not allow to generate full page, but the whole range was fetched and reached the end" in {
+    val getUpdatesPageRequest = GetUpdatesPageRequest(
+      startExclusive = None,
+      endInclusive = Some(Offset.tryFromLong(100L)),
+      continueStreamFromIncl = None,
+      maxPageSize = 2,
+      updateFormat = allUpdatesFormat,
+      descendingOrder = false,
+      requestChecksum = ByteString.copyFrom(Array[Byte](1)),
+      participantChecksum = ByteString.copyFrom(Array[Byte](2)),
+    )
+
+    val response =
+      IndexServiceImpl.processAscendingPageData(
+        getUpdatesPageRequest = getUpdatesPageRequest,
+        loggingContext = LoggingContextWithTrace.ForTesting,
+        isFirstPageOfAscendingDynamicLowerBound = true,
+        limit = 6,
+        calculatedBeginExclusive = Some(Offset.tryFromLong(1)),
+        calculatedEndInclusive = Some(Offset.tryFromLong(100)),
+        transactions = Vector(
+          mockTransaction(1L),
+          mockTransaction(2L),
+          mockTransaction(50L), // Simulate a lot of filtered offsets
+        ),
+        pruningOffsetAfterFetch = Some(Offset.tryFromLong(2)),
+        logger = mock[TracedLogger],
+      )
+
+    response.nextPageToken should be(empty)
+    response.updates should contain theSameElementsInOrderAs Seq(mockTransaction(50L))
+    response.lowestPageOffsetExclusive should equal(2L)
+    response.highestPageOffsetInclusive should equal(100L)
+  }
+
+  def mockTransaction(offset: Long): GetUpdateResponse =
+    GetUpdateResponse(
+      GetUpdateResponse.Update.Transaction(
+        com.daml.ledger.api.v2.transaction.Transaction(
+          updateId = s"u$offset",
+          commandId = s"c$offset",
+          workflowId = s"w$offset",
+          effectiveAt = Some(Timestamp.defaultInstance),
+          events = Vector(),
+          offset = offset,
+          synchronizerId = "synchronizer",
+          traceContext = None,
+          recordTime = Some(Timestamp.defaultInstance),
+          externalTransactionHash = None,
+          paidTrafficCost = None,
+        )
+      )
+    )
 
   def updateFormatForTransactions(eventFormat: EventFormat): UpdateFormat =
     UpdateFormat(

@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.RejectionReasonTemplate
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.protocol.{LfHash, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -176,7 +177,7 @@ object Update {
 
   /** Signal the acceptance of a transaction.
     */
-  trait TransactionAccepted extends SynchronizerUpdate {
+  sealed trait TransactionAccepted extends SynchronizerUpdate {
 
     /** The information provided by the submitter of the command that created this transaction. It
       * must be provided if this participant hosts one of the [[SubmitterInfo.actAs]] parties and
@@ -270,21 +271,19 @@ object Update {
 
   /** Information about a contract needed for indexing.
     *
-    * @param internalContractId
-    *   The internal contract id assigned to the contract.
-    * @param contractAuthenticationData
-    *   Contract authentication data assigned by the ledger implementation. This data is opaque and
-    *   can only be used in [[com.digitalasset.daml.lf.transaction.FatContractInstance]]s when
-    *   submitting transactions through the [[SyncService]].
+    * @param persistedContractInstance
+    *   The persisted contract.
     * @param representativePackageId
     *   The representative package-id for the contract, if the contract is created in this
     *   transaction. See [[TransactionAccepted.RepresentativePackageId]] for more details.
     */
   final case class ContractInfo(
-      internalContractId: Long,
-      contractAuthenticationData: Bytes,
+      persistedContractInstance: PersistedContractInstance,
       representativePackageId: RepresentativePackageId,
-  )
+  ) {
+    def internalContractId: Long = persistedContractInstance.internalContractId
+    def contractAuthenticationData: Bytes = persistedContractInstance.inst.authenticationData
+  }
 
   final case class SequencedTransactionAccepted(
       completionInfoO: Option[CompletionInfo],
@@ -356,7 +355,7 @@ object Update {
       )
   }
 
-  trait ReassignmentAccepted extends SynchronizerUpdate {
+  sealed trait ReassignmentAccepted extends SynchronizerUpdate {
 
     /** The information provided by the submitter of the command that created this reassignment. It
       * must be provided if this participant hosts the submitter and shall output a completion event

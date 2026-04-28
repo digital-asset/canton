@@ -26,10 +26,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 // Split the Upgrade unit tests over four suites, which seems to be the sweet
 // spot (~95s instead of ~185s runtime)
-class UpgradesMatrixUnit0 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 3, 0)
-class UpgradesMatrixUnit1 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 3, 1)
-class UpgradesMatrixUnit2 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 3, 2)
-class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 1, 0)
+class UpgradesMatrixUnit0 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 0)
+class UpgradesMatrixUnit1 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 1)
+class UpgradesMatrixUnit2 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 2)
+class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2MaxStable, 4, 3)
 
 /** A test suite to run the UpgradesMatrix matrix directly in the engine
   *
@@ -66,6 +66,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         clientLocalContractId = toContractId("client-local"),
         clientGlobalContractId = toContractId("client-global"),
         globalContractId = toContractId("1"),
+        extraGlobalContractId = toContractId("2"),
         additionalSetup = (),
       )
     )
@@ -127,12 +128,28 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
       packageName = cases.templateDefsPkgName,
       templateId = testHelper.v1TplId,
       createArg = normalize(
-        testHelper.globalContractArg(setupData.alice, setupData.bob),
+        testHelper.globalContractArgV1(setupData.alice, setupData.bob),
         Ast.TTyCon(testHelper.v1TplId),
       ),
       signatories = immutable.TreeSet(setupData.alice),
       stakeholders = immutable.TreeSet(setupData.alice),
-      contractKeyWithMaintainers = testHelper.globalContractKeyWithMaintainers(setupData),
+      contractKeyWithMaintainers = testHelper.globalContractV1KeyWithMaintainers(setupData),
+      createdAt = CreationTime.CreatedAt(Time.Timestamp.Epoch),
+      authenticationData = Bytes.assertFromString("00"),
+    )
+
+    val extraGlobalContract: FatContractInstance = FatContractInstanceImpl(
+      version = cases.serializationVersion,
+      contractId = setupData.extraGlobalContractId,
+      packageName = cases.templateDefsPkgName,
+      templateId = testHelper.v1TplId,
+      createArg = normalize(
+        testHelper.globalContractArgV1(setupData.alice, setupData.bob),
+        Ast.TTyCon(testHelper.v1TplId),
+      ),
+      signatories = immutable.TreeSet(setupData.alice),
+      stakeholders = immutable.TreeSet(setupData.alice),
+      contractKeyWithMaintainers = testHelper.globalContractV1KeyWithMaintainers(setupData),
       createdAt = CreationTime.CreatedAt(Time.Timestamp.Epoch),
       authenticationData = Bytes.assertFromString("00"),
     )
@@ -142,8 +159,15 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
     val submitters = Set(setupData.alice)
     val readAs = Set.empty[Party]
 
-    val lookupContractById = contractOrigin match {
-      case UpgradesMatrixCases.Global | UpgradesMatrixCases.Disclosed =>
+    val lookupContractById = (contractOrigin, testHelper.operation) match {
+      case (_, UpgradesMatrixCases.LookupNByKey) =>
+        Map(
+          setupData.clientLocalContractId -> clientLocalContract,
+          setupData.clientGlobalContractId -> clientGlobalContract,
+          setupData.globalContractId -> globalContract,
+          setupData.extraGlobalContractId -> extraGlobalContract,
+        )
+      case (UpgradesMatrixCases.Global | UpgradesMatrixCases.Disclosed, _) =>
         Map(
           setupData.clientLocalContractId -> clientLocalContract,
           setupData.clientGlobalContractId -> clientGlobalContract,
@@ -155,12 +179,23 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
           setupData.clientGlobalContractId -> clientGlobalContract,
         )
     }
-    val lookupContractByKey = contractOrigin match {
-      case UpgradesMatrixCases.Global | UpgradesMatrixCases.Disclosed =>
+    val lookupContractByKey = (contractOrigin, testHelper.operation) match {
+      case (_, UpgradesMatrixCases.LookupNByKey) =>
         (
             (gkey: GlobalKey) =>
               testHelper
-                .globalContractKeyWithMaintainers(setupData)
+                .globalContractV1KeyWithMaintainers(setupData)
+                .flatMap(helperKey =>
+                  Option.when(helperKey.globalKey == gkey)(
+                    Vector(extraGlobalContract, globalContract)
+                  )
+                )
+        ).unlift
+      case (UpgradesMatrixCases.Global | UpgradesMatrixCases.Disclosed, _) =>
+        (
+            (gkey: GlobalKey) =>
+              testHelper
+                .globalContractV1KeyWithMaintainers(setupData)
                 .flatMap(helperKey =>
                   Option.when(helperKey.globalKey == gkey)(Vector(globalContract))
                 )
@@ -178,6 +213,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
       setupData.clientLocalContractId -> hash(clientLocalContract),
       setupData.clientGlobalContractId -> hash(clientGlobalContract),
       setupData.globalContractId -> hash(globalContract),
+      setupData.extraGlobalContractId -> hash(extraGlobalContract),
     )
 
     newEngine()
@@ -219,7 +255,28 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   )(implicit ec: ExecutionContext): Assertion =
     expectedOutcome match {
       case UpgradesMatrixCases.ExpectSuccess =>
-        result shouldBe a[Right[?, ?]]
+        inside(result) { case Right((VersionedTransaction(_, nodes, rootNodes), _)) =>
+          rootNodes.toSeq.map(nodes(_)).collect { case e: Node.Exercise => e } match {
+            case Seq(e) =>
+              e.exerciseResult match {
+                case Some(ValueText(t)) =>
+                  // TODO(#32310) We have choices that are expected to succeed and
+                  // need to have an exception-free failure when they fail.
+                  // Currently, they return text, and we match for the phrase in
+                  // UpgradesMatrixCases.unexpectedErrorMessage. Later, we should
+                  // return Either and match on the variant instead.
+                  t should not include UpgradesMatrixCases.unexpectedErrorMessage
+                case Some(_) =>
+                  succeed // non-text type in result
+                case None =>
+                  fail("Expected success, got an exercise with no result value")
+              }
+            case Seq() =>
+              fail("Expected success, got no exercise node")
+            case _ =>
+              fail("Expected success, got more than one exercise node")
+          }
+        }
       case UpgradesMatrixCases.ExpectUpgradeError =>
         inside(result) { case Left(EE.Interpretation(EE.Interpretation.DamlException(error), _)) =>
           error shouldBe a[IE.Upgrade]
@@ -242,9 +299,11 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         inside(result) { case Left(EE.Interpretation(EE.Interpretation.DamlException(error), _)) =>
           error shouldBe a[IE.TemplatePreconditionViolated]
         }
-      case UpgradesMatrixCases.ExpectUnhandledException =>
+      case UpgradesMatrixCases.ExpectUnhandledException(expectedMsg) =>
         inside(result) { case Left(EE.Interpretation(EE.Interpretation.DamlException(error), _)) =>
-          error shouldBe a[IE.FailureStatus]
+          inside(error) { case e: IE.FailureStatus =>
+            e.errorMessage should include(expectedMsg)
+          }
         }
       case UpgradesMatrixCases.ExpectInternalInterpretationError =>
         inside(result) { case Left(EE.Interpretation(error, _)) =>

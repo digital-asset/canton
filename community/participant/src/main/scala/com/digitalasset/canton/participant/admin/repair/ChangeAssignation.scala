@@ -24,7 +24,6 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.daml.lf.data.Bytes
 
 import scala.concurrent.ExecutionContext
 
@@ -442,24 +441,21 @@ private final class ChangeAssignation(
         ),
         reassignment = Reassignment.Batch(batch.contracts.zipWithIndex.map { case (reassign, idx) =>
           Reassignment.Assign(
-            ledgerEffectiveTime = reassign.contract.inst.createdAt.time,
-            createNode = reassign.contract.toLf,
-            contractAuthenticationData = Bytes.fromByteString(
-              reassign.contract.metadata
-                .toByteString(repairTarget.unwrap.synchronizer.parameters.protocolVersion)
-            ),
             reassignmentCounter = reassign.counter.v,
             nodeId = idx,
-            internalContractId = checked {
-              // the internal contract id must exist since we persisted the contracts before
-              internalContractIds
-                .getOrElse(
-                  reassign.contract.contractId,
-                  ErrorUtil.invalidState(
-                    s"The internal contract id for contract ${reassign.contract.contractId} was not found"
-                  ),
-                )
-            },
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId = checked {
+                // the internal contract id must exist since we persisted the contracts before
+                internalContractIds
+                  .getOrElse(
+                    reassign.contract.contractId,
+                    ErrorUtil.invalidState(
+                      s"The internal contract id for contract ${reassign.contract.contractId} was not found"
+                    ),
+                  )
+              },
+              inst = reassign.contract.inst,
+            ),
           )
         }),
         repairCounter = changes.targetTimeOfRepair.unwrap.repairCounter,

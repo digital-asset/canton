@@ -39,7 +39,7 @@ class SyncCryptoWithLongTermKeysTest
           TestingTopology()
             .withSimpleParticipants(participant1)
             .withCryptoConfig(
-              cryptoConfigWithSessionSigningKeysConfig(SessionSigningKeysConfig.default)
+              cryptoConfigWithSessionSigningKeysConfig(SessionSigningKeysConfig.enabled)
             )
             .build(crypto, loggerFactory)
 

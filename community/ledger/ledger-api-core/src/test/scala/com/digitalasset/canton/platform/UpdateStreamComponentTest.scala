@@ -123,7 +123,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         dsoParty,
         "upd-id-ra-1",
         withAcsChange = true,
-        create1._2.loneElement.inst.toCreateNode,
+        create1._2,
       )
       ingestUpdateSync(reassignment1)
 
@@ -131,7 +131,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         dsoParty,
         "upd-id-ra-2",
         withAcsChange = true,
-        create2._2.loneElement.inst.toCreateNode,
+        create2._2,
       )
       ingestUpdateSync(reassignment2)
 
@@ -182,7 +182,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         dsoParty,
         "upd-id-ra-interleave-1",
         withAcsChange = true,
-        create1._2.loneElement.inst.toCreateNode,
+        create1._2,
       )
       ingestUpdateSync(reassignment1)
 
@@ -193,7 +193,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         dsoParty,
         "upd-id-ra-interleave-2",
         withAcsChange = true,
-        create2._2.loneElement.inst.toCreateNode,
+        create2._2,
       )
       ingestUpdateSync(reassignment2)
 

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -27,7 +26,6 @@ import com.digitalasset.canton.topology.transaction.checks.TopologyMappingChecks
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -311,21 +309,8 @@ class TopologyStateProcessorImpl private[processing] (
         TopologyTransactionRejection.Processor
           .SerialMismatch(actual = toValidate.serial, expected = expected),
       )
-    case None =>
-      val sloppyEnforcement =
-        store.storeId.forSynchronizer.exists(_.protocolVersion < ProtocolVersion.v35)
-      if (sloppyEnforcement)
-        Either.unit
-      else {
-        // starting with pv=35, we will require that newly added proposals start with serial 1
-        // topology transactions might start at a later point
-        Either.cond(
-          !toValidate.isProposal || toValidate.serial == PositiveInt.one,
-          (),
-          TopologyTransactionRejection.Processor
-            .SerialMismatch(actual = toValidate.serial, expected = PositiveInt.one),
-        )
-      }
+    // TODO(#32311): Re-enable validation that newly added proposals start with serial 1
+    case None => Either.unit
   }
 
   private def transactionIsAuthorized(

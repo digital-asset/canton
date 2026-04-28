@@ -243,9 +243,32 @@ nightly_integration_test:
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+
+nightly_integration_test_with_session_keys:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - enable_session_signing_keys
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
                  grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
+
+nightly_cn_topology_snapshot_test_only:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 4 # One node per environment (cilr, dev, test, main)
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
+        num_test_buckets: "4"
+        num_parallel_tasks: "1"
+        timeout: "120m" # Very large timeout on purpose, because topology validation can take a long time
 
 nightly_integration_test_sequencer_only:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -445,7 +468,7 @@ generate_data_continuity_dumps:
                     -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ConfigContinuityWriterTest \
                     -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
                     -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ConsoleCommandBackwardsCompatibilityWriterTest \
-                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ProtobufCompatibilityWriterTest \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.ProtobufCompatibilityWriterTest \
                 "
         num_test_buckets: "1"
         timeout: 1h

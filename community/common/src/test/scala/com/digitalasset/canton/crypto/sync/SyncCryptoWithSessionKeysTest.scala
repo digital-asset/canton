@@ -36,7 +36,7 @@ class SyncCryptoWithSessionKeysTest
     with ProtocolVersionChecksAnyWordSpec {
 
   override protected lazy val sessionSigningKeysConfig: SessionSigningKeysConfig =
-    if (testedProtocolVersion >= ProtocolVersion.v35) SessionSigningKeysConfig.default
+    if (testedProtocolVersion >= ProtocolVersion.v35) SessionSigningKeysConfig.enabled
     else SessionSigningKeysConfig.disabled
 
   private var p1PV34: SynchronizerCryptoClient = _
@@ -601,7 +601,7 @@ class SyncCryptoWithSessionKeysTest
 
         val signature = loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
-            p1PV34 = createTestingTopologyWith(SessionSigningKeysConfig.default)
+            p1PV34 = createTestingTopologyWith(SessionSigningKeysConfig.enabled)
               .forOwnerAndSynchronizer(participant1)
             p1PV34.syncCryptoSigner.isInstanceOf[SyncCryptoSignerWithLongTermKeys] shouldBe true
             p1PV34.syncCryptoSigner

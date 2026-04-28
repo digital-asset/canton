@@ -96,6 +96,9 @@ private[topology] class LsuChaos(
   private val lastKnownSynchronizer: AtomicReference[Option[SynchronizerData]] =
     new AtomicReference(None)
 
+  private val currentActiveSynchronizer: AtomicReference[Option[PhysicalSynchronizerId]] =
+    new AtomicReference(None)
+
   override def companion: TopologyOperationsCompanion = LsuChaos
 
   override def additionalSetupPhase()(implicit env: TestConsoleEnvironment): Unit = {
@@ -119,7 +122,11 @@ private[topology] class LsuChaos(
     usedSynchronizerNodes.put(1, Set(env.sequencer1, env.mediator1))
 
     lastKnownSynchronizer.set(Some(synchronizerData))
+    currentActiveSynchronizer.set(Some(env.daId))
   }
+
+  override def activePsid(implicit env: TestConsoleEnvironment): PhysicalSynchronizerId =
+    currentActiveSynchronizer.get().value
 
   private val enableMetrics: ConfigTransform = _.focus(_.monitoring.metrics)
     .replace(
@@ -214,7 +221,9 @@ private[topology] class LsuChaos(
     newSequencer.start()
     newMediator.start()
 
-    logOperationStep(lsuId)(s"Announce LSU to $lsuId at $upgradeTime")
+    logOperationStep(lsuId)(
+      s"Announce LSU to $lsuId at $upgradeTime. New nodes are: $newSequencer, $newMediator."
+    )
     lastKnownSynchronizer.set(Some(newSynchronizer))
 
     logger.info(s"[$lsuId] $synchronizerOwner propose the announcement")
@@ -268,10 +277,21 @@ private[topology] class LsuChaos(
 
     logger.info(s"[$lsuId] Scheduling operations to run at upgrade time ($upgradeTime)")
     scheduler.scheduleOnce((upgradeTime - CantonTimestamp.now()).toScala) {
-      transferTraffic(lsuId, upgradeTime, currentSequencer, newSequencer)
+      transferTraffic(
+        lsuId = lsuId,
+        upgradeTime = upgradeTime,
+        currentSequencer = currentSequencer,
+        newSequencer = newSequencer,
+        newPsid = newSynchronizer.psid,
+      )
 
       // assert on the outcome of test_lsu_sequencing above: it should bump metrics
-      LsuBase.getLsuSequencingTestMetricValues(newMediator) shouldBe Map(newSequencer.id -> 1)
+      logger.info(
+        s"Ensuring that sanity check message sent by $newSequencer to $newMediator is reflected in metrics."
+      )
+      BaseTest.eventually() {
+        LsuBase.getLsuSequencingTestMetricValues(newMediator) shouldBe Map(newSequencer.id -> 1)
+      }
     }
 
     logger.info(s"[$lsuId] All operations scheduled")
@@ -282,6 +302,7 @@ private[topology] class LsuChaos(
       upgradeTime: CantonTimestamp,
       currentSequencer: LocalSequencerReference,
       newSequencer: LocalSequencerReference,
+      newPsid: PhysicalSynchronizerId,
   )(implicit env: TestConsoleEnvironment, errorLoggingContext: ErrorLoggingContext): Unit = {
     logOperationStep(lsuId)("Transferring LSU traffic state")
     logger.info(s"[$lsuId] Downloading LSU traffic state $currentSequencer")
@@ -309,6 +330,7 @@ private[topology] class LsuChaos(
     trafficStateAfterLsu shouldEqual trafficStateBeforeLsu
 
     logOperationStep(lsuId)(s"Upgrade to $lsuId is finished")
+    currentActiveSynchronizer.set(Some(newPsid))
   }
 
   override def runTopologyChanges()(implicit

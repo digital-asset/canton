@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.admin.party.PartyManagementServiceErr
   AcsExportMissingTargetOnboardingMapping,
   EffectivePartyToParticipantMappingNotFound,
 }
+import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersHistory,
@@ -146,6 +147,45 @@ trait OfflinePartyReplicationIntegrationTestBase
     sourceLedgerEnd
   }
 
+  /** Advances the simulated clock in chunks and pings to prevent static time drift.
+    *
+    * In Canton's static time mode, advancing the local clock too far at once causes the
+    * participant's ledger time to drift ahead of the sequencer's record time. This will result in
+    * warnings like so: "Time validation has failed: The delta of the ledger time .* and the record
+    * time .* exceeds the max of 1 minute"
+    *
+    * The sequencer will reject requests if this drift exceeds its 1-minute tolerance. By stepping
+    * time in 30-second chunks and sending a ping, we force the sequencer to process an event and
+    * update its record time, keeping the nodes synchronized.
+    *
+    * @param clock
+    *   The simulated clock to advance.
+    * @param totalDuration
+    *   The total duration to advance the time by.
+    * @param sourceNode
+    *   The participant initiating the ping to drag the sequencer time forward.
+    * @param targetNode
+    *   The target participant receiving the ping.
+    */
+  protected[offpr] def advanceTimeAndPing(
+      clock: DelegatingSimClock,
+      totalDuration: Duration,
+      sourceNode: LocalParticipantReference,
+      targetNode: LocalParticipantReference,
+  ): Unit = {
+    val maxStepSize = Duration.ofSeconds(30)
+    // Chunk total duration into smaller advancements
+    val fullSteps = (totalDuration.toMillis / maxStepSize.toMillis).toInt
+    val remainder = Duration.ofMillis(totalDuration.toMillis % maxStepSize.toMillis)
+    // Creates Seq(30s, 30s, 30s, 30s, 10s) for 2 min 10 sec wait time and max step sise 30 sec
+    val steps = Seq.fill(fullSteps)(maxStepSize) ++ Option.when(!remainder.isZero)(remainder)
+
+    steps.foreach { step =>
+      clock.advance(step)
+      sourceNode.health.ping(targetNode.id)
+    }
+  }
+
   /** Reconnects to synchronizer and unilaterally clears the onboarding flag. */
   protected[offpr] def reconnectAndEnsureOnboardingClearance(
       clock: DelegatingSimClock,
@@ -155,10 +195,8 @@ trait OfflinePartyReplicationIntegrationTestBase
   )(implicit env: TestConsoleEnvironment, traceContext: TraceContext): Unit = {
     import env.*
 
-    val clockAdvancementStep = Duration.ofSeconds(30)
-
     // Advance time to allow topology transactions to be processed
-    clock.advance(clockAdvancementStep)
+    clock.advance(Duration.ofSeconds(30))
 
     val targetLedgerEnd = providedTargetLedgerEnd.getOrElse(target.ledger_api.state.end())
     val psid = getInitializedSynchronizer(synchronizerAlias).physicalSynchronizerId
@@ -176,28 +214,7 @@ trait OfflinePartyReplicationIntegrationTestBase
     // Depends on the historical decision timeout and of topology transaction actually removing the onboarding flag
     // becoming effective.
     val totalWaitTime = Duration.ofMinutes(2).plusSeconds(10)
-    val maxStepSize = clockAdvancementStep
-
-    // Chunk total duration into smaller advancements
-    val fullSteps = (totalWaitTime.toMillis / maxStepSize.toMillis).toInt
-    val remainder = Duration.ofMillis(totalWaitTime.toMillis % maxStepSize.toMillis)
-
-    // Creates Seq(30s, 30s, 30s, 30s, 10s)
-    val steps = Seq.fill(fullSteps)(maxStepSize) ++ Option.when(!remainder.isZero)(remainder)
-
-    // In Canton's static time mode, advancing the local clock too far at once causes
-    // the participant's ledger time to drift ahead of the sequencer's record time.
-    //
-    // This will result in warnings like so:
-    // "Time validation has failed: The delta of the ledger time .* and the record time .* exceeds the max of 1 minute"
-    //
-    // The sequencer will reject requests if this drift exceeds its 1-minute tolerance.
-    // By stepping time in 30-second chunks and sending a ping, we force the sequencer
-    // to process an event and update its record time, keeping the nodes synchronized.
-    steps.foreach { step =>
-      clock.advance(step)
-      source.health.ping(target) // Drags the sequencer time forward
-    }
+    advanceTimeAndPing(clock, totalWaitTime, source, target)
 
     // Force both participants to process all messages up to the new clock time.
     // This ensures `source` processes the flag-clearing transaction sent by `target`.
@@ -345,16 +362,23 @@ final class OfflinePartyReplicationIntegrationTest
       },
     )
 
-    // Assert contract archival and creation continues work even though the onboarding flag
-    // has not been cleared yet.
-    assertAcsAndContinuedOperation(
-      target,
-      expectedNumActiveContracts = 2,
-      numOfContractCreations = 7,
+    // Assert contract archival and creation (submission) does NOT work
+    // while the onboarding flag has not been cleared yet.
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      assertAcsAndContinuedOperation(
+        target,
+        expectedNumActiveContracts = 2,
+        numOfContractCreations = 7,
+      ),
+      _.shouldBeCantonErrorCode(
+        TransactionProcessor.SubmissionErrors.PartyCurrentlyOnboarding
+          .Rejection(Seq(alice.toLf))
+          .code
+      ),
     )
 
     // Advance time to allow the asynchronous onboarding flag clearance to complete
-    clock.advance(Duration.ofMinutes(2).plusSeconds(10))
+    advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
 
     // Force both participants to process all messages up to the new clock time.
     // This ensures `source` processes the flag-clearing transaction sent by `target`.
@@ -364,7 +388,13 @@ final class OfflinePartyReplicationIntegrationTest
     // Now that we've advanced time and synced, the onboarding flag on the target participant should be cleared
     checkOnboardingFlag(daId, setOnTarget = false)
 
-    assertAcsAndContinuedOperation(source, expectedNumActiveContracts = 8)
+    // Assert contract archival and creation (submission) DOES work
+    // after the onboarding flag has been cleared.
+    assertAcsAndContinuedOperation(
+      source,
+      expectedNumActiveContracts = 2,
+      numOfContractCreations = 3,
+    )
   }
 
   private def checkOnboardingFlag(daId: => PhysicalSynchronizerId, setOnTarget: Boolean): Unit = {

@@ -273,7 +273,11 @@ trait MessageDispatcher { this: NamedLogging =>
       }
 
     // Extract the participant relevant messages from the batch. All other messages are ignored.
-    val encryptedViews = envelopes.mapFilter(select[EncryptedViewMessage[ViewType]])
+    val encryptedViews = envelopes.mapFilter(env =>
+      select[EncryptedViewMessage[ViewType]](env)(
+        EncryptedViewMessage.encryptedViewMessageCast
+      )
+    )
     val rootHashMessages =
       envelopes.mapFilter(select[RootHashMessage[SerializedRootHashMessagePayload]])
     val confirmationResults =
@@ -554,11 +558,10 @@ trait MessageDispatcher { this: NamedLogging =>
       mediator: MediatorGroupRecipient,
   ): Checked[SendMalformedAndExpectMediatorResult, String, GoodRequest] = {
     val viewType: rootHashMessage.viewType.type = rootHashMessage.viewType
+
     val (badEncryptedViewTypes, goodEncryptedViews) = encryptedViews
-      .map(_.traverse { encryptedViewMessage =>
-        encryptedViewMessage
-          .traverse(_.select(viewType))
-          .toRight(encryptedViewMessage.viewType)
+      .map(_.traverse { message =>
+        message.select(viewType).toRight(message.viewType)
       })
       .separate
 
@@ -702,15 +705,8 @@ trait MessageDispatcher { this: NamedLogging =>
         case (env, message: UnsignedProtocolMessage) =>
           message match {
             case RootHashMessage(rootHash, _, _, _, _) => s"root-hash=$rootHash"
-            case EncryptedViewMessage(
-                  submittingParticipantSignature,
-                  viewHash,
-                  _,
-                  encryptedView,
-                  _,
-                  _,
-                ) =>
-              s"enc-view=$viewHash,rcp=${env.recipients.allRecipients.size}, sz=${encryptedView.sizeHint}" + submittingParticipantSignature
+            case evm: EncryptedViewMessage[?] =>
+              s"enc-view=${evm.viewHashes},rcp=${env.recipients.allRecipients.size}, sz=${evm.encryptedSizeHint}" + evm.submittingParticipantSignature
                 .map(_ => ", with sig")
             case TopologyTransactionsBroadcast(_, transactions) =>
               s"topo-bcast with ntx=${transactions.transactions.size}"
@@ -999,8 +995,9 @@ private[participant] object MessageDispatcher {
     ): GoodRequest = new GoodRequest {
       override val rootHashMessage: rhm.type = rhm
       override val mediator: MediatorGroupRecipient = mediatorGroup
-      override val requestEnvelopes
-          : NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]]] =
+      override val requestEnvelopes: NonEmpty[
+        Seq[OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]]
+      ] =
         envelopes
     }
   }

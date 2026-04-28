@@ -12,9 +12,14 @@ import com.digitalasset.canton.sequencing.protocol.{AllMembersOfSynchronizer, Op
   */
 package object messages {
 
+  type TransactionSingleViewMessage = EncryptedSingleViewMessage[TransactionViewType]
+
+  type TransactionMultiViewMessage = EncryptedMultipleViewsMessage[TransactionViewType]
+
   type TransactionViewMessage = EncryptedViewMessage[TransactionViewType]
 
   type DefaultOpenEnvelope = OpenEnvelope[ProtocolMessage]
+
   object DefaultOpenEnvelopesFilter {
 
     /** @param withExplicitTopologyTimestamp

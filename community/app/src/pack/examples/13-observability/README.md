@@ -13,11 +13,11 @@ in the official documentation.
   * `cd community/app/target/release/canton`
   * Copy [`Dockerfile`](canton/Dockerfile) there.
   * `docker build . -t canton-community:latest` (or anything matching your [.env](.env)'s `CANTON_IMAGE`).
-* A matching ledger API test tool ("LAPITT"):
-  * From the **repository root**, build it with `sbt ledger-test-tool-2-1/assembly`.
+* The ledger API test tool ("LAPITT"):
+  * From the **repository root**, build it with `sbt ledger-test-tool/assembly`.
   * Copy it as `lapitt.jar` into the release pack folder you are working from (created by `sbt packRelease`):
     ```sh
-    cp community/ledger-test-tool/.1/target/scala-2.13/ledger-api-test-tool-2.1-*.jar \
+    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.2-*.jar \
        community/app/target/release/canton-open-source-*/examples/13-observability/lapitt.jar
     ```
 

@@ -60,7 +60,7 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedViewMessage(messageP) =>
-          EncryptedViewMessage.fromProto(messageP)
+          EncryptedSingleViewMessage.fromProto(messageP)
         case Content.UnassignmentMediatorMessage(messageP) =>
           UnassignmentMediatorMessage.fromProtoV30(
             (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))
@@ -91,8 +91,8 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
       content <- (contentP.someEnvelopeContent match {
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
-        case Content.EncryptedViewMessage(messageP) =>
-          EncryptedViewMessage.fromProto(messageP)
+        case Content.EncryptedMultipleViewsMessage(messageP) =>
+          EncryptedMultipleViewsMessage.fromProto(messageP)
         case Content.UnassignmentMediatorMessage(messageP) =>
           UnassignmentMediatorMessage.fromProtoV30(
             (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))

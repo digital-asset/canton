@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.packageId
 import com.digitalasset.canton.protocol.{ExampleContractFactory, GenContractInstance, LfContractId}
@@ -117,59 +116,6 @@ trait ContractStoreTest extends FailOnShutdown { this: AsyncWordSpec & BaseTest 
       for {
         c <- store.lookup(contractId).value
       } yield c shouldEqual None
-    }
-
-    "delete a set of contracts as done by pruning" in {
-      val store = mk()
-      for {
-        _ <- List(contract, contract2, contract4, contract5)
-          .parTraverse(store.storeContract)
-          .failOnShutdown
-        _ <- store
-          .deleteIgnoringUnknown(Seq(contractId, contractId2, contractId3, contractId4))
-          .failOnShutdown
-        notFounds <- List(contractId, contractId2, contractId3, contractId4).parTraverse(
-          store.lookupE(_).value
-        )
-        notDeleted <- store.lookupE(contractId5).value
-      } yield {
-        notFounds shouldEqual List(
-          Left(UnknownContract(contractId)),
-          Left(UnknownContract(contractId2)),
-          Left(UnknownContract(contractId3)),
-          Left(UnknownContract(contractId4)),
-        )
-        notDeleted shouldEqual Right(contract5)
-      }
-    }
-
-    "purge contract store deletes all contracts" in {
-      val store = mk()
-      for {
-        _ <- store.storeContract(contract).failOnShutdown
-        _ <- store.storeContract(contract2).failOnShutdown
-        _ <- store.storeContract(contract3).failOnShutdown
-        contractsBeforePurge <- store
-          .find(
-            exactId = None,
-            filterPackage = None,
-            filterTemplate = None,
-            limit = 5,
-          )
-          .failOnShutdown
-        _ <- store.purge().failOnShutdown
-        contractsAfterPurge <- store
-          .find(
-            exactId = None,
-            filterPackage = None,
-            filterTemplate = None,
-            limit = 5,
-          )
-          .failOnShutdown
-      } yield {
-        contractsBeforePurge.toSet shouldEqual Set(contract, contract2, contract3)
-        contractsAfterPurge shouldBe empty
-      }
     }
 
     "find contracts by filters" in {

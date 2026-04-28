@@ -90,7 +90,6 @@ class ParticipantMetrics(
   // register the metric for the documentation generation.
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
     new ConnectedSynchronizerMetrics(
-      SynchronizerAlias.tryCreate("synchronizer"),
       inventory.connectedSynchronizer,
       openTelemetryMetricsFactory,
     )
@@ -149,7 +148,6 @@ class ParticipantMetrics(
         // by delaying the creation until the getOrElseUpdate call has finished.
         Eval.later(
           new ConnectedSynchronizerMetrics(
-            alias,
             inventory.connectedSynchronizer,
             openTelemetryMetricsFactory,
           )(
@@ -296,7 +294,6 @@ class ConnectedSynchronizerHistograms private[metrics] (
 }
 
 class ConnectedSynchronizerMetrics private[metrics] (
-    synchronizerAlias: SynchronizerAlias,
     histograms: ConnectedSynchronizerHistograms,
     factory: LabeledMetricsFactory,
 )(implicit metricsContext: MetricsContext) {
@@ -339,7 +336,7 @@ class ConnectedSynchronizerMetrics private[metrics] (
   }
 
   val commitments: CommitmentMetrics =
-    new CommitmentMetrics(synchronizerAlias, histograms.commitments, factory)
+    new CommitmentMetrics(histograms.commitments, factory)
 
   val transactionProcessing: TransactionProcessingMetrics =
     new TransactionProcessingMetrics(histograms.transactionProcessing, factory)

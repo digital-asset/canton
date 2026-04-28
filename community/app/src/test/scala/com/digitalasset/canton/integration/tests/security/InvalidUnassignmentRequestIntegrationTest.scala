@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.security
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{FullUnassignmentTree, ReassignmentRef, UnassignmentViewTree}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.AcsInspection
+import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -28,6 +28,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, Recipients}
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import org.scalatest.Assertion
@@ -46,7 +47,8 @@ import java.util.UUID
 class InvalidUnassignmentRequestIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
-    with AcsInspection {
+    with AcsInspection
+    with EntitySyntax {
 
   private var signatory: PartyId = _
   private var observer: PartyId = _
@@ -68,14 +70,31 @@ class InvalidUnassignmentRequestIntegrationTest
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
 
-        signatory = participant1.parties.enable("signatory", synchronizer = daName)
-        participant1.parties.enable("signatory", synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            "signatory" -> participant1,
+            "observer" -> participant2,
+            "otherParty" -> participant2,
+          ),
+          Map(
+            "signatory" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            "observer" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+            "otherParty" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+        )
 
-        observer = participant2.parties.enable("observer", synchronizer = daName)
-        participant2.parties.enable("observer", synchronizer = acmeName)
-
-        otherParty = participant2.parties.enable("otherParty", synchronizer = daName)
-        participant2.parties.enable("otherParty", synchronizer = acmeName)
+        signatory = "signatory".toPartyId(participant1)
+        observer = "observer".toPartyId(participant2)
+        otherParty = "otherParty".toPartyId(participant2)
 
         maliciousP2 = MaliciousParticipantNode(
           participant2,

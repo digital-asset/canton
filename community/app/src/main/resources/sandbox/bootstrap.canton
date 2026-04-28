@@ -2,12 +2,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Mode
 
-val protocol =
-  if(sandbox.config.parameters.engine.contractStateMode==Mode.NUCK)
-    ProtocolVersion.v35
-  else if(sequencer1.config.parameters.alphaVersionSupport)
-    ProtocolVersion.dev
-  else ProtocolVersion.forSynchronizer
+val protocol = ProtocolVersion.forSynchronizer
 
 case class SyncDef(
   mediator: com.digitalasset.canton.console.LocalMediatorReference,

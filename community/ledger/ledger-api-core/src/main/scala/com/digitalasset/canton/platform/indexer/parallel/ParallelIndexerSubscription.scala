@@ -7,11 +7,13 @@ import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
+import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.{
   CommitRepair,
+  ContractInfo,
   EmptyAcsPublicationRequired,
   LsuTimeReached,
   ReassignmentAccepted,
@@ -22,6 +24,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   UnSequencedCommandRejected,
 }
 import com.digitalasset.canton.ledger.participant.state.{
+  Reassignment,
   SynchronizerIndex,
   SynchronizerUpdate,
   Update,
@@ -35,6 +38,7 @@ import com.digitalasset.canton.logging.{
   TracedLogger,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
@@ -234,8 +238,15 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
             )
           ),
           ingestingParallelism = ingestionParallelism,
+          contractReInsertion = reInsertContracts(
+            ledgerApiContractStore = contractStore,
+            executionContext = executionContext,
+            logger = logger,
+          ),
           ingester = ingester(
             ingestFunction = ingestionStorageBackend.insertBatch,
+            lockUsedContracts = eventStorageBackend.readLockInternalContractIds,
+            evictContractsFromCache = contractStore.contractsPruned,
             reassignmentOffsetPersistence = reassignmentOffsetPersistence,
             zeroDbBatch = ingestionStorageBackend.batch(
               Vector.empty,
@@ -318,23 +329,32 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
       .via(
         achsConfigEffective match {
           case Some(achsCfg) =>
-            AchsMaintenancePipe(
-              parameterStorageBackend = parameterStorageBackend,
-              eventStorageBackend = eventStorageBackend,
-              dbDispatcher = dbDispatcher,
-              achsStateCache = inMemoryState.achsStateCache,
-              toAchsWorkDistance = (batch: Batch[?]) =>
-                AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
-              initialWork = initialAchsWork,
-              populationParallelism = achsCfg.populationParallelism.unwrap,
-              removalParallelism = achsCfg.removalParallelism.unwrap,
-              aggregationThreshold = achsCfg.aggregationThreshold,
-              metrics = metrics,
-              executionContext = executionContext,
-              logger = logger,
-            )
+            Flow[Batch[?]]
+              .buffered(
+                counter = metrics.indexer.achsBufferLength,
+                size = achsCfg.bufferSize,
+              )
+              .via(
+                AchsMaintenancePipe(
+                  parameterStorageBackend = parameterStorageBackend,
+                  eventStorageBackend = eventStorageBackend,
+                  dbDispatcher = dbDispatcher,
+                  achsStateCache = inMemoryState.achsStateCache,
+                  toAchsWorkDistance = (batch: Batch[?]) =>
+                    AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
+                  initialWork = initialAchsWork,
+                  populationParallelism = achsCfg.populationParallelism.unwrap,
+                  removalParallelism = achsCfg.removalParallelism.unwrap,
+                  aggregationThreshold = achsCfg.aggregationThreshold,
+                  metrics = metrics,
+                  executionContext = executionContext,
+                  logger = logger,
+                  fullDrain = false,
+                )
+              )
+              .map(_ => ())
           // ACHS not configured or repair mode
-          case _ => Flow.apply
+          case _ => Flow.apply.map(_ => ())
         }
       )
       .viaMat(KillSwitches.single)(Keep.both)
@@ -382,6 +402,7 @@ object ParallelIndexerSubscription {
       distinctRawStrings: Iterable[String],
       eventCount: Long,
       batchTraceContext: TraceContext,
+      usedInternalContractIds: Set[Long],
   )
 
   final case class SynCon(
@@ -523,6 +544,145 @@ object ParallelIndexerSubscription {
     if (!condition)
       ErrorUtil.invalidState(errorMessage)(ErrorLoggingContext.fromTracedLogger(tracedLogger))
 
+  def extractPersistedContracts(
+      updates: Iterable[(Offset, Update)]
+  ): Map[ContractId, PersistedContractInstance] =
+    updates.view.flatMap {
+      case (_, tx: Update.TransactionAccepted) =>
+        tx.contractInfos.view.map { case (cid, contractInfo) =>
+          cid -> contractInfo.persistedContractInstance
+        }
+
+      case (_, reassignment: Update.ReassignmentAccepted) =>
+        reassignment.reassignment.reassignments.view.collect { case assign: Reassignment.Assign =>
+          assign.persistedContractInstance.inst.contractId -> assign.persistedContractInstance
+        }
+      case (_, _) => Nil
+    }.toMap
+
+  def reInsertContracts(
+      ledgerApiContractStore: LedgerApiContractStore,
+      executionContext: ExecutionContext,
+      logger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext
+  ): Iterable[(Offset, Update)] => Future[Iterable[(Offset, Update)]] = { updates =>
+    implicit val ec: ExecutionContext = executionContext
+    def fixContractInfo(newInternalContractId: Long): ContractInfo => ContractInfo =
+      old =>
+        old.copy(
+          persistedContractInstance = old.persistedContractInstance.copy(
+            internalContractId = newInternalContractId
+          )
+        )
+    def fixContractInfos(
+        overrides: Map[ContractId, Long]
+    ): Map[ContractId, ContractInfo] => Map[ContractId, ContractInfo] =
+      _.map { case (cid, info) =>
+        overrides.get(cid) match {
+          case Some(newInternalContractId) =>
+            cid -> fixContractInfo(newInternalContractId)(info)
+          case None =>
+            cid -> info
+        }
+      }
+    def fixAssign(newInternalContractId: Long): Reassignment.Assign => Reassignment.Assign =
+      old =>
+        old.copy(
+          persistedContractInstance = old.persistedContractInstance.copy(
+            internalContractId = newInternalContractId
+          )
+        )
+    def fixReassignments(
+        overrides: Map[ContractId, Long]
+    ): Reassignment.Batch => Reassignment.Batch = { old =>
+      val reassignments: NonEmpty[Seq[Reassignment]] = old.reassignments.map {
+        case assign: Reassignment.Assign =>
+          overrides.get(assign.persistedContractInstance.inst.contractId) match {
+            case Some(newInternalContractId) => fixAssign(newInternalContractId)(assign)
+            case None => assign
+          }
+        case unassign: Reassignment.Unassign => unassign
+      }
+      Reassignment.Batch(reassignments)
+    }
+
+    def fixUpdate(overrides: Map[ContractId, Long]): Update => Update = {
+      case u: Update.SequencedTransactionAccepted =>
+        u.copy(
+          contractInfos = fixContractInfos(overrides)(u.contractInfos)
+        )
+      case u: Update.RepairTransactionAccepted =>
+        u.copy(
+          contractInfos = fixContractInfos(overrides)(u.contractInfos)
+        )
+      case u: Update.SequencedReassignmentAccepted =>
+        u.copy(
+          reassignment = fixReassignments(overrides)(u.reassignment)
+        )
+      case u: Update.RepairReassignmentAccepted =>
+        u.copy(
+          reassignment = fixReassignments(overrides)(u.reassignment)
+        )
+      case u: Update.OnPRReassignmentAccepted =>
+        u.copy(
+          reassignment = fixReassignments(overrides)(u.reassignment)
+        )
+
+      case u: Update.CommandRejected => u
+      case u: Update.CommitRepair => u
+      case u: Update.EmptyAcsPublicationRequired => u
+      case u: Update.LsuTimeReached => u
+      case u: Update.SequencerIndexMoved => u
+      case u: Update.TopologyTransactionEffective => u
+    }
+
+    for {
+      contracts <- Future(extractPersistedContracts(updates))
+      foundInternalContractIds <- ledgerApiContractStore.lookupBatchedInternalIdsNonReadThrough(
+        contracts.keySet
+      )
+      changedInternalContractIds = contracts.keysIterator.flatMap { cid =>
+        for {
+          foundInternalId <- foundInternalContractIds.get(cid)
+          originalInternalContractId <- contracts.get(cid).map(_.internalContractId)
+          if foundInternalId != originalInternalContractId
+        } yield cid -> foundInternalId
+      }.toMap
+      missingContracts = contracts.filterNot { case (cid, _) =>
+        foundInternalContractIds.contains(cid)
+      }
+      storedContracts <- ledgerApiContractStore.storeContracts(
+        missingContracts.valuesIterator.map(_.asContractInstance).toVector
+      )
+      _ = {
+        // sanity check
+        if (storedContracts.keySet != missingContracts.keySet) {
+          ErrorUtil.invalidState(
+            s"Programming error: stored and missing contracts are not the same."
+          )(ErrorLoggingContext.fromTracedLogger(logger))
+        }
+      }
+      allInternalContractIdOverrides = storedContracts ++ changedInternalContractIds
+    } yield {
+      if (allInternalContractIdOverrides.isEmpty) {
+        updates
+      } else {
+        if (storedContracts.nonEmpty) {
+          logger.info(s"Needed to re-insert ${storedContracts.size} contracts during indexing.")
+        }
+        if (changedInternalContractIds.nonEmpty) {
+          logger.info(
+            s"There were ${changedInternalContractIds.size} contracts pruned and reinserted during indexing."
+          )
+        }
+        updates.map { case (offset, update) =>
+          offset -> fixUpdate(allInternalContractIdOverrides)(update)
+        }
+      }
+    }
+  }
+
   def inputMapper(
       metrics: LedgerApiServerMetrics,
       toDbDto: Offset => Update => Iterator[DbDto],
@@ -565,6 +725,7 @@ object ParallelIndexerSubscription {
       batchTraceContext = TraceContext.ofBatch("indexer_update_batch")(
         input.iterator.map(_._2)
       )(logger),
+      usedInternalContractIds = Set.empty, // will be filled later
     )
   }
 
@@ -580,6 +741,7 @@ object ParallelIndexerSubscription {
       batchTraceContext = TraceContext.empty, // will be populated later
       eventCount = 0L, // will be populated later
       distinctRawStrings = Nil, // will be populated later
+      usedInternalContractIds = Set.empty, // will be populated later
     )
 
   def seqMapper(
@@ -743,7 +905,7 @@ object ParallelIndexerSubscription {
     else {
       implicit val loggingContextWithTrace: LoggingContextWithTrace =
         new LoggingContextWithTrace(LoggingEntries.empty, batch.batchTraceContext)
-      implicit val ec = executionContext
+      implicit val ec: ExecutionContext = executionContext
       for {
         resolvedInternalContractIds <- resolveInternalContractIds(batch.batchTraceContext)(
           missingContracts
@@ -838,15 +1000,22 @@ object ParallelIndexerSubscription {
       logger: TracedLogger,
       metrics: LedgerApiServerMetrics,
   )(inBatch: Batch[Vector[DbDto]]): Batch[DbBatch] = {
-    val dbBatch = inBatch
+    val finalDbDtos = inBatch
       .pipe(refillMissingDeactivatedActivations(metrics, logger))
       .batch
-      .pipe(batchF)
-    inBatch.copy(batch = dbBatch)
+    val dbBatch = batchF(finalDbDtos)
+    val usedInternalContractIds =
+      extractPersistedContracts(inBatch.offsetsUpdates).view.map(_._2.internalContractId).toSet
+    inBatch.copy(
+      batch = dbBatch,
+      usedInternalContractIds = usedInternalContractIds,
+    )
   }
 
   def ingester[DbBatch](
       ingestFunction: (Connection, DbBatch) => Unit,
+      lockUsedContracts: Set[Long] => Connection => Set[Long],
+      evictContractsFromCache: Iterable[Long] => Unit,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
       zeroDbBatch: DbBatch,
       dbDispatcher: DbDispatcher,
@@ -865,6 +1034,21 @@ object ParallelIndexerSubscription {
         .flatMap(_ =>
           dbDispatcher.executeSql(metrics.indexer.ingestion) { connection =>
             metrics.indexer.updates.inc(batch.batchSize.toLong)(MetricsContext.Empty)
+            val missingContracts = Timed.value(
+              metrics.indexer.ingestionBlockeByPruningDuration,
+              lockUsedContracts(batch.usedInternalContractIds)(connection),
+            )
+            if (missingContracts.nonEmpty) {
+              logger.info(
+                s"Found ${missingContracts.size} missing contracts during indexing. Likely because pruning. Restarting indexer to recover the missing contracts."
+              )
+              metrics.indexer.indexerRestartDueToMissingReferencedContracts.inc()
+              // As stale cache entries in contract store could cause crash looping, we evict the cached entries here again as a last resort.
+              // It is OK to evict, as we just had evidence that these do not exist (and never will, as the internal contract IDs increase
+              // strictly monotonically).
+              evictContractsFromCache(missingContracts)
+              throw new ReferencedContractNotFoundException()
+            }
             ingestFunction(connection, batch.batch)
             cleanUnusedBatch(zeroDbBatch)(batch)
           }
@@ -1067,6 +1251,7 @@ object ParallelIndexerSubscription {
       batch = zeroDbBatch, // not used anymore
       batchSize = 0, // not used anymore
       missingDeactivatedActivations = Map.empty, // not used anymore
+      usedInternalContractIds = Set.empty, // not used anymore
     )
 
   val LightWeight = 1L
@@ -1089,6 +1274,11 @@ object ParallelIndexerSubscription {
     case (_, u: ReassignmentAccepted) =>
       (2 + u.reassignment.iterator.map(_.stakeholders.size + 1).sum) * InsertWeight
   }
+
+  class ReferencedContractNotFoundException
+      extends RuntimeException(
+        "Restarting indexer due to attempt to store events relying on missing internal contract IDs."
+      )
 }
 
 trait ReassignmentOffsetPersistence {

@@ -46,6 +46,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.actor.Scheduler
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.duration.*
@@ -75,6 +76,7 @@ final class IndexServiceOwner(
     pruningOffsetService: PruningOffsetService,
     materializer: Materializer,
     updateServiceConfig: UpdateServiceConfig,
+    scheduler: Scheduler,
 ) extends ResourceOwner[IndexService]
     with NamedLogging {
   private val initializationRetryDelay = 100.millis
@@ -237,6 +239,9 @@ final class IndexServiceOwner(
       pruningOffsetService = pruningOffsetService,
       contractStore = participantContractStore,
       achsStateCache = achsStateCache,
+      contractPruningMaxRetries = config.contractPruningMaxRetries,
+      contractPruningDelayBeforeRetry = config.contractPruningDelayBeforeRetry.underlying,
+      scheduler = scheduler,
     )(queryExecutionContext)
 
   private object InMemoryStateNotInitialized extends NoStackTrace

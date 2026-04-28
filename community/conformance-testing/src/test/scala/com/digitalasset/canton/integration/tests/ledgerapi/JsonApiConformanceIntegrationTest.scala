@@ -3,13 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
-import com.daml.ledger.api.testtool.Tests
-import com.daml.ledger.api.testtool.infrastructure.{
-  JsonSupported,
-  LedgerTestCase,
-  LedgerTestSuite,
-  TestConstraints,
-}
+import com.daml.ledger.api.testtool.infrastructure.{JsonSupported, LedgerTestCase, TestConstraints}
 import com.daml.ledger.api.testtool.runner.{AvailableTests, Config, ConfiguredTests, TestRunner}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -71,17 +65,9 @@ sealed trait JsonApiConformanceBase
       concurrentTestRuns = 4, // these tests run together with all other tests
       connectedSynchronizers = env.environment.config.sequencers.size,
     )
-
-    val availableTests = new AvailableTests {
-      override def defaultTests: Vector[LedgerTestSuite] =
-        Tests.default(timeoutScaleFactor = config.timeoutScaleFactor)
-
-      override def optionalTests: Vector[LedgerTestSuite] =
-        Tests.optional(config.tlsConfig)
-    }
+    val availableTests = AvailableTests.v2_2
 
     val envArgInclusion = envArgTestsInclusion.getOrElse(TestInclusions.AllIncluded)
-
     val testsToRun =
       new ConfiguredTests(availableTests, config).defaultTests.view
         .flatMap(_.tests)
@@ -158,18 +144,14 @@ sealed trait JsonApiConformanceBase
             s"Test selection from env var $LapittRunOnlyEnvVarName: $envArgInclusions."
         )
       } else {
-        val testRunner = new TestRunner(
-          availableTests,
-          config.copy(included = testsToBeRun),
-          Tests.lfVersion,
-        )
+        val testRunner = new TestRunner(availableTests, config.copy(included = testsToBeRun))
 
         logger.debug(
           s"Running ${testsToBeRun.mkString("[", ", ", "]")} in current shard $shard/$numShards"
         )
 
-        val (resultF, _testCases) = testRunner.runInProcess(logger.underlying)
-        resultF
+        testRunner
+          .runInProcess(logger.underlying)
           .map { summaries =>
             val failures = summaries
               .collect(summary =>

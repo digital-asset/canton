@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.Functor
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
@@ -13,14 +12,18 @@ import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError.FailedToReadKey
 import com.digitalasset.canton.crypto.v30 as V30Crypto
-import com.digitalasset.canton.data.ViewType
+import com.digitalasset.canton.data.{ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v30, v31, *}
-import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  ProtoConverter,
+}
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,6 +32,23 @@ import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
+
+/** A wrapper over a view tree collection, a separate class is needed, so it can implement
+  * [[com.digitalasset.canton.version.HasToByteString]] and can be wrapped in [[CompressedView]]
+  */
+final case class MultipleViewTrees[+VT <: ViewTree with HasToByteString](
+    viewTrees: NonEmpty[Seq[VT]]
+) extends HasToByteString {
+
+  @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
+  override def toByteString: ByteString = {
+    val proto = v31.EncryptedMultipleViewsMessage.UncompressedViewTrees(
+      viewTrees.map(_.toByteString)
+    )
+
+    proto.toByteString
+  }
+}
 
 /** An encrypted [[com.digitalasset.canton.data.ViewTree]] together with its
   * [[com.digitalasset.canton.data.ViewType]]. The correspondence is encoded via a path-dependent
@@ -41,7 +61,7 @@ import scala.concurrent.ExecutionContext
 // We therefore implement the case class boilerplate stuff to the extent needed.
 sealed trait EncryptedView[+VT <: ViewType] extends Product with Serializable {
   val viewType: VT
-  val viewTree: Encrypted[EncryptedView.CompressedView[viewType.View]]
+  val viewTree: Encrypted[CompressedView[viewType.View]]
 
   override def productArity: Int = 1
   override def productElement(n: Int): Any = n match {
@@ -67,21 +87,11 @@ sealed trait EncryptedView[+VT <: ViewType] extends Product with Serializable {
     }
   override def hashCode(): Int = scala.runtime.ScalaRunTime._hashCode(this)
 
-  /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
-    * provided that the argument is the same as [[viewType]]
-    * @return
-    *   [[scala.None$]] if `desiredViewType` does not equal [[viewType]].
-    */
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def select(desiredViewType: ViewType): Option[EncryptedView[desiredViewType.type]] =
-    // Unfortunately, there doesn't seem to be a way to convince Scala's type checker that the two types must be equal.
-    if (desiredViewType == viewType) Some(this.asInstanceOf[EncryptedView[desiredViewType.type]])
-    else None
-
   /** Indicative size for pretty printing */
   def sizeHint: Int
 
 }
+
 object EncryptedView {
   def apply[VT <: ViewType](
       aViewType: VT
@@ -113,55 +123,141 @@ object EncryptedView {
     } yield encryptedView
   }
 
-  def decrypt[VT <: ViewType](
+  def decrypt[View <: ViewTree with HasToByteString](
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
-      encrypted: EncryptedView[VT],
+      encryptedViewTree: Encrypted[CompressedView[View]],
   )(
-      deserialize: ByteString => Either[DeserializationError, encrypted.viewType.View],
+      deserialize: ByteString => Either[DeserializationError, View],
       maxBytesToDecompress: MaxBytesToDecompress,
-  ): Either[DecryptionError, encrypted.viewType.View] =
+  ): Either[DecryptionError, View] =
     encryptionOps
-      .decryptWith(encrypted.viewTree, viewKey)(
+      .decryptWith(encryptedViewTree, viewKey)(
         CompressedView
-          .fromByteString[encrypted.viewType.View](deserialize)(_, maxBytesToDecompress)
+          .fromByteString[View](deserialize)(_, maxBytesToDecompress)
       )
       .map(_.value)
+}
 
-  /** Wrapper class to compress the view before encrypting it.
-    *
-    * This class's methods are essentially private to [[EncryptedView]] because compression is in
-    * theory non-deterministic (the gzip format can store a timestamp that is ignored by decryption)
-    * and we want to avoid that this is applied to
-    * [[com.digitalasset.canton.serialization.HasCryptographicEvidence]] instances.
-    */
-  final case class CompressedView[+V <: HasToByteString] private (value: V)
-      extends HasToByteString {
-    override def toByteString: ByteString =
-      ByteStringUtil.compressGzip(value.toByteString)
+/** A version of [[com.digitalasset.canton.protocol.messages.EncryptedView]], but for multiple
+  * views.
+  */
+final case class EncryptedMultipleViews[+VT <: ViewType](
+    viewType: VT,
+    viewTrees: Encrypted[CompressedView[MultipleViewTrees[VT#View]]],
+) {
+  lazy val sizeHint: Int = viewTrees.ciphertext.size
+}
+
+object EncryptedMultipleViews {
+  def compressed[VT <: ViewType](
+      encryptionOps: EncryptionOps,
+      viewKey: SymmetricKey,
+      viewType: VT,
+  )(
+      viewTrees: NonEmpty[Seq[viewType.View]],
+      maxBytesToDecompress: MaxBytesToDecompress,
+  ): Either[EncryptionError, EncryptedMultipleViews[VT]] = {
+    val multiView = MultipleViewTrees(viewTrees)
+    val size = multiView.toByteString.size()
+
+    for {
+      _ <- Either.cond(
+        maxBytesToDecompress.limit.value >= size,
+        (),
+        EncryptionError.MaxViewSizeExceeded(size, maxBytesToDecompress.limit),
+      )
+      encryptedViews <- encryptionOps.encryptSymmetricWith(CompressedView(multiView), viewKey)
+    } yield EncryptedMultipleViews(viewType, encryptedViews)
   }
 
-  object CompressedView {
-    private[EncryptedView] def apply[V <: HasToByteString](value: V): CompressedView[V] =
-      new CompressedView(value)
+  def decrypt[View <: ViewTree with HasToByteString](
+      encryptionOps: EncryptionOps,
+      viewKey: SymmetricKey,
+      encryptedViewTrees: Encrypted[CompressedView[MultipleViewTrees[View]]],
+  )(
+      deserialize: ByteString => Either[DeserializationError, View],
+      maxBytesToDecompress: MaxBytesToDecompress,
+  ): Either[DecryptionError, MultipleViewTrees[View]] = {
 
-    private[EncryptedView] def fromByteString[V <: HasToByteString](
-        deserialize: ByteString => Either[DeserializationError, V]
-    )(
-        bytes: ByteString,
-        maxBytesToDecompress: MaxBytesToDecompress,
-    ): Either[DeserializationError, CompressedView[V]] =
-      ByteStringUtil
-        .decompressGzip(bytes, maxBytesLimit = maxBytesToDecompress)
-        .flatMap(deserialize)
-        .map(CompressedView(_))
+    def deserializeMultiView(
+        bytestring: ByteString
+    ): Either[DeserializationError, MultipleViewTrees[View]] =
+      ProtoConverter
+        .protoParser(v31.EncryptedMultipleViewsMessage.UncompressedViewTrees.parseFrom)(bytestring)
+        .leftMap(err => DefaultDeserializationError(err.message))
+        .flatMap(protoTrees => protoTrees.viewTrees.traverse(deserialize))
+        .flatMap { viewTrees =>
+          NonEmpty
+            .from(viewTrees)
+            .toRight(
+              DefaultDeserializationError("An empty collection of view trees is not allowed")
+            )
+        }
+        .map(MultipleViewTrees.apply)
+
+    encryptionOps
+      .decryptWith(encryptedViewTrees, viewKey)(
+        CompressedView
+          .fromByteString[MultipleViewTrees[View]](deserializeMultiView)(_, maxBytesToDecompress)
+      )
+      .map(_.value)
   }
+}
+
+/** Wrapper class to compress the view or the views before encrypting it.
+  *
+  * This class's methods should be used only from [[EncryptedView]] or [[EncryptedMultipleViews]]
+  * because compression is in theory non-deterministic (the gzip format can store a timestamp that
+  * is ignored by decryption) and we want to avoid that this is applied to
+  * [[com.digitalasset.canton.serialization.HasCryptographicEvidence]] instances.
+  */
+final case class CompressedView[+V <: HasToByteString] private (value: V) extends HasToByteString {
+  override def toByteString: ByteString =
+    ByteStringUtil.compressGzip(value.toByteString)
+}
+
+object CompressedView {
+  private[messages] def apply[V <: HasToByteString](value: V): CompressedView[V] =
+    new CompressedView(value)
+
+  private[messages] def fromByteString[V <: HasToByteString](
+      deserialize: ByteString => Either[DeserializationError, V]
+  )(
+      bytes: ByteString,
+      maxBytesToDecompress: MaxBytesToDecompress,
+  ): Either[DeserializationError, CompressedView[V]] =
+    ByteStringUtil
+      .decompressGzip(bytes, maxBytesLimit = maxBytesToDecompress)
+      .flatMap(deserialize)
+      .map(CompressedView(_))
 }
 
 /** An encrypted view message. The view message is encrypted with a symmetric key derived from the
   * view's randomness.
-  *
-  * @param viewHash
+  */
+sealed trait EncryptedViewMessage[+VT <: ViewType] extends UnsignedProtocolMessage {
+  def submittingParticipantSignature: Option[Signature]
+
+  def viewHashes: NonEmpty[Seq[ViewHash]]
+
+  /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
+    * provided that the argument is the same as [[viewType]]
+    * @return
+    *   [[scala.None$]] if `desiredViewType` does not equal [[viewType]].
+    */
+  def select(desiredViewType: ViewType): Option[EncryptedViewMessage[desiredViewType.type]]
+
+  def viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]]
+
+  def viewEncryptionScheme: SymmetricKeyScheme
+
+  def viewType: VT
+
+  def encryptedSizeHint: Int
+}
+
+/** @param viewHash
   *   Transaction view hash in plain text - included such that the recipient can prove to a 3rd
   *   party that it has correctly decrypted the `viewTree`
   * @param viewEncryptionKeyRandomness
@@ -173,24 +269,30 @@ object EncryptedView {
   *     [[com.digitalasset.canton.crypto.SynchronizerCryptoPureApi#createSymmetricKey]] is used to
   *     derive the symmetric key.
   */
-final case class EncryptedViewMessage[+VT <: ViewType](
-    submittingParticipantSignature: Option[Signature],
+final case class EncryptedSingleViewMessage[+VT <: ViewType](
+    override val submittingParticipantSignature: Option[
+      Signature
+    ],
     viewHash: ViewHash,
-    viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
+    override val viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
     encryptedView: EncryptedView[VT],
     override val psid: PhysicalSynchronizerId,
-    viewEncryptionScheme: SymmetricKeyScheme,
+    override val viewEncryptionScheme: SymmetricKeyScheme,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      EncryptedViewMessage.type
+      EncryptedSingleViewMessage.type
     ]
-) extends UnsignedProtocolMessage
-    with HasProtocolVersionedWrapper[EncryptedViewMessage[ViewType]] {
+) extends HasProtocolVersionedWrapper[EncryptedSingleViewMessage[ViewType]]
+    with EncryptedViewMessage[VT] {
 
-  @transient override protected lazy val companionObj: EncryptedViewMessage.type =
-    EncryptedViewMessage
+  override def viewHashes: NonEmpty[Seq[ViewHash]] = NonEmpty.mk(Seq, viewHash)
 
-  def viewType: VT = encryptedView.viewType
+  @transient override protected lazy val companionObj: EncryptedSingleViewMessage.type =
+    EncryptedSingleViewMessage
+
+  override val viewType: VT = encryptedView.viewType
+
+  override def encryptedSizeHint: Int = encryptedView.sizeHint
 
   def copy[A <: ViewType](
       submittingParticipantSignature: Option[Signature] = this.submittingParticipantSignature,
@@ -200,7 +302,7 @@ final case class EncryptedViewMessage[+VT <: ViewType](
       encryptedView: EncryptedView[A] = this.encryptedView,
       synchronizerId: PhysicalSynchronizerId = this.psid,
       viewEncryptionScheme: SymmetricKeyScheme = this.viewEncryptionScheme,
-  ): EncryptedViewMessage[A] = new EncryptedViewMessage(
+  ): EncryptedSingleViewMessage[A] = new EncryptedSingleViewMessage(
     submittingParticipantSignature,
     viewHash,
     viewEncryptionKeyRandomness,
@@ -223,23 +325,26 @@ final case class EncryptedViewMessage[+VT <: ViewType](
   override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
     v30.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV30)
 
+  // Not implemented on purpose, this type does not exist for v31+
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-    v31.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV30)
+    throw new UnsupportedOperationException(
+      "Cannot serialize an EncryptedSingleViewMessage to proto version 31"
+    )
 
-  protected def updateView[VT2 <: ViewType](
-      newView: EncryptedView[VT2]
-  ): EncryptedViewMessage[VT2] = copy(encryptedView = newView)
-
+  /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
+    * provided that the argument is the same as [[viewType]]
+    * @return
+    *   [[scala.None$]] if `desiredViewType` does not equal [[viewType]].
+    */
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def traverse[F[_], VT2 <: ViewType](
-      f: EncryptedView[VT] => F[EncryptedView[VT2]]
-  )(implicit F: Functor[F]): F[EncryptedViewMessage[VT2]] =
-    F.map(f(encryptedView)) { newEncryptedView =>
-      if (newEncryptedView eq encryptedView) this.asInstanceOf[EncryptedViewMessage[VT2]]
-      else updateView(newEncryptedView)
-    }
+  override def select(
+      desiredViewType: ViewType
+  ): Option[EncryptedSingleViewMessage[desiredViewType.type]] =
+    if (desiredViewType == viewType)
+      Some(this.asInstanceOf[EncryptedSingleViewMessage[desiredViewType.type]])
+    else None
 
-  override def pretty: Pretty[EncryptedViewMessage.this.type] = prettyOfClass(
+  override def pretty: Pretty[EncryptedSingleViewMessage.this.type] = prettyOfClass(
     param("view hash", _.viewHash),
     param("view type", _.viewType),
     param("size", _.encryptedView.sizeHint),
@@ -249,89 +354,7 @@ final case class EncryptedViewMessage[+VT <: ViewType](
   )
 }
 
-object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[ViewType]] {
-
-  val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.EncryptedViewMessage)(
-      supportedProtoVersion(_)(EncryptedViewMessage.fromProto),
-      _.toProtoV30,
-    )
-  )
-
-  def apply[VT <: ViewType](
-      submittingParticipantSignature: Option[Signature],
-      viewHash: ViewHash,
-      viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
-      encryptedView: EncryptedView[VT],
-      synchronizerId: PhysicalSynchronizerId,
-      viewEncryptionScheme: SymmetricKeyScheme,
-      protocolVersion: ProtocolVersion,
-  ): EncryptedViewMessage[VT] = EncryptedViewMessage(
-    submittingParticipantSignature,
-    viewHash,
-    viewEncryptionKeyRandomness,
-    encryptedView,
-    synchronizerId,
-    viewEncryptionScheme,
-  )(protocolVersionRepresentativeFor(protocolVersion))
-
-  private def serializeEncryptedRandomness(
-      encryptedRandomness: AsymmetricEncrypted[SecureRandomness]
-  ): V30Crypto.AsymmetricEncrypted =
-    AsymmetricEncrypted(
-      encryptedRandomness.ciphertext,
-      encryptedRandomness.encryptionAlgorithmSpec,
-      encryptedRandomness.encryptedFor,
-    ).toProtoV30
-
-  private def deserializeEncryptedRandomness(
-      encryptedRandomnessP: V30Crypto.AsymmetricEncrypted
-  ): ParsingResult[AsymmetricEncrypted[SecureRandomness]] =
-    AsymmetricEncrypted.fromProtoV30(encryptedRandomnessP)
-
-  def fromProto(
-      encryptedViewMessageP: v30.EncryptedViewMessage
-  ): ParsingResult[EncryptedViewMessage[ViewType]] = {
-    val v30.EncryptedViewMessage(
-      viewTreeP,
-      encryptionSchemeP,
-      signatureP,
-      viewHashP,
-      sessionKeyLookupP,
-      synchronizerIdP,
-      viewTypeP,
-    ) =
-      encryptedViewMessageP
-    for {
-      viewType <- ViewType.fromProtoEnum(viewTypeP)
-      viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
-        "encryptionScheme",
-        encryptionSchemeP,
-      )
-      signature <- signatureP.traverse(Signature.fromProtoV30)
-      viewTree = Encrypted.fromByteString[EncryptedView.CompressedView[viewType.View]](viewTreeP)
-      encryptedView = EncryptedView(viewType)(viewTree)
-      viewHash <- ViewHash.fromProtoPrimitive(viewHashP)
-      viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
-        deserializeEncryptedRandomness,
-        "session key",
-        sessionKeyLookupP,
-      )
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
-        synchronizerIdP,
-        "physical_synchronizer_id",
-      )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-    } yield new EncryptedViewMessage(
-      signature,
-      viewHash,
-      viewEncryptionKeyRandomness,
-      encryptedView,
-      synchronizerId,
-      viewEncryptionScheme,
-    )(rpv)
-  }
-
+object EncryptedViewMessage {
   def decryptRandomness[VT <: ViewType](
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       sessionKeyStore: ConfirmationRequestSessionKeyStore,
@@ -352,6 +375,7 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
           snapshot.ipsSnapshot.encryptionKeys(participantId)
         )
         .map(_.map(_.id).toSet)
+
       encryptedRandomnessForParticipant <- encrypted.viewEncryptionKeyRandomness
         .find(e => encryptionKeys.contains(e.encryptedFor))
         .toRight(
@@ -409,11 +433,15 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       encrypted: EncryptedViewMessage[VT],
       viewRandomness: SecureRandomness,
-  )(deserialize: ByteString => Either[DeserializationError, encrypted.encryptedView.viewType.View])(
-      implicit
+  )(
+      deserialize: ByteString => Either[
+        DeserializationError,
+        VT#View,
+      ]
+  )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, VT#View] = {
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, MultipleViewTrees[VT#View]] = {
 
     val pureCrypto = snapshot.pureCrypto
     val randomnessLength = encrypted.viewEncryptionScheme.keySizeInBytes
@@ -443,9 +471,42 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
         .map(_.parameters.maxRequestSize.value)
         .map(MaxBytesToDecompress(_))
 
-      decrypted <- eitherT(
+      result <- encrypted match {
+        case singleViewMessage: EncryptedSingleViewMessage[VT] =>
+          decryptSingleView(
+            pureCrypto,
+            singleViewMessage,
+            viewKey,
+            maxBytesToDecompress,
+          )(deserialize).map(view => MultipleViewTrees(NonEmpty.mk(Seq, view)))
+        case multipleViewsMessage: EncryptedMultipleViewsMessage[VT] =>
+          decryptMultipleViews(
+            pureCrypto,
+            multipleViewsMessage,
+            viewKey,
+            maxBytesToDecompress,
+          )(deserialize)
+      }
+    } yield result
+  }
+
+  private def decryptSingleView[VT <: ViewType](
+      pureCrypto: SynchronizerCryptoPureApi,
+      encrypted: EncryptedSingleViewMessage[VT],
+      viewKey: SymmetricKey,
+      maxBytesToDecompress: MaxBytesToDecompress,
+  )(
+      deserialize: ByteString => Either[
+        DeserializationError,
+        VT#View,
+      ]
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, VT#View] =
+    for {
+      decryptedView <- eitherT(
         EncryptedView
-          .decrypt(pureCrypto, viewKey, encrypted.encryptedView)(
+          .decrypt[VT#View](pureCrypto, viewKey, encrypted.encryptedView.viewTree)(
             deserialize,
             maxBytesToDecompress = maxBytesToDecompress,
           )
@@ -453,16 +514,49 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
       )
       _ <- eitherT(
         Either.cond(
-          decrypted.psid == encrypted.psid,
+          decryptedView.psid == encrypted.psid,
           (),
-          EncryptedViewMessageError.WrongSynchronizerIdInEncryptedViewMessage(
+          EncryptedViewMessageError.WrongSynchronizerIdsInEncryptedViewMessage(
             encrypted.psid,
-            decrypted.psid,
+            Set(decryptedView.psid),
           ),
         )
       )
-    } yield decrypted
-  }
+    } yield decryptedView
+
+  private def decryptMultipleViews[VT <: ViewType](
+      pureCrypto: SynchronizerCryptoPureApi,
+      encrypted: EncryptedMultipleViewsMessage[VT],
+      viewKey: SymmetricKey,
+      maxBytesToDecompress: MaxBytesToDecompress,
+  )(
+      deserialize: ByteString => Either[
+        DeserializationError,
+        VT#View,
+      ]
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, MultipleViewTrees[VT#View]] =
+    for {
+      decryptedMultiView <- eitherT(
+        EncryptedMultipleViews
+          .decrypt(pureCrypto, viewKey, encrypted.encryptedViews.viewTrees)(
+            deserialize,
+            maxBytesToDecompress = maxBytesToDecompress,
+          )
+          .leftMap(EncryptedViewMessageError.SymmetricDecryptError.apply)
+      )
+      _ <- eitherT(
+        Either.cond(
+          decryptedMultiView.viewTrees.forall(_.psid == encrypted.psid),
+          (),
+          EncryptedViewMessageError.WrongSynchronizerIdsInEncryptedViewMessage(
+            encrypted.psid,
+            decryptedMultiView.viewTrees.map(_.psid).toSet,
+          ),
+        )
+      )
+    } yield decryptedMultiView
 
   def decryptFor[VT <: ViewType](
       snapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -470,11 +564,15 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
       encrypted: EncryptedViewMessage[VT],
       participantId: ParticipantId,
       optViewRandomness: Option[SecureRandomness] = None,
-  )(deserialize: ByteString => Either[DeserializationError, encrypted.encryptedView.viewType.View])(
-      implicit
+  )(
+      deserialize: ByteString => Either[
+        DeserializationError,
+        VT#View,
+      ]
+  )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, VT#View] =
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, MultipleViewTrees[VT#View]] =
     for {
       viewRandomness <- optViewRandomness.fold(
         decryptRandomness(
@@ -484,19 +582,111 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
           participantId,
         )
       )(r => EitherT.pure(r))
-      decrypted <- decryptWithRandomness(snapshot, encrypted, viewRandomness)(
+      decrypted <- decryptWithRandomness(
+        snapshot,
+        encrypted,
+        viewRandomness,
+      )(
         deserialize
       )
     } yield decrypted
 
+  def serializeEncryptedRandomness(
+      encryptedRandomness: AsymmetricEncrypted[SecureRandomness]
+  ): V30Crypto.AsymmetricEncrypted =
+    AsymmetricEncrypted(
+      encryptedRandomness.ciphertext,
+      encryptedRandomness.encryptionAlgorithmSpec,
+      encryptedRandomness.encryptedFor,
+    ).toProtoV30
+
+  def deserializeEncryptedRandomness(
+      encryptedRandomnessP: V30Crypto.AsymmetricEncrypted
+  ): ParsingResult[AsymmetricEncrypted[SecureRandomness]] =
+    AsymmetricEncrypted.fromProtoV30(encryptedRandomnessP)
+
   implicit val encryptedViewMessageCast
       : ProtocolMessageContentCast[EncryptedViewMessage[ViewType]] =
-    ProtocolMessageContentCast.create[EncryptedViewMessage[ViewType]]("EncryptedViewMessage") {
+    ProtocolMessageContentCast.create[EncryptedViewMessage[ViewType]](
+      "EncryptedViewMessage"
+    ) {
       case evm: EncryptedViewMessage[?] => Some(evm)
       case _ => None
     }
+}
 
-  override def name: String = "EncryptedViewMessage"
+object EncryptedSingleViewMessage
+    extends VersioningCompanion[EncryptedSingleViewMessage[ViewType]] {
+
+  val versioningTable: VersioningTable = VersioningTable(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.EncryptedViewMessage)(
+      supportedProtoVersion(_)(EncryptedSingleViewMessage.fromProto),
+      _.toProtoV30,
+    ),
+    ProtoVersion(31) -> UnsupportedProtoCodec(ProtocolVersion.v35),
+  )
+
+  def apply[VT <: ViewType](
+      submittingParticipantSignature: Option[Signature],
+      viewHash: ViewHash,
+      viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
+      encryptedView: EncryptedView[VT],
+      synchronizerId: PhysicalSynchronizerId,
+      viewEncryptionScheme: SymmetricKeyScheme,
+      protocolVersion: ProtocolVersion,
+  ): EncryptedSingleViewMessage[VT] = EncryptedSingleViewMessage(
+    submittingParticipantSignature,
+    viewHash,
+    viewEncryptionKeyRandomness,
+    encryptedView,
+    synchronizerId,
+    viewEncryptionScheme,
+  )(protocolVersionRepresentativeFor(protocolVersion))
+
+  def fromProto(
+      encryptedViewMessageP: v30.EncryptedViewMessage
+  ): ParsingResult[EncryptedSingleViewMessage[ViewType]] = {
+    val v30.EncryptedViewMessage(
+      viewTreeP,
+      encryptionSchemeP,
+      signatureP,
+      viewHashP,
+      sessionKeyLookupP,
+      synchronizerIdP,
+      viewTypeP,
+    ) =
+      encryptedViewMessageP
+    for {
+      viewType <- ViewType.fromProtoEnum(viewTypeP)
+      viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
+        "encryptionScheme",
+        encryptionSchemeP,
+      )
+      signature <- signatureP.traverse(Signature.fromProtoV30)
+      viewTree = Encrypted.fromByteString[CompressedView[viewType.View]](viewTreeP)
+      encryptedView = EncryptedView(viewType)(viewTree)
+      viewHash <- ViewHash.fromProtoPrimitive(viewHashP)
+      viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
+        EncryptedViewMessage.deserializeEncryptedRandomness,
+        "session key",
+        sessionKeyLookupP,
+      )
+      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+        synchronizerIdP,
+        "physical_synchronizer_id",
+      )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield new EncryptedSingleViewMessage(
+      signature,
+      viewHash,
+      viewEncryptionKeyRandomness,
+      encryptedView,
+      synchronizerId,
+      viewEncryptionScheme,
+    )(rpv)
+  }
+
+  override def name: String = "EncryptedSingleViewMessage"
 }
 
 sealed trait EncryptedViewMessageError extends Product with Serializable with PrettyPrinting {
@@ -522,9 +712,9 @@ object EncryptedViewMessageError {
       decryptError: DecryptionError
   ) extends EncryptedViewMessageError
 
-  final case class WrongSynchronizerIdInEncryptedViewMessage(
+  final case class WrongSynchronizerIdsInEncryptedViewMessage(
       declaredSynchronizerId: PhysicalSynchronizerId,
-      containedSynchronizerId: PhysicalSynchronizerId,
+      containedSynchronizerId: Set[PhysicalSynchronizerId],
   ) extends EncryptedViewMessageError
 
   final case class WrongRandomnessLength(
@@ -542,4 +732,166 @@ object EncryptedViewMessageError {
   ) extends EncryptedViewMessageError
 
   final case class InvalidContractIdInView(error: String) extends EncryptedViewMessageError
+
+  final case class TooManyViews(error: String) extends EncryptedViewMessageError
+}
+
+final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
+    encryptedViews: EncryptedMultipleViews[VT],
+    override val viewHashes: NonEmpty[Seq[ViewHash]],
+    override val viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
+    override val psid: PhysicalSynchronizerId,
+    override val viewEncryptionScheme: SymmetricKeyScheme,
+    override val submittingParticipantSignature: Option[Signature],
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      EncryptedMultipleViewsMessage.type
+    ]
+) extends HasProtocolVersionedWrapper[EncryptedMultipleViewsMessage[ViewType]]
+    with EncryptedViewMessage[VT] {
+
+  @transient override protected lazy val companionObj: EncryptedMultipleViewsMessage.type =
+    EncryptedMultipleViewsMessage
+
+  override val viewType: VT = encryptedViews.viewType
+
+  override def encryptedSizeHint: Int = encryptedViews.sizeHint
+
+  private def toProtoV31: v31.EncryptedMultipleViewsMessage =
+    v31.EncryptedMultipleViewsMessage(
+      compressedViewTrees = encryptedViews.viewTrees.ciphertext,
+      viewHashes = viewHashes.map(_.toProtoPrimitive),
+      encryptionScheme = viewEncryptionScheme.toProtoEnum,
+      submittingParticipantSignature = submittingParticipantSignature.map(_.toProtoV30),
+      sessionKeyLookup =
+        viewEncryptionKeyRandomness.map(EncryptedViewMessage.serializeEncryptedRandomness),
+      physicalSynchronizerId = psid.toProtoPrimitive,
+      viewType = viewType.toProtoEnum,
+    )
+
+  // Not implemented on purpose, this type exists for 31+ only
+  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
+    throw new UnsupportedOperationException(
+      "Cannot serialize an EncryptedMultipleViewsMessage to proto version 30"
+    )
+
+  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+    v31.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
+
+  /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
+    * provided that the argument is the same as [[viewType]]
+    * @return
+    *   [[scala.None$]] if `desiredViewType` does not equal [[viewType]].
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  override def select(
+      desiredViewType: ViewType
+  ): Option[EncryptedMultipleViewsMessage[desiredViewType.type]] =
+    if (desiredViewType == viewType)
+      Some(this.asInstanceOf[EncryptedMultipleViewsMessage[desiredViewType.type]])
+    else None
+
+  override def pretty: Pretty[EncryptedMultipleViewsMessage.this.type] = prettyOfClass(
+    param("view hashes", _.viewHashes),
+    param("view type", _.viewType),
+    param("size", _.encryptedViews.sizeHint),
+    param("psid", _.psid),
+    param("number of view keys", _.viewEncryptionKeyRandomness.size),
+    param("view encryption scheme", _.viewEncryptionScheme),
+  )
+
+  def copy[A <: ViewType](
+      encryptedViews: EncryptedMultipleViews[A] = this.encryptedViews,
+      viewHashes: NonEmpty[Seq[ViewHash]] = this.viewHashes,
+      viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]] =
+        this.viewEncryptionKeyRandomness,
+      psid: PhysicalSynchronizerId = this.psid,
+      viewEncryptionScheme: SymmetricKeyScheme = this.viewEncryptionScheme,
+      submittingParticipantSignature: Option[Signature] = this.submittingParticipantSignature,
+  ): EncryptedMultipleViewsMessage[A] = new EncryptedMultipleViewsMessage(
+    encryptedViews,
+    viewHashes,
+    viewEncryptionKeyRandomness,
+    psid,
+    viewEncryptionScheme,
+    submittingParticipantSignature,
+  )(representativeProtocolVersion)
+}
+
+object EncryptedMultipleViewsMessage
+    extends VersioningCompanion[EncryptedMultipleViewsMessage[ViewType]] {
+
+  val versioningTable: VersioningTable = VersioningTable(
+    ProtoVersion(30) -> UnsupportedProtoCodec(ProtocolVersion.v34),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.EncryptedMultipleViewsMessage)(
+      supportedProtoVersion(_)(EncryptedMultipleViewsMessage.fromProto),
+      _.toProtoV31,
+    ),
+  )
+
+  def apply[VT <: ViewType](
+      encryptedViews: EncryptedMultipleViews[VT],
+      viewHashes: NonEmpty[Seq[ViewHash]],
+      viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
+      synchronizerId: PhysicalSynchronizerId,
+      viewEncryptionScheme: SymmetricKeyScheme,
+      submittingParticipantSignature: Option[Signature],
+      protocolVersion: ProtocolVersion,
+  ): EncryptedMultipleViewsMessage[VT] = EncryptedMultipleViewsMessage(
+    encryptedViews,
+    viewHashes,
+    viewEncryptionKeyRandomness,
+    synchronizerId,
+    viewEncryptionScheme,
+    submittingParticipantSignature,
+  )(protocolVersionRepresentativeFor(protocolVersion))
+
+  def fromProto(
+      encryptedViewMessageP: v31.EncryptedMultipleViewsMessage
+  ): ParsingResult[EncryptedMultipleViewsMessage[ViewType]] = {
+    val v31.EncryptedMultipleViewsMessage(
+      compressedViewTreesP,
+      viewHashesP,
+      encryptionSchemeP,
+      signatureP,
+      sessionKeyLookupP,
+      synchronizerIdP,
+      viewTypeP,
+    ) =
+      encryptedViewMessageP
+    for {
+      viewType <- ViewType.fromProtoEnum(viewTypeP)
+      viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
+        "encryptionScheme",
+        encryptionSchemeP,
+      )
+
+      signature <- signatureP.traverse(Signature.fromProtoV30)
+      viewHashes <- parseRequiredNonEmpty(
+        ViewHash.fromProtoPrimitive,
+        "view_hashes",
+        viewHashesP,
+      )
+
+      viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
+        EncryptedViewMessage.deserializeEncryptedRandomness,
+        "session_key_lookup",
+        sessionKeyLookupP,
+      )
+      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+        synchronizerIdP,
+        "physical_synchronizer_id",
+      )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+    } yield new EncryptedMultipleViewsMessage(
+      EncryptedMultipleViews(viewType, Encrypted.fromByteString(compressedViewTreesP)),
+      viewHashes,
+      viewEncryptionKeyRandomness,
+      synchronizerId,
+      viewEncryptionScheme,
+      signature,
+    )(rpv)
+  }
+
+  override def name: String = "EncryptedMultipleViewsMessage"
 }

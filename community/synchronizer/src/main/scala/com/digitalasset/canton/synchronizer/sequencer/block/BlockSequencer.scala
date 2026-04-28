@@ -141,6 +141,7 @@ class BlockSequencer(
     loggerFactory: NamedLoggerFactory,
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
+    delayRequestsBeforeLsuTrafficInit: Boolean,
 )(implicit executionContext: ExecutionContext, materializer: Materializer, val tracer: Tracer)
     extends DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
@@ -531,8 +532,13 @@ class BlockSequencer(
     )
 
     for {
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
+        TrafficControlErrors.LsuTrafficNotInitialized.Error(),
+      )
       _ <-
-        if (!skipLsuChecks) EitherT.right(lsuTrafficInitialized.futureUS)
+        if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
+          EitherT.right(lsuTrafficInitialized.futureUS)
         else EitherTUtil.unitUS
       _ <-
         if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
@@ -725,7 +731,7 @@ class BlockSequencer(
                 val viewHashes = openEnvelope.protocolMessage match {
                   // For encrypted view messages, extract the view hash
                   case message: EncryptedViewMessage[?] =>
-                    List(message.viewHash.unwrap.getCryptographicEvidence)
+                    message.viewHashes.forgetNE.map(_.unwrap.getCryptographicEvidence)
                   case _ => List.empty
                 }
                 EnvelopeTrafficSummary(
