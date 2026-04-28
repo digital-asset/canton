@@ -518,6 +518,24 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
       ) shouldBe defaultHash
     }
 
+    "not include external call results" in {
+      a[NodeHashingError.UnsupportedFeature] shouldBe thrownBy(
+        hashExerciseNode(
+          exerciseNode.copy(externalCallResults =
+            ImmArray(
+              ExternalCallResult(
+                extensionId = "ext",
+                functionId = "fun",
+                config = Bytes.assertFromString("0a0b"),
+                input = Bytes.assertFromString("c0ff"),
+                output = Bytes.assertFromString("beef"),
+              )
+            )
+          )
+        )
+      )
+    }
+
     "throw if some nodes are missing" in {
       an[IncompleteTransactionTree] shouldBe thrownBy {
         hashExerciseNode(exerciseNode, subNodes = Map.empty)
