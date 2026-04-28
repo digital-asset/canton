@@ -1,4 +1,4 @@
-sdk-version: 2.10.4
+sdk-version: 2.10.4-snapshot.20260428.13204.0.vb1dd528e
 name: health-insurance
 source: HealthInsurance.daml
 init-script: HealthInsurance:setup
