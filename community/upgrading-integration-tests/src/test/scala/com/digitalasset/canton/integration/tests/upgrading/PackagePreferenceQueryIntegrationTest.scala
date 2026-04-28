@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.GetPref
 import com.daml.ledger.api.v2.package_reference.PackageReference
 import com.digitalasset.canton.LfPackageName
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltests.appinstall.v1.java.appinstall.AppInstall as AppInstallV1
 import com.digitalasset.canton.damltests.appinstall.v2.java.appinstall.AppInstall as AppInstallV2
@@ -14,8 +15,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.NoPreferredPackagesFound
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.util.SetupPackageVetting
 import org.scalatest.Assertion
 
@@ -25,7 +28,8 @@ import UpgradingBaseTest.Syntax.*
 
 final class PackagePreferenceQueryIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with EntitySyntax {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseBftSequencer(
@@ -67,10 +71,25 @@ final class PackagePreferenceQueryIntegrationTest
         participant2.synchronizers.connect_local(sequencer1, alias = daName)
         participant2.synchronizers.connect_local(sequencer2, alias = acmeName)
 
-        party1 = participant1.parties.enable("party1", synchronizer = daName)
-        participant1.parties.enable("party1", synchronizer = acmeName)
-        party2 = participant2.parties.enable("party2", synchronizer = daName)
-        participant2.parties.enable("party2", synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            "party1" -> participant1,
+            "party2" -> participant2,
+          ),
+          Map(
+            "party1" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            "party2" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+        )
+
+        party1 = "party1".toPartyId(participant1)
+        party2 = "party2".toPartyId(participant2)
 
         SetupPackageVetting(
           darPaths = Set(UpgradingBaseTest.AppInstallV1, UpgradingBaseTest.AppInstallV2),

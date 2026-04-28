@@ -3,11 +3,20 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import com.daml.nonempty.NonEmpty
+import cats.data.EitherT
+import cats.syntax.either.*
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
-import com.digitalasset.canton.config.{CacheConfig, CryptoConfig, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CacheConfig,
+  CryptoConfig,
+  LoggingConfig,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.jce.JceCrypto
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPrivateStore,
   InMemoryCryptoPublicStore,
@@ -16,25 +25,77 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   FullTransactionViewTree,
+  GenTransactionTree,
   LightTransactionViewTree,
+  TransactionView,
+  ViewPosition,
 }
+import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedViews
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  ContractInstanceOfId,
+  TransactionTreeConversionError,
+}
+import com.digitalasset.canton.participant.protocol.submission.{
+  EncryptedViewMessageFactory,
+  SeedGenerator,
+  TransactionConfirmationRequestFactory,
+  TransactionTreeFactory,
+}
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
+  extra,
+  extraParticipant,
+  observer,
+  observerParticipant,
+  signatory,
+  signatoryParticipant,
+  submitter,
+  submittingParticipant,
+}
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
+import com.digitalasset.canton.protocol.WellFormedTransaction.{
+  WithAbsoluteSuffixes,
+  WithoutSuffixes,
+}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageUtils.Optics.viewHashOrHashesLens
 import com.digitalasset.canton.protocol.{
+  CantonContractIdVersion,
+  ContractIdAbsolutizer,
   DynamicSynchronizerParameters,
   ExampleTransactionFactory,
+  RollbackContext,
   ViewHash,
+  WellFormedTransaction,
 }
-import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients, WithRecipients}
-import com.digitalasset.canton.store.SessionKeyStoreWithNoEviction
+import com.digitalasset.canton.sequencing.protocol.{
+  MediatorGroupRecipient,
+  MemberRecipient,
+  OpenEnvelope,
+  Recipients,
+  WithRecipients,
+}
+import com.digitalasset.canton.store.{
+  SessionKeyStoreWithInMemoryCache,
+  SessionKeyStoreWithNoEviction,
+}
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Observation, Submission}
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, TestingTopology}
-import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{
+  BaseTestWordSpec,
+  HasExecutionContext,
+  LfGlobalKeyMapping,
+  WorkflowId,
+}
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
+
+import java.util.UUID
 
 class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext {
 
@@ -44,7 +105,9 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       ] = identity,
       interceptSubviewKeyRandomness: Seq[Seq[SecureRandomness]] => Seq[Seq[SecureRandomness]] =
         identity,
-      interceptEncryptedViewMessages: Seq[EncryptedViewMessage[TransactionViewType.type]] => Seq[
+      interceptEncryptedViewMessages: Seq[
+        EncryptedViewMessage[TransactionViewType.type]
+      ] => Seq[
         EncryptedViewMessage[TransactionViewType.type]
       ] = identity,
       interceptFullTree: Seq[FullTransactionViewTree] => Seq[FullTransactionViewTree] = identity,
@@ -70,9 +133,17 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
 
     val pureCrypto: CryptoPureApi = jceCrypto.pureCrypto
 
+    val topologyMap = Map(
+      submittingParticipant -> Map(submitter -> Submission),
+      signatoryParticipant -> Map(signatory -> Submission),
+      observerParticipant -> Map(observer -> Observation),
+      extraParticipant -> Map(extra -> Observation),
+    )
+
     val snapshot: SynchronizerSnapshotSyncCryptoApi = {
       val identityFactory: TestingIdentityFactory = new TestingIdentityFactory(
-        TestingTopology(participants = Map(participantId -> ParticipantAttributes(Submission))),
+        TestingTopology(participants = Map(participantId -> ParticipantAttributes(Submission)))
+          .withReversedTopology(topologyMap),
         jceCrypto,
         loggerFactory,
         List(
@@ -140,9 +211,9 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
 
     val encryptedViewMessage: Seq[EncryptedViewMessage[TransactionViewType.type]] =
       interceptEncryptedViewMessages(
-        allViewIndices.map(i =>
+        allViewIndices.map { i =>
           EncryptedViewMessageFactory
-            .create(TransactionViewType)(
+            .encryptView(TransactionViewType)(
               lightTree(i),
               viewKeyData(i),
               snapshot,
@@ -151,7 +222,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
             )
             .futureValueUS
             .value
-        )
+        }
       )
 
     val recipients: Recipients = Recipients.cc(participantId)
@@ -171,9 +242,165 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       futureSupervisor,
       loggerFactory,
     )
+
+    /** Dataset used for a scenario with multiple messages per envelope.
+      *
+      * Uses the envelopes from the actual envelopes from the confirmation request
+      */
+    object MultipleMessagesPerEnvelope {
+
+      private val randomOps: RandomOps = new SymbolicPureCrypto()
+
+      private val transactionUuid: UUID = new UUID(10L, 20L)
+
+      private val seedGenerator: SeedGenerator =
+        new SeedGenerator(randomOps) {
+          override def generateUuid(): UUID = transactionUuid
+        }
+
+      private val ledgerTime: CantonTimestamp = CantonTimestamp.Epoch
+
+      private val transactionFactory: ExampleTransactionFactory =
+        new ExampleTransactionFactory()(ledgerTime = ledgerTime)
+
+      private def confirmationRequestFactory(
+          transactionTreeFactoryResult: Either[TransactionTreeConversionError, GenTransactionTree]
+      ): TransactionConfirmationRequestFactory = {
+
+        val transactionTreeFactory: TransactionTreeFactory = new TransactionTreeFactory {
+          override def cantonContractIdVersion: CantonContractIdVersion =
+            transactionFactory.cantonContractIdVersion
+
+          override def createTransactionTree(
+              transaction: WellFormedTransaction[WithoutSuffixes],
+              submitterInfo: SubmitterInfo,
+              _workflowId: Option[WorkflowId],
+              _mediator: MediatorGroupRecipient,
+              transactionSeed: SaltSeed,
+              transactionUuid: UUID,
+              _topologySnapshot: TopologySnapshot,
+              _contractOfId: ContractInstanceOfId,
+              _keyResolver: LfGlobalKeyMapping,
+              _maxSequencingTime: CantonTimestamp,
+              validatePackageVettings: Boolean,
+          )(implicit
+              traceContext: TraceContext
+          ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] =
+            transactionTreeFactoryResult.toEitherT
+
+          override def tryReconstruct(
+              subaction: WellFormedTransaction[WithoutSuffixes],
+              rootPosition: ViewPosition,
+              mediator: MediatorGroupRecipient,
+              submittingParticipantO: Option[ParticipantId],
+              salts: Iterable[Salt],
+              transactionUuid: UUID,
+              topologySnapshot: TopologySnapshot,
+              contractOfId: ContractInstanceOfId,
+              _rbContext: RollbackContext,
+              _keyResolver: LfGlobalKeyMapping,
+              _absolutizer: ContractIdAbsolutizer,
+          )(implicit traceContext: TraceContext): EitherT[
+            FutureUnlessShutdown,
+            TransactionTreeConversionError,
+            (TransactionView, WellFormedTransaction[WithAbsoluteSuffixes]),
+          ] = ???
+
+          override def saltsFromView(view: TransactionView): Iterable[Salt] = ???
+        }
+
+        // we force view requests to be handled sequentially, which makes results deterministic and easier to compare
+        // in the end.
+        new TransactionConfirmationRequestFactory(
+          submittingParticipant,
+          LoggingConfig(),
+          loggerFactory,
+          parallel = false,
+        )(
+          transactionTreeFactory,
+          seedGenerator,
+        )(executorService)
+      }
+
+      val exampleTransactionFactory: ExampleTransactionFactory = new ExampleTransactionFactory(
+        pureCrypto
+      )()
+
+      val example = exampleTransactionFactory.ViewInterleavings
+      val factory = confirmationRequestFactory(Right(example.transactionTree))
+
+      val sessionKeyStore = new SessionKeyStoreWithInMemoryCache(
+        SessionEncryptionKeyCacheConfig(),
+        timeouts,
+        loggerFactory,
+      )
+
+      val maxSequencingTime: CantonTimestamp = ledgerTime.plusSeconds(10)
+
+      val confirmationRequest = factory
+        .createConfirmationRequest(
+          transactionTree = example.transactionTree,
+          cryptoSnapshot = snapshot,
+          signingTimestampOverrides = Some(
+            SigningTimestampOverrides(
+              wallClock.now,
+              Some(maxSequencingTime),
+            )
+          ),
+          sessionKeyStore = sessionKeyStore,
+          protocolVersion = testedProtocolVersion,
+        )
+        .futureValueUS
+        .value
+
+      val decrypterForObserver: ViewMessageDecrypter = new ViewMessageDecrypter(
+        observerParticipant,
+        testedProtocolVersion,
+        sessionKeyStore,
+        snapshot,
+        futureSupervisor,
+        loggerFactory,
+      )
+    }
   }
 
   "ViewMessageDecrypter" can {
+
+    "successfully decrypt all view messages from envelopes with multiple views" in {
+      val env = new Env()
+      import env.*
+
+      import MultipleMessagesPerEnvelope.{confirmationRequest, decrypterForObserver, example}
+
+      val envelopes = confirmationRequest.viewEnvelopes.filter(
+        _.recipients.allRecipients.contains(MemberRecipient(observerParticipant))
+      )
+
+      if (testedProtocolVersion >= ProtocolVersion.v35) {
+        envelopes.length shouldBe 2
+      } else {
+        envelopes.length shouldBe 4
+      }
+
+      val decryptionResult = decrypterForObserver
+        .decryptViews(
+          NonEmptyUtil.fromUnsafe(envelopes)
+        )
+        .futureValueUS
+        .value
+
+      decryptionResult.decryptionErrors shouldBe empty
+      decryptionResult.views.length shouldBe 4
+
+      val decryptedViewGenTrees = decryptionResult.views.map(_._1.unwrap.tree)
+
+      decryptedViewGenTrees should contain theSameElementsAs Seq(
+        example.transactionViewTree0.tree,
+        example.transactionViewTree100.tree,
+        example.transactionViewTree110.tree,
+        example.transactionViewTree2.tree,
+      )
+    }
 
     "successfully decrypt all view messages" in {
 
@@ -186,7 +413,9 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
           case ((WithRecipients(view, actualRecipients), optSignature), i) =>
             view shouldBe lightTree(i)
             actualRecipients shouldBe recipients
-            optSignature shouldBe encryptedViewMessage(i).submittingParticipantSignature
+            optSignature shouldBe encryptedViewMessage(
+              i
+            ).submittingParticipantSignature
         }
         views should have size allViewIndices.size.toLong
 
@@ -209,7 +438,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
         decrypter.decryptViews(onlyChildEnvelopes).value,
         _.getMessage should startWith(
-          s"Can't decrypt the randomness of the view with hash ${encryptedViewMessage(child).viewHash} where I'm allegedly an informee. " +
+          s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
             s"SyncCryptoDecryptError(\n  FailedToDecrypt(\n    org.bouncycastle.jcajce.provider.util.BadBlockException"
         ),
       )
@@ -229,7 +458,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
 
       loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
         decrypter.decryptViews(onlyChildEnvelopes).value,
-        _.getMessage shouldBe s"Can't decrypt the randomness of the view with hash ${encryptedViewMessage(child).viewHash} where I'm allegedly an informee. " +
+        _.getMessage shouldBe s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
           s"MissingParticipantKey(PAR::participant::default)",
       )
     }.futureValueUS
@@ -252,7 +481,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       loggerFactory
         .assertInternalErrorAsyncUS[IllegalArgumentException](
           decrypter.decryptViews(onlyChildEnvelopes).value,
-          _.getMessage shouldBe s"Can't decrypt the randomness of the view with hash ${encryptedViewMessage(child).viewHash} where I'm allegedly an informee. " +
+          _.getMessage shouldBe s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
             s"PrivateKeyStoreVerificationError(FailedToReadKey(keyId = $fingerprint, reason = matching private key does not exist))",
         )
         .futureValueUS
@@ -270,7 +499,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       loggerFactory
         .assertInternalErrorAsyncUS[IllegalArgumentException](
           decrypter.decryptViews(allEnvelopes).value,
-          _.getMessage shouldBe s"View ${encryptedViewMessage(child).viewHash} has different encryption keys associated with it. " +
+          _.getMessage shouldBe s"View ${encryptedViewMessage(child).viewHashes.head1} has different encryption keys associated with it. " +
             s"(Previous: Some(Success(Outcome(${randomness(child)}))), new: $dummyRandomness)",
         )
         .futureValueUS
@@ -290,7 +519,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
         { x =>
           val randomnesses = (randomness(parent), randomness(child))
           Seq(randomnesses, randomnesses.swap).map { case (r1, r2) =>
-            s"View ${encryptedViewMessage(child).viewHash} has different encryption keys associated with it. " +
+            s"View ${encryptedViewMessage(child).viewHashes.head1} has different encryption keys associated with it. " +
               s"(Previous: Some(Success(Outcome($r1))), new: $r2)"
           } should contain(x.getMessage)
         },
@@ -307,22 +536,23 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
           HashAlgorithm.Sha256,
         )
       )
+
       val env = new Env(
-        interceptEncryptedViewMessages = _.map(
-          _.focus(_.viewHash)
-            .replace(
-              dummyViewHash
-            )
-        )
+        interceptEncryptedViewMessages = _.map { message =>
+          viewHashOrHashesLens[TransactionViewType].replace(dummyViewHash)(message)
+        }
       )
       import env.*
 
       val decryptedViews = decrypter.decryptViews(onlyChildEnvelopes).futureValueUS.value
+
       inside(decryptedViews) { case DecryptedViews(views, decryptionErrors) =>
         val (WithRecipients(view, outputRecipients), optSignature) = views.loneElement
         view shouldBe lightTree(child)
         outputRecipients shouldBe recipients
-        optSignature shouldBe encryptedViewMessage(child).submittingParticipantSignature
+        optSignature shouldBe encryptedViewMessage(
+          child
+        ).submittingParticipantSignature
         decryptionErrors shouldBe empty
       }
     }

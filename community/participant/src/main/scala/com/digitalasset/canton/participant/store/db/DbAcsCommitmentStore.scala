@@ -391,13 +391,19 @@ class DbAcsCommitmentStore(
   ): FutureUnlessShutdown[Option[CantonTimestamp]] = {
     val effectiveSafeToPruneCommitmentState =
       safeToPruneCommitmentState.getOrElse(SafeToPruneCommitmentState.Match)
+
+    logger.debug(s"Computing noOutstandingCommitments with beforeOrAt=$beforeOrAt")
+
     for {
       computed <- lastComputedAndSent
       adjustedPruningTsOpt = computed.map(_.forgetRefinement.min(beforeOrAt))
 
+      _ = logger.debug(s"Last ACS commitment computed and sent was at $computed")
+
       unsafePeriods <- effectiveSafeToPruneCommitmentState match {
         case SafeToPruneCommitmentState.All =>
           FutureUnlessShutdown.pure(Seq.empty[(CantonTimestamp, CantonTimestamp)])
+
         case other: SafeToPruneCommitmentStateRequiresChecks =>
           for {
             ignores <- acsCounterParticipantConfigStore

@@ -10,7 +10,7 @@ override-components:
     version: $DAML_VERSION
 name: vetting-main
 data-dependencies:
-- ../../../../../scala-2.13/resource_managed/main/vetting-dep-1.0.0.dar
+- ../../../scala-2.13/resource_managed/main/vetting-dep-1.0.0${LF_VERSION_SUFFIX}.dar
 source: .
 version: 1.0.0
 dependencies:

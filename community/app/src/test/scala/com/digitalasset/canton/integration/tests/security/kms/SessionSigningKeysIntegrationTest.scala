@@ -38,7 +38,7 @@ trait SessionSigningKeysIntegrationTest
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.setSigningKeysIfPV35OrHigher(
-      SessionSigningKeysConfig.default,
+      SessionSigningKeysConfig.enabled,
       nodeFilter = name => !nodesWithSessionSigningKeysDisabled.contains(name),
     )
   )
@@ -69,7 +69,7 @@ trait SessionSigningKeysIntegrationTest
         if (nodesWithSessionSigningKeysDisabled.contains(node.name))
           node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.disabled
         else
-          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
+          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.enabled
       }
 
       assertPingSucceeds(participant1, participant2)

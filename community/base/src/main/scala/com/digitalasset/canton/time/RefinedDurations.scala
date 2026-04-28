@@ -36,7 +36,7 @@ import scala.jdk.DurationConverters.*
 
 object RefinedDuration {
 
-  /** Returns the duration in seconds truncated to the size of Int, returns as a maximum
+  /** Returns the duration in seconds truncated to the size of Int, with the maximum as
     * Int.MaxValue.
     *
     * Usage: On the database/jdbc level many timeouts require to be specified in seconds as an
@@ -48,10 +48,28 @@ object RefinedDuration {
     val seconds = duration.getSeconds
 
     if (seconds > Int.MaxValue) {
-      logger.info(s"Truncating $duration to integer")
+      logger.warn(s"Truncating $duration to integer seconds")
       Int.MaxValue
     } else
       seconds.toInt
+  }
+
+  /** Returns the duration in milliseconds truncated to the size of Int, with the maximum as
+    * Int.MaxValue.
+    *
+    * Usage: On the database/jdbc level, some timeouts require to be specified in milliseconds as an
+    * integer, not a long.
+    */
+  def toMillisTruncated(duration: Duration, logger: TracedLogger)(implicit
+      traceContext: TraceContext
+  ): Int = {
+    val millis = duration.toMillis
+
+    if (millis > Int.MaxValue) {
+      logger.warn(s"Truncating $duration to integer milliseconds")
+      Int.MaxValue
+    } else
+      millis.toInt
   }
 }
 
@@ -222,6 +240,18 @@ final case class NonNegativeFiniteDuration private (duration: Duration)
   )(implicit traceContext: TraceContext): NonNegativeNumeric[Int] =
     // Result must be positive due to assertion on duration
     checked(NonNegativeNumeric.tryCreate(RefinedDuration.toSecondsTruncated(duration, logger)))
+
+  /** Returns the duration in milliseconds truncated to the size of Int, with the maximum as
+    * Int.MaxValue.
+    *
+    * Usage: On the database/jdbc level, some timeouts require to be specified in milliseconds as an
+    * integer, not a long.
+    */
+  def toMillisTruncated(
+      logger: TracedLogger
+  )(implicit traceContext: TraceContext): NonNegativeNumeric[Int] =
+    // Result must be positive due to assertion on duration
+    checked(NonNegativeNumeric.tryCreate(RefinedDuration.toMillisTruncated(duration, logger)))
 }
 
 object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {

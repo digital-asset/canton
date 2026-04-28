@@ -10,18 +10,21 @@ import "com/digitalasset/canton/protocol/v30/participant_reassignment.proto";
 import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v30/synchronization.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "com/digitalasset/canton/protocol/v31/participant_transaction.proto";
 import "scalapb/scalapb.proto";
 
 /*
    Compared to v30:
      - Added: v30.AcsCommitmentProtocolMessage
+     - Added: v31.EncryptedMultipleViewsMessage
+     - Removed: v30.EncryptedViewMessage
 */
 message EnvelopeContent {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   oneof some_envelope_content {
     v30.InformeeMessage informee_message = 1;
-    v30.EncryptedViewMessage encrypted_view_message = 2;
+    v31.EncryptedMultipleViewsMessage encrypted_multiple_views_message = 2;
     v30.UnassignmentMediatorMessage unassignment_mediator_message = 3;
     v30.AssignmentMediatorMessage assignment_mediator_message = 4;
     v30.RootHashMessage root_hash_message = 5;

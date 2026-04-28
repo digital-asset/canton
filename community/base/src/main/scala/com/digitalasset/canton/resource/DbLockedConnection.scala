@@ -772,16 +772,26 @@ object DbLockedConnection {
             connectionConfig.keepAliveIdle.toInternal.toSecondsTruncated(tracedLogger).unwrap
           val keepAliveInterval =
             connectionConfig.keepAliveInterval.toInternal.toSecondsTruncated(tracedLogger).unwrap
-          val keepAliveCount = connectionConfig.keepAliveCount
-          val setKeepAliveSettings = DBIO
-            .seq(
-              sqlu"SET tcp_keepalives_idle TO #$keepAliveIdle",
-              sqlu"SET tcp_keepalives_interval TO #$keepAliveInterval",
-              sqlu"SET tcp_keepalives_count TO #$keepAliveCount",
+          val maybeClientConnectionCheckIntervalMs =
+            connectionConfig.clientConnectionCheckInterval.map(
+              _.toInternal
+                .toMillisTruncated(tracedLogger)
+                .unwrap
             )
+          val keepAliveCount = connectionConfig.keepAliveCount
+
+          val keepAliveSettingsSeq = Seq(
+            sqlu"SET tcp_keepalives_idle TO #$keepAliveIdle",
+            sqlu"SET tcp_keepalives_interval TO #$keepAliveInterval",
+            sqlu"SET tcp_keepalives_count TO #$keepAliveCount",
+          ) ++ maybeClientConnectionCheckIntervalMs
+            .map { clientConnectionCheckIntervalMs =>
+              // client_connection_check_interval has default unit as milliseconds
+              sqlu"SET client_connection_check_interval TO #$clientConnectionCheckIntervalMs"
+            }
 
           EitherTUtil.fromFuture(
-            db.run(setKeepAliveSettings),
+            db.run(DBIO.seq(keepAliveSettingsSeq*)),
             err => show"Failed to initialize new connection: $err",
           )
       }

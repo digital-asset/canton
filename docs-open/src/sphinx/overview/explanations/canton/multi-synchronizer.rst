@@ -429,6 +429,8 @@ when it enters the visibility of a Participant Node.
 From the point of view of a participant, a contract can enter and leave its visibility several times during its
 life cycle. This can happen if all stakeholders hosted on the participant are multi-hosted.
 
+.. _non-causality-of-updates-stream:
+
 Non causality of the updates stream
 ===================================
 

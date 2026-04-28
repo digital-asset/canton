@@ -4,76 +4,114 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.data.FullTransactionViewTree
-import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
-import com.digitalasset.canton.participant.protocol.validation.LegacyInternalConsistencyChecker.checkRollbackScopeOrder
-import com.digitalasset.canton.protocol.*
-import org.scalatest.wordspec.AnyWordSpec
+import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.{
+  ErrorWithInternalConsistencyCheck,
+  InconsistentContractKeyError,
+}
+import com.digitalasset.canton.protocol.ExampleContractFactory
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.transaction.NodeId
+import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder.NodeOps
+import com.digitalasset.daml.lf.transaction.test.{
+  TestIdFactory,
+  TestNodeBuilder,
+  TransactionBuilder,
+  TreeTransactionBuilder,
+}
+import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.ValueRecord
 
-import scala.concurrent.ExecutionContext
-import scala.util.Random
+import TransactionBuilder.Implicits.*
 
-// TODO(#31527): SPM - this should not test legacy rollback scenarios
-class NextGenInternalConsistencyCheckerTest extends AnyWordSpec with BaseTest {
-
-  implicit val ec: ExecutionContext = directExecutionContext
-
-  private val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
-
-  private def check(
-      icc: InternalConsistencyChecker,
-      views: Seq[FullTransactionViewTree],
-  ): Either[ErrorWithInternalConsistencyCheck, Unit] =
-    icc.check(NonEmptyUtil.fromUnsafe(views))
-
-  "Rollback scope ordering" when {
-
-    "checkRollbackScopeOrder should validate sequences of scopes" in {
-      val ops: Seq[RollbackContext => RollbackContext] = Seq(
-        _.enterRollback,
-        _.enterRollback,
-        _.exitRollback,
-        _.enterRollback,
-        _.exitRollback,
-        _.exitRollback,
-        _.enterRollback,
-        _.exitRollback,
-      )
-
-      val (_, testScopes) = ops.foldLeft((RollbackContext.empty, Seq(RollbackContext.empty))) {
-        case ((c, seq), op) =>
-          val nc = op(c)
-          (nc, seq :+ nc)
-      }
-
-      Random.shuffle(testScopes).sorted shouldBe testScopes
-      checkRollbackScopeOrder(testScopes) shouldBe Either.unit
-      checkRollbackScopeOrder(testScopes.reverse).isLeft shouldBe true
-    }
-  }
+class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTest {
 
   "Internal consistency checker" when {
 
-    val relevantExamples = factory.standardHappyCases.filter(_.rootTransactionViewTrees.nonEmpty)
+    val participantId: ParticipantId = ParticipantId("test")
+    val sut = new NextGenInternalConsistencyChecker(participantId, loggerFactory)
 
-    forEvery(relevantExamples) { example =>
-      s"checking $example" must {
+    "rollback scope order" should checkRollbackScopeOrder()
 
-        val sut = NextGenInternalConsistencyChecker
+    "standard happy cases" should checkStandardHappyCases(sut)
 
-        "yield the correct result" in {
-          check(sut, example.rootTransactionViewTrees).isRight shouldBe true
+    "key consistency cases" should checkKeyConsistencyCases(sut)
+
+  }
+
+  def checkKeyConsistencyCases(sut: InternalConsistencyChecker): Unit = {
+    val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId.apply)
+    val txBuilder = new TreeTransactionBuilder with TestNodeBuilder with TestIdFactory {
+      override def nextNodeId(): NodeId = ids.next()
+    }
+
+    val someCreate = txBuilder.create(
+      id = txBuilder.newCid,
+      templateId = "M:T",
+      argument = Value.ValueUnit,
+      signatories = List("signatory"),
+      observers = List("observer"),
+    )
+
+    val someExercise = txBuilder.exercise(
+      someCreate,
+      choice = "C",
+      consuming = false,
+      actingParties = Set("A"),
+      ValueRecord(None, ImmArray.empty),
+      byKey = false,
+    )
+
+    val key = ExampleContractFactory.buildKeyWithMaintainers()
+
+    val cId1 = txBuilder.newCid
+    val cId2 = txBuilder.newCid
+    val cId3 = txBuilder.newCid
+
+    s"key consistency" must {
+      "allow a non-exhaustive query followed by an exhaustive one" in {
+        val tx = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2), exhaustive = false),
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2), exhaustive = true),
+          )
+        )
+        checkTransaction(sut, tx, Set(key.globalKey)) shouldBe Either.unit
+      }
+      "disallow the inconsistent contract ordering" in {
+        val tx = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2, cId3), exhaustive = false),
+            txBuilder.queryByKey(key = key, Vector(cId2, cId3), exhaustive = false),
+          )
+        )
+        inside(checkTransaction(sut, tx, Set(key.globalKey))) {
+          case Left(ErrorWithInternalConsistencyCheck(InconsistentContractKeyError(actual))) =>
+            actual shouldBe key.globalKey
         }
-
-        "reinterpret views individually" in {
-          example.transactionViewTrees.foreach { viewTree =>
-            check(sut, Seq(viewTree)) shouldBe Either.unit
-          }
+      }
+      "allow inconsistent contract ordering if the key is not hosted" in {
+        val tx = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2, cId3), exhaustive = false),
+            txBuilder.queryByKey(key = key, Vector(cId2, cId3), exhaustive = false),
+          )
+        )
+        checkTransaction(sut, tx, Set.empty) shouldBe Either.unit
+      }
+      "disallow an exhaustive query followed by one that returns additional contracts" in {
+        val tx = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2), exhaustive = true),
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2, cId3), exhaustive = false),
+          )
+        )
+        inside(checkTransaction(sut, tx, Set(key.globalKey))) {
+          case Left(ErrorWithInternalConsistencyCheck(InconsistentContractKeyError(actual))) =>
+            actual shouldBe key.globalKey
         }
       }
     }
-
   }
+
 }

@@ -133,23 +133,12 @@ class InMemoryContractStore(
     idx
   }
 
-  override def deleteIgnoringUnknown(
-      ids: Iterable[LfContractId]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    ids.foreach(id =>
-      contracts
-        .remove(id)
-        .flatMap { case PersistedContractInstance(iid, _) => internalIds.remove(iid) }
-        .discard[Option[LfContractId]]
-    )
-    FutureUnlessShutdown.unit
-  }
-
-  override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    contracts.clear()
-    internalIds.clear()
-    FutureUnlessShutdown.unit
-  }
+  override def contractsPruned(
+      internalContractIds: Iterable[Long]
+  ): Unit =
+    internalContractIds.view
+      .flatMap(internalIds.remove)
+      .foreach(contracts.remove(_).discard)
 
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext

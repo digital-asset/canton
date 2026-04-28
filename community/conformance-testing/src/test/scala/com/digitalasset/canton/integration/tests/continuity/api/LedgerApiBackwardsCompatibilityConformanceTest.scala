@@ -8,6 +8,7 @@ import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
 }
 import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvironments}
+import com.digitalasset.canton.util.ReleaseUtils
 
 /** Tests various TestTools (as external processes) against the current canton. No canton is
   * downloaded from a zip; the current build is used directly.
@@ -15,8 +16,8 @@ import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvir
 trait LedgerApiBackwardsCompatibilityConformanceTest
     extends MultiVersionLedgerApiConformanceBase
     with IsolatedEnvironments {
-  override lazy val testedReleases =
-    ProtocolContinuityConformanceTest.previousSupportedReleases(logger)
+  override lazy val testedReleases: List[ReleaseUtils.TestedRelease] =
+    ProtocolContinuityConformanceTest.previousSupportedReleases(logger).forgetNE
 
   override def connectedSynchronizersCount = 2
 

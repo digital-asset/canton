@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TemplateFilter
@@ -10,8 +11,6 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.protocol.{ExampleContractFactory, TestUpdateId}
-import com.digitalasset.canton.testing.utils.TestModels
-import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Decode}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
@@ -37,7 +36,6 @@ import java.util.UUID
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.concurrent.Future
 import scala.language.implicitConversions
-import scala.util.chaining.*
 
 private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionValues {
   this: AsyncTestSuite =>
@@ -55,10 +53,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
     }
   }
 
-  private[this] lazy val dar =
-    TestModels.com_daml_ledger_test_ModelTestDar_path
-      .pipe(JarResourceUtils.extractFileFromJar)
-      .pipe(DarParser.assertReadArchiveFromFile)
+  private[this] lazy val dar = DarParser.assertReadArchiveFromFile(TestDars.v2_2.ModelTestDar.file)
 
   protected final lazy val packageMap =
     dar.all.map(archive => archive.getHash -> archive).toMap

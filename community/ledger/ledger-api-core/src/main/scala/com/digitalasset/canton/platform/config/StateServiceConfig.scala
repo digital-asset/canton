@@ -18,6 +18,6 @@ final case class StateServiceConfig(
 )
 
 object StateServiceConfig {
-  private val DefaultAcsPageSize = PositiveInt.tryCreate(100)
-  private val AcsPageSizeLimit = PositiveInt.tryCreate(1000)
+  private val DefaultAcsPageSize = PositiveInt.tryCreate(500)
+  private val AcsPageSizeLimit = PositiveInt.tryCreate(10000)
 }

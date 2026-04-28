@@ -9,12 +9,13 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.AcsInspection
+import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -26,6 +27,7 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.{ReassignmentCounter, config}
 import org.scalatest.Assertion
 
@@ -34,7 +36,8 @@ import scala.jdk.CollectionConverters.*
 abstract class RepairServiceIntegrationTest
     extends CommunityIntegrationTest
     with AcsInspection
-    with SharedEnvironment {
+    with SharedEnvironment
+    with EntitySyntax {
 
   private val payerName = "payer"
   private val ownerName = "owner"
@@ -73,10 +76,25 @@ abstract class RepairServiceIntegrationTest
         participant1.dars.upload(CantonExamplesPath, synchronizerId = daId)
         participant1.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
 
-        payer = participant1.parties.enable(payerName, synchronizer = daName)
-        participant1.parties.enable(payerName, synchronizer = acmeName)
-        owner = participant1.parties.enable(ownerName, synchronizer = daName)
-        participant1.parties.enable(ownerName, synchronizer = acmeName)
+        PartiesAllocator(Set(participant1))(
+          Seq(
+            payerName -> participant1,
+            ownerName -> participant1,
+          ),
+          Map(
+            payerName -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            ownerName -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+          ),
+        )
+
+        payer = payerName.toPartyId(participant1)
+        owner = ownerName.toPartyId(participant1)
       }
 
   "repair.change_assignation" when {
@@ -209,7 +227,11 @@ abstract class RepairServiceIntegrationTest
               daId.logical,
               acmeId.logical,
             )
-            forAll(reinitCmtsResult)(_.acsTimestamp.isDefined shouldBe true)
+            forAll(reinitCmtsResult) { result =>
+              withClue(s"For synchronizer ${result.synchronizerId} ") {
+                result.acsTimestamp shouldBe defined
+              }
+            }
 
             // TODO(i23735): When we fix that, we should have no more ACS_COMMITMENT_INTERNAL_ERROR logs, and the
             //  log suppression and the comment below should be removed

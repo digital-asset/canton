@@ -195,6 +195,7 @@ class BatchingParallelIngestionPipeSpec
       BatchingParallelIngestionPipe[Int, List[(Int, Int)], List[(Int, String)]](
         batchingFlow = BatchN.weighted(MaxBatchSize.toLong, 2)(weightFn),
         inputMappingParallelism = 2,
+        contractReInsertion = Future.successful,
         inputMapper = ins =>
           Future {
             inputMapperHook()

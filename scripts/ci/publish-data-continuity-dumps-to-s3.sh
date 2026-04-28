@@ -36,5 +36,8 @@ for DUMP_DIR in $DUMP_DIRS; do
   # This allows both accumulating dumps from parallel executors and updating existing dumps.
   # We use RELEASE_SUFFIX as a destination to keep the history of dumps for snapshot releases.
   info "Syncing data continuity dumps to s3 for $DUMP_DIR"
-  run "Sync data continuity dumps to s3" aws s3 sync "/tmp/canton/data-continuity-dumps/$DUMP_DIR" "s3://canton-public-releases/data-continuity-dumps/$RELEASE_SUFFIX"
+  ABSOLUTE_DUMP_DIR="/tmp/canton/data-continuity-dumps/$DUMP_DIR"
+  info "Local content of dump dir $ABSOLUTE_DUMP_DIR about to sync to aws s3:"
+  ls -R $ABSOLUTE_DUMP_DIR
+  run "Sync data continuity dumps to s3" aws s3 sync $ABSOLUTE_DUMP_DIR "s3://canton-public-releases/data-continuity-dumps/$RELEASE_SUFFIX"
 done

@@ -100,7 +100,6 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.{BindableService, ServerInterceptor, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
@@ -118,7 +117,6 @@ class LedgerApiServer(
     adminParty: Party,
     adminTokenConfig: AdminTokenConfig,
     engine: Engine,
-    contractStateMode: ContractStateMachine.Mode,
     syncService: CantonSyncService,
     cantonParameterConfig: ParticipantNodeParameters,
     testingTimeService: Option[TimeServiceBackend],
@@ -286,6 +284,7 @@ class LedgerApiServer(
           PruningOffsetServiceImpl(participantPruningStore.value, loggerFactory),
         materializer = implicitly[Materializer],
         updateServiceConfig = updateServiceConfig,
+        scheduler = actorSystem.scheduler,
       )
       _ = timedSyncService.registerInternalIndexService(new InternalIndexService {
         override def activeContracts(
@@ -408,7 +407,6 @@ class LedgerApiServer(
         otherServices = Seq(apiInfoService),
         otherInterceptors = getInterceptors,
         engine = engine,
-        contractStateMode = contractStateMode,
         queryExecutionContext = queryExecutionContext,
         commandExecutionContext = executionContext,
         checkOverloaded = syncService.checkOverloaded,
@@ -622,7 +620,6 @@ object LedgerApiServer {
       adminParty = adminParty,
       adminTokenConfig = config.ledgerApi.adminTokenConfig.merge(config.adminApi.adminTokenConfig),
       engine = ledgerApiServerBootstrapUtils.engine,
-      contractStateMode = config.parameters.engine.contractStateMode,
       syncService = sync,
       cantonParameterConfig = parameters,
       testingTimeService = ledgerTestingTimeService,

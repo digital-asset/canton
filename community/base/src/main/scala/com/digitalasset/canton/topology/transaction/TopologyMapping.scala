@@ -832,14 +832,22 @@ object KeyMapping {
       keys: NonEmpty[Set[SigningPublicKey]],
       maxKeys: Int,
   ): Either[String, Unit] =
-    Either.cond(keys.sizeIs <= maxKeys, (), s"At most $maxKeys can be specified.")
+    Either.cond(
+      keys.sizeIs <= maxKeys,
+      (),
+      s"At most $maxKeys key(s) can be specified, got ${keys.size}.",
+    )
 
   def validateKeysSize(
       keys: NonEmpty[Seq[PublicKey]],
       maxKeys: Int,
   ): Either[String, Unit] =
     for {
-      _ <- Either.cond(keys.sizeIs <= maxKeys, (), s"At most $maxKeys can be specified.")
+      _ <- Either.cond(
+        keys.sizeIs <= maxKeys,
+        (),
+        s"At most $maxKeys key(s) can be specified, got ${keys.size}.",
+      )
     } yield ()
 }
 
@@ -1889,12 +1897,14 @@ object PartyToParticipant extends TopologyMappingCompanion {
       .distinct
       .flatMap(deduplicateParticipantsWithDifferentPermissionsMap.get)
 
-    val keysValid = partySigningKeysWithThreshold.traverse_(signingKeysWithThreshold =>
-      KeyMapping.validateKeysSizeSet(
-        signingKeysWithThreshold.keys,
-        MaxKeys,
+    val keysValid = partySigningKeysWithThreshold
+      .traverse_(signingKeysWithThreshold =>
+        KeyMapping.validateKeysSizeSet(
+          signingKeysWithThreshold.keys,
+          MaxKeys,
+        )
       )
-    )
+      .leftMap(err => s"Invalid PartyToParticipant: $err")
 
     for {
       _ <- keysValid

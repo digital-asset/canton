@@ -19,9 +19,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
+  IndexServiceConfig,
   UpdatesStreamsConfig,
 }
 import com.digitalasset.canton.platform.store.*
@@ -37,6 +39,7 @@ import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.CreationTime.CreatedAt
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, Node}
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.actor.Scheduler
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -68,6 +71,7 @@ private class JdbcLedgerWriteDao(
     contractStore: LedgerApiContractStoreImpl,
     achsStateCache: AchsStateCache,
     pruningOffsetService: PruningOffsetService,
+    scheduler: Scheduler,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
     with LedgerWriteDao
@@ -94,6 +98,10 @@ private class JdbcLedgerWriteDao(
     pruningOffsetService = pruningOffsetService,
     contractStore = contractStore,
     achsStateCache = achsStateCache,
+    scheduler = scheduler,
+    contractPruningDelayBeforeRetry =
+      IndexServiceConfig.DefaultContractPruningDelayBeforeRetry.underlying,
+    contractPruningMaxRetries = IndexServiceConfig.DefaultContractPruningMaxRetries,
   )
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()
@@ -240,28 +248,21 @@ private class JdbcLedgerWriteDao(
       loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] = for {
     _ <- Future.successful(logger.info("Storing contracts into participant contract store"))
-    _ <- contractStore.participantContractStore
-      .storeContracts(
-        transaction.nodes.values
-          .collect { case create: Node.Create => create }
-          .map(FatContract.fromCreateNode(_, CreatedAt(ledgerEffectiveTime), Bytes.Empty))
-          .map(
-            ContractInstance
-              .create(_)
-              .fold(
-                error => throw new IllegalArgumentException(s"Invalid contract: $error"),
-                identity,
-              )
+    contracts = transaction.nodes.values
+      .collect { case create: Node.Create => create }
+      .map(FatContract.fromCreateNode(_, CreatedAt(ledgerEffectiveTime), Bytes.Empty))
+      .map(
+        ContractInstance
+          .create(_)
+          .fold(
+            error => throw new IllegalArgumentException(s"Invalid contract: $error"),
+            identity,
           )
-          .toSeq
       )
+      .toSeq
+    internalContractIds <- contractStore.participantContractStore
+      .storeContracts(contracts)
       .failOnShutdownToAbortException("storeTransaction")
-
-    contractIds =
-      transaction.nodes.values
-        .collect { case create: Node.Create => create.coid }
-
-    internalContractIds <- contractStore.lookupBatchedInternalIdsNonReadThrough(contractIds)
 
     _ <- Future.successful(logger.info("Storing transaction"))
     _ <- dbDispatcher
@@ -289,13 +290,15 @@ private class JdbcLedgerWriteDao(
               externalTransactionHash = None,
               acsChangeFactory =
                 TestAcsChangeFactory(contractActivenessChanged = contractActivenessChanged),
-              contractInfos = internalContractIds.map { case (cid, internalContractId) =>
-                cid -> ContractInfo(
-                  internalContractId = internalContractId,
-                  contractAuthenticationData = Bytes.Empty,
+              contractInfos = contracts.map { c =>
+                c.contractId -> ContractInfo(
+                  persistedContractInstance = PersistedContractInstance(
+                    internalContractId = internalContractIds(c.contractId),
+                    inst = c.inst,
+                  ),
                   representativePackageId = SameAsContractPackageId,
                 )
-              },
+              }.toMap,
             )
           ),
         )

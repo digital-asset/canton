@@ -4,10 +4,13 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
+import cats.instances.either.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto.*
@@ -22,7 +25,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   ViewHashAndRecipients,
-  ViewKeyData,
+  ViewKeyDataMap,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
@@ -47,7 +50,8 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ContractHasher, MonadUtil}
+import com.digitalasset.canton.util.IdUtil.catsSemigroupForIdLeftBias
+import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -108,7 +112,6 @@ class TransactionConfirmationRequestFactory(
     val ledgerTime = wfTransaction.metadata.ledgerTime
 
     for {
-
       _ <- assertPartiesCanSubmit(
         submitterInfo,
         cryptoSnapshot,
@@ -287,55 +290,152 @@ class TransactionConfirmationRequestFactory(
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, List[
+  ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[
     OpenEnvelope[TransactionViewMessage]
   ]] = {
     val pureCrypto = cryptoSnapshot.pureCrypto
 
-    def createOpenEnvelopeWithTransaction(
-        vt: FullTransactionViewTree,
-        viewsToKeyMap: Map[
-          ViewHash,
-          ViewKeyData,
-        ],
-        recipients: Recipients,
-    ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, OpenEnvelope[
-      EncryptedViewMessage[TransactionViewType.type]
+    // We would like to keep the original order of the trees, so using groupMap alone won't work
+    def groupLightTransactionViewTreesByRecipientsWithOrder(
+        lightTreesNE: NonEmpty[Seq[(Recipients, LightTransactionViewTree)]]
+    ): Seq[(Recipients, NonEmpty[Seq[LightTransactionViewTree]])] = {
+      val groupedUnordered = lightTreesNE.groupMap1 { case (recipients, _) => recipients } {
+        case (_, lightTree) => lightTree
+      }
+      val orderedRecipients = lightTreesNE.map(_._1).distinct
+
+      orderedRecipients.map { recipients =>
+        recipients -> groupedUnordered.getOrElse(
+          recipients,
+          // This should never happen, but let's handle it the best way possible
+          // (which is logging an error and throwing an exception)
+          ErrorUtil.invalidState(
+            s"Missing key $recipients when grouping light transaction view trees by recipients."
+          ),
+        )
+      }
+    }
+
+    def createOpenEnvelopesWithTransaction(
+        viewsWithWitnessesAndRecipients: NonEmpty[Seq[ViewWithWitnessesAndRecipients]],
+        viewKeyDataMap: ViewKeyDataMap,
+    ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[
+      OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
     ]] = {
-      val subviewsKeys = vt.subviewHashes
-        .map(subviewHash => viewsToKeyMap(subviewHash).viewKeyRandomness)
-      for {
-        lvt <- LightTransactionViewTree
-          .fromTransactionViewTree(vt, subviewsKeys, protocolVersion)
-          .leftMap[TransactionConfirmationRequestCreationError](
-            LightTransactionViewTreeCreationError.apply
-          )
-          .toEitherT[FutureUnlessShutdown]
-        ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(vt.viewHash)
-        envelope <- EncryptedViewMessageFactory
-          .create(TransactionViewType)(
-            lvt,
-            (viewKey, viewKeyMap),
-            cryptoSnapshot,
-            signingTimestampOverrides,
+      def makeLightTransactionViewTreeWithRecipient(
+          viewWithWitnessesAndRecipients: ViewWithWitnessesAndRecipients
+      ): Either[
+        TransactionConfirmationRequestCreationError,
+        (Recipients, LightTransactionViewTree),
+      ] = {
+        val randomness = viewWithWitnessesAndRecipients.view.subviewHashes
+          .map(subviewHash => viewKeyDataMap.randomnessByHash(subviewHash))
+
+        LightTransactionViewTree
+          .fromTransactionViewTree(
+            viewWithWitnessesAndRecipients.view,
+            randomness,
             protocolVersion,
           )
           .leftMap[TransactionConfirmationRequestCreationError](
-            EncryptedViewMessageCreationError.apply
+            LightTransactionViewTreeCreationError.apply
           )
-          .map(viewMessage => OpenEnvelope(viewMessage, recipients)(protocolVersion))
-      } yield envelope
+          .map { result =>
+            (viewWithWitnessesAndRecipients.recipients, result)
+          }
+      }
+
+      def createOpenEnvelopes(
+          lightTreesByRecipients: Seq[(Recipients, NonEmpty[Seq[LightTransactionViewTree]])]
+      ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[
+        OpenEnvelope[EncryptedMultipleViewsMessage[TransactionViewType.type]]
+      ]] = {
+        def encryptViews(
+            lightTrees: NonEmpty[Seq[LightTransactionViewTree]],
+            recipients: Recipients,
+        ) =
+          for {
+            viewMessage <- EncryptedViewMessageFactory
+              .encryptGroupedViews(TransactionViewType)(
+                lightTrees,
+                viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
+                cryptoSnapshot,
+                signingTimestampOverrides,
+                protocolVersion,
+              )
+              .leftMap[TransactionConfirmationRequestCreationError](
+                EncryptedViewMessageCreationError.apply
+              )
+          } yield OpenEnvelope(viewMessage, recipients)(protocolVersion)
+
+        if (parallel) {
+          lightTreesByRecipients
+            .parTraverse { case (recipients, lightTrees) =>
+              encryptViews(lightTrees, recipients)
+            }
+        } else {
+          MonadUtil
+            .sequentialTraverse(lightTreesByRecipients) { case (recipients, lightTrees) =>
+              encryptViews(lightTrees, recipients)
+            }
+        }
+      }
+
+      val lightTreesWithRecipientsE =
+        if (parallel) {
+          viewsWithWitnessesAndRecipients.toNEF
+            .parTraverse(
+              makeLightTransactionViewTreeWithRecipient
+            )
+        } else {
+          viewsWithWitnessesAndRecipients.toNEF
+            .traverse(makeLightTransactionViewTreeWithRecipient)
+        }
+
+      if (protocolVersion >= ProtocolVersion.v35) {
+        val lightTreesByRecipientsE =
+          lightTreesWithRecipientsE.map(groupLightTransactionViewTreesByRecipientsWithOrder)
+
+        for {
+          lightTreesByRecipients <- EitherT.fromEither[FutureUnlessShutdown](
+            lightTreesByRecipientsE
+          )
+          envelopes <- createOpenEnvelopes(lightTreesByRecipients)
+        } yield envelopes
+      } else {
+        for {
+          lightTreeWithRecipients <- EitherT.fromEither[FutureUnlessShutdown](
+            lightTreesWithRecipientsE
+          )
+          recipients = lightTreeWithRecipients.map(_._1)
+          messages <- EncryptedViewMessageFactory
+            .encryptNonGroupedViews(TransactionViewType)(
+              lightTreeWithRecipients,
+              viewKeyDataMap,
+              cryptoSnapshot,
+              signingTimestampOverrides,
+              protocolVersion,
+              parallel,
+            )
+            .leftMap[TransactionConfirmationRequestCreationError](
+              EncryptedViewMessageCreationError.apply
+            )
+        } yield messages.zip(recipients).map { case (message, recipients) =>
+          OpenEnvelope(message, recipients)(protocolVersion)
+        }
+      }
     }
 
     for {
-      lightTreesWithMetadata <- transactionTree
+      viewsWithWitnessesAndRecipients <- transactionTree
         .allTransactionViewTreesWithRecipients(cryptoSnapshot.ipsSnapshot)
         .leftMap[TransactionConfirmationRequestCreationError](e =>
           RecipientsCreationError(e.message)
         )
-      viewsToKeyMap <- EncryptedViewMessageFactory
+
+      viewsKeyDataMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
-          lightTreesWithMetadata.map {
+          viewsWithWitnessesAndRecipients.map {
             case ViewWithWitnessesAndRecipients(tvt, _, recipients, parentRecipients) =>
               (
                 ViewHashAndRecipients(tvt.viewHash, recipients),
@@ -351,26 +451,20 @@ class TransactionConfirmationRequestFactory(
         .leftMap[TransactionConfirmationRequestCreationError](e =>
           EncryptedViewMessageCreationError(e)
         )
-      res <-
-        if (parallel) {
-          lightTreesWithMetadata.toList.parTraverse {
-            case ViewWithWitnessesAndRecipients(tvt, _, recipients, _) =>
-              createOpenEnvelopeWithTransaction(
-                tvt,
-                viewsToKeyMap,
-                recipients,
-              )
-          }
-        } else
-          MonadUtil.sequentialTraverse(lightTreesWithMetadata) {
-            case ViewWithWitnessesAndRecipients(tvt, _, recipients, _) =>
-              createOpenEnvelopeWithTransaction(
-                tvt,
-                viewsToKeyMap,
-                recipients,
-              )
-          }
-    } yield res.toList
+
+      viewsWithWitnessesAndRecipientsNE <- EitherT.fromEither[FutureUnlessShutdown](
+        NonEmpty
+          .from(viewsWithWitnessesAndRecipients)
+          .toRight[TransactionConfirmationRequestCreationError](
+            NoViewsToEncryptError("There are no view to encrypt")
+          )
+      )
+
+      envelopes <- createOpenEnvelopesWithTransaction(
+        viewsWithWitnessesAndRecipientsNE,
+        viewsKeyDataMap,
+      )
+    } yield envelopes
   }
 }
 
@@ -482,6 +576,13 @@ object TransactionConfirmationRequestFactory {
       extends TransactionConfirmationRequestCreationError {
     override protected def pretty: Pretty[TransactionSigningError] = prettyOfClass(
       unnamedParam(_.cause)
+    )
+  }
+
+  final case class NoViewsToEncryptError(message: String)
+      extends TransactionConfirmationRequestCreationError {
+    override protected def pretty: Pretty[NoViewsToEncryptError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
     )
   }
 }

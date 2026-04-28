@@ -42,4 +42,8 @@ object SuppressionRules {
     SuppressionRule.LoggerNameContains("ApiPartyManagementService") &&
       SuppressionRule.Level(Level.WARN)
 
+  val DbActiveContractStoreConsistencyCheckSuppressionRule: SuppressionRule =
+    SuppressionRule.LoggerNameContains("DbActiveContractStore") &&
+      SuppressionRule.Level(Level.WARN)
+
 }

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.infrastructure.participant
 
+import com.daml.ledger.api.testtool.TestDar
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.{
   ChannelEndpoint,
@@ -87,7 +88,7 @@ object ParticipantSession {
       maxConnectionAttempts: Int,
       commandInterceptors: Seq[ClientInterceptor],
       timeoutScaleFactor: Double,
-      darList: List[String],
+      dars: List[TestDar],
       connectedSynchronizers: Int,
   )(implicit
       executionContext: ExecutionContext
@@ -98,7 +99,7 @@ object ParticipantSession {
     }
     Future.traverse(participantChannelsS.zip(participantAdminChannels)) {
       case (endpoint: Either[JsonApiEndpoint, ChannelEndpoint], adminEndpoint) =>
-        val services = LedgerServices(endpoint.map(_.channel), commandInterceptors, darList)
+        val services = LedgerServices(endpoint.map(_.channel), commandInterceptors, dars)
         for {
           features <- RetryStrategy
             .exponentialBackoff(attempts = maxConnectionAttempts, 100.millis) { (attempt, wait) =>

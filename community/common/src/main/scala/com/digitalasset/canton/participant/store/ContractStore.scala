@@ -15,7 +15,6 @@ import com.digitalasset.canton.participant.store.db.DbContractStore
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.store.Purgeable
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
@@ -23,7 +22,7 @@ import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance}
 
 import scala.concurrent.ExecutionContext
 
-trait ContractStore extends ContractLookup with Purgeable with FlagCloseable {
+trait ContractStore extends ContractLookup with FlagCloseable {
 
   def lookupPersistedIfCached(id: LfContractId)(implicit
       traceContext: TraceContext
@@ -80,13 +79,11 @@ trait ContractStore extends ContractLookup with Purgeable with FlagCloseable {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfContractId, ContractInstance]]
 
-  /** Deletes multiple contracts from the contract store.
-    *
-    * Ignores errors due to a contract not being present in the store, fails on other errors.
+  /** Signal to the contract store that contract IDs should be pruned. In case of the InMemory store
+    * this should do actual pruning, in case of the JDBC stores this should only invalidate the
+    * caches, as the actual persistence pruning happens in the Index DB pruning.
     */
-  def deleteIgnoringUnknown(contractIds: Iterable[LfContractId])(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
+  def contractsPruned(internalContractIds: Iterable[Long]): Unit
 
   def contractCount()(implicit traceContext: TraceContext): FutureUnlessShutdown[Int]
 

@@ -89,6 +89,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
+      delayRequestsBeforeLsuTrafficInit = false,
     )
 
   "Reference sequencer" when runSequencerApiTests()

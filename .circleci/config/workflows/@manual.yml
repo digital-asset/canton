@@ -713,9 +713,9 @@ manual_blackduck:
         requires:
           - package_community
 
-manual_nightly_integration_tests:
+manual_nightly_integration_test:
   when:
-    equal: [ nightly-integration-tests, << pipeline.parameters.manual_job >> ]
+    equal: [ nightly-integration-test, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -735,6 +735,28 @@ manual_nightly_integration_tests:
           - da-images
           - aws_kms_testing
           - gcp_kms_testing
+        requires:
+          - compile
+
+manual_cn_topology_snapshot_test:
+  when:
+    equal: [ cn-topology-snapshot-test, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - nightly_cn_topology_snapshot_test_only:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - gcp_topology_testing
         requires:
           - compile
 

@@ -46,6 +46,14 @@ class IndexerHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Debug,
   )
 
+  private[metrics] val ingestionBlockeByPruningDuration: Item = Item(
+    prefix :+ "ingestion_blocked_by_pruning" :+ "duration",
+    summary = "The duration of ingestions DB execution is blocked by pruning.",
+    description =
+      "The time that a batch of updates spends in blocked waiting for the pruning DB operation to finish.",
+    qualification = MetricQualification.Debug,
+  )
+
   private[metrics] val deactivationDistances: Item = Item(
     prefix :+ "deactivation_distances",
     summary = "Event sequence id distances between activations and deactivations.",
@@ -96,6 +104,22 @@ class IndexerMetrics(
         qualification = MetricQualification.Debug,
       )
     )
+
+  // Number of times the Indexer needed to restart due to missing referenced contracts (likely because of pruning)
+  val indexerRestartDueToMissingReferencedContracts: Counter = factory.counter(
+    MetricInfo(
+      prefix :+ "indexer_restart_due_to_missing_contract",
+      summary =
+        "Number of times the Indexer needed to restart due to missing referenced contracts.",
+      description = """Under seldom circumstances the indexer could be forced to restart if pruning removed
+                      |referenced contracts. If this happens the missing contracts will be re-inserted to the DB
+                      |and indexing continues. This is part for the normal operation and should happen very rarely.""",
+      qualification = MetricQualification.Traffic,
+    )
+  )
+
+  val ingestionBlockeByPruningDuration: Timer =
+    factory.timer(histograms.ingestionBlockeByPruningDuration.info)
 
   // Input mapping stage
   // Translating state updates to data objects corresponding to individual SQL insert statements
@@ -155,6 +179,57 @@ class IndexerMetrics(
 
   val achsProcessing =
     new DatabaseMetrics(prefix :+ "achs_processing", factory)
+
+  val achsBufferLength: Counter =
+    factory.counter(
+      MetricInfo(
+        prefix :+ "achs_buffer_length",
+        summary = "The size of the queue between the indexer and the ACHS maintenance pipe.",
+        description =
+          """This counter counts batches of updates queued before the ACHS maintenance pipe.
+            |When the buffer is mostly full, it indicates that ACHS maintenance is creating
+            |backpressure on the indexing pipeline.""",
+        qualification = MetricQualification.Debug,
+      )
+    )
+
+  val achsValidAt: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_valid_at",
+        summary = "The event sequential id at which the ACHS is valid.",
+        description =
+          """The event sequential id at which the ACHS is currently valid. It may contain some
+            |deactivated events but they will anyway be removed when fetched.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
+
+  val achsLastPopulated: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_last_populated",
+        summary = "The last event sequential id populated into the ACHS.",
+        description =
+          """The last event sequential id for which activations were added to the ACHS.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
+
+  val achsLastRemoved: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_last_removed",
+        summary =
+          "The last event sequential id for which deactivations were removed from the ACHS.",
+        description = """The last event sequential id for which deactivations were looked up and the
+            |corresponding activations were removed from the ACHS.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
 
   val indexerQueueBlocked: MetricHandle.Meter = factory.meter(
     MetricInfo(

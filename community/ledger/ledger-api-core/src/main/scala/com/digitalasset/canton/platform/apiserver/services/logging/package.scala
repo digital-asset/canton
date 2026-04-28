@@ -73,6 +73,11 @@ package object logging {
   private[services] def offset(offset: Long): LoggingEntry =
     "offset" -> offset.toString
 
+  private[services] def activeAtOffset(
+      offset: Option[Offset]
+  ): LoggingEntry =
+    "activeAtOffset" -> offset
+
   private[services] def commandId(id: String): LoggingEntry =
     "commandId" -> id
 

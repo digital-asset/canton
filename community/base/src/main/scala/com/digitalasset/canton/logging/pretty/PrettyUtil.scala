@@ -28,16 +28,16 @@ trait PrettyUtil {
       // class is again anonymous (not sure whether this can happen in Scala)
       // we go up in the hierarchy until we find a non-anonymous class.
       @tailrec
-      def firstNonAnonmymousSuperclass(clazz: Class[?]): Class[?] =
+      def firstNonAnonymousSuperclass(clazz: Class[?]): Class[?] =
         if (clazz.isAnonymousClass) {
           // The superclass cannot be `null` as neither java.lang.Object
           // nor Java interfaces nor primitive types nor void are anonymous classes.
-          firstNonAnonmymousSuperclass(clazz.getSuperclass)
+          firstNonAnonymousSuperclass(clazz.getSuperclass)
         } else clazz
 
       if (inst == null) nullTree
       else {
-        val simpleName = firstNonAnonmymousSuperclass(inst.getClass).getSimpleName
+        val simpleName = firstNonAnonymousSuperclass(inst.getClass).getSimpleName
         Tree.Apply(simpleName, getParamTrees.mapFilter(_(inst)).iterator)
       }
     }

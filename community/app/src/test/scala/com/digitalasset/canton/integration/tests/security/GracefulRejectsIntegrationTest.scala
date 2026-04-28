@@ -45,6 +45,7 @@ import com.digitalasset.canton.participant.pretty.Implicits.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerBackpressure
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.NotConnectedToAnySynchronizer
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
@@ -192,16 +193,30 @@ sealed trait GracefulRejectsIntegrationTest
           // Use a fixed seed for reproducibility
           // We also create multiple contracts to avoid hitting the limit on the encryptedView, but on the overall batch size.
           val testId = new Random(1).nextString(1000)
+
           loggerFactory.assertThrowsAndLogs[CommandFailure](
             createCycleContracts(
               participant1,
               participant1.id.adminParty,
               ids = (1 to 35).map(i => s"$testId $i"),
             ),
-            _.warningMessage should include("Failed to submit transaction due to "),
-            _.commandFailureMessage should include regex s"Batch size \\(.* bytes\\) is exceeding maximum size \\(.* bytes\\) for synchronizer ${daName.unwrap}",
+            (if (testedProtocolVersion >= ProtocolVersion.v35)
+               Seq[LogEntry => Assertion](
+                 { logEntry =>
+                   logEntry.commandFailureMessage should include(
+                     "Transaction confirmation request creation failed"
+                   )
+                   logEntry.commandFailureMessage should include regex s"MaxViewSizeExceeded\\(view size \\(bytes\\) = \\d+, max request size configured \\(bytes\\) = \\d+\\)"
+                 }
+               )
+             else
+               Seq[LogEntry => Assertion](
+                 _.warningMessage should include("Failed to submit transaction due to "),
+                 _.commandFailureMessage should include regex s"Batch size \\(.* bytes\\) is exceeding maximum size \\(.* bytes\\) for synchronizer ${daName.unwrap}",
+               ))*
           )
         }
+
         withClue("system remains functional after reject") {
           participant1.health.maybe_ping(participant1.id) shouldBe defined
         }

@@ -12,13 +12,12 @@ import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.TestUtils
+import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
-  TrafficTestUtils,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
@@ -46,7 +45,7 @@ trait TrafficSummariesTest
       }
       .withTrafficControl(
         TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
-        trafficControlParameters = TrafficTestUtils.predictableTraffic,
+        trafficControlParameters = TrafficControlUtils.predictableTraffic,
         topUpAllMembers = true,
         disableCommitments = true,
       )

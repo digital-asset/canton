@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.infrastructure
 
+import com.daml.ledger.api.testtool.TestDar
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestCasesRunner.*
 import com.daml.ledger.api.testtool.infrastructure.PartyAllocationConfiguration.ClosedWorldWaitingForAllParticipants
@@ -52,7 +53,7 @@ final class LedgerTestCasesRunner(
     concurrentTestRuns: Int = 8,
     identifierSuffix: String = "test",
     commandInterceptors: Seq[ClientInterceptor] = Seq.empty,
-    lfVersion: String,
+    allDars: List[TestDar],
     connectedSynchronizers: Int,
 ) {
   private[this] val verifyRequirements: Try[Unit] =
@@ -151,10 +152,9 @@ final class LedgerTestCasesRunner(
   private def uploadDarsIfRequired(
       sessions: Vector[ParticipantSession]
   )(implicit executionContext: ExecutionContext): Future[Unit] = {
-    val allDars = Dars.resources(lfVersion)
     val darsToUpload = skipDarNamesPattern
       .map { skipRegex =>
-        val darsToUpload = allDars.filterNot(skipRegex.matches)
+        val darsToUpload = allDars.filterNot(dar => skipRegex.matches(dar.path))
         logger.info(
           s"Uploading DARs excluding pattern ${skipRegex.pattern.toString}: ${darsToUpload
               .mkString("[", ",", "]")}"
@@ -184,17 +184,13 @@ final class LedgerTestCasesRunner(
 
   private def uploadDar(
       context: ParticipantTestContext,
-      name: String,
+      dar: TestDar,
   )(implicit executionContext: ExecutionContext): Future[Unit] = {
-    logger.info(s"""Uploading DAR "$name"...""")
+    logger.info(s"""Uploading DAR $dar...""")
     context
-      .uploadDarFileAndVetOnConnectedSynchronizers(Dars.read(name))
-      .map { _ =>
-        logger.info(s"""Uploaded DAR "$name".""")
-      }
-      .recover { case NonFatal(exception) =>
-        throw new Errors.DarUploadException(name, exception)
-      }
+      .uploadDarFileAndVetOnConnectedSynchronizers(dar.bytes)
+      .map(_ => logger.info(s"""Uploaded DAR $dar."""))
+      .recover { case NonFatal(exception) => throw new Errors.DarUploadException(dar, exception) }
   }
 
   private def createActorSystem: ActorSystem =
@@ -233,7 +229,7 @@ final class LedgerTestCasesRunner(
       maxConnectionAttempts = maxConnectionAttempts,
       commandInterceptors = commandInterceptors,
       timeoutScaleFactor = timeoutScaleFactor,
-      darList = Dars.resources(lfVersion),
+      dars = allDars,
       connectedSynchronizers = connectedSynchronizers,
     )
     sessions

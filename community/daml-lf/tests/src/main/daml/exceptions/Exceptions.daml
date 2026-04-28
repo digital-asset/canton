@@ -157,9 +157,10 @@ template NodeSeeds
     p : Party
   where
     signatory p
+
     -- Produces a transaction with all non-key node types so we can
     -- check which produce node seed and which do not.
-    choice CreateAllTypes : ()
+    choice CreateAllTypesNoKey : ()
       with
         cid : ContractId T
       controller p
@@ -172,3 +173,23 @@ template NodeSeeds
          catch
            E -> pure ()
          pure ()
+
+#ifdef DAML_CONTRACT_KEYS
+    -- Produces a transaction with all node types so we can
+    -- check which produce node seed and which do not.
+    choice CreateAllTypes : ()
+      with
+        cid : ContractId K
+      controller p
+      do _ <- fetch cid
+         create (K p 2000 "")
+         create (K p 2000 "")
+         try do
+           _ <- fetch cid
+           _ <- fetchByKey @K (p, 2000)
+           _ <- lookupByKey @K (p, 2000)
+           throw E
+         catch
+           E -> pure ()
+         pure ()
+#endif

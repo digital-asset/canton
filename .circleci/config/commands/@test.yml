@@ -526,6 +526,14 @@ set_external_parties:
           echo "export CANTON_TEST_EXTERNAL_PARTIES=true" >> $BASH_ENV
           echo "Canton will use external parties for capable tests"
 
+enable_session_signing_keys:
+  steps:
+    - run:
+        name: Enable session signing keys
+        command: |
+          echo 'export SESSION_SIGNING_KEYS_ENABLED=true' >> "$BASH_ENV"
+          echo "Session signing keys enabled for tests"
+
 test_flake_fix_many_times_command:
   parameters:
     test_repetitions_per_runner:

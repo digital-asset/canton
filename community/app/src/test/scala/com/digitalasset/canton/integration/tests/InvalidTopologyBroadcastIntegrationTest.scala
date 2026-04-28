@@ -454,7 +454,7 @@ class InvalidTopologyBroadcastIntegrationTest
                   entry => {
                     entry.shouldBeCantonErrorCode(SyncServiceAlarm)
                     entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} can be specified"
+                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
                     )
                   },
                   "warning on participant",
@@ -463,7 +463,7 @@ class InvalidTopologyBroadcastIntegrationTest
                   entry => {
                     entry.shouldBeCantonErrorCode(MalformedMessage)
                     entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} can be specified"
+                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
                     )
                   },
                   "warning on mediator",
@@ -472,7 +472,7 @@ class InvalidTopologyBroadcastIntegrationTest
                   entry => {
                     entry.shouldBeCantonErrorCode(EnvelopeOpenerDeserializationError)
                     entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} can be specified"
+                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
                     )
                   },
                   "warning on mediator",

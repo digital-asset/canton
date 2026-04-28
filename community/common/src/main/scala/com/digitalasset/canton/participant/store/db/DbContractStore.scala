@@ -20,7 +20,6 @@ import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderCha
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionCoder}
@@ -465,37 +464,12 @@ class DbContractStore(
     BatchAggregator(processor, insertBatchAggregatorConfig)
   }
 
-  override def deleteIgnoringUnknown(
-      contractIds: Iterable[LfContractId]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    import DbStorage.Implicits.BuilderChain.*
-    NonEmpty.from(contractIds.toSeq) match {
-      case None => FutureUnlessShutdown.unit
-      case Some(cids) =>
-        val inClause = DbStorage.toInClause("contract_id", cids)
-        storage
-          .update_(
-            (sql"""delete from par_contracts where """ ++ inClause).asUpdate,
-            functionFullName,
-          )
-          .thereafter { _ =>
-            cache.invalidateAll(contractIds)
-          }
-    }
-  }
-
-  override def purge()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    storage
-      .update_(
-        sqlu"""delete from par_contracts""",
-        functionFullName,
-      )
-      .thereafter { _ =>
-        // purge is not used for DBContractStore, so we leave it without atomicity guarantees
-        cache.invalidateAll()
-      }
+  override def contractsPruned(
+      internalContractIds: Iterable[Long]
+  ): Unit =
+    internalContractIds.view
+      .flatMap(cache.getIfPresentAuxKey)
+      .foreach(cache.invalidate)
 
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext

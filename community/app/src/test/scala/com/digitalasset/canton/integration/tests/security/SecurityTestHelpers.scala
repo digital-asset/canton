@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.security
 
 import cats.syntax.alternative.*
+import cats.syntax.compose.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v2.completion.Completion
@@ -198,7 +199,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
                   .protocolMessage
               )
               requestsB ++= allProtocolMessages.collect {
-                case encryptedView: EncryptedViewMessage[ViewType] => encryptedView
+                case encryptedViewMessage: EncryptedViewMessage[ViewType] => encryptedViewMessage
               }
             }
           }
@@ -380,20 +381,14 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
     * sign and send the resulting submission request as the original.
     */
   def withLocalVerdict(
-      verdict: LocalVerdict
+      verdict: LocalVerdict,
+      modifyConfirmingParties: Set[LfPartyId] => Set[LfPartyId] = identity,
   )(implicit executionContext: ExecutionContext): SignedMessageTransform[ConfirmationResponses] =
     signedTransformOf(
-      traverseMessages[ConfirmationResponses](_)
-        .modify(cr =>
-          ConfirmationResponses.tryCreate(
-            cr.requestId,
-            cr.rootHash,
-            cr.psid,
-            cr.sender,
-            cr.responses.map(cr => ConfirmationResponse.localVerdictUnsafe.replace(verdict)(cr)),
-            testedProtocolVersion,
-          )
-        )(_)
+      traverseMessages[ConfirmationResponses](_).modify(
+        ConfirmationResponses.localVerdictUnsafe.replace(verdict) >>>
+          ConfirmationResponses.confirmingPartiesUnsafe.modify(modifyConfirmingParties)
+      )(_)
     )
 
   def withLocalVerdict(

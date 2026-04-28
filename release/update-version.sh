@@ -15,6 +15,7 @@ update_VERSION_file() {
 
 update_version() {
   update_version_sbt_and_VERSION "$@"
+  run "Generate Ledger JSON Api documentation" sbt packageJsonApiDocsArtifacts
 }
 
 update_version_sbt_and_VERSION() {

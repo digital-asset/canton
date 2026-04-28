@@ -131,11 +131,13 @@ class TransactionConfirmationResponsesFactory(
       }
     }
 
-    def responsesForWellformedPayloads(
+    def responsesForWellFormedPayloads(
         transactionValidationResult: TransactionValidationResult
     ): FutureUnlessShutdown[Option[ConfirmationResponses]] = {
       for {
         modelConformanceResultE <- transactionValidationResult.modelConformanceResultET.value
+
+        internalConsistencyResultE <- transactionValidationResult.internalConsistencyResultET.value
 
         // Rejections due to a failed model conformance check
         // Aborts are logged by the Engine callback when the abort happens
@@ -159,7 +161,7 @@ class TransactionConfirmationResponsesFactory(
 
               // Rejections due to a failed internal consistency check
               val internalConsistencyRejections =
-                transactionValidationResult.internalConsistencyResultE.swap.toOption.map(cause =>
+                internalConsistencyResultE.swap.toOption.map(cause =>
                   logged(
                     requestId,
                     LocalRejectError.MalformedRejects.ModelConformance.Reject(cause.toString),
@@ -307,7 +309,7 @@ class TransactionConfirmationResponsesFactory(
         )
       )
     } else {
-      responsesForWellformedPayloads(transactionValidationResult)
+      responsesForWellFormedPayloads(transactionValidationResult)
     }
   }
 

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.ledger.api
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.concurrent.{ExecutionContextIdlenessExecutorService, Threading}
+import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   SynchronizerOffset,
 }
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
@@ -107,7 +108,48 @@ class LedgerApiStore(
       QueryStrategy.withoutNetworkTimeout { connection =>
         eventStorageBackend.lockExclusivelyPruningProcessingTable(connection)
         locked.trySuccess(()).discard
-        Threading.sleep(1000)
+        Await.result(releaseLock.future, timeout)
+      }(_, noTracingLogger)
+    }
+    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
+  }
+
+  @VisibleForTesting
+  def readLockContract(
+      internalContractId: Long,
+      releaseLock: Promise[Unit],
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
+    val locked = Promise[Unit]()
+    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingReadLockContract")) {
+      QueryStrategy.withoutNetworkTimeout { connection =>
+        eventStorageBackend.readLockInternalContractIds(Set(internalContractId))(connection).discard
+        locked.trySuccess(()).discard
+        Await.result(releaseLock.future, timeout)
+      }(_, noTracingLogger)
+    }
+    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
+  }
+
+  @VisibleForTesting
+  def writeLockContract(
+      internalContractId: Long,
+      releaseLock: Promise[Unit],
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
+    val locked = Promise[Unit]()
+    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingWriteLockContract")) {
+      QueryStrategy.withoutNetworkTimeout { connection =>
+        eventStorageBackend
+          .writeLockInternalContractIds(cSQL"= $internalContractId")(connection)
+          .discard
+        locked.trySuccess(()).discard
         Await.result(releaseLock.future, timeout)
       }(_, noTracingLogger)
     }
@@ -266,14 +308,6 @@ class LedgerApiStore(
         synchronizerId,
         beforeOrAtOffsetInclusive,
       )
-    )
-
-  def prunableContracts(
-      fromExclusive: Option[Offset],
-      toInclusive: Offset,
-  )(implicit traceContext: TraceContext, ec: ExecutionContext): FutureUnlessShutdown[Set[Long]] =
-    executeSqlUS(metrics.index.db.prunableContracts)(
-      eventStorageBackend.prunableContracts(fromExclusive, toInclusive)
     )
 
   private[api] def initializeInMemoryState(implicit

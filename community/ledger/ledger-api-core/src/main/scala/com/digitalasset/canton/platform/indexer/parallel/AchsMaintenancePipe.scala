@@ -47,7 +47,8 @@ object AchsMaintenancePipe {
       metrics: LedgerApiServerMetrics,
       executionContext: ExecutionContext,
       logger: TracedLogger,
-  )(implicit traceContext: TraceContext): Flow[T, Unit, NotUsed] =
+      fullDrain: Boolean,
+  )(implicit traceContext: TraceContext): Flow[T, AchsWorkRange, NotUsed] =
     maintenanceFlow(
       toAchsWork = toAchsWorkDistance,
       initialWork = initialWork,
@@ -61,6 +62,7 @@ object AchsMaintenancePipe {
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = logger,
+        metrics = metrics,
       ),
       populateAchsActivations = populateAchsActivations(
         persistActivationsF = persistChangesF(
@@ -92,9 +94,11 @@ object AchsMaintenancePipe {
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = logger,
+        metrics = metrics,
       ),
       aggregationThreshold = aggregationThreshold,
       initialAchsState = achsStateCache.get(),
+      fullDrain = fullDrain,
     )
 
   /** Computes the initial work distance for the ACHS maintenance pipe. This can be negative,
@@ -158,11 +162,12 @@ object AchsMaintenancePipe {
       removeDeactivatedFromAchs: AchsWorkRange => Future[AchsWorkRange],
       populationParallelism: Int,
       removalParallelism: Int,
-      updateAchsLastPointers: AchsWorkRange => Future[Unit],
+      updateAchsLastPointers: AchsWorkRange => Future[AchsWorkRange],
       aggregationThreshold: Long,
       initialAchsState: AchsState,
       initialWork: AchsWorkDistance,
-  ): Flow[T, Unit, NotUsed] =
+      fullDrain: Boolean,
+  ): Flow[T, AchsWorkRange, NotUsed] =
     Flow[T]
       // Stage 0: Convert to work distance, accumulate, and drain threshold-sized AchsWorkRange chunks.
       .map(toAchsWork)
@@ -176,6 +181,7 @@ object AchsMaintenancePipe {
             state = achsState,
             remaining = totalWork,
             acc = Vector.empty,
+            fullDrain = fullDrain,
           )
           (newState, remainingWork) -> workRanges
         },
@@ -195,39 +201,57 @@ object AchsMaintenancePipe {
       .conflate((_, latest) => latest)
       .mapAsync(1)(updateAchsLastPointers)
 
+  private def applyWork(
+      state: AchsState,
+      work: AchsWorkDistance,
+  ): (AchsWorkRange, AchsState) = {
+    val workRange = AchsWorkRange(
+      activationsPopulation = EventSeqIdRange(
+        startExclusive = state.lastPointers.lastPopulated,
+        endInclusive = state.lastPointers.lastPopulated + work.populate,
+      ),
+      deactivatedRemoval = EventSeqIdRange(
+        startExclusive = state.lastPointers.lastRemoved,
+        endInclusive = state.lastPointers.lastRemoved + work.remove,
+      ),
+    )
+    val newState = AchsState(
+      validAt = state.validAt,
+      lastPointers = AchsLastPointers(
+        lastPopulated = state.lastPointers.lastPopulated + work.populate,
+        lastRemoved = state.lastPointers.lastRemoved + work.remove,
+      ),
+    )
+    (workRange, newState)
+  }
+
   @scala.annotation.tailrec
   private[platform] def drain(
       aggregationThreshold: Long,
       state: AchsState,
       remaining: AchsWorkDistance,
       acc: Vector[AchsWorkRange],
+      fullDrain: Boolean,
   ): (AchsState, AchsWorkDistance, Vector[AchsWorkRange]) =
     if (remaining.populate >= aggregationThreshold || remaining.remove >= aggregationThreshold) {
       val chunk = remaining.cap(aggregationThreshold)
-      val newRemaining = remaining - chunk
-      val workRange = AchsWorkRange(
-        activationsPopulation = EventSeqIdRange(
-          startExclusive = state.lastPointers.lastPopulated,
-          endInclusive = state.lastPointers.lastPopulated + chunk.populate,
-        ),
-        deactivatedRemoval = EventSeqIdRange(
-          startExclusive = state.lastPointers.lastRemoved,
-          endInclusive = state.lastPointers.lastRemoved + chunk.remove,
-        ),
-      )
-      val newState = AchsState(
-        validAt = state.validAt,
-        lastPointers = AchsLastPointers(
-          lastPopulated = state.lastPointers.lastPopulated + chunk.populate,
-          lastRemoved = state.lastPointers.lastRemoved + chunk.remove,
-        ),
-      )
+      val (workRange, newState) = applyWork(state, chunk)
       drain(
         aggregationThreshold = aggregationThreshold,
         state = newState,
-        remaining = newRemaining,
+        remaining = remaining - chunk,
         acc = acc :+ workRange,
+        fullDrain = fullDrain,
       )
+    } else if (fullDrain && (remaining.populate > 0L || remaining.remove > 0L)) {
+      // Flush any positive sub-threshold remainder as a final undersized chunk.
+      // Negative dimensions are clamped to 0 (they represent debt, not real work).
+      val clamped = AchsWorkDistance(
+        populate = remaining.populate.max(0L),
+        remove = remaining.remove.max(0L),
+      )
+      val (workRange, newState) = applyWork(state, clamped)
+      (newState, remaining - clamped, acc :+ workRange)
     } else {
       (state, remaining, acc)
     }
@@ -240,6 +264,7 @@ object AchsMaintenancePipe {
       achsStateCache: AchsStateCache,
       executionContext: ExecutionContext,
       logger: TracedLogger,
+      metrics: LedgerApiServerMetrics,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val newValidAt = workRange.deactivatedRemoval.endInclusive.max(0L)
     val currentValidAt = achsStateCache.get().validAt
@@ -254,6 +279,7 @@ object AchsMaintenancePipe {
       // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
       achsStateCache
         .updateValidAt(newValidAt)
+      metrics.indexer.achsValidAt.updateValue(newValidAt)
       storeAchsValidAt(newValidAt)
         .map(_ => workRange)(executionContext)
     }
@@ -326,7 +352,8 @@ object AchsMaintenancePipe {
       achsStateCache: AchsStateCache,
       executionContext: ExecutionContext,
       logger: TracedLogger,
-  )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[Unit] = {
+      metrics: LedgerApiServerMetrics,
+  )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val lastPopulated = workRange.activationsPopulation.endInclusive
     val lastRemoved = workRange.deactivatedRemoval.endInclusive
 
@@ -334,17 +361,20 @@ object AchsMaintenancePipe {
       val lastPointers = AchsLastPointers(lastRemoved = lastRemoved, lastPopulated = lastPopulated)
       // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
       achsStateCache.updateLastPointers(lastPointers)
+      metrics.indexer.achsLastPopulated.updateValue(lastPopulated)
+      metrics.indexer.achsLastRemoved.updateValue(lastRemoved)
       persistAchsLastPointersF(lastPointers)
         .map { _ =>
           logger.debug(
             s"Updated ACHS last pointers: lastRemoved=$lastRemoved, lastPopulated=$lastPopulated."
           )
+          workRange
         }(executionContext)
     } else {
       logger.debug(
         s"Skipping ACHS last pointers update as the new lastRemoved and lastPopulated are not greater than 0."
       )
-      Future.unit
+      Future.successful(workRange)
     }
   }
 

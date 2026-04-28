@@ -11,11 +11,16 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.TestAcsChangeFactory
 import com.digitalasset.canton.ledger.participant.state.Update.ContractInfo
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
-import com.digitalasset.canton.protocol.{LfSerializationVersion, TestUpdateId}
+import com.digitalasset.canton.participant.store.PersistedContractInstance
+import com.digitalasset.canton.protocol.{
+  ExampleContractFactory,
+  LfSerializationVersion,
+  TestUpdateId,
+}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics.EmptyActions
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.transaction.{
@@ -65,31 +70,32 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
       optByKeyNodes = None,
     )
 
-    def someContractNode = TestNodeBuilder.create(
-      id = TransactionBuilder.newCid,
+    def someContract = ExampleContractFactory.build(
+      stakeholders = Set(Ref.Party.assertFromString("party")),
+      signatories = Set(Ref.Party.assertFromString("party")),
       templateId = Ref.Identifier(
         Ref.PackageId.assertFromString("abc"),
         Ref.QualifiedName.assertFromString("Main:Template"),
       ),
       argument = Value.ValueUnit,
-      signatories = Set.empty,
-      observers = Set.empty,
     )
+
     val someConsumingExerciseNode = TestNodeBuilder.exercise(
-      contract = someContractNode,
+      contract = someContract.inst.toCreateNode,
       choice = Ref.Name.assertFromString("somechoice"),
       consuming = true,
       actingParties = Set.empty,
       argument = Value.ValueUnit,
       byKey = false,
     )
+    val aContract = someContract
     val someTransactionAccepted = state.Update.SequencedTransactionAccepted(
       completionInfoO = Some(someCompletionInfo),
       transactionMeta = someTransactionMeta,
       transactionInfo = state.Update.TransactionAccepted.TransactionInfo(
         TransactionBuilder.justCommitted(
-          someContractNode,
-          someContractNode,
+          someContract.inst.toCreateNode,
+          someContract.inst.toCreateNode,
           someConsumingExerciseNode,
           TestNodeBuilder.rollback(
             ImmArray(
@@ -103,9 +109,11 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
       recordTime = CantonTimestamp.now(),
       acsChangeFactory = TestAcsChangeFactory(),
       contractInfos = Map(
-        someContractNode.coid -> ContractInfo(
-          internalContractId = 0L,
-          contractAuthenticationData = Bytes.Empty,
+        aContract.contractId -> ContractInfo(
+          persistedContractInstance = PersistedContractInstance(
+            inst = aContract.inst,
+            internalContractId = 0L,
+          ),
           representativePackageId = SameAsContractPackageId,
         )
       ),
@@ -174,9 +182,11 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
         recordTime = CantonTimestamp.now(),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map(
-          someContractNode.coid -> ContractInfo(
-            internalContractId = 0L,
-            contractAuthenticationData = Bytes.Empty,
+          aContract.contractId -> ContractInfo(
+            persistedContractInstance = PersistedContractInstance(
+              inst = aContract.inst,
+              internalContractId = 0L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),

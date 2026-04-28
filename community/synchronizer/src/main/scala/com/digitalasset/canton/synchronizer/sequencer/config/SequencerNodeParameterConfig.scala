@@ -45,6 +45,10 @@ final case class AsyncWriterConfig(
   * @param lsuRepair
   *   Config values that are used in disaster recovery scenarios after LSU. Those values SHOULD be
   *   set only in very specific cases and MUST be synchronized across sequencers.
+  * @param delayRequestsBeforeLsuTrafficInit
+  *   Configures behavior of sendAsync requests until the traffic is initialized during LSU: If
+  *   true, the sequencer will delay processing of the requests. If false, the sequencer will
+  *   synchronously reject the requests with an error.
   */
 final case class SequencerNodeParameterConfig(
     override val alphaVersionSupport: Boolean = false,
@@ -60,6 +64,7 @@ final case class SequencerNodeParameterConfig(
     // TODO(#30769) remove this flag once the feature is complete
     producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
+    delayRequestsBeforeLsuTrafficInit: Boolean = false,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 

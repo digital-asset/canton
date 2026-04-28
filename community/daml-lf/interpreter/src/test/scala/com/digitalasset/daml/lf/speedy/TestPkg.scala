@@ -12,8 +12,8 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.SerializationVersion
 
-/** Shared Daml-LF package definition and common constants used by both
-  * [[EvaluationOrderTest]] and [[AuthorizationTest]].
+/** Shared Daml-LF package definition and common constants used by both [[EvaluationOrderTest]] and
+  * [[AuthorizationTest]].
   */
 object TestPkg {
   val packageId: Ref.PackageId = Ref.PackageId.assertFromString("-pkg-")
@@ -313,7 +313,7 @@ $ifKey      observers Nil @Party
 $ifKey      to let n: Int64 = $tuple2TyCon @Int64 @Test:TKeyParams {_1} paramsAndInt
 $ifKey         in let params: Test:TKeyParams = $tuple2TyCon @Int64 @Test:TKeyParams {_2} paramsAndInt
 $ifKey            in let key: M:TKey = Test:buildTKey params
-$ifKey               in Test:run @(List ($tuple2TyCon (ContractId M:T) M:T)) (query_n_by_key @M:T n key);
+$ifKey               in Test:run @(Option (List ($tuple2TyCon (ContractId M:T) M:T))) (query_n_by_key @M:T n key);
 
 $ifKey    choice QueryNByKeyExcept (self) (paramsAndInt: ($tuple2TyCon Int64 Test:TKeyParams)): Unit,
 $ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
@@ -321,7 +321,7 @@ $ifKey      observers Nil @Party
 $ifKey      to let n: Int64 = $tuple2TyCon @Int64 @Test:TKeyParams {_1} paramsAndInt
 $ifKey         in let params: Test:TKeyParams = $tuple2TyCon @Int64 @Test:TKeyParams {_2} paramsAndInt
 $ifKey            in let key: M:TKey = Test:buildTKey params
-$ifKey               in Test:run @(List ($tuple2TyCon (ContractId M:TExcept) M:TExcept)) (query_n_by_key @M:TExcept n key);
+$ifKey               in Test:run @(Option (List ($tuple2TyCon (ContractId M:TExcept) M:TExcept))) (query_n_by_key @M:TExcept n key);
         };
 
         val f: Text -> Text -> Text =

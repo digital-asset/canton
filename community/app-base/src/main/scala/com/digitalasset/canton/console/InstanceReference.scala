@@ -231,7 +231,9 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
       res match {
         case one :: Nil => Right(one)
         case Nil =>
-          Left(s"No metric of name $metricName with instance name $name found.")
+          Left(
+            s"No metric of name $metricName with instance name $name found for attributes $attributes."
+          )
         case other =>
           Left(s"Found ${other.length} matching metrics")
       }

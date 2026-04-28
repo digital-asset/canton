@@ -605,7 +605,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       participant.httpLedgerApi.requestTimeout.toMinutes shouldBe 105
 
       // verify that `crypto.sessionSigningKeys` is configured with the expected values
-      participant.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
+      participant.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.enabled
     }
 
     // In this test case, both deprecated and new fields are set with opposite values, we make sure the new fields

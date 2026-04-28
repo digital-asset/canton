@@ -29,9 +29,6 @@ ERROR .*DefaultGrpcExporter - Too many log messages detected.
 # Under some load conditions, the create database call might be retried
 WARN  .*Operation com.digitalasset.canton.resource.DbStorage.createDatabase failed
 
-# Ignore warnings from ledger-api-test-tool
-WARN .*SingleParticipantTestContext - Failed to prune
-
 # Ignore expected SEVERE exceptions in HelloService
 ERROR .*Exception while executing runnable io.grpc.internal.ServerImpl\$JumpToApplicationThreadServerStreamListener\$1HalfClosed.*\n.*\n.*\n.*at com.daml.*HelloServiceReferenceImplementation.*
 

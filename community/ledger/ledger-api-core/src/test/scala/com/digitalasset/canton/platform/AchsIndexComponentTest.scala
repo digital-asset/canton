@@ -284,7 +284,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
     // wait until we have fetched some contracts from ACHS
     fetchStarted.future.futureValue
 
-    val fallbackMessage = "falling back to activate filter tables"
+    val fallbackMessage = "fell back to filter tables"
     val acs = loggerFactory.assertLogsSeq(
       SuppressionRule.LevelAndAbove(Level.DEBUG) && SuppressionRule.forLogger[ACSReader]
     )(

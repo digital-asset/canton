@@ -20,7 +20,6 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 import com.google.common.annotations.VisibleForTesting
 
 import java.net.URI
@@ -87,7 +86,6 @@ object ConfigValidations extends NamedLogging {
       sessionSigningKeysParamsValidation,
       distinctScopesAndAudiencesOnAuthServices,
       engineAdditionalConsistencyChecksParticipants,
-      engineContractStateModeParticipants,
       dbLockFeaturesRequireUsingLockSupportingStorage,
       highlyAvailableSequencerTotalNodeCount,
       noDuplicateStorageUnlessReplicated,
@@ -378,20 +376,6 @@ object ConfigValidations extends NamedLogging {
         participantConfig.parameters.engine.enableAdditionalConsistencyChecks && !config.parameters.nonStandardConfig
       )(
         s"Enabling additional consistency checks on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
-      )
-    }
-    toValidated(errors)
-  }
-
-  private def engineContractStateModeParticipants(
-      config: CantonConfig
-  ): Validated[NonEmpty[Seq[String]], Unit] = {
-    val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
-      val mode = participantConfig.parameters.engine.contractStateMode
-      Option.when(
-        mode != NextGenContractStateMachine.Mode.default && !config.parameters.nonStandardConfig
-      )(
-        s"Changing the contract state machine mode to $mode on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
       )
     }
     toValidated(errors)

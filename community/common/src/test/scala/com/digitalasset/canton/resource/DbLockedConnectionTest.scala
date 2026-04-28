@@ -14,6 +14,8 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.slf4j.event.Level
 import slick.util.AsyncExecutorWithMetrics
 
+import java.sql.Connection
+
 trait DbLockedConnectionTest
     extends FixtureAsyncWordSpec
     with BaseTest
@@ -101,8 +103,7 @@ trait DbLockedConnectionTest
       setup.close()
     } finally super.afterAll()
 
-  "DbLockedConnection" can {
-
+  DbLockedConnection.getClass.getSimpleName can {
     "create a connection and acquire an exclusive lock" in { f =>
       awaitHealthy(f.connection)
       succeed
@@ -250,7 +251,46 @@ trait DbLockedConnectionTest
           f.connection.state shouldNot be(prevState)
         }
       }
+    }
 
+    "have tcp_keepalives_* and client_connection_check_interval configured on the connection" in {
+      f =>
+        awaitHealthy(f.connection)
+
+        val underlyingConnection: Connection = f.connection.get.value.underlying
+
+        def checkValue(query: String, expected: String, desc: String): Unit = {
+          val rs = underlyingConnection.createStatement().executeQuery(query)
+          if (rs.next()) rs.getString(1) shouldBe expected
+          else fail(s"Failed to query $desc")
+        }
+
+        checkValue(
+          query = "SHOW client_connection_check_interval",
+          expected =
+            s"${f.config.clientConnectionCheckInterval.value.toInternal.toSecondsTruncated(logger)}s",
+          desc = "client_connection_check_interval",
+        )
+
+        checkValue(
+          query = "SHOW tcp_keepalives_idle",
+          expected = s"${f.config.keepAliveIdle.toInternal.toSecondsTruncated(logger)}",
+          desc = "tcp_keepalives_idle",
+        )
+
+        checkValue(
+          query = "SHOW tcp_keepalives_interval",
+          expected = s"${f.config.keepAliveInterval.toInternal.toSecondsTruncated(logger)}",
+          desc = "tcp_keepalives_interval",
+        )
+
+        checkValue(
+          query = "SHOW tcp_keepalives_count",
+          expected = s"${f.config.keepAliveCount}",
+          desc = "tcp_keepalives_count",
+        )
+
+        succeed
     }
   }
 

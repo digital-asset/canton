@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
@@ -94,6 +95,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe empty
     newState shouldBe state
@@ -111,6 +113,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe Vector(workRange(popStart = 60L, popEnd = 70L, remStart = 80L, remEnd = 90L))
     newState shouldBe AchsState(
@@ -131,6 +134,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe Vector(workRange(popStart = 60L, popEnd = 60L, remStart = 80L, remEnd = 90L))
     newState shouldBe AchsState(
@@ -151,6 +155,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe Vector(
       workRange(popStart = 0L, popEnd = 10L, remStart = 0L, remEnd = 10L),
@@ -174,6 +179,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe Vector(
       workRange(popStart = 5L, popEnd = 15L, remStart = 42L, remEnd = 52L),
@@ -198,6 +204,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       state = state,
       remaining = work,
       acc = Vector.empty,
+      fullDrain = false,
     )
     ranges shouldBe Vector(
       workRange(popStart = 0L, popEnd = 0L, remStart = 0L, remEnd = 10L),
@@ -213,6 +220,93 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       lastPointers = AchsLastPointers(lastRemoved = 30L, lastPopulated = 0L),
     )
     remaining shouldBe AchsWorkDistance(populate = 0L, remove = 5L)
+  }
+
+  it should "with fullDrain, flush the positive sub-threshold remainder as a final chunk" in {
+    val state = AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 0L, lastPopulated = 0L),
+    )
+    val work = AchsWorkDistance(populate = 25L, remove = 25L)
+    val (newState, remaining, ranges) = AchsMaintenancePipe.drain(
+      aggregationThreshold = 10L,
+      state = state,
+      remaining = work,
+      acc = Vector.empty,
+      fullDrain = true,
+    )
+    ranges shouldBe Vector(
+      workRange(popStart = 0L, popEnd = 10L, remStart = 0L, remEnd = 10L),
+      workRange(popStart = 10L, popEnd = 20L, remStart = 10L, remEnd = 20L),
+      workRange(popStart = 20L, popEnd = 25L, remStart = 20L, remEnd = 25L),
+    )
+    newState shouldBe AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 25L, lastPopulated = 25L),
+    )
+    remaining shouldBe AchsWorkDistance(populate = 0L, remove = 0L)
+  }
+
+  it should "with fullDrain, clamp negative dimensions to zero in the flushed remainder" in {
+    val state = AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 42L, lastPopulated = 5L),
+    )
+    val work = AchsWorkDistance(populate = 35L, remove = -13L)
+    val (newState, remaining, ranges) = AchsMaintenancePipe.drain(
+      aggregationThreshold = 10L,
+      state = state,
+      remaining = work,
+      acc = Vector.empty,
+      fullDrain = true,
+    )
+    ranges shouldBe Vector(
+      workRange(popStart = 5L, popEnd = 15L, remStart = 42L, remEnd = 42L),
+      workRange(popStart = 15L, popEnd = 25L, remStart = 42L, remEnd = 42L),
+      workRange(popStart = 25L, popEnd = 35L, remStart = 42L, remEnd = 42L),
+      workRange(popStart = 35L, popEnd = 40L, remStart = 42L, remEnd = 42L),
+    )
+    newState shouldBe AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 42L, lastPopulated = 40L),
+    )
+    remaining shouldBe AchsWorkDistance(populate = 0L, remove = -13L)
+  }
+
+  it should "with fullDrain, not emit anything when both dimensions are zero" in {
+    val state = AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 80L, lastPopulated = 60L),
+    )
+    val work = AchsWorkDistance(populate = 0L, remove = 0L)
+    val (newState, remaining, ranges) = AchsMaintenancePipe.drain(
+      aggregationThreshold = 10L,
+      state = state,
+      remaining = work,
+      acc = Vector.empty,
+      fullDrain = true,
+    )
+    ranges shouldBe empty
+    newState shouldBe state
+    remaining shouldBe work
+  }
+
+  it should "with fullDrain, not emit anything when both dimensions are negative" in {
+    val state = AchsState(
+      validAt = 100L,
+      lastPointers = AchsLastPointers(lastRemoved = 80L, lastPopulated = 60L),
+    )
+    val work = AchsWorkDistance(populate = -5L, remove = -3L)
+    val (newState, remaining, ranges) = AchsMaintenancePipe.drain(
+      aggregationThreshold = 10L,
+      state = state,
+      remaining = work,
+      acc = Vector.empty,
+      fullDrain = true,
+    )
+    ranges shouldBe empty
+    newState shouldBe state
+    remaining shouldBe work
   }
 
   behavior of "bumpAchsValidAt"
@@ -251,6 +345,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        metrics = LedgerApiServerMetrics.ForTesting,
       )(inputWorkRange)
       .futureValue shouldBe inputWorkRange
 
@@ -285,6 +380,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        metrics = LedgerApiServerMetrics.ForTesting,
       )(inputWorkRange)
       .futureValue shouldBe inputWorkRange
 
@@ -320,6 +416,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        metrics = LedgerApiServerMetrics.ForTesting,
       )(inputWorkRange)
       .futureValue
 
@@ -357,6 +454,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        metrics = LedgerApiServerMetrics.ForTesting,
       )(inputWorkRange)
       .futureValue
 
@@ -391,6 +489,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        metrics = LedgerApiServerMetrics.ForTesting,
       )(inputWorkRange)
       .futureValue
 

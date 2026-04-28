@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.config
 
+import com.digitalasset.canton.config
+
 /** Configuration of a DB lock
   *
   * @param healthCheckPeriod
@@ -50,6 +52,14 @@ object DbLockConfig {
   * @param keepAliveCount
   *   TCP keep-alive count, i.e., how many unanswered keep-alive messages required to consider the
   *   connection lost.
+  * @param clientConnectionCheckInterval
+  *   Interval for client connection checks. Corresponds to the Postgres
+  *   `client_connection_check_interval` configuration parameter (Postgres >= 14 only). Millisecond
+  *   granularity is the lowest supported precision. `None` leaves the server default unchanged
+  *   whereas a Some(0) explicitly disables the check. On macOS with Postgres 14, this must be
+  *   disabled, since in Postgres 14, this setting requires the non-standard `POLLRDHUP` extension
+  *   to the `poll` system call, which is only available on Linux. See
+  *   [[https://www.postgresql.org/docs/14/runtime-config-connection.html]] for details.
   * @param initialAcquisitionMaxRetries
   *   Maximum number of retries when trying to acquire the lock for the first time before trying to
   *   acquire the lock in a background task.
@@ -66,6 +76,9 @@ final case class DbLockedConnectionConfig(
     keepAliveIdle: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(10),
     keepAliveInterval: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
     keepAliveCount: Int = 5,
+    clientConnectionCheckInterval: Option[config.NonNegativeFiniteDuration] = Some(
+      config.NonNegativeFiniteDuration.ofSeconds(5)
+    ),
     initialAcquisitionMaxRetries: Int = 5,
     initialAcquisitionInterval: PositiveFiniteDuration = PositiveFiniteDuration.ofMillis(200),
     lock: DbLockConfig = DbLockConfig(),

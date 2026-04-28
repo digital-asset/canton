@@ -13,7 +13,6 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.ConfirmationResponse.InvalidConfirmationResponse
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -36,13 +35,17 @@ import monocle.{Lens, PTraversal, Traversal}
   *   The set of confirming parties. Empty, if the verdict is malformed.
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class ConfirmationResponse private (
+case class ConfirmationResponse private
+// The constructor is private, as it does not validate object invariants.
+// Clients should use create or tryCreate instead
+(
     viewPositionO: Option[ViewPosition],
     localVerdict: LocalVerdict,
     confirmingParties: Set[LfPartyId],
 ) extends PrettyPrinting {
 
   // Private copy method used by the lenses
+  // Needs to be private as it does not validate object invariants.
   private def copy(
       viewPositionO: Option[ViewPosition] = viewPositionO,
       localVerdict: LocalVerdict = localVerdict,
@@ -53,21 +56,15 @@ case class ConfirmationResponse private (
     confirmingParties,
   )
 
-  // If an object invariant is violated, throw an exception specific to the class.
-  // Thus, the exception can be caught during deserialization and translated to a human-readable error message.
-  if (localVerdict.isMalformed) {
-    if (confirmingParties.nonEmpty)
-      throw InvalidConfirmationResponse("Confirming parties must be empty for verdict Malformed.")
-  } else {
-    if (confirmingParties.isEmpty)
-      throw InvalidConfirmationResponse(
-        show"Confirming parties must not be empty for verdict $localVerdict"
-      )
-    if (viewPositionO.isEmpty)
-      throw InvalidConfirmationResponse(
-        show"View position must not be empty for verdict $localVerdict"
-      )
-  }
+  // The work-horse for checking object invariants.
+  private def validated: Either[String, this.type] =
+    if (localVerdict.isMalformed && confirmingParties.nonEmpty) {
+      Left("Confirming parties must be empty for verdict Malformed.")
+    } else if (!localVerdict.isMalformed && confirmingParties.isEmpty) {
+      Left(show"Confirming parties must not be empty for verdict $localVerdict")
+    } else if (!localVerdict.isMalformed && viewPositionO.isEmpty) {
+      Left(show"View position must not be empty for verdict $localVerdict")
+    } else Right(this)
 
   private[messages] def toProtoV30: v30.ConfirmationResponse =
     v30.ConfirmationResponse(
@@ -88,28 +85,32 @@ object ConfirmationResponse {
 
   final case class InvalidConfirmationResponse(msg: String) extends RuntimeException(msg)
 
+  // This method is tailored to the case that the caller does not know if the parameters meet the object invariants.
+  // Consequently, the method returns Left(...) in case of invalid parameters.
+  def create(
+      viewPositionO: Option[ViewPosition],
+      localVerdict: LocalVerdict,
+      confirmingParties: Set[LfPartyId],
+  ): Either[String, ConfirmationResponse] =
+    ConfirmationResponse(
+      viewPositionO,
+      localVerdict,
+      confirmingParties,
+    ).validated
+
   // This method is tailored to the case that the caller already knows that the parameters meet the object invariants.
   // Consequently, the method throws an exception on invalid parameters.
-  //
-  // The "tryCreate" method has the following advantage over the auto-generated "apply" method:
-  // - The deserializedFrom field cannot be set; so it cannot be set incorrectly.
   //
   // The method is called "tryCreate" instead of "apply" for two reasons:
   // - to emphasize that this method may throw an exception
   // - to not confuse the Idea compiler by overloading "apply".
-  //   (This is not a problem with this particular class, but it has been a problem with other classes.)
-  //
-  // The "tryCreate" method is optional.
-  // Feel free to omit "tryCreate", if the auto-generated "apply" method is good enough.
   def tryCreate(
       viewPositionO: Option[ViewPosition],
       localVerdict: LocalVerdict,
       confirmingParties: Set[LfPartyId],
   ): ConfirmationResponse =
-    ConfirmationResponse(
-      viewPositionO,
-      localVerdict,
-      confirmingParties,
+    create(viewPositionO, localVerdict, confirmingParties).valueOr(err =>
+      throw InvalidConfirmationResponse(err)
     )
 
   /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
@@ -144,15 +145,14 @@ object ConfirmationResponse {
         ProtoConverter.parseLfPartyId(_, "confirming_parties")
       )
       viewPositionO = viewPositionPO.map(ViewPosition.fromProtoV30)
-      response <- Either
-        .catchOnly[InvalidConfirmationResponse](
-          ConfirmationResponse(
+      response <-
+        ConfirmationResponse
+          .create(
             viewPositionO,
             localVerdict,
             confirmingParties.toSet,
           )
-        )
-        .leftMap(err => InvariantViolation(field = None, error = err.toString))
+          .leftMap(err => InvariantViolation(field = None, error = err))
     } yield response
   }
 }

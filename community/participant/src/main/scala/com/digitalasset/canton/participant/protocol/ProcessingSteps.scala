@@ -80,7 +80,8 @@ trait ProcessingSteps[
 ] {
 
   /** The type of request messages */
-  type RequestBatch = RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]
+  type RequestBatch =
+    RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]
 
   /** The submission errors that can occur during sending the batch to the sequencer and updating
     * the pending submission map.
@@ -178,6 +179,16 @@ trait ProcessingSteps[
     SubmissionError,
     (Submission, PendingSubmissionData),
   ]
+
+  /** Validates that the submitting party/parties are not currently onboarding on this participant.
+    */
+  def validateSubmittersNotOnboarding(
+      submissionParam: SubmissionParam,
+      topologySnapshot: TopologySnapshot,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SubmissionError, Unit]
 
   def embedNoMediatorError(error: NoMediatorError): SubmissionError
 

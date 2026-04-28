@@ -40,6 +40,7 @@ import com.digitalasset.canton.logging.{
   LoggingContextWithTrace,
   NamedLoggerFactory,
   NamedLogging,
+  TracedLogger,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
@@ -112,7 +113,6 @@ private[index] class IndexServiceImpl(
     contractStore,
     loggerFactory,
   )
-
   override def getParticipantId(): Future[Ref.ParticipantId] =
     Future.successful(participantId)
 
@@ -414,12 +414,13 @@ private[index] class IndexServiceImpl(
       loggingContext: LoggingContextWithTrace
   ): Future[Unit] = {
     pruneBuffers(pruneUpToInclusive)
-    ledgerDao.prune(
-      previousPruneUpToInclusive = previousPruneUpToInclusive,
-      previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
-      pruneUpToInclusive = pruneUpToInclusive,
-      incompleteReassignmentOffsets = incompleteReassignmentOffsets,
-    )
+    ledgerDao
+      .prune(
+        previousPruneUpToInclusive = previousPruneUpToInclusive,
+        previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
+        pruneUpToInclusive = pruneUpToInclusive,
+        incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+      )
   }
 
   override def indexDbPrunedUpto(implicit
@@ -521,44 +522,17 @@ private[index] class IndexServiceImpl(
         )
       pruningOffsetAfterFetch <- pruningOffsetService.pruningOffset
     } yield {
-      pruningOffsetAfterFetch match {
-        case Some(pruningOffset) if isFirstPageOfAscendingDynamicLowerBound =>
-          lazy val trimmedTransactions =
-            transactions.dropWhile(r => pruningOffset >= updatesToOffset(r))
-          val fetchedEnoughForFirstPage =
-            calculatedEndInclusive.exists(
-              _ < pruningOffset
-            ) // Trivial exclusion -- no overlap with pruning
-              || transactions.sizeIs < limit // Fetched up to calculatedEndInclusive -- if page is shorter it's the last page, so OK.
-              || trimmedTransactions.lengthIs >= getUpdatesPageRequest.maxPageSize + 1 // Non-trivial case where we need to look into transactions
-
-          if (fetchedEnoughForFirstPage) {
-            buildAscendingPage(
-              getUpdatesPageRequest = getUpdatesPageRequest,
-              calculatedBeginExclusive = pruningOffsetAfterFetch,
-              calculatedEndInclusive = calculatedEndInclusive,
-              transactions = trimmedTransactions,
-            )
-          } else {
-            throw RequestValidationErrors.ParticipantPrunedDataAccessed
-              .Reject(
-                cause =
-                  "Pruning offset moves faster than participant is able to generate page. You may want to tweak page size or ask the node administrator to increase ascending_first_page_dynamic_bound_overfetch config setting.",
-                earliestOffset =
-                  pruningOffset.unwrap, // If we are here pruning offset definitely exists
-              )(
-                ErrorLoggingContext(logger, loggingContext)
-              )
-              .asGrpcError
-          }
-        case _ =>
-          buildAscendingPage(
-            getUpdatesPageRequest = getUpdatesPageRequest,
-            calculatedBeginExclusive = calculatedBeginExclusive,
-            calculatedEndInclusive = calculatedEndInclusive,
-            transactions = transactions,
-          )
-      }
+      processAscendingPageData(
+        getUpdatesPageRequest = getUpdatesPageRequest,
+        loggingContext = loggingContext,
+        isFirstPageOfAscendingDynamicLowerBound = isFirstPageOfAscendingDynamicLowerBound,
+        limit = limit,
+        calculatedBeginExclusive = calculatedBeginExclusive,
+        calculatedEndInclusive = calculatedEndInclusive,
+        transactions = transactions,
+        pruningOffsetAfterFetch = pruningOffsetAfterFetch,
+        logger = logger,
+      )
     }
   }
 
@@ -661,48 +635,6 @@ private[index] class IndexServiceImpl(
       updatesPageDescendingOrder(getUpdatesPageRequest)
     } else {
       updatesPageAscendingOrder(getUpdatesPageRequest)
-    }
-
-  private def buildAscendingPage(
-      getUpdatesPageRequest: GetUpdatesPageRequest,
-      calculatedBeginExclusive: Option[Offset],
-      calculatedEndInclusive: Option[Offset],
-      transactions: Seq[GetUpdateResponse],
-  ): GetUpdatesPageResponse =
-    if (transactions.lengthIs >= getUpdatesPageRequest.maxPageSize + 1) { // Full page (note: it may be larger than maxPageSize+1 due to overfetch for the first page)
-      GetUpdatesPageResponse(
-        updates = transactions.take(getUpdatesPageRequest.maxPageSize),
-        lowestPageOffsetExclusive = calculatedBeginExclusive.fold(0L)(_.unwrap),
-        highestPageOffsetInclusive =
-          updatesToOffset(transactions(getUpdatesPageRequest.maxPageSize)).unwrap - 1,
-        nextPageToken = Some(
-          UpdatesPageToken(
-            lowestPageOffsetExclusive = calculatedBeginExclusive,
-            highestPageOffsetInclusive =
-              updatesToOffset(transactions(getUpdatesPageRequest.maxPageSize)).decrement,
-            participantIdChecksum = getUpdatesPageRequest.participantChecksum,
-            requestChecksum = getUpdatesPageRequest.requestChecksum,
-          ).toOpaqueByteString
-        ),
-      )
-    } else { // Last page or ledger end with dynamic bound
-      GetUpdatesPageResponse(
-        updates = transactions,
-        lowestPageOffsetExclusive = calculatedBeginExclusive.fold(0L)(_.unwrap),
-        highestPageOffsetInclusive = calculatedEndInclusive.fold(0L)(_.unwrap),
-        nextPageToken = getUpdatesPageRequest.endInclusive match {
-          case Some(_) => None
-          case None =>
-            Some(
-              UpdatesPageToken(
-                lowestPageOffsetExclusive = calculatedBeginExclusive,
-                highestPageOffsetInclusive = calculatedEndInclusive,
-                participantIdChecksum = getUpdatesPageRequest.participantChecksum,
-                requestChecksum = getUpdatesPageRequest.requestChecksum,
-              ).toOpaqueByteString
-            )
-        },
-      )
     }
 
   private def createViewUpgradeMemoized(implicit
@@ -964,7 +896,6 @@ object IndexServiceImpl {
         )
         .asGrpcError,
     )
-
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   private[index] def memoizedInternalUpdateFormat(
       getPackageMetadataSnapshot: ErrorLoggingContext => PackageMetadata,
@@ -1307,5 +1238,97 @@ object IndexServiceImpl {
       case GetUpdatesResponse.Update.OffsetCheckpoint(_) => None
       case GetUpdatesResponse.Update.TopologyTransaction(value) =>
         Some(GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(value)))
+    }
+
+  def processAscendingPageData(
+      getUpdatesPageRequest: GetUpdatesPageRequest,
+      loggingContext: LoggingContextWithTrace,
+      isFirstPageOfAscendingDynamicLowerBound: Boolean,
+      limit: Int,
+      calculatedBeginExclusive: Option[Offset],
+      calculatedEndInclusive: Option[Offset],
+      transactions: Seq[GetUpdateResponse],
+      pruningOffsetAfterFetch: Option[Offset],
+      logger: TracedLogger,
+  ): GetUpdatesPageResponse =
+    pruningOffsetAfterFetch match {
+      case Some(pruningOffset) if isFirstPageOfAscendingDynamicLowerBound =>
+        lazy val trimmedTransactions =
+          transactions.dropWhile(r => pruningOffset >= updatesToOffset(r))
+        val fetchedEnoughForFirstPage =
+          calculatedEndInclusive.exists(
+            _ < pruningOffset
+          ) // Trivial exclusion -- no overlap with pruning
+            || transactions.sizeIs < limit // Fetched up to calculatedEndInclusive -- if page is shorter it's the last page, so OK.
+            || trimmedTransactions.lengthIs >= getUpdatesPageRequest.maxPageSize + 1 // Non-trivial case where we need to look into transactions
+
+        if (fetchedEnoughForFirstPage) {
+          buildAscendingPage(
+            getUpdatesPageRequest = getUpdatesPageRequest,
+            calculatedBeginExclusive = pruningOffsetAfterFetch,
+            calculatedEndInclusive = calculatedEndInclusive,
+            transactions = trimmedTransactions,
+          )
+        } else {
+          throw RequestValidationErrors.ParticipantPrunedDataAccessed
+            .Reject(
+              cause =
+                "Pruning offset moves faster than participant is able to generate page. You may want to tweak page size or ask the node administrator to increase ascending_first_page_dynamic_bound_overfetch config setting.",
+              earliestOffset =
+                pruningOffset.unwrap, // If we are here pruning offset definitely exists
+            )(
+              ErrorLoggingContext(logger, loggingContext)
+            )
+            .asGrpcError
+        }
+      case _ =>
+        buildAscendingPage(
+          getUpdatesPageRequest = getUpdatesPageRequest,
+          calculatedBeginExclusive = calculatedBeginExclusive,
+          calculatedEndInclusive = calculatedEndInclusive,
+          transactions = transactions,
+        )
+    }
+
+  private def buildAscendingPage(
+      getUpdatesPageRequest: GetUpdatesPageRequest,
+      calculatedBeginExclusive: Option[Offset],
+      calculatedEndInclusive: Option[Offset],
+      transactions: Seq[GetUpdateResponse],
+  ): GetUpdatesPageResponse =
+    if (transactions.lengthIs >= getUpdatesPageRequest.maxPageSize + 1) { // Full page (note: it may be larger than maxPageSize+1 due to overfetch for the first page)
+      GetUpdatesPageResponse(
+        updates = transactions.take(getUpdatesPageRequest.maxPageSize),
+        lowestPageOffsetExclusive = calculatedBeginExclusive.fold(0L)(_.unwrap),
+        highestPageOffsetInclusive =
+          updatesToOffset(transactions(getUpdatesPageRequest.maxPageSize)).unwrap - 1,
+        nextPageToken = Some(
+          UpdatesPageToken(
+            lowestPageOffsetExclusive = calculatedBeginExclusive,
+            highestPageOffsetInclusive =
+              updatesToOffset(transactions(getUpdatesPageRequest.maxPageSize)).decrement,
+            participantIdChecksum = getUpdatesPageRequest.participantChecksum,
+            requestChecksum = getUpdatesPageRequest.requestChecksum,
+          ).toOpaqueByteString
+        ),
+      )
+    } else { // Last page or ledger end with dynamic bound
+      GetUpdatesPageResponse(
+        updates = transactions,
+        lowestPageOffsetExclusive = calculatedBeginExclusive.fold(0L)(_.unwrap),
+        highestPageOffsetInclusive = calculatedEndInclusive.fold(0L)(_.unwrap),
+        nextPageToken = getUpdatesPageRequest.endInclusive match {
+          case Some(_) => None
+          case None =>
+            Some(
+              UpdatesPageToken(
+                lowestPageOffsetExclusive = calculatedBeginExclusive,
+                highestPageOffsetInclusive = calculatedEndInclusive,
+                participantIdChecksum = getUpdatesPageRequest.participantChecksum,
+                requestChecksum = getUpdatesPageRequest.requestChecksum,
+              ).toOpaqueByteString
+            )
+        },
+      )
     }
 }

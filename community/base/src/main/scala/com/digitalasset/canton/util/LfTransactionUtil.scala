@@ -33,6 +33,13 @@ object LfTransactionUtil {
     case n: LfNodeQueryByKey => n.result
   }
 
+  def isEffectful(node: LfActionNode): Boolean = node match {
+    case _: LfNodeCreate => true
+    case _: LfNodeFetch => false
+    case n: LfNodeExercises => n.consuming
+    case _: LfNodeQueryByKey => false
+  }
+
   def usedContractId(node: LfActionNode): Vector[LfContractId] = node match {
     case _: LfNodeCreate => Vector.empty
     case n: LfNodeFetch => Vector(n.coid)

@@ -207,16 +207,19 @@ private[execution] class TopologyAwareCommandExecutor(
         partyPackageRequirements = passInput.partyPackageRequirements,
         computePackagePreferenceSet = perSynchronizerPreferenceSet =>
           FutureUnlessShutdown.pure(
-            perSynchronizerPreferenceSet.values.flatten
-              .map(_.unsafeToPackageReference(packageIndex))
-              .groupBy(_.packageName)
-              .valuesIterator
-              .map(
-                _.maxOption
-                  .getOrElse(sys.error("Unexpected empty references set after groupBy"))
-                  .pkgId
-              )
-              .toSet
+            (
+              perSynchronizerPreferenceSet.values.flatten
+                .map(_.unsafeToPackageReference(packageIndex))
+                .groupBy(_.packageName)
+                .valuesIterator
+                .map(
+                  _.maxOption
+                    .getOrElse(sys.error("Unexpected empty references set after groupBy"))
+                    .pkgId
+                )
+                .toSet,
+              perSynchronizerPreferenceSet.keySet.max1.protocolVersion,
+            )
           ),
       )
 
@@ -254,7 +257,10 @@ private[execution] class TopologyAwareCommandExecutor(
                     .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
                     .merge
                     .map(highestRankedSync =>
-                      checked(perSynchronizerPreferenceSet(highestRankedSync))
+                      (
+                        checked(perSynchronizerPreferenceSet(highestRankedSync)),
+                        highestRankedSync.protocolVersion,
+                      )
                     ),
               )
               .flatMap(nextResult => loop(nextInput, nextResult, nextPassNumber))

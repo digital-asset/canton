@@ -15,7 +15,7 @@ import com.digitalasset.canton.util.ReleaseUtils
   */
 trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
   override lazy val testedReleases: List[ReleaseUtils.TestedRelease] =
-    ProtocolContinuityConformanceTest.latestSupportedRelease(logger).toList
+    List(ProtocolContinuityConformanceTest.latestSupportedRelease(logger))
 
   protected val numShards: Int = 1
   protected def shard: Int

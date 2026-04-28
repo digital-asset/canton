@@ -25,7 +25,9 @@ import com.daml.ledger.api.v2.commands.{
   ExerciseByKeyCommand,
   ExerciseCommand,
 }
+import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.api.v2.transaction_filter.{
   CumulativeFilter,
   EventFormat,
@@ -33,6 +35,11 @@ import com.daml.ledger.api.v2.transaction_filter.{
   TemplateFilter,
 }
 import com.daml.ledger.api.v2.value as api
+import com.daml.ledger.javaapi.data.{
+  Event as JavaEvent,
+  ExercisedEvent as JavaExercisedEvent,
+  Transaction as JavaTransaction,
+}
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.InstanceReference
@@ -76,6 +83,8 @@ import java.time.Duration
 import java.util.UUID
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 // Split the tests across eight suites with eight Canton runners, which brings
 // down the runtime from ~4000s on a single suite to ~1400s
@@ -363,11 +372,17 @@ abstract class UpgradesMatrixIntegration(
         testHelper.clientGlobalTplId,
         testHelper.clientContractArg(alice, bob),
       )
+      extraGlobalContractId <- createContract(
+        ledgerClient,
+        alice,
+        testHelper.v1TplId,
+        testHelper.globalContractArgV1(alice, bob),
+      )
       globalContractId <- createContract(
         ledgerClient,
         alice,
         testHelper.v1TplId,
-        testHelper.globalContractArg(alice, bob),
+        testHelper.globalContractArgV1(alice, bob),
       )
     } yield UpgradesMatrixCases.SetupData(
       alice = alice,
@@ -375,6 +390,7 @@ abstract class UpgradesMatrixIntegration(
       clientLocalContractId = clientLocalContractId,
       clientGlobalContractId = clientGlobalContractId,
       globalContractId = globalContractId,
+      extraGlobalContractId = extraGlobalContractId,
       additionalSetup = ledgerClient,
     )
   }
@@ -597,7 +613,8 @@ abstract class UpgradesMatrixIntegration(
             packageIdSelectionPreference =
               List(cases.commonDefsPkgId, cases.templateDefsV2PkgId, cases.clientLocalPkgId),
             commands = commands,
-          )
+          ),
+          transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
         )
       }
     } yield result
@@ -619,7 +636,33 @@ abstract class UpgradesMatrixIntegration(
 
     expectedOutcome match {
       case UpgradesMatrixCases.ExpectSuccess =>
-        result shouldBe a[Right[?, ?]]
+        inside(result) { case Right(response) =>
+          val tx = JavaTransaction.fromProto(Transaction.toJavaProto(response.getTransaction))
+          val eventsById: Map[Integer, JavaEvent] = tx.getEventsById().asScala.toMap
+          val exercisedEvents: Seq[JavaExercisedEvent] =
+            tx.getRootNodeIds.asScala.toSeq.map(eventsById(_)).collect {
+              case e: JavaExercisedEvent => e
+            }
+          exercisedEvents match {
+            case Seq(e) =>
+              Option(e.getExerciseResult).map(_.asText.toScala) match {
+                case Some(Some(t)) =>
+                  // TODO(#32310) We have choices that are expected to succeed and
+                  // need to have an exception-free failure when they fail.
+                  // Currently, they return text, and we match for the phrase in
+                  // UpgradesMatrixCases.unexpectedErrorMessage. Later, we should
+                  // return Either and match on the variant instead.
+                  t.getValue should not include UpgradesMatrixCases.unexpectedErrorMessage
+                case Some(None) => succeed // non-text type in result
+                case None =>
+                  fail("Expected success, got an exercise with no result value")
+              }
+            case Seq() =>
+              fail("Expected success, got no exercise node")
+            case _ =>
+              fail("Expected success, got more than one exercise node")
+          }
+        }
       case UpgradesMatrixCases.ExpectUpgradeError =>
         inside(result) { case Left(statusError) =>
           expectStatusHasErrorCode(statusError, "INTERPRETATION_UPGRADE_ERROR_VALIDATION_FAILED")
@@ -645,9 +688,10 @@ abstract class UpgradesMatrixIntegration(
         inside(result) { case Left(statusError) =>
           expectStatusHasErrorCode(statusError, "TEMPLATE_PRECONDITION_VIOLATED")
         }
-      case UpgradesMatrixCases.ExpectUnhandledException =>
+      case UpgradesMatrixCases.ExpectUnhandledException(expectedMsg) =>
         inside(result) { case Left(statusError) =>
           expectStatusHasErrorCode(statusError, "DAML_FAILURE")
+          statusError.message should include(expectedMsg)
         }
       case UpgradesMatrixCases.ExpectInternalInterpretationError =>
         inside(result) { case Left(statusError) =>

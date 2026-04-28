@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.runner
 
+import com.daml.ledger.api.testtool.TestDar
 import com.daml.ledger.api.testtool.infrastructure.*
 import com.daml.ledger.api.testtool.runner.TestRunner.*
 import com.daml.metrics.ExecutorServiceMetrics
@@ -12,7 +13,6 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import io.grpc.Channel
 import io.grpc.netty.shaded.io.grpc.netty.{NegotiationType, NettyChannelBuilder}
-import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.{Logger, LoggerFactory}
 
 import java.io.File
@@ -21,7 +21,6 @@ import java.util.concurrent.Executors
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Failure, Success}
 
 object TestRunner {
@@ -49,29 +48,13 @@ object TestRunner {
   private def exitCode(summaries: Vector[LedgerTestSummary], expectFailure: Boolean): Int =
     if (summaries.exists(_.result.isLeft) == expectFailure) 0 else 1
 
-  private def printListOfTests[A](tests: Seq[A])(getName: A => String): Unit = {
-    println("All tests are run by default.")
-    println()
-    tests.map(getName).sorted.foreach(println(_))
-  }
-
-  private def printAvailableTestSuites(testSuites: Vector[LedgerTestSuite]): Unit = {
-    println("Listing test suites. Run with --list-all to see individual tests.")
-    printListOfTests(testSuites)(_.name)
-  }
-
-  private def printAvailableTests(testSuites: Vector[LedgerTestSuite]): Unit = {
-    println("Listing all tests. Run with --list to only see test suites.")
-    printListOfTests(testSuites.flatMap(_.tests))(_.name)
-  }
-
-  private def extractResources(resources: Seq[String]): Unit = {
+  private def extractResources(resources: Seq[TestDar]): Unit = {
     val pwd = Paths.get(".").toAbsolutePath
     println(s"Extracting all Daml resources necessary to run the tests into $pwd.")
     for (resource <- resources) {
-      val is = getClass.getClassLoader.getResourceAsStream(resource)
+      val is = getClass.getClassLoader.getResourceAsStream(resource.path)
       if (is == null) sys.error(s"Could not find $resource in classpath")
-      val targetFile = new File(new File(resource).getName)
+      val targetFile = new File(new File(resource.path).getName)
       Files.copy(is, targetFile.toPath, StandardCopyOption.REPLACE_EXISTING)
       println(s"Extracted $resource to $targetFile")
     }
@@ -81,9 +64,10 @@ object TestRunner {
     prefixes.exists(test.name.startsWith)
 }
 
-final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion: String) {
+final class TestRunner(availableTests: AvailableTests, config: Config) {
+  private val configuredTests = new ConfiguredTests(availableTests, config)
 
-  implicit val resourceManagementExecutionContext: ExecutionContext =
+  private implicit val resourceManagementExecutionContext: ExecutionContext =
     ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor())
 
   def runAndExit(): Unit = {
@@ -102,44 +86,41 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
     }
   }
 
-  def runInProcess(logger: Logger): (Future[Vector[LedgerTestSummary]], Vector[LedgerTestCase]) = {
+  def runInProcess(logger: Logger): Future[Vector[LedgerTestSummary]] = {
     val reportLogBuilder = new mutable.StringBuilder()
     reportLogBuilder.addOne('\n')
     val addReportLineToLogEntry: String => Unit = reportLogBuilder.addAll(_).addOne('\n')
 
-    runInternal(reporterPrintln = addReportLineToLogEntry)
-      .focus(_._1)
-      .modify(_.map(_.tap { _ =>
-        // Log the full report at info level
-        logger.info(reportLogBuilder.result())
-      }))
+    val res = runInternal(reporterPrintln = addReportLineToLogEntry)
+    // Log the full report at info level
+    logger.info(reportLogBuilder.result())
+    res._1
   }
 
   private def runInternal(
       reporterPrintln: String => Unit
   ): (Future[Vector[LedgerTestSummary]], Vector[LedgerTestCase]) = {
-    val tests = new ConfiguredTests(availableTests, config)
 
-    if (tests.missingTests.nonEmpty) {
+    if (configuredTests.missingTests.nonEmpty) {
       println("The following exclusion or inclusion does not match any test:")
-      tests.missingTests.foreach { testName =>
+      configuredTests.missingTests.foreach { testName =>
         println(s"  - $testName")
       }
       sys.exit(64)
     }
 
     if (config.listTestSuites) {
-      printAvailableTestSuites(tests.allTests)
+      printAvailableTestSuites()
       sys.exit(0)
     }
 
     if (config.listTests) {
-      printAvailableTests(tests.allTests)
+      printAvailableTests()
       sys.exit(0)
     }
 
     if (config.extract) {
-      extractResources(Dars.resources(lfVersion))
+      extractResources(availableTests.darsToUpload)
       sys.exit(0)
     }
 
@@ -156,15 +137,15 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
       }
 
     val includedTests =
-      if (config.included.isEmpty) tests.defaultCases
-      else tests.allCases.filter(matches(config.included))
+      if (config.included.isEmpty) configuredTests.defaultCases
+      else configuredTests.allCases.filter(matches(config.included))
 
-    val addedTests = tests.allCases.filter(matches(config.additional))
+    val addedTests = configuredTests.allCases.filter(matches(config.additional))
 
     val (excludedTests, testsToRun) =
       (includedTests ++ addedTests).partition(matches(config.excluded))
 
-    val runner = newLedgerCasesRunner(config, testsToRun)
+    val runner = newLedgerCasesRunner(testsToRun)
     val testsF = runner.asFuture
       .flatMap(
         _.runTests(
@@ -208,16 +189,22 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
     (testsF, excludedTests)
   }
 
-  private def newLedgerCasesRunner(
-      config: Config,
-      cases: Vector[LedgerTestCase],
-  ): Resource[LedgerTestCasesRunner] =
-    createLedgerCasesRunner(config, cases, config.concurrentTestRuns)
+  private def printAvailableTests(): Unit = {
+    println("Listing all tests. Run with --list to only see test suites.")
+    println("All tests are run by default.")
+    println()
+    configuredTests.allTestNames.foreach(println(_))
+  }
 
-  private def createLedgerCasesRunner(
-      config: Config,
-      cases: Vector[LedgerTestCase],
-      concurrentTestRuns: Int,
+  private def printAvailableTestSuites(): Unit = {
+    println("Listing test suites. Run with --list-all to see individual tests.")
+    println("All tests are run by default.")
+    println()
+    configuredTests.allSuiteNames.foreach(println(_))
+  }
+
+  private def newLedgerCasesRunner(
+      cases: Vector[LedgerTestCase]
   ): Resource[LedgerTestCasesRunner] =
     if (config.jsonApiMode) {
       initializeParticipantChannels(
@@ -233,9 +220,9 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
           partyAllocation = config.partyAllocation,
           shuffleParticipants = config.shuffleParticipants,
           timeoutScaleFactor = config.timeoutScaleFactor,
-          concurrentTestRuns = concurrentTestRuns,
+          concurrentTestRuns = config.concurrentTestRuns,
           identifierSuffix = identifierSuffix,
-          lfVersion = lfVersion,
+          allDars = availableTests.darsToUpload,
           connectedSynchronizers = config.connectedSynchronizers,
         )
       )
@@ -259,9 +246,9 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
           partyAllocation = config.partyAllocation,
           shuffleParticipants = config.shuffleParticipants,
           timeoutScaleFactor = config.timeoutScaleFactor,
-          concurrentTestRuns = concurrentTestRuns,
+          concurrentTestRuns = config.concurrentTestRuns,
           identifierSuffix = identifierSuffix,
-          lfVersion = lfVersion,
+          allDars = availableTests.darsToUpload,
           connectedSynchronizers = config.connectedSynchronizers,
         )
       }
@@ -294,5 +281,4 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
         .acquire()
         .map(channel => ChannelEndpoint.forRemote(channel = channel, hostname = host, port = port))
     })
-
 }
