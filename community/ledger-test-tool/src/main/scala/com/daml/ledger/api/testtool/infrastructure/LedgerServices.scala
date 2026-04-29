@@ -4,6 +4,7 @@
 package com.daml.ledger.api.testtool.infrastructure
 
 import cats.implicits.{catsSyntaxSemigroup, toTraverseOps}
+import com.daml.ledger.api.testtool.TestDar
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.JsonErrors.GenericErrorCode
 import com.daml.ledger.api.testtool.infrastructure.ws.WsHelper
@@ -253,7 +254,7 @@ object LedgerServices {
   def apply(
       participantEndpoint: Either[JsonApiEndpoint, Channel],
       commandInterceptors: Seq[ClientInterceptor],
-      dars: List[String],
+      dars: List[TestDar],
   )(implicit executionContext: ExecutionContext): LedgerServices = participantEndpoint
     .map(new LedgerServicesGrpc(_, commandInterceptors))
     .left
@@ -274,7 +275,7 @@ object LedgerServices {
 private final class LedgerServicesJson(
     hostname: String,
     port: Int,
-    dars: List[String],
+    dars: List[TestDar],
     tokenParam: Option[String],
 )(implicit executionContext: ExecutionContext, mat: Materializer)
     extends LedgerServices
@@ -470,7 +471,7 @@ private final class LedgerServicesJson(
   private val packageMetadataView: AtomicReference[PackageMetadata] =
     new AtomicReference(PackageMetadata())
 
-  dars.foreach(dar => addDarToPackageMetadataView(Dars.read(dar).newInput()))
+  dars.foreach(dar => addDarToPackageMetadataView(dar.bytes.newInput()))
 
   private val schemaProcessors =
     new SchemaProcessorsImpl(

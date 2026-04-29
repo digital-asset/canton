@@ -10,6 +10,7 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -24,7 +25,8 @@ import com.digitalasset.canton.data.{
   ReassignmentSubmitterMetadata,
   ViewPosition,
 }
-import com.digitalasset.canton.error.TransactionError
+import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.ReassignmentErrorGroup.SubmissionErrorGroup
+import com.digitalasset.canton.error.{CantonError, TransactionError}
 import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
   SequencedEventUpdate,
@@ -603,7 +605,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
           .orElse(reassignmentIdResult)
           .orElse(multiSynchronizerIsNotEnabled)
     }
-
 }
 
 object ReassignmentProcessingSteps {
@@ -666,6 +667,31 @@ object ReassignmentProcessingSteps {
       adHocPrettyInstance
 
     def message: String
+  }
+
+  object ReassignmentSubmissionErrors extends SubmissionErrorGroup {
+
+    @Explanation(
+      """This error occurs when a reassignment is submitted on behalf of a party that is currently onboarding on the participant. Onboarding parties cannot initiate ledger changes until their onboarding is complete."""
+    )
+    @Resolution(
+      """Wait for the party's onboarding to complete before submitting commands on their behalf."""
+    )
+    object PartyCurrentlyOnboarding
+        extends ErrorCode(
+          id = "REASSIGNMENT_PARTY_CURRENTLY_ONBOARDING",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Reject(party: LfPartyId)(implicit
+          val loggingContext: com.digitalasset.canton.logging.ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              s"Submitting party $party is currently onboarding and cannot initiate reassignments."
+          )
+          with ReassignmentProcessorError {
+        override def message: String = cause
+      }
+    }
   }
 
   /** Used to convert ReassignmentValidationError to ReassignmentValidationError */

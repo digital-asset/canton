@@ -7,7 +7,7 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, TransactionHelpers}
-import com.daml.ledger.api.testtool.suites.v2_1.CompanionImplicits.*
+import com.daml.ledger.api.testtool.suites.v2_2.CompanionImplicits.*
 import com.daml.ledger.api.testtool.suites.v2_dev.EventsDescendantsIT.isDescendant
 import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.event.Event.Event.Exercised

@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsState,
   PruneUptoInclusiveAndLedgerEnd,
 }
+import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.CompositeSql
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
@@ -360,7 +361,8 @@ trait EventStorageBackend {
   def eventReaderQueries: EventReaderQueries
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related
-    * database operations
+    * database operations. The underlying DB operation will populate the
+    * lapi_pruning_contract_candidate table to prepare for Contract pruning.
     */
   def pruneEvents(
       previousPruneUpToInclusive: Option[Offset],
@@ -368,6 +370,29 @@ trait EventStorageBackend {
       pruneUpToInclusive: Offset,
       incompleteReassignmentOffsets: Vector[Offset],
   )(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit
+
+  /** Attempt to prune contracts prepared in the lapi_pruning_contract_candidate table. This method
+    * is not guaranteed to succeed as issuing write locks, but guaranteed to be not starved / fail
+    * fast, if cannot acquire all necessary locks immediately. In case of locking related failure
+    * PruningContractsBlockedException will be thrown to adhere to DbDispatcher semantics, and the
+    * DB transaction will be rolled back. In case of success the lapi_pruning_contract_candidate
+    * table will be emptied.
+    *
+    * @return
+    *   The pruned internal_contract_id-s.
+    */
+  def pruneContracts()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Iterable[Long]
+
+  /** Removes all contract candidates from lapi_pruning_contract_candidate table which are not
+    * eligible for pruning.
+    */
+  def cleanPruningCandidates()(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit
@@ -420,13 +445,6 @@ trait EventStorageBackend {
       synchronizerId: SynchronizerId,
       beforeOrAtOffsetInclusive: Offset,
   )(connection: Connection): Option[CantonTimestamp]
-
-  /** The contracts which were archived or participant-divulged in the specified range. These are
-    * the contracts in the ContractStore, which can be pruned in a single-synchronizer setup.
-    */
-  def prunableContracts(fromExclusive: Option[Offset], toInclusive: Offset)(
-      connection: Connection
-  ): Set[Long]
 
   def fetchTopologyPartyEventIds(party: Option[Party]): IdPageQuery
 
@@ -481,9 +499,23 @@ trait EventStorageBackend {
   )(connection: Connection): Unit
 
   def lockExclusivelyPruningProcessingTable(connection: Connection): Unit
+
+  def lockExclusivelyContractPruningProcessingTable(connection: Connection): Unit
+
+  /** @return
+    *   the missing internal contract IDs
+    */
+  def readLockInternalContractIds(internalContractIds: Set[Long])(connection: Connection): Set[Long]
+
+  def writeLockInternalContractIds(whereInternalContractIdExprs: CompositeSql)(
+      connection: Connection
+  ): Unit
 }
 
 object EventStorageBackend {
+  class PruningContractsBlockedException extends RuntimeException
+  class CannotAcquireAllRowLocksException extends RuntimeException
+
   sealed trait RawEvent extends Product with Serializable {
     def commonEventProperties: CommonEventProperties
     final def offset: Long = commonEventProperties.offset

@@ -33,7 +33,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractHasher
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.{LegacyTransactionErrors, NodeId, TransactionError}
+import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -148,50 +148,6 @@ object TransactionTreeFactory {
   /** Supertype for all errors than may arise during the conversion. */
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting
 
-  object TransactionTreeConversionError {
-    def toConversionError(error: TransactionError): TransactionTreeConversionError =
-      error match {
-        case TransactionError.DuplicateContractId(cid) =>
-          DuplicateContractIdError(cid)
-        case TransactionError.AlreadyConsumed(cid, tmplId, nodeId) =>
-          AlreadyConsumedContractError(cid, tmplId, nodeId.toString)
-        case TransactionError.InconsistentContractKey(key) =>
-          InconsistentContractKeyError(key)
-        case TransactionError.EffectfulRollback(nodeIds) =>
-          EffectfulRollbackError(nodeIds)
-      }
-  }
-
-  final case class EffectfulRollbackError(nodeIds: Set[NodeId])
-      extends TransactionTreeConversionError {
-    override protected def pretty: Pretty[EffectfulRollbackError] =
-      prettyOfClass(unnamedParam(_.nodeIds))
-  }
-
-  final case class DuplicateContractIdError(contractId: LfContractId)
-      extends TransactionTreeConversionError {
-    override protected def pretty: Pretty[DuplicateContractIdError] =
-      prettyOfClass(unnamedParam(_.contractId))
-  }
-
-  final case class AlreadyConsumedContractError(
-      contractId: LfContractId,
-      tmplId: LfTemplateId,
-      nodeId: String,
-  ) extends TransactionTreeConversionError {
-    override protected def pretty: Pretty[AlreadyConsumedContractError] = prettyOfClass(
-      param("contractId", _.contractId),
-      param("tmplId", _.tmplId),
-      param("nodeId", _.nodeId.unquoted),
-    )
-  }
-
-  final case class InconsistentContractKeyError(key: LfGlobalKey)
-      extends TransactionTreeConversionError {
-    override protected def pretty: Pretty[InconsistentContractKeyError] =
-      prettyOfClass(unnamedParam(_.key))
-  }
-
   /** Indicates that a contract instance could not be looked up by an instance of
     * [[ContractInstanceOfId]].
     */
@@ -206,6 +162,14 @@ object TransactionTreeFactory {
   final case class SubmitterMetadataError(message: String) extends TransactionTreeConversionError {
     override protected def pretty: Pretty[SubmitterMetadataError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
+    )
+  }
+
+  final case class RolledBackEffect(context: RollbackContext, viewPosition: ViewPosition)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[RolledBackEffect] = prettyOfClass(
+      param("context", _.context),
+      param("view position", _.viewPosition),
     )
   }
 

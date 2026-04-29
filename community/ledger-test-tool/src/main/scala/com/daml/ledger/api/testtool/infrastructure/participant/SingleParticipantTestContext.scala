@@ -84,7 +84,7 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.{crypto as lapicrypto, value as v1}
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, ExerciseByKeyCommand, Identifier, Template, Value}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -93,7 +93,6 @@ import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffe
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
@@ -129,7 +128,6 @@ final class SingleParticipantTestContext private[participant] (
     val participantId: String,
 )(protected[participant] implicit val ec: ExecutionContext)
     extends ParticipantTestContext {
-  private val logger = ContextualizedLogger.get(getClass)
 
   private[this] val identifierPrefix =
     s"$userId-$endpointId-$identifierSuffix"
@@ -1703,12 +1701,7 @@ final class SingleParticipantTestContext private[participant] (
     // Distributed ledger participants need to reach global consensus prior to pruning. Hence the "eventually" here:
     eventually(assertionName = "Prune", attempts = attempts) {
       services.participantPruning
-        .prune(
-          PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true)
-        )
-        .thereafterP { case Failure(exception) =>
-          logger.warn("Failed to prune", exception)(LoggingContext.ForTesting)
-        }
+        .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
     }
 
   override def pruneCantonSafe(

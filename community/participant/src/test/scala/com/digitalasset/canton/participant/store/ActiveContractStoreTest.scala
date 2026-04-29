@@ -310,7 +310,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
       }
     }
 
-    "archival must not be timestamped before creation" inUS {
+    "archival can be timestamped before creation" inUS {
       val acs = mk()
       val toc = TimeOfChange(ts, rc)
       val toc1 = TimeOfChange(ts1, rc)
@@ -322,10 +322,8 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
       } yield {
         assert(created.successful, "creation succeeds")
         assert(
-          archived.isResult && archived.nonaborts.toList.toSet == Set(
-            ChangeBeforeCreation(coid00, toc1, toc)
-          ),
-          "archival fails",
+          archived.isResult && archived.nonaborts.isEmpty,
+          "archival succeeds",
         )
         assert(fetch.contains(ContractState(active, ts1, rc)), "contract remains active")
         assert(
@@ -1238,53 +1236,6 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
           "assignment is flagged",
         )
         assert(fetch.contains(ContractState(active, ts, rc)))
-      }
-    }
-
-    "complain about changes before creation" inUS {
-      val acs = mk()
-      val toc1 = TimeOfChange(ts, rc)
-      val toc2 = TimeOfChange(ts.plusSeconds(1), rc1)
-      val toc3 = TimeOfChange(ts.plusSeconds(2), rc3)
-      val toc4 = TimeOfChange(ts.plusSeconds(3), rc2)
-      for {
-        create <- acs.markContractCreated(coid00 -> initialReassignmentCounter, toc3).value
-        assignment1 <- acs
-          .assignContract(coid00, toc1, sourceSynchronizer1, initialReassignmentCounter)
-          .value
-        fetch3 <- acs.fetchState(coid00)
-        assignment4 <- acs
-          .assignContract(coid00, toc4, sourceSynchronizer2, reassignmentCounter3)
-          .value
-        unassignment2 <- acs
-          .unassignContracts(coid00, toc2, targetSynchronizer1, reassignmentCounter1)
-          .value
-        snapshot1 <- acs.snapshot(toc1)
-        snapshot2 <- acs.snapshot(toc2)
-        snapshot3 <- acs.snapshot(toc3)
-      } yield {
-        assert(create.successful, "creation succeeds")
-        assert(
-          assignment1.isResult && assignment1.nonaborts.toList
-            .contains(ChangeBeforeCreation(coid00, toc3, toc1)),
-          s"assignment before creation fails",
-        )
-        assert(fetch3.contains(ContractState(active, toc3.timestamp, toc3.counterO)))
-        assert(assignment4.successful, "assignment after creation succeeds")
-        assert(
-          unassignment2.isResult && unassignment2.nonaborts.toList.contains(
-            ChangeBeforeCreation(coid00, toc3, toc2)
-          )
-        )
-        assert(
-          snapshot1 == Map(coid00 -> (toc1, initialReassignmentCounter)),
-          "contract is active after the first assignment",
-        )
-        assert(snapshot2 == Map.empty, "unassignment deactivates the contract")
-        assert(
-          snapshot3 == Map(coid00 -> (toc3, initialReassignmentCounter)),
-          "creation activates the contract again",
-        )
       }
     }
 

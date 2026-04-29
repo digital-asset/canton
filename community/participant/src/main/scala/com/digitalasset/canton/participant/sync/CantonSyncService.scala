@@ -81,6 +81,7 @@ import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
+import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.FinishAutomaticLsuRequest
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   PartyAllocationCannotDetermineSynchronizer,
   PartyAllocationNoSynchronizerError,
@@ -90,7 +91,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectionListener,
 }
-import com.digitalasset.canton.participant.synchronizer.{PendingLsuOperation, *}
+import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
@@ -124,6 +125,7 @@ import com.google.protobuf.ByteString
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Right, Success}
@@ -1156,19 +1158,46 @@ class CantonSyncService(
         connectionConfig.configuredPsid.toOption.flatMap { currentPsid =>
           psidToSuccessor
             .get(currentPsid)
-            .map((currentPsid, connectionConfig.config.synchronizerAlias, _))
+            .map(successor =>
+              FinishAutomaticLsuRequest(
+                connectionConfig.config.synchronizerAlias,
+                currentPsid = currentPsid,
+                successorPsid = successor.psid,
+              )
+            )
         }
       } else None
     }
 
     logger.info(s"Found unfinished LSUs: $unfinishedLsus")
 
-    MonadUtil.sequentialTraverse_(unfinishedLsus) { case (currentPsid, alias, successor) =>
-      connectionsManager.automaticLogicalSynchronizerUpgrade.finishUpgradeWithoutChecks(
-        alias = alias,
-        currentPsid = currentPsid,
-        synchronizerSuccessor = successor,
-      )
+    MonadUtil.sequentialTraverse_(unfinishedLsus) { finishLsuRequest =>
+      val upgrader = new FinishAutomaticLogicalSynchronizerUpgrade(
+        synchronizerConnectionConfigStore,
+        ledgerApiIndexer,
+        connectionsManager.connectQueue,
+        connectionsManager.connectedSynchronizers,
+        connectSynchronizer = tc =>
+          connectionsManager.connectSynchronizer(
+            finishLsuRequest.alias,
+            keepRetrying = true,
+            connectSynchronizer = ConnectSynchronizer.Connect,
+            /*
+            After LSU, the likelihood of a failure of the first connection attempt is higher than
+            with normal connects. Sequencers might not be ready yet and/or be hammered with requests.
+            Hence, we decrease the level from WARN to INFO.
+             */
+            logLevelFailureInitialAttempt = Level.INFO,
+          )(tc),
+        disconnectSynchronizer = disconnectSynchronizer(finishLsuRequest.alias)(_),
+        metrics,
+        pendingLsuOperationsStore,
+        parameters.lsuConfig,
+        timeouts,
+        loggerFactory.append("lsu", finishLsuRequest.successorPsid.suffix),
+      )(finishLsuRequest)
+
+      upgrader.finishUpgradeWithoutChecks()
     }
   }
 
@@ -1517,12 +1546,15 @@ class CantonSyncService(
               )
           )
           _ <- reassign(connectedSynchronizer, topologySnapshot)
-            .leftMap(error =>
-              RequestValidationErrors.InvalidArgument
-                .Reject(
-                  error.message
-                ): RpcError // TODO(i13240): Improve reassignment-submission Ledger API errors
-            )
+            .leftMap {
+              case rpcError: RpcError =>
+                // Pass Canton errors (like PartyCurrentlyOnboarding) straight through
+                rpcError
+              case error =>
+                // Fallback for older ReassignmentProcessorErrors, to be addressed by:
+                // TODO(#13240): Improve reassignment-submission Ledger API errors
+                RequestValidationErrors.InvalidArgument.Reject(error.message): RpcError
+            }
             .mapK(FutureUnlessShutdown.outcomeK)
             .semiflatMap(Predef.identity)
             .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error()))

@@ -409,17 +409,18 @@ class ProtocolProcessorTest
   private lazy val rootHash = RootHash(TestHash.digest(1))
   private lazy val testTopologyTimestamp = CantonTimestamp.Epoch
   private lazy val viewHash = ViewHash(TestHash.digest(2))
-  private lazy val encryptedView =
-    EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive))
-  private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
-    submittingParticipantSignature = None,
-    viewHash = viewHash,
-    viewEncryptionKeyRandomness = sessionKeyMapTest,
-    encryptedView = encryptedView,
-    synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-    SymmetricKeyScheme.Aes128Gcm,
-    testedProtocolVersion,
-  )
+
+  private lazy val viewMessage: EncryptedViewMessage[TestViewType] =
+    EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
+      submittingParticipantSignature = None,
+      viewHash = viewHash,
+      viewEncryptionKeyRandomness = sessionKeyMapTest,
+      encryptedViewBytes = rootHash.toProtoPrimitive,
+      synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
+      viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+      protocolVersion = testedProtocolVersion,
+    )
+
   private lazy val rootHashMessage = RootHashMessage(
     rootHash,
     DefaultTestIdentities.physicalSynchronizerId,
@@ -713,17 +714,18 @@ class ProtocolProcessorTest
     "log wrong root hashes" in {
       val wrongRootHash = RootHash(TestHash.digest(3))
       val viewHash1 = ViewHash(TestHash.digest(2))
-      val encryptedViewWrongRH =
-        EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive))
-      val viewMessageWrongRH = EncryptedViewMessage(
-        submittingParticipantSignature = None,
-        viewHash = viewHash1,
-        viewEncryptionKeyRandomness = sessionKeyMapTest,
-        encryptedView = encryptedViewWrongRH,
-        synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-        SymmetricKeyScheme.Aes128Gcm,
-        testedProtocolVersion,
-      )
+
+      val viewMessageWrongRH: EncryptedViewMessage[TestViewType.type] =
+        EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
+          submittingParticipantSignature = None,
+          viewHash = viewHash1,
+          viewEncryptionKeyRandomness = sessionKeyMapTest,
+          encryptedViewBytes = wrongRootHash.toProtoPrimitive,
+          synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
+          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+          protocolVersion = testedProtocolVersion,
+        )
+
       val requestBatchWrongRH = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
@@ -754,20 +756,22 @@ class ProtocolProcessorTest
     }
 
     "log decryption errors" in {
-      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
-        submittingParticipantSignature = None,
-        viewHash = viewHash,
-        viewEncryptionKeyRandomness = sessionKeyMapTest,
-        encryptedView = EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY)),
-        synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-        viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
-        protocolVersion = testedProtocolVersion,
-      )
+
+      val viewMessage: EncryptedViewMessage[TestViewType] =
+        EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
+          submittingParticipantSignature = None,
+          viewHash = viewHash,
+          viewEncryptionKeyRandomness = sessionKeyMapTest,
+          encryptedViewBytes = ByteString.EMPTY,
+          synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
+          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+          protocolVersion = testedProtocolVersion,
+        )
 
       val requestBatchDecryptError = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
-          OpenEnvelope(viewMessageDecryptError, someRecipients)(testedProtocolVersion),
+          OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion),
         ),
         rootHashMessage,
         MediatorGroupRecipient(MediatorGroupIndex.zero),

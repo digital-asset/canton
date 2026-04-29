@@ -55,6 +55,7 @@ private[apiserver] trait CommandInterpreter {
 
   def interpret(
       commands: api.Commands,
+      mode: NextGenContractStateMachine.Mode,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -68,7 +69,6 @@ private[apiserver] trait CommandInterpreter {
   */
 final class StoreBackedCommandInterpreter(
     engine: Engine,
-    contractStateMode: NextGenContractStateMachine.Mode,
     participant: Ref.ParticipantId,
     packageResolver: PackageResolver,
     contractStore: ContractStore,
@@ -87,6 +87,7 @@ final class StoreBackedCommandInterpreter(
 
   override def interpret(
       commands: api.Commands,
+      mode: NextGenContractStateMachine.Mode,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -106,7 +107,7 @@ final class StoreBackedCommandInterpreter(
         }
         .value
         .map(_.toOption)
-      submissionResult <- submitToEngine(commands, submissionSeed, interpretationTimeNanos)
+      submissionResult <- submitToEngine(commands, mode, submissionSeed, interpretationTimeNanos)
       submission <- consume(
         commands.actAs,
         commands.readAs,
@@ -191,6 +192,7 @@ final class StoreBackedCommandInterpreter(
 
   private def submitToEngine(
       commands: api.Commands,
+      mode: NextGenContractStateMachine.Mode,
       submissionSeed: crypto.Hash,
       interpretationTimeNanos: AtomicLong,
   )(implicit
@@ -216,7 +218,7 @@ final class StoreBackedCommandInterpreter(
           submissionSeed = submissionSeed,
           prefetchKeys = commands.prefetchKeys,
           contractIdVersion = ContractIdVersion.V1,
-          contractStateMode = contractStateMode,
+          contractStateMode = mode,
         )
       })),
     )

@@ -43,8 +43,8 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.security.SecurityTestLensUtils
-import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
+import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -52,7 +52,6 @@ import com.digitalasset.canton.integration.{
   HasCycleUtils,
   SharedEnvironment,
   TestConsoleEnvironment,
-  TrafficTestUtils,
 }
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -125,7 +124,7 @@ sealed trait TrafficCostOnLAPITest
       }
       .withTrafficControl(
         TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
-        TrafficTestUtils.predictableTraffic,
+        TrafficControlUtils.predictableTraffic,
         topUpAllMembers = true,
         disableCommitments = true,
       )

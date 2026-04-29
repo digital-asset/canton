@@ -72,6 +72,9 @@ final case class IndexServiceConfig(
       IndexServiceConfig.OffsetCheckpointCacheUpdateInterval,
     idleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
       IndexServiceConfig.IdleStreamOffsetCheckpointTimeout,
+    contractPruningMaxRetries: Int = IndexServiceConfig.DefaultContractPruningMaxRetries,
+    contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
+      IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
 )
 
 object IndexServiceConfig {
@@ -89,6 +92,9 @@ object IndexServiceConfig {
     NonNegativeFiniteDuration.ofSeconds(15)
   val IdleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(1)
+  val DefaultContractPruningMaxRetries: Int = 10
+  val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(2)
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value

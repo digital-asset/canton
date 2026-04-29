@@ -4,8 +4,9 @@
 package com.digitalasset.canton.integration.plugins
 
 import better.files.File
+import com.daml.ledger.api.testtool.CliParser
+import com.daml.ledger.api.testtool.runner.{AvailableTests, Config, ConfiguredTests, TestRunner}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config.{
   CantonConfig,
   ClientConfig,
@@ -15,6 +16,7 @@ import com.digitalasset.canton.console.{LocalParticipantReference, RemotePartici
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   EnvVarTestOverrides,
   LAPITTVersion,
+  LedgerTestTool,
 }
 import com.digitalasset.canton.integration.util.ExternalCommandExecutor
 import com.digitalasset.canton.integration.{
@@ -25,7 +27,11 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
+import org.scalatest.Assertions
+import org.scalatest.concurrent.ScalaFutures.*
+import org.scalatest.time.{Seconds, Span}
 
 import scala.concurrent.blocking
 import scala.util.{Failure, Success, Try}
@@ -38,7 +44,7 @@ import scala.util.{Failure, Success, Try}
 class UseLedgerApiTestTool(
     protected val loggerFactory: NamedLoggerFactory,
     connectedSynchronizersCount: Int,
-    lfVersion: UseLedgerApiTestTool.LfVersion = UseLedgerApiTestTool.LfVersion.Stable,
+    lfVersion: LanguageVersion = LanguageVersion.v2_2,
     // If set, unique benchmark name for uploading benchmark results to datadog.
     benchmarkReportFileO: Option[String] = None,
     version: LAPITTVersion = LAPITTVersion.Latest,
@@ -47,6 +53,9 @@ class UseLedgerApiTestTool(
 ) extends EnvironmentSetupPlugin
     with NoTracing
     with EnvVarTestOverrides {
+
+  protected val ledgerApiTestToolPatience: PatienceConfig =
+    PatienceConfig(timeout = scaled(Span(500, Seconds)))
 
   private def defaultExtraArgumentsSeq: Seq[String] = defaultExtraArguments.flatMap { case (k, v) =>
     Seq(k, v)
@@ -57,7 +66,7 @@ class UseLedgerApiTestTool(
     s"Benchmark report file must start with 'benchmark_', otherwise it won't be reported to DataDog. Found: $benchmarkReportFileO",
   )
 
-  private var testTool: File = _
+  private var testTool: LedgerTestTool = _
 
   private val tempDir = File.newTemporaryDirectory()
 
@@ -67,26 +76,26 @@ class UseLedgerApiTestTool(
     // First ensure we are able to find and invoke java as that is needed to invoke the test tool.
     commandExecutor.exec(cmd = "java --version", errorHint = "Is 'java' not on the path?")
 
-    def tryDownload(testToolRelease: LAPITTRelease): File =
-      getOrDownloadTestTool(testToolRelease, lfVersion)
-        .recoverWith {
-          case error if isMissingArtifact(error) =>
-            // TODO (i31441) substitute is a temporary solution, fix publishing of testtools
-            // TestTools 2.1 are missing in 3.4 line hence substitution with 2.2
-            // We might want to republish test tools for 2.1
-            logger.info(s"unable to load TestTool $lfVersion trying substitute")
-            getOrDownloadTestTool(testToolRelease, UseLedgerApiTestTool.LfVersion.V22).orElse(
-              Failure(error)
-            )
+    def tryDownload(testToolRelease: LAPITTRelease): LedgerTestTool.Assembly = {
+      val otherLfVersions =
+        if (LanguageVersion.stableLfVersions.contains(lfVersion))
+          LanguageVersion.stableLfVersions.takeWhile(_ < lfVersion)
+        else List.empty
+
+      // find and download test tool with the higher stable LF version
+      otherLfVersions
+        .foldRight(getOrDownloadTestTool(testToolRelease, lfVersion)) { (otherLfVersion, res) =>
+          res.recoverWith {
+            case error if isMissingArtifact(error) =>
+              logger.info(s"unable to load TestTool $lfVersion trying substitute")
+              getOrDownloadTestTool(testToolRelease, otherLfVersion).orElse(Failure(error))
+          }
         }
         .fold(throw _, identity)
+    }
 
     testTool = version match {
-      case LAPITTVersion.LocalJar =>
-        val repoDir = File(System.getProperty("user.dir"))
-        val projectDir =
-          repoDir / s"community/ledger-test-tool/lf-v${lfVersion.testToolSuffix.tail}"
-        projectDir / s"target/scala-2.13/ledger-api-test-tool${lfVersion.testToolSuffix}-${BuildInfo.version}.jar"
+      case LAPITTVersion.Local => LedgerTestTool.Local(AvailableTests(lfVersion))
       case LAPITTVersion.Latest => tryDownload(UseLedgerApiTestTool.latestRelease(logger))
       case LAPITTVersion.Explicit(release) => tryDownload(release)
     }
@@ -107,7 +116,7 @@ class UseLedgerApiTestTool(
       exclude: Seq[String],
       concurrency: Int,
       kv: (String, String)*
-  )(implicit env: TestConsoleEnvironment): String = {
+  )(implicit env: TestConsoleEnvironment): Unit = {
     val excludeParameter = NonEmpty.from(exclude) match {
       case Some(suitesNE) => Seq("--exclude", suitesNE.mkString(","))
       case None => Nil
@@ -129,7 +138,7 @@ class UseLedgerApiTestTool(
       suites: String, // comma-separated list of suites
       exclude: Seq[String],
       kv: (String, String)*
-  )(implicit env: TestConsoleEnvironment): String =
+  )(implicit env: TestConsoleEnvironment): Unit =
     runSuites(suites = suites, exclude = exclude, concurrency = 1, kv*)
 
   def runShardedSuites(
@@ -140,22 +149,25 @@ class UseLedgerApiTestTool(
       useJson: Boolean,
   )(implicit
       env: TestConsoleEnvironment
-  ): String = {
-    val allTests = execTestTool("--list-all").split("\n")
-    val listing = allTests
+  ): Unit = {
+    val allTests: Seq[String] = testTool match {
+      case LedgerTestTool.Assembly(assemblyJar) =>
+        execTestTool(assemblyJar, Array("--list-all"))
+          .split("\n")
+          .toSeq
+          .filter(_.contains(":"))
+          .map(_.trim)
+      case LedgerTestTool.Local(tests) => ConfiguredTests(tests, Config.default).allTestNames
+    }
+    val filteredTests = allTests
       .filter(line => exclude.forall(not => !line.contains(not)))
-      .filter(_.contains(":"))
-      .map(_.trim)
       .zipWithIndex
-      .filter { case (_, idx) =>
-        idx % numShards == shard
-      }
-      .map(_._1)
+      .collect { case (test, idx) if idx % numShards == shard => test }
 
     runTestsInternal(
       concurrentTestRuns = concurrentTestRuns,
       connectedSynchronizersCount = connectedSynchronizersCount,
-      testInclusions = listing.toSeq,
+      testInclusions = filteredTests,
       extraArgs = defaultExtraArgumentsSeq,
       testParticipants = testParticipants(useJson),
       useJson = useJson,
@@ -165,9 +177,9 @@ class UseLedgerApiTestTool(
   @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
   private def getOrDownloadTestTool(
       release: LAPITTRelease,
-      lfVersion: UseLedgerApiTestTool.LfVersion,
-  ): Try[File] = {
-    val testToolName: String = s"ledger-api-test-tool${lfVersion.testToolSuffix}"
+      lfVersion: LanguageVersion,
+  ): Try[LedgerTestTool.Assembly] = {
+    val testToolName: String = s"ledger-api-test-tool-$lfVersion"
     val filename = s"$testToolName-${release.version}.jar"
     val destination =
       File(System.getProperty("user.home")) / ".cache" / testToolName / filename
@@ -176,17 +188,16 @@ class UseLedgerApiTestTool(
       if (!destination.exists) {
         logger.info(s"Downloading $filename from S3.")
         destination.parent.createDirectoryIfNotExists(createParents = true)
-        LAPITTResolver.download(release, lfVersion, destination, logger).map(_ => destination)
-      } else Success(destination)
-    })
+        LAPITTResolver.download(release, lfVersion, destination, logger)
+      } else Success(())
+    }).map(_ => LedgerTestTool.Assembly(destination))
   }
 
   private def isMissingArtifact(error: Throwable): Boolean =
-    Option(error.getMessage)
-      .exists { msg =>
-        val lower = msg.toLowerCase
-        msg.contains("404") || lower.contains("not found")
-      }
+    Option(error.getMessage).exists { msg =>
+      val lower = msg.toLowerCase
+      msg.contains("404") || lower.contains("not found")
+    }
 
   private def runTestsInternal(
       concurrentTestRuns: Int,
@@ -195,7 +206,7 @@ class UseLedgerApiTestTool(
       extraArgs: Seq[String],
       testParticipants: Seq[String],
       useJson: Boolean,
-  ): String = {
+  ): Unit = {
     val testInclusionsAfterEnvArgConsideration = envArgTestsInclusion
       .map { selectedTests =>
         val filtered = testInclusions.filter(selectedTests.testCaseEnabled)
@@ -212,22 +223,36 @@ class UseLedgerApiTestTool(
       }
       .getOrElse(testInclusions)
     val jsonOpt = if (useJson) Seq("--json-api-mode") else Seq.empty
-    execTestTool(
-      Seq(
-        "--concurrent-test-runs",
-        concurrentTestRuns.toString,
-        "--connected-synchronizers",
-        connectedSynchronizersCount.toString,
-        "-v",
-        "--include",
-        testInclusionsAfterEnvArgConsideration.mkString(","),
-      ) ++ jsonOpt ++ extraArgs ++ testParticipants: _*
-    )
+    val args = Array(
+      "--concurrent-test-runs",
+      concurrentTestRuns.toString,
+      "--connected-synchronizers",
+      connectedSynchronizersCount.toString,
+      "-v",
+      "--include",
+      testInclusionsAfterEnvArgConsideration.mkString(","),
+    ) ++ jsonOpt ++ extraArgs ++ testParticipants
+
+    testTool match {
+      case LedgerTestTool.Assembly(assemblyJar) => execTestTool(assemblyJar, args)
+      case LedgerTestTool.Local(tests) =>
+        val config = CliParser.parse(args).getOrElse(sys.error("Invalid config"))
+        val runner = new TestRunner(tests, config)
+        val failures = runner
+          .runInProcess(logger.underlying)
+          .futureValue(config = ledgerApiTestToolPatience, pos = implicitly)
+          .map(test => test.result.left.map(failure => s"${test.name} failed: $failure"))
+          .collect { case Left(failure) => failure }
+        if (failures.nonEmpty)
+          Assertions.fail(
+            s"Some Ledger API tests have failed: ${failures.mkString("\n\t", "\n\t", "")}"
+          )
+    }
   }
 
-  private def execTestTool(option: String*): String =
+  private def execTestTool(assemblyJar: File, args: Array[String]): String =
     commandExecutor.exec(
-      cmd = s"java $javaOpts -jar ${testTool.toString} ${option.mkString(" ")}",
+      cmd = s"java $javaOpts -jar ${assemblyJar.toString} ${args.mkString(" ")}",
       errorHint = s"Failures in aforementioned test suite.",
     )
 
@@ -332,40 +357,25 @@ object UseLedgerApiTestTool {
       }
   }
 
-  sealed trait LfVersion {
-    def testToolSuffix: String
-  }
-
-  object LfVersion {
-    case object Stable extends LfVersion {
-      override def testToolSuffix: String = "-2.1"
-    }
-
-    case object V22 extends LfVersion {
-      override def testToolSuffix: String = "-2.2"
-    }
-
-    case object V23 extends LfVersion {
-      override def testToolSuffix: String = "-2.3"
-    }
-
-    case object Dev extends LfVersion {
-      override def testToolSuffix: String = "-2.dev"
-    }
-  }
-
   sealed trait LAPITTVersion
 
   object LAPITTVersion {
-    // The lapitt runs only for the latest version of latest release.
+    // Run the latest released version of the LAPITT.
     case object Latest extends LAPITTVersion
 
-    // The lapitt runs only for the specified version.
+    // Run the specified version of the LAPITT.
     final case class Explicit(version: LAPITTRelease) extends LAPITTVersion
 
-    // The lapitt runs with the local lapitt jar.
-    // Requires running `sbt ledger-test-tool-<lfVersion>/assembly` first
-    case object LocalJar extends LAPITTVersion
+    // Run the LAPITT from the classpath.
+    // Requires running `sbt ledger-test-tool/assembly` first
+    case object Local extends LAPITTVersion
+  }
+
+  private sealed trait LedgerTestTool
+
+  private object LedgerTestTool {
+    final case class Assembly(assemblyJar: File) extends LedgerTestTool
+    final case class Local(tests: AvailableTests) extends LedgerTestTool
   }
 
   // finds all major.minor.patch releases

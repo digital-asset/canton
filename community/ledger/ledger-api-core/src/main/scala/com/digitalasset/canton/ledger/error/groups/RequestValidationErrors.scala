@@ -449,14 +449,14 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   @Resolution("Inspect the reason given and correct your application.")
   object InvalidUpdatesPageToken
       extends ErrorCode(
-        id = "INVALID_UPDATE_PAGE_TOKEN",
+        id = "INVALID_UPDATES_PAGE_TOKEN",
         ErrorCategory.InvalidIndependentOfSystemState,
       ) {
     final case class Reject(message: String)(implicit
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
-          cause = "The submitted command contains an invalid continuation token. Tokens used in GetUpdatesPage requests must " +
-            "be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, the same " +
+          cause = "The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must " +
+            "be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same " +
             s"begin and end with the same Canton participant running the same Canton version. $message"
         )
   }

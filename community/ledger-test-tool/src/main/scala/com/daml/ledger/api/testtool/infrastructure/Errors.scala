@@ -3,6 +3,8 @@
 
 package com.daml.ledger.api.testtool.infrastructure
 
+import com.daml.ledger.api.testtool.TestDar
+
 object Errors {
 
   sealed abstract class FrameworkException(message: String, cause: Throwable)
@@ -14,7 +16,7 @@ object Errors {
         cause,
       )
 
-  final class DarUploadException(name: String, cause: Throwable)
-      extends FrameworkException(s"""Failed to upload DAR "$name": ${cause.getMessage}""", cause)
+  final class DarUploadException(dar: TestDar, cause: Throwable)
+      extends FrameworkException(s"""Failed to upload DAR "$dar": ${cause.getMessage}""", cause)
 
 }

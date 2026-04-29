@@ -67,6 +67,7 @@ import com.digitalasset.canton.participant.protocol.validation.InternalConsisten
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.{
   ErrorWithSubTransaction,
   LazyAsyncReInterpretationMap,
+  Result,
 }
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.store.*
@@ -107,7 +108,6 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.transaction.CreationTime
 import monocle.PLens
 
-import scala.annotation.unused
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -130,8 +130,6 @@ class TransactionProcessingSteps(
     transactionEnricher: TransactionEnricher,
     createNodeEnricher: ContractEnricher,
     authorizationValidator: AuthorizationValidator,
-    // TODO(#31527): SPM re-enable with legacy and NUCK variants
-    @unused
     internalConsistencyChecker: InternalConsistencyChecker,
     tracker: CommandProgressTracker,
     protected val loggerFactory: NamedLoggerFactory,
@@ -253,6 +251,35 @@ class TransactionProcessingSteps(
         )
       )
     } yield submission
+  }
+
+  override def validateSubmittersNotOnboarding(
+      submissionParam: SubmissionParam,
+      topologySnapshot: TopologySnapshot,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransactionSubmissionError, Unit] = {
+    val submitters = submissionParam.submitterInfo.actAs.toList.map(LfPartyId.assertFromString)
+
+    EitherT(
+      topologySnapshot
+        .hostedOn(submitters.toSet, participantId)
+        .map { hosted =>
+          val onboardingSubmitters = hosted.collect {
+            case (party, attributes) if attributes.onboarding => party
+          }
+
+          if (onboardingSubmitters.nonEmpty) {
+            Left(
+              TransactionProcessor.SubmissionErrors.PartyCurrentlyOnboarding
+                .Rejection(onboardingSubmitters.toSeq)
+            )
+          } else {
+            Right(())
+          }
+        }
+    )
   }
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
@@ -849,16 +876,29 @@ class TransactionProcessingSteps(
             reInterpretedTopLevelViews,
           )
 
-        // TODO(#31527): SPM re-enable this with legacy and NUCK variants
-        // internalConsistencyResultE = internalConsistencyChecker.check(parsedRequest.rootViewTrees)
-        internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit] = Right(())
+        internalConsistencyResultET = EitherT(
+          conformanceResultET.value
+            .flatMap {
+              case Right(mcResult: Result) =>
+                internalConsistencyChecker
+                  .check(
+                    parsedRequest.rootViewTrees,
+                    mcResult.suffixedTransaction.unwrap.transaction,
+                    topologySnapshot = ipsSnapshot,
+                  )
+                  .value
+              case Left(_) =>
+                // As the model conformance has failed do not produce internal consistency noise
+                FutureUnlessShutdown.pure(().asRight[ErrorWithInternalConsistencyCheck])
+            }
+        )
 
       } yield ParallelChecksResult(
         authenticationResult,
         consistencyResultE,
         authorizationResult,
         conformanceResultET,
-        internalConsistencyResultE,
+        internalConsistencyResultET,
         timeValidationE,
         replayCheckResult,
       )
@@ -930,7 +970,7 @@ class TransactionProcessingSteps(
         authenticationResult = parallelChecksResult.authenticationResult,
         authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResultET = parallelChecksResult.conformanceResultET,
-        internalConsistencyResultE = parallelChecksResult.internalConsistencyResultE,
+        internalConsistencyResultET = parallelChecksResult.internalConsistencyResultET,
         consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         witnessed = usedAndCreated.contracts.witnessed,
         createdContracts = usedAndCreated.contracts.created,
@@ -1185,14 +1225,6 @@ class TransactionProcessingSteps(
         .map(ContractInstance.assignCreationTime(_, ledgerEffectiveTime))
         .toSeq
 
-    val contractAuthenticationData =
-      // We deliberately do not forward the authentication data
-      // for retroactively divulged contracts since they are not visible on the Ledger API
-      // For immediately divulged contracts we populate this as those are visible.
-      (createdContracts ++ witnessed).view.map { case (contractId, contract) =>
-        contractId -> contract.inst.authenticationData
-      }.toMap
-
     val acceptedEvent =
       (acsChangeFactory: AcsChangeFactory) =>
         (internalContractIds: Map[LfContractId, Long]) => {
@@ -1223,9 +1255,10 @@ class TransactionProcessingSteps(
             recordTime = requestTime,
             externalTransactionHash = externalTransactionHash,
             acsChangeFactory = acsChangeFactory,
-            contractInfos =
-              contractAuthenticationData.map { case (contractId, contractAuthenticationData) =>
-                contractId -> ContractInfo(
+            contractInfos = contractsToBeStored.map { contractInstance =>
+              val contractId = contractInstance.contractId
+              contractId -> ContractInfo(
+                persistedContractInstance = PersistedContractInstance(
                   internalContractId = checked {
                     // the internal contract id must exist since we persisted the contracts before (in the ProtocolProcessor)
                     internalContractIds.getOrElse(
@@ -1235,10 +1268,11 @@ class TransactionProcessingSteps(
                       ),
                     )
                   },
-                  contractAuthenticationData = contractAuthenticationData,
-                  representativePackageId = SameAsContractPackageId,
-                )
-              },
+                  inst = contractInstance.inst,
+                ),
+                representativePackageId = SameAsContractPackageId,
+              )
+            }.toMap,
           )
         }
     CommitAndStoreContractsAndPublishEvent(
@@ -1574,7 +1608,11 @@ object TransactionProcessingSteps {
         ModelConformanceChecker.ErrorWithSubTransaction[ViewAbsoluteLedgerEffect],
         ModelConformanceChecker.Result,
       ],
-      internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
+      internalConsistencyResultET: EitherT[
+        FutureUnlessShutdown,
+        ErrorWithInternalConsistencyCheck,
+        Unit,
+      ],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
       replayCheckResult: Option[String],
   ) {

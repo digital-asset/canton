@@ -124,6 +124,25 @@ trait TopologyStoreTest
         }
       }
 
+      "clear partial data without affecting other stores" in {
+        val store1 = mk(synchronizer1_p1p2_physicalSynchronizerId, "store1")
+        val store2 = mk(da_p1p2_physicalSynchronizerId, "store2")
+
+        update(store1, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
+        update(store2, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
+
+        // store1 can be incrementally cleared
+        store1.dumpStoreContent().futureValueUS.result.size shouldBe 3
+        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.dumpStoreContent().futureValueUS.result.size shouldBe 1
+        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.dumpStoreContent().futureValueUS.result.size shouldBe 0
+        store1.deleteDataChunk(2).futureValueUS shouldBe false
+
+        // store2 is unaffected
+        store2.dumpStoreContent().futureValueUS.result.size shouldBe 3
+      }
+
       "properly evolve party participant hosting" in {
         val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "case2")
         def ptpFred(

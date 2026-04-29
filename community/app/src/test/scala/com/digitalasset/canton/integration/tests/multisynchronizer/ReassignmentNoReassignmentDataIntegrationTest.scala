@@ -16,7 +16,12 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.{AcsInspection, PartyToParticipantDeclarative}
+import com.digitalasset.canton.integration.util.{
+  AcsInspection,
+  EntitySyntax,
+  PartiesAllocator,
+  PartyToParticipantDeclarative,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -38,6 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicyWithoutTraceContext,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.{BaseTest, config}
 
@@ -55,7 +61,8 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with AcsInspection
-    with HasProgrammableSequencer {
+    with HasProgrammableSequencer
+    with EntitySyntax {
 
   private val acmeConfirmationResponses = new TrieMap[ParticipantId, SubmissionRequest]()
 
@@ -86,11 +93,25 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
-        alice = participant1.parties.enable("alice", synchronizer = daName)
-        participant1.parties.enable("alice", synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            "alice" -> participant1,
+            "bob" -> participant2,
+          ),
+          Map(
+            "alice" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            "bob" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+        )
 
-        bob = participant2.parties.enable("bob", synchronizer = daName)
-        participant2.parties.enable("bob", synchronizer = acmeName)
+        alice = "alice".toPartyId(participant1)
+        bob = "bob".toPartyId(participant2)
 
       }
 

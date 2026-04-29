@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
@@ -13,14 +14,10 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestEnvironment}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
-import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.{
-  Optional,
-  OptionalMany,
-}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
+import com.digitalasset.canton.participant.sync.SyncServiceInjectionError
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.PartyId
 import com.google.rpc.Code
@@ -144,44 +141,30 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
 
         val cmdIdAtUpgradeTime = "cmd-id-at-upgrade-time"
         withClue("test command at upgrade time") {
-          loggerFactory.assertLogsUnorderedOptional(
-            {
-              // Move to upgrade time so that command submissions will fail due to overlap with LSU
-              environment.simClock.value.advanceTo(upgradeTime)
+          // Move to upgrade time so that command submissions will fail due to overlap with LSU
+          environment.simClock.value.advanceTo(upgradeTime)
+          waitForTargetTimeOnSequencer(sequencer1, environment.clock.now, logger)
 
-              val offsetBeforeSubmit = participant1.ledger_api.state.end()
-              participant1.ledger_api.javaapi.commands
-                .submit_async(Seq(bank), createIouCmd, commandId = cmdIdAtUpgradeTime)
-
-              // Move forward until the new psid is up
-              environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-              transferTraffic(suppressLogs = false)
-              eventually() {
-                environment.simClock.value.advance(Duration.ofSeconds(1))
-                participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
-              }
-              waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
-
-              oldSynchronizerNodes.all.stop()
-
-              // Move further forward until this decision timeout has expired, and expect to see our submission timeout on the completion stream
-              environment.simClock.value.advance(decisionTimeout.plusSeconds(1).asJava)
-              participant1.health.ping(participant1) // To notify the sequencer that time has passed
-
-              assertCommandEventuallyFailed(
-                cmdIdAtUpgradeTime,
-                offsetBeforeSubmit,
-                bank,
-                _ should (include(TimeRejects.LocalTimeout.id) or include(
-                  SubmissionErrors.TimeoutError.id
-                ) or include(SubmissionErrors.SequencerRequest.id)),
-              )
-            },
-            Optional -> (_.warningMessage should (include regex "Response message for request .* timed out at")),
-            Optional -> (_.warningMessage should include("Submission timed out at")),
-            Optional -> (_.warningMessage should include("Time validation has failed")),
-            OptionalMany -> (_.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond)),
+          assertThrowsAndLogsCommandFailures(
+            participant1.ledger_api.javaapi.commands
+              .submit(Seq(bank), createIouCmd, commandId = cmdIdAtUpgradeTime),
+            _.commandFailureMessage should (
+              include(SyncServiceInjectionError.NotConnectedToAnySynchronizer.id) or
+                include(ConfigurationErrors.SubmissionSynchronizerNotReady.id) or
+                include(SubmissionErrors.TimeoutError.id)
+            ),
           )
+
+          // Move forward until the new psid is up
+          environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+          transferTraffic(suppressLogs = false)
+          eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
+            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+          }
+          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+
+          oldSynchronizerNodes.all.stop()
         }
 
         withClue(

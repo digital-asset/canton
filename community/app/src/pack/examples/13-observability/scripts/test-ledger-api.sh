@@ -12,9 +12,9 @@ jar_file=lapitt.jar
 if [ ! -f "${jar_file}" ]; then
   echo "Error: ${jar_file} not found in the current directory ($(pwd))." >&2
   echo "  Build it from the repository root:" >&2
-  echo "    sbt ledger-test-tool-2-1/assembly" >&2
+  echo "    sbt ledger-test-tool/assembly" >&2
   echo "  Then copy it here:" >&2
-  echo "    cp community/ledger-test-tool/lf-v2.1/target/scala-2.13/ledger-api-test-tool-2.1-*.jar \\" >&2
+  echo "    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.2-*.jar \\" >&2
   echo "       community/app/target/release/canton-open-source-*/examples/13-observability/lapitt.jar" >&2
   echo "  See the Prerequisites section of README.md for details." >&2
   exit 1

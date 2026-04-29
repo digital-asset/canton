@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.{
@@ -91,12 +90,6 @@ object ActivationsDeactivationsConsistencyCheck {
           case _ => Nil
         }
 
-        val changeBeforeCreation = currentChange match {
-          case _: Create =>
-            existingToc(prevToc, currentToc).map(ChangeBeforeCreation(cid, _, toc))
-          case _ => Nil
-        }
-
         val addPurge = currentChange match {
           case _: Add if isActive => doubleContractCreation(prevToc, currentToc)
           case Purge if isInactive =>
@@ -105,7 +98,7 @@ object ActivationsDeactivationsConsistencyCheck {
         }
 
         updateStateVariables(currentChange, currentToc)
-        val warnings = addPurge ++ doubleCreation ++ changeBeforeCreation
+        val warnings = addPurge ++ doubleCreation
 
         if (warnings.nonEmpty)
           warnings
@@ -118,17 +111,6 @@ object ActivationsDeactivationsConsistencyCheck {
     val (firstToc, firstChange) = changes.head1
     updateStateVariables(firstChange, firstToc)
 
-    val warnings = check(changes.tail1.iterator, changes.head1)
-
-    val containsDoubleCreation = warnings.collectFirst { case _: DoubleContractCreation =>
-      ()
-    }.isDefined
-
-    val filteredWarnings = warnings.mapFilter {
-      case c: ChangeBeforeCreation => Option.when(!containsDoubleCreation)(c)
-      case other => Some(other)
-    }
-
-    filteredWarnings
+    check(changes.tail1.iterator, changes.head1)
   }
 }

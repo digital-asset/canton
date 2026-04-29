@@ -3,19 +3,12 @@
 
 package com.daml.ledger.api.testtool
 
-import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.testtool.runner.{AvailableTests, TestRunner}
 
 object Main {
   def main(args: Array[String]): Unit = {
     val config = CliParser.parse(args).getOrElse(sys.exit(1))
-    val availableTests = new AvailableTests {
-      override def defaultTests: Vector[LedgerTestSuite] =
-        Tests.default(timeoutScaleFactor = config.timeoutScaleFactor)
-
-      override def optionalTests: Vector[LedgerTestSuite] =
-        Tests.optional(config.tlsConfig)
-    }
-    new TestRunner(availableTests, config, Tests.lfVersion).runAndExit()
+    // TODO(#32282) Make it configurable: Add lfVersion in CLI config
+    new TestRunner(AvailableTests.v2_2, config).runAndExit()
   }
 }

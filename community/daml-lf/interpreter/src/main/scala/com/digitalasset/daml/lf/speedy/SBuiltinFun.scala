@@ -2104,11 +2104,13 @@ private[lf] object SBuiltinFun {
         )
         machine.metrics.incrCount[TxNodeCount]()
         Control.Value(
-          SList(
-            (result.queue.view.map(SContractId(_)) zip payloads)
-              .map { case (cid, payload) => SValue.SPair(cid, payload) }
-              .to(FrontStack)
-          )
+          SOptional(Some(
+            SList(
+              (result.queue.view.map(SContractId(_)) zip payloads)
+                .map { case (cid, payload) => SValue.SPair(cid, payload) }
+                .to(FrontStack)
+            )
+          ))
         )
       }
 

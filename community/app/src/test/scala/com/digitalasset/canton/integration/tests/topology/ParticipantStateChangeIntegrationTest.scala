@@ -9,7 +9,6 @@ import com.daml.test.evidence.tag.FuncTest
 import com.daml.test.evidence.tag.Security.SecurityTest.Property
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.{CommandFailure, LocalInstanceReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.NoSynchronizerOnWhichAllSubmittersCanSubmit
@@ -321,7 +320,6 @@ trait ParticipantStateChangeIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#30006)
 class ParticipantStateChangeIntegrationTestPostgres extends ParticipantStateChangeIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

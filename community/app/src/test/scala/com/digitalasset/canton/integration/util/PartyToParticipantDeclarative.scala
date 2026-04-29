@@ -6,8 +6,8 @@ package com.digitalasset.canton.integration.util
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.discard.Implicits.*
@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.version.HashingSchemeVersion
 import org.scalatest.Assertions.fail
 
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.math.Ordering.Implicits.*
 
@@ -68,8 +69,11 @@ sealed trait PartyToParticipantDeclarativeCommon[P] extends PartyTopologyUtils {
       throw new IllegalArgumentException(s"Unknown participant with id $id"),
     )
 
-  protected def retryUntil[A](expected: A)(actual: => A): Unit =
-    BaseTest.eventually() {
+  protected def retryUntil[A](
+      expected: A,
+      timeout: NonNegativeDuration,
+  )(actual: => A): Unit =
+    BaseTest.eventually(timeUntilSuccess = timeout.asFiniteApproximation) {
       if (actual == expected) () else fail(s"""Couldn't reach target topology:
            |expected: $expected
            |actual  : $actual""".stripMargin)
@@ -204,7 +208,7 @@ class PartyToParticipantDeclarative(
       topology.map { case (synchronizer, hostingState) => (party, synchronizer) -> hostingState }
     }
 
-  def run(force: ForceFlags = ForceFlags.none): Unit = {
+  private def run(force: ForceFlags, timeout: NonNegativeDuration): Unit = {
     sanityChecks()
 
     val target = flattenTarget(targetTopology)
@@ -270,7 +274,7 @@ class PartyToParticipantDeclarative(
         .toMap
 
     participants.toSeq.foreach { p =>
-      retryUntil(expectedTopology) {
+      retryUntil(expectedTopology, timeout) {
         getTopology(p).view
           .mapValues(_.view.mapValues { case (_serial, hosting) => hosting }.toMap)
           .toMap
@@ -411,6 +415,7 @@ object PartyToParticipantDeclarative {
       ],
       forceFlags: ForceFlags = ForceFlags.none,
       onboarding: Boolean = false, // participants added in target topology are marked as onboarding
+      timeout: NonNegativeDuration = NonNegativeDuration.tryFromDuration(20.seconds),
   )(implicit executionContext: ExecutionContext, env: TestEnvironment): Unit = {
     val participantReference = participants.headOption.getOrElse(
       fail("No participant set in PartyToParticipantDeclarative")
@@ -448,7 +453,7 @@ object PartyToParticipantDeclarative {
             .toMap
       },
       onboarding,
-    ).run(forceFlags)
+    ).run(forceFlags, timeout = timeout)
   }
 
   def forParty(
@@ -490,6 +495,7 @@ class PartiesAllocator(
 )(
     newParties: Seq[(String, ParticipantId)],
     val targetTopology: Map[String, Map[PhysicalSynchronizerId, PartyHostingState]],
+    timeout: NonNegativeDuration = ConsoleCommandTimeout.defaultBoundedTimeout,
 )(implicit executionContext: ExecutionContext)
     extends PartyToParticipantDeclarativeCommon[String] {
 
@@ -541,7 +547,7 @@ class PartiesAllocator(
     // For performance reasons, we delay synchronization until here
     Await.result(
       result.flatMap(_._2).sequence,
-      ConsoleCommandTimeout.defaultBoundedTimeout.asFiniteApproximation,
+      timeout.asFiniteApproximation,
     )
 
     // synchronization
@@ -554,7 +560,7 @@ class PartiesAllocator(
           .filter { case (_keys, values) => values.nonEmpty }
           .toMap
 
-      retryUntil(topologyOnConnectedSynchronizers) {
+      retryUntil(topologyOnConnectedSynchronizers, timeout) {
         getTopology(p).view
           .mapValues(_.view.mapValues { case (_serial, hosting) => hosting }.toMap)
           .toMap
@@ -573,6 +579,7 @@ object PartiesAllocator {
         String,
         Map[PhysicalSynchronizerId, (PositiveInt, Set[(ParticipantId, ParticipantPermission)])],
       ],
+      timeout: NonNegativeDuration = ConsoleCommandTimeout.defaultBoundedTimeout,
   )(implicit executionContext: ExecutionContext): Seq[PartyId] =
     new PartiesAllocator(participants)(
       newParties,
@@ -587,5 +594,6 @@ object PartiesAllocator {
             .toMap
         )
         .toMap,
+      timeout,
     ).run()
 }

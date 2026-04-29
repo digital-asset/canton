@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.pruning
 
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.examples.java.iou.Iou
@@ -17,9 +18,11 @@ import com.digitalasset.canton.integration.util.{
   EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
+  PartiesAllocator,
 }
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.{BaseTest, config}
 
@@ -85,10 +88,25 @@ sealed trait ReassignmentPruningIntegrationTest
 
         participant1.health.ping(participant2.id)
 
-        alice = participant1.parties.enable("alice", synchronizer = daName)
-        participant1.parties.enable("alice", synchronizer = acmeName)
-        bank = participant2.parties.enable("bank", synchronizer = daName)
-        participant2.parties.enable("bank", synchronizer = acmeName)
+        PartiesAllocator(participants.all.toSet)(
+          Seq(
+            "alice" -> participant1,
+            "bank" -> participant2,
+          ),
+          Map(
+            "alice" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
+            ),
+            "bank" -> Map(
+              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
+            ),
+          ),
+        )
+
+        alice = "alice".toPartyId(participant1)
+        bank = "bank".toPartyId(participant2)
 
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)

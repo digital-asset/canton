@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   TestAcsChangeFactory,
   Update,
 }
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
@@ -21,7 +22,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.flatspec.AnyFlatSpec
@@ -112,13 +113,13 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
           NonEmpty
             .from(contracts.zipWithIndex.map { case (contract, index) =>
               Reassignment.Assign(
-                ledgerEffectiveTime = recordTime.toLf,
-                createNode = contract.toLf,
-                contractAuthenticationData = Bytes.Empty,
                 reassignmentCounter = 15L,
                 nodeId = index,
-                internalContractId =
-                  -1, // will be filled when contracts are stored in the participant contract store
+                persistedContractInstance = PersistedContractInstance(
+                  // will be filled when contracts are stored in the participant contract store
+                  internalContractId = -1,
+                  inst = contract.inst,
+                ),
               )
             }.toSeq)
             .value

@@ -175,6 +175,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         pruningOffsetService = pruningOffsetService,
         contractStore = contractStore,
         achsStateCache = new AchsStateCache(loggerFactory),
+        scheduler = system.scheduler,
       )
     }
   }

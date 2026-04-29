@@ -2686,7 +2686,39 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     ): Unit = consoleEnvironment.run {
       adminCommand(
         ParticipantAdminCommands.SynchronizerConnectivity
-          .PerformManualLsu(currentPsid, successorPsid, upgradeTime, sequencerSuccessors)
+          .PerformManualLsu(currentPsid, successorPsid, upgradeTime, Left(sequencerSuccessors))
+      )
+    }
+
+    @Help.Summary("Perform a manual LSU")
+    @Help.Description("""
+        |Perform a local manual logical synchronizer upgrade to switch to the designated successor
+        |
+        |Unlike the other method above, a new config is specified and replaces the current one.
+        |This should be used only if the goal is to change the synchronizer connection config
+        |as part of the upgrade (e.g., if one sequencer does not migrate).
+        |
+        |
+        |Parameters:
+        |- currentPsid: current physical synchronizer id
+        |- successorPsid: physical synchronizer id of the successor
+        |- upgradeTime:
+        |     If defined:
+        |       - MUST be higher than any message received by the node on the synchronizer id
+        |       - Upgrade will not start until all events until upgrade_time have been processed
+        |     If empty:
+        |       - Clean synchronizer index from ledger api server will be used.
+        |- config: Config for the the new synchronizer
+        |""")
+    def perform_manual_lsu(
+        currentPsid: PhysicalSynchronizerId,
+        successorPsid: PhysicalSynchronizerId,
+        upgradeTime: Option[CantonTimestamp],
+        config: SynchronizerConnectionConfig,
+    ): Unit = consoleEnvironment.run {
+      adminCommand(
+        ParticipantAdminCommands.SynchronizerConnectivity
+          .PerformManualLsu(currentPsid, successorPsid, upgradeTime, Right(config.toInternal))
       )
     }
   }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.examples
 
 import better.files.File
+import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.integration.CommunityIntegrationTest
 import com.digitalasset.canton.integration.tests.examples.ExampleIntegrationTest.JsonApiExample
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
@@ -98,9 +99,10 @@ class LedgerJsonApiDemoExampleIntegrationTest
     }
 
   private def setupTest(implicit env: FixtureParam): Unit = {
-    import env.environment
-    ExampleIntegrationTest.ensureSystemProperties("model-tests-examples.dar-path" -> ModelTestsPath)
-    runScript(JsonApiExample.path / "json.canton")(environment)
+    ExampleIntegrationTest.ensureSystemProperties(
+      "model-tests-examples.dar-path" -> TestDars.v2_2.ModelTestDar.file.toString
+    )
+    runScript(JsonApiExample.path / "json.canton")(env.environment)
   }
 
 }

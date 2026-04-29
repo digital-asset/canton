@@ -35,6 +35,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.{EngineMode, ProtocolVersion}
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion, LfPartyId}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
@@ -99,7 +100,7 @@ private[execution] class TapsCommandExecutionFactory(
       partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
       computePackagePreferenceSet: NonEmpty[
         Map[PhysicalSynchronizerId, Set[LfPackageId]]
-      ] => FutureUnlessShutdown[Set[LfPackageId]],
+      ] => FutureUnlessShutdown[(Set[LfPackageId], ProtocolVersion)],
   ): FutureUnlessShutdown[TapsResult] =
     new TapsPass(tapsPassDescription).execute(
       requiredSubmitters,
@@ -113,26 +114,35 @@ private[execution] class TapsCommandExecutionFactory(
         partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
         computePackagePreferenceSet: NonEmpty[
           Map[PhysicalSynchronizerId, Set[LfPackageId]]
-        ] => FutureUnlessShutdown[Set[LfPackageId]],
+        ] => FutureUnlessShutdown[(Set[LfPackageId], ProtocolVersion)],
     ): FutureUnlessShutdown[TapsResult] = {
       import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerOnShutdownSyntax
       logDebug(s"Attempting $tapsPassDescription of $TapsDescription")
       for {
         // Compute package preference set
-        packagePreferenceSet <- Timed.futureUS(
+        packagePreferenceSetPV <- Timed.futureUS(
           metrics.commands.tapsPackageSelection,
           computePerSynchronizerPackagePreferenceSet(requiredSubmitters, partyPackageRequirements)
             .flatMap(computePackagePreferenceSet),
         )
-        _ = logDebug(show"Using package preference set: $packagePreferenceSet")
+        (packagePreferenceSet, protocolVersion) = packagePreferenceSetPV
 
-        // Interpret command with the computed package preference set
-        commandInterpretationResult <- commandInterpreter.interpret(
-          commands.copy(packagePreferenceSet = packagePreferenceSet),
-          submissionSeed,
+        // TODO(#32356): Engine contract state mode selection for TAPS
+        mode = EngineMode.forProtocolVersion(protocolVersion)
+
+        _ = logDebug(
+          show"Using package preference set: $packagePreferenceSet, protocol version: $protocolVersion"
         )
 
-        passResult <- commandInterpretationResult match {
+        // Interpret command with the computed package preference set
+        commandInterpretationResult: Either[ErrorCause, CommandInterpretationResult] <-
+          commandInterpreter.interpret(
+            commands.copy(packagePreferenceSet = packagePreferenceSet),
+            mode,
+            submissionSeed,
+          )
+
+        passResult: TapsResult <- commandInterpretationResult match {
           case Left(error) =>
             val refinedError =
               refinePackageNotFoundError(error, packageMetadataSnapshot.packageNameMap.keySet)

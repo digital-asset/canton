@@ -3,40 +3,28 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
-import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.*
 import com.digitalasset.canton.participant.protocol.validation.LegacyInternalConsistencyChecker.*
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.{
   LfContractId,
   LfGlobalKey,
-  RollbackContext,
+  LfTransaction,
   WithRollbackScope,
 }
 import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.daml.lf.value.Value
 
 import scala.annotation.tailrec
-import scala.concurrent.ExecutionContext
 
 class LegacyInternalConsistencyChecker(
-    override val loggerFactory: NamedLoggerFactory
+    override val participantId: ParticipantId,
+    override val loggerFactory: NamedLoggerFactory,
 ) extends InternalConsistencyChecker
     with NamedLogging {
 
@@ -47,8 +35,10 @@ class LegacyInternalConsistencyChecker(
     * The method does not check for consistency issues inside of a single view. This is checked by
     * Daml engine as part of [[ModelConformanceChecker]].
     */
-  def check(
-      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
+  override def check(
+      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
+      mergedTransaction: LfTransaction,
+      hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext
   ): Either[ErrorWithInternalConsistencyCheck, Unit] =
@@ -56,15 +46,6 @@ class LegacyInternalConsistencyChecker(
       _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
     } yield ()
-
-  private def checkRollbackScopes(
-      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
-  ): Result[Unit] =
-    checkRollbackScopeOrder(
-      rootViewTrees.map(_.viewParticipantData.rollbackContext)
-    ).left.map { error =>
-      ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
-    }
 
   private def checkContractState(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
@@ -93,30 +74,9 @@ class LegacyInternalConsistencyChecker(
       }
       .map(_.discard)
 
-  private def checkNotUsedBeforeCreation(
-      previouslyReferenced: Set[LfContractId],
-      newlyCreated: Set[LfContractId],
-  ): Result[Unit] =
-    NonEmpty.from(newlyCreated.intersect(previouslyReferenced)) match {
-      case Some(ne) => Left(ErrorWithInternalConsistencyCheck(UsedBeforeCreation(ne)))
-      case None => Either.unit
-    }
-
-  private def checkNotUsedAfterArchive(
-      previouslyConsumed: Set[LfContractId],
-      newlyReferenced: Set[LfContractId],
-  ): Result[Unit] =
-    NonEmpty.from(previouslyConsumed.intersect(newlyReferenced)) match {
-      case Some(ne) => Left(ErrorWithInternalConsistencyCheck(UsedAfterArchive(ne)))
-      case None => Either.unit
-    }
 }
 
 object LegacyInternalConsistencyChecker {
-
-  type Result[R] = Either[ErrorWithInternalConsistencyCheck, R]
-
-  import InternalConsistencyChecker.Error
 
   /** This trait manages pushing the active state onto a stack when a new rollback context is
     * entered and restoring the rollback back active state when a rollback scope is exited.
@@ -206,127 +166,5 @@ object LegacyInternalConsistencyChecker {
   private object ContractState {
     val empty: ContractState = ContractState(Set.empty, RollbackScope.empty, Set.empty, Nil)
   }
-
-  private type KeyResolution = Option[Value.ContractId]
-  private type KeyMapping = Map[LfGlobalKey, KeyResolution]
-
-  /** @param preResolutions
-    *   The the key resolutions that must be in place before processing the transaction in order to
-    *   successfully process all previous views.
-    * @param rollbackScope
-    *   The current rollback scope
-    * @param activeResolutions
-    *   The key resolutions that are in place after processing all previous views that have been
-    *   changed by some previous view. This excludes changes to key resolutions performed by rolled
-    *   back views.
-    * @param stack
-    *   The stack of rollback scopes that are currently open
-    */
-  private final case class KeyState(
-      preResolutions: KeyMapping,
-      rollbackScope: RollbackScope,
-      activeResolutions: KeyMapping,
-      stack: List[WithRollbackScope[KeyMapping]],
-  ) extends PushPopRollbackScope[KeyState, KeyMapping] {
-
-    override def self: KeyState = this
-
-    override def activeRollbackState: KeyMapping = activeResolutions
-
-    override def copyWith(
-        rollbackScope: RollbackScope,
-        activeState: KeyMapping,
-        stack: List[WithRollbackScope[KeyMapping]],
-    ): KeyState =
-      copy(rollbackScope = rollbackScope, activeResolutions = activeState, stack = stack)
-
-    def inconsistentKeys(
-        viewKeyMappings: Map[LfGlobalKey, KeyResolution]
-    ): Set[LfGlobalKey] =
-      (for {
-        (key, previousResolution) <- preResolutions ++ activeRollbackState
-        currentResolution <- viewKeyMappings.get(key)
-        if previousResolution != currentResolution
-      } yield key).toSet
-
-    def update(viewGlobal: KeyMapping, updates: KeyMapping): KeyState =
-      copy(
-        preResolutions = preResolutions ++ (viewGlobal -- preResolutions.keySet),
-        activeResolutions = activeResolutions ++ updates,
-      )
-
-  }
-
-  private object KeyState {
-    val empty: KeyState = KeyState(Map.empty, RollbackScope.empty, Map.empty, Nil)
-  }
-
-  final case class IncorrectRollbackScopeOrder(error: String) extends Error {
-    override protected def pretty: Pretty[IncorrectRollbackScopeOrder] = prettyOfClass(
-      param("cause", _ => error.unquoted)
-    )
-  }
-
-  final case class UsedBeforeCreation(contractIds: NonEmpty[Set[LfContractId]]) extends Error {
-    override protected def pretty: Pretty[UsedBeforeCreation] = prettyOfClass(
-      param("cause", _ => "Contract id used before creation".unquoted),
-      param("contractIds", _.contractIds),
-    )
-  }
-
-  final case class UsedAfterArchive(keys: NonEmpty[Set[LfContractId]]) extends Error {
-    override protected def pretty: Pretty[UsedAfterArchive] = prettyOfClass(
-      param("cause", _ => "Contract id used after archive".unquoted),
-      param("contractIds", _.keys),
-    )
-  }
-
-  final case class InconsistentKeyUse(keys: NonEmpty[Set[LfGlobalKey]]) extends Error {
-    override protected def pretty: Pretty[InconsistentKeyUse] = prettyOfClass(
-      param("cause", _ => "Inconsistent global key assumptions".unquoted),
-      param("contractIds", _.keys),
-    )
-  }
-
-  def alertingPartyLookup(
-      hostedParties: Map[LfPartyId, Boolean]
-  )(implicit loggingContext: ErrorLoggingContext): LfPartyId => Boolean = { party =>
-    hostedParties.getOrElse(
-      party, {
-        loggingContext.error(
-          s"Prefetch of global key parties is wrong and missed to load data for party $party"
-        )
-        false
-      },
-    )
-  }
-
-  def hostedGlobalKeyParties(
-      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      participantId: ParticipantId,
-      topologySnapshot: TopologySnapshot,
-  )(implicit
-      loggingContext: NamedLoggingContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Map[LfPartyId, Option[ParticipantAttributes]]] = {
-    val parties =
-      rootViewTrees.forgetNE
-        .flatMap(_.view.keyMaintainers().values.flatten)
-        .toSet
-    ExtractUsedAndCreated.fetchHostedParties(
-      parties,
-      participantId,
-      topologySnapshot,
-    )(ec, loggingContext.traceContext)
-  }
-
-  private[validation] def checkRollbackScopeOrder(
-      presented: Seq[RollbackContext]
-  ): Either[String, Unit] =
-    Either.cond(
-      presented == presented.sorted,
-      (),
-      s"Detected out of order rollback scopes in: $presented",
-    )
 
 }

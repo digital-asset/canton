@@ -1,3 +1,4 @@
+import org.latestbit.sbt.gcs.GcsPlugin.autoImport.*
 import sbt.Keys.streams
 import sbt.internal.sona.Sona
 import sbt.internal.util.ManagedLogger
@@ -7,6 +8,9 @@ import cats.syntax.either._
 import scala.util.Properties
 
 object Release {
+  val publishToSonatypeEnabled =
+    Def.settingKey[Boolean]("enable publishing to Sonatype repository")
+
   private val SemVerDigitsRegex = """(0|[1-9]\d*)"""
 
   // Utility class to hold args of release fix functions
@@ -223,6 +227,13 @@ object Release {
         fixReleaseToProtocolVersion(releaseToProtocolVersionArgs)
       }
     )
+  }
+
+  def publishToGoogleArtifactRegistryEnabled = Def.task {
+    val googleEnabled = !(Global / googleCredentialsDisable).value
+    val sonatypeEnabled = publishToSonatypeEnabled.value
+    val version = Keys.version.value
+    !sonatypeEnabled && googleEnabled && !version.contains("-SNAPSHOT")
   }
 
   private def isStableOrReleaseCandidate(version: String): Boolean = {

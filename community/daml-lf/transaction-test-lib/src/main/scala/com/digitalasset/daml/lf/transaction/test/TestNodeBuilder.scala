@@ -142,6 +142,20 @@ trait TestNodeBuilder {
       version = contractSerializationVersion(contract),
     )
 
+  def queryByKey(
+      key: GlobalKeyWithMaintainers,
+      result: Vector[ContractId],
+      exhaustive: Boolean,
+  ): Node.QueryByKey =
+    Node.QueryByKey(
+      packageName = key.globalKey.packageName,
+      templateId = key.globalKey.templateId,
+      exhaustive = exhaustive,
+      key = key,
+      result = result,
+      version = SerializationVersion.assign(true),
+    )
+
   def rollback(children: ImmArray[NodeId] = ImmArray.empty): Node.Rollback =
     Node.Rollback(children)
 

@@ -34,10 +34,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentPro
   TargetSynchronizerIsSourceSynchronizer,
   UnexpectedSynchronizer,
 }
-import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
-  ViewHashAndRecipients,
-  ViewKeyData,
-}
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -54,19 +51,22 @@ import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.TooManyViews
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeserializationError}
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -280,16 +280,17 @@ private[reassignment] class UnassignmentProcessingSteps(
           ephemeralState.sessionKeyStoreLookup.convertStore,
         )
         .leftMap[ReassignmentProcessorError](EncryptionError(contracts.contractIds.toSeq, _))
-      ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
+
       viewMessage <- EncryptedViewMessageFactory
-        .create(UnassignmentViewType)(
+        .encryptView(UnassignmentViewType)(
           fullTree,
-          (viewKey, viewKeyMap),
+          viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipientsT),
           sourceRecentSnapshot,
           Some(signingTimestampOverrides),
           protocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](EncryptionError(contracts.contractIds.toSeq, _))
+
       rootHashMessage =
         RootHashMessage(
           rootHash,
@@ -315,6 +316,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
+
       pendingSubmission <-
         performPendingSubmissionMapUpdate(
           pendingSubmissions(ephemeralState),
@@ -331,6 +333,31 @@ private[reassignment] class UnassignmentProcessingSteps(
         maxSequencingTime,
       ),
       Some(pendingSubmission),
+    )
+  }
+
+  override def validateSubmittersNotOnboarding(
+      submissionParam: SubmissionParam,
+      topologySnapshot: TopologySnapshot,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
+    val submitter = submissionParam.submittingParty
+
+    EitherT(
+      topologySnapshot.hostedOn(Set(submitter), participantId).map { hosted =>
+        val isOnboarding = hosted.get(submitter).exists(_.onboarding)
+
+        if (isOnboarding) {
+          Left(
+            ReassignmentProcessingSteps.ReassignmentSubmissionErrors.PartyCurrentlyOnboarding
+              .Reject(submitter)
+          )
+        } else {
+          Right(())
+        }
+      }
     )
   }
 
@@ -354,27 +381,37 @@ private[reassignment] class UnassignmentProcessingSteps(
     FutureUnlessShutdown,
     EncryptedViewMessageError,
     (WithRecipients[FullUnassignmentTree], Option[Signature]),
-  ] =
+  ] = {
+    val message = envelope.protocolMessage
+
+    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullUnassignmentTree] =
+      FullUnassignmentTree
+        .fromByteString(
+          sourceSnapshot.pureCrypto,
+          protocolVersion.map(ProtocolVersionValidation.PV(_)),
+        )(bytes)
+        .leftMap(e => DefaultDeserializationError(e.toString))
+
     EncryptedViewMessage
       .decryptFor(
         sourceSnapshot,
         sessionKeyStore,
-        envelope.protocolMessage,
+        message,
         participantId,
-      ) { bytes =>
-        FullUnassignmentTree
-          .fromByteString(
-            sourceSnapshot.pureCrypto,
-            protocolVersion.map(ProtocolVersionValidation.PV(_)),
-          )(bytes)
-          .leftMap(e => DefaultDeserializationError(e.toString))
-      }
-      .map(fullTree =>
-        (
-          WithRecipients(fullTree, envelope.recipients),
-          envelope.protocolMessage.submittingParticipantSignature,
+      )(deserializeTree)
+      .flatMap { multiView =>
+        EitherT.cond[FutureUnlessShutdown](
+          multiView.viewTrees.lengthIs == 1,
+          (
+            WithRecipients(multiView.viewTrees.head1, envelope.recipients),
+            message.submittingParticipantSignature,
+          ),
+          TooManyViews(
+            s"Exactly 1 view is expected for Unassignment, ${multiView.viewTrees.length} given."
+          ),
         )
-      )
+      }
+  }
 
   override def computeActivenessSet(
       parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]

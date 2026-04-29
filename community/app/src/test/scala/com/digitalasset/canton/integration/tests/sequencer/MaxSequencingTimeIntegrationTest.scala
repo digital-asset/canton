@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.SuppressionRule.LoggerNameContains
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   MessageId,
@@ -23,6 +24,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.store.SequencedEventStore.SearchCriterion
 import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl
+import com.digitalasset.canton.synchronizer.sequencer.WritePayloadsFlow
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
@@ -30,7 +32,7 @@ import java.time.Duration
 import scala.concurrent.duration.DurationInt
 
 /** Checks that the config flag max sequencing time is taken into account. */
-@UnstableTest // TODO(i31786): mark stable again
+@UnstableTest // TODO(#31786) Remove from unstable
 final class MaxSequencingTimeIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
@@ -80,35 +82,43 @@ final class MaxSequencingTimeIntegrationTest
         getLatestKnownSequencingTime() should be > initialTs
       }
 
-      environment.simClock.value.advanceTo(maxSequencingTime)
-
-      /*
-       We cannot rely on the standard waitForTargetTimeOnSequencer: as soon as the sequencing time is past
-       the target time, nothing gets sequenced (and so waitForTargetTimeOnSequencer foes not complete)
-       */
-      eventually() {
-        val ts =
-          sequencer1.underlying.value.sequencer.sequencer.sequencingTime.futureValueUS.value
-        ts should be >= maxSequencingTime
-      }
-
       /*
         Time needs to progress for the message to be logged.
         Hence, we retry a few times.
        */
       eventually(retryOnTestFailuresOnly = false) {
-        environment.simClock.value.advance(Duration.ofMillis(10))
+        /*
+          In the standard scenario, the message is logged by the BlockUpdateGeneratorImpl.
 
+          However, it can happen that a topology tick is the first event sequencer >= maxSequencingTime.
+          Such a topology tick:
+            - Is not handled by the BlockUpdateGeneratorImpl: the log is emitted by WritePayloadsFlow.
+            - If dropped (which is the case if >= max sequencing time), completely blocks the orderer,
+              which prevents subsequent attempts to succeed.
+            - Can be emitted as soon as the clock is advanced.
+         */
         loggerFactory
           .assertEventuallyLogsSeq(
-            SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[BlockUpdateGeneratorImpl]
+            SuppressionRule.Level(Level.INFO) && (SuppressionRule
+              .forLogger[BlockUpdateGeneratorImpl] || LoggerNameContains(
+              WritePayloadsFlow.getClass.getSimpleName
+            ))
           )(
-            sequencer1.underlying.value.sequencer.sequencer
-              .sendAsyncSigned(signedRequestForP1())
-              .value
-              .futureValueUS
-              .value,
-            forExactly(1, _)(
+            {
+              environment.simClock.value.advanceTo(maxSequencingTime)
+              val ts =
+                sequencer1.underlying.value.sequencer.sequencer.sequencingTime.futureValueUS.value
+              ts should be >= maxSequencingTime
+
+              environment.simClock.value.advance(Duration.ofMillis(10))
+
+              sequencer1.underlying.value.sequencer.sequencer
+                .sendAsyncSigned(signedRequestForP1())
+                .value
+                .futureValueUS
+                .value
+            },
+            forAtLeast(1, _)(
               _.infoMessage should include(
                 s"is not admissible (sequencing time is at or after the upper bound ($maxSequencingTime)"
               )

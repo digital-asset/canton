@@ -5,11 +5,12 @@ package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressionRule}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
   FlagNotSet,
   FlagSet,
@@ -40,7 +41,6 @@ import com.digitalasset.canton.{
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
-import org.slf4j.event.Level
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.concurrent.duration.DurationInt
@@ -494,16 +494,12 @@ class PartyOnboardingClearanceSchedulerTest
           when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
             .thenReturn(Some(tickPromise.future))
 
-          // Note: Because of our custom retry policy, we suppress DEBUG/TRACE,
-          // ensuring the standard INFO logging is clean.
-          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+          fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
 
-            eventually() {
-              // Workflow is only called ONCE because the LSU block prevented it the first time
-              fixture.fakeWorkflow.calls.size shouldBe 1
-              fixture.scheduler.pendingClearances.size shouldBe 1
-            }
+          eventually() {
+            // Workflow is only called ONCE because the LSU block prevented it the first time
+            fixture.fakeWorkflow.calls.size shouldBe 1
+            fixture.scheduler.pendingClearances.size shouldBe 1
           }
         }
       }
@@ -523,15 +519,13 @@ class PartyOnboardingClearanceSchedulerTest
           )
           fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
 
-          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+          fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
 
-            eventually() {
-              // It should have executed the workflow 3 times (2 fails + 1 success)
-              fixture.fakeWorkflow.calls.size shouldBe 3
-              // The task should be successfully scheduled after the loop breaks
-              fixture.scheduler.pendingClearances.size shouldBe 1
-            }
+          eventually() {
+            // It should have executed the workflow 3 times (2 fails + 1 success)
+            fixture.fakeWorkflow.calls.size shouldBe 3
+            // The task should be successfully scheduled after the loop breaks
+            fixture.scheduler.pendingClearances.size shouldBe 1
           }
         }
       }
@@ -546,13 +540,11 @@ class PartyOnboardingClearanceSchedulerTest
             AuthorizeClearanceError.PartyNotHosted("Party is not hosted by target participant")
           )
 
-          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-            fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+          fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
 
-            eventually() {
-              // It should evaluate exactly twice, then safely abort the infinite loop
-              fixture.fakeWorkflow.calls.size shouldBe 2
-            }
+          eventually() {
+            // It should evaluate exactly twice, then safely abort the infinite loop
+            fixture.fakeWorkflow.calls.size shouldBe 2
           }
 
           // Ensure it did not schedule anything
@@ -598,6 +590,30 @@ class PartyOnboardingClearanceSchedulerTest
           }
         }
       }
+
+      "cleanly release the idempotency lock if the background task hits a terminal failure" in {
+        createFixture().map { fixture =>
+          val tickPromise = Promise[Unit]()
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Queue a terminal failure
+          fixture.fakeWorkflow.addFailure(
+            AuthorizeClearanceError.PartyNotHosted("Party is no longer hosted")
+          )
+
+          fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+
+          eventually() {
+            // The workflow evaluates the terminal failure and aborts
+            fixture.fakeWorkflow.calls.size shouldBe 1
+
+            // Assert lock is removed even on failure
+            fixture.scheduler.inFlightBackgroundRequests.contains(partyId) shouldBe false
+          }
+        }
+      }
+
     }
 
     "the scheduled trigger fires" should {
@@ -706,15 +722,13 @@ class PartyOnboardingClearanceSchedulerTest
                 )
                 .failOnShutdown
                 .map { _ =>
-                  loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-                    // Release the timer tick, allowing the background trigger to fire
-                    tickPromise.success(())
+                  // Release the timer tick, allowing the background trigger to fire
+                  tickPromise.success(())
 
-                    eventually() {
-                      // Task should be removed, and no further workflow calls made
-                      fixture.scheduler.pendingClearances.get(partyId) shouldBe None
-                      fixture.fakeWorkflow.calls.size shouldBe 1 // only the initial one
-                    }
+                  eventually() {
+                    // Task should be removed, and no further workflow calls made
+                    fixture.scheduler.pendingClearances.get(partyId) shouldBe None
+                    fixture.fakeWorkflow.calls.size shouldBe 1 // only the initial one
                   }
                   succeed
                 }
@@ -743,13 +757,11 @@ class PartyOnboardingClearanceSchedulerTest
             .map { _ =>
               fixture.fakeWorkflow.calls.size shouldBe 1
 
-              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-                tickPromise.success(())
+              tickPromise.success(())
 
-                eventually() {
-                  // 1 initial + 3 trigger attempts (2 fail, 1 success) = 4
-                  fixture.fakeWorkflow.calls.size shouldBe 4
-                }
+              eventually() {
+                // 1 initial + 3 trigger attempts (2 fail, 1 success) = 4
+                fixture.fakeWorkflow.calls.size shouldBe 4
               }
               succeed
             }
@@ -787,15 +799,14 @@ class PartyOnboardingClearanceSchedulerTest
               // Background trigger responses (once the LSU drops, it succeeds)
               fixture.fakeWorkflow.addResponse(FlagNotSet)
 
-              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-                // Fire the timer tick to kick off the background trigger
-                tickPromise.success(())
+              // Fire the timer tick to kick off the background trigger
+              tickPromise.success(())
 
-                eventually() {
-                  // 1 initial + 1 trigger attempt (LSU blocked the first, then succeeded)
-                  fixture.fakeWorkflow.calls.size shouldBe 2
-                }
+              eventually() {
+                // 1 initial + 1 trigger attempt (LSU blocked the first, then succeeded)
+                fixture.fakeWorkflow.calls.size shouldBe 2
               }
+
               succeed
             }
         }
@@ -817,7 +828,7 @@ class PartyOnboardingClearanceSchedulerTest
           fixture.fakeWorkflow.addFailure(
             AuthorizeClearanceError.PartyNotHosted("Party is not hosted by target participant")
           )
-          // If the loop doesn't break, it would hit this and fail the assertion
+          // If the loop does not break, it would hit this and fail the assertion
           fixture.fakeWorkflow.addFailure(
             AuthorizeClearanceError.ProposeError("SHOULD NOT BE REACHED")
           )
@@ -826,18 +837,88 @@ class PartyOnboardingClearanceSchedulerTest
             .requestClearance(partyId, onboardingEffectiveAt)
             .valueOrFailShutdown("make the initial request")
             .map { _ =>
-              loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.INFO)) {
-                tickPromise.success(())
+              tickPromise.success(())
 
-                eventually() {
-                  // 1 initial + 2 trigger attempts (1 transient, 1 terminal) = 3
-                  fixture.fakeWorkflow.calls.size shouldBe 3
-                }
+              eventually() {
+                // 1 initial + 2 trigger attempts (1 transient, 1 terminal) = 3
+                fixture.fakeWorkflow.calls.size shouldBe 3
+              }
+
+              succeed
+            }
+        }
+      }
+
+      "trigger immediately if the time tracker returns None (time is already in the past)" in {
+        createFixture().flatMap { fixture =>
+          // Simulate the time tracker determining the time is already in the past
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(None)
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+          // Trigger response (immediate)
+          fixture.fakeWorkflow.addResponse(FlagNotSet)
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .map { _ =>
+              // No need to complete the tick (promise); background thread is already running
+              // the second attempt (because the `earliestClearanceTime` is in the past).
+              eventually() {
+                // Initial synchronous request + immediate asynchronous background trigger = 2 calls
+                fixture.fakeWorkflow.calls.size shouldBe 2
+
+                // Clearance task should have been handled, trigger should have fired; will remain on 1
+                // because the trigger only proposes the transaction. The task is intentionally kept in
+                // the map until the `observed` method confirms the finalized transaction on the ledger
+                // (which is outside the scope of this test case).
+                fixture.scheduler.pendingClearances.size shouldBe 1
               }
               succeed
             }
         }
       }
+
+      "safely ignore the timer tick if the scheduler is closing/shutting down" in {
+        createFixture().flatMap { fixture =>
+          val tickPromise = Promise[Unit]()
+
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(tickPromise.future))
+
+          // Initial setup response
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+
+          fixture.scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("make the initial request")
+            .map { _ =>
+              // Initial request succeeds, workflow called once
+              fixture.fakeWorkflow.calls.size shouldBe 1
+
+              // Simulate synchronizer disconnect or participant shutdown
+              fixture.scheduler.close()
+
+              // Flake prevention: Fire the tick AND wait for the specific shutdown log message
+              loggerFactory.assertLogs(
+                tickPromise.success(()),
+                logEntry => {
+                  logEntry.infoMessage should include(
+                    s"Skipping clearance trigger for party $partyId due to shutdown."
+                  )
+                },
+              )
+
+              // The trigger should see `isClosing == true` and bypass the attempt.
+              // Therefore, workflow calls should remain exactly 1.
+              fixture.fakeWorkflow.calls.size shouldBe 1
+              succeed
+            }
+        }
+      }
+
     }
 
     "observing transactions" should {
@@ -875,6 +956,35 @@ class PartyOnboardingClearanceSchedulerTest
           testData.p1Key,
           testData.p2Key,
         )
+      }
+
+      // Helper for creating "Proposal" transactions
+      def createProposalTx(
+          party: PartyId,
+          participant: ParticipantId,
+      ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
+        val mapping = PartyToParticipant
+          .tryCreate(
+            partyId = party,
+            threshold = PositiveInt.one,
+            participants = Seq(
+              HostingParticipant(participant, ParticipantPermission.Submission, onboarding = false)
+            ),
+          )
+        testData.makeSignedTx(mapping, isProposal = true)(testData.p1Key, testData.p2Key)
+      }
+
+      // Helper for creating irrelevant mappings (PartyToKeyMapping)
+      def createIrrelevantMappingTx(
+          party: PartyId
+      ): SignedTopologyTransaction[TopologyChangeOp, PartyToKeyMapping] = {
+        val mapping = PartyToKeyMapping
+          .tryCreate(
+            partyId = party,
+            threshold = PositiveInt.one,
+            signingKeys = NonEmpty(Seq, testData.p1Key),
+          )
+        testData.makeSignedTx(mapping, isProposal = false)(testData.p1Key, testData.p2Key)
       }
 
       "remove a pending task if clearance is effective" in {
@@ -919,22 +1029,27 @@ class PartyOnboardingClearanceSchedulerTest
         }
       }
 
-      "not remove a task if the participantId does not match" in {
+      "remove a pending task if the participant is evicted (Replace op without the participant)" in {
         createFixture().flatMap { fixture =>
           fixture.scheduler.pendingClearances.put(task.partyId, task)
+          fixture.scheduler.pendingClearances.size shouldBe 1
+
+          // A replace transaction for the same party, but hosted only on a different participant.
+          // Simulates the topology state where `participantId` has been removed from the hosts.
           val otherParticipant = testData.p2Id
-          val clearanceTx = createTx(partyId, otherParticipant, onboarding = false)
+          val evictionTx = createTx(partyId, otherParticipant, onboarding = false)
 
           fixture.scheduler
             .observed(
               SequencedTime(CantonTimestamp.now()),
               EffectiveTime(CantonTimestamp.now()),
               SequencerCounter.One,
-              Seq(clearanceTx),
+              Seq(evictionTx),
             )
             .failOnShutdown
             .map { _ =>
-              fixture.scheduler.pendingClearances.size shouldBe 1
+              fixture.scheduler.pendingClearances.size shouldBe 0
+              fixture.scheduler.pendingClearances.get(task.partyId) shouldBe None
               succeed
             }
         }
@@ -1031,6 +1146,106 @@ class PartyOnboardingClearanceSchedulerTest
             }
         }
       }
+
+      "not remove a pending task if the transaction is only a proposal" in {
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+
+          // Valid clearance transaction, but a proposal only
+          val proposalTx = createProposalTx(partyId, participantId)
+
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(proposalTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              // Task should remain as is because proposals are ignored
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              succeed
+            }
+        }
+      }
+
+      "ignore transactions for irrelevant topology mappings" in {
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+
+          // A transaction that affects the party, but is not a PartyToParticipant mapping
+          val partyToKeyTx = createIrrelevantMappingTx(partyId)
+
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(partyToKeyTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              // The scheduler should ignore the mapping and leave the task intact
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              succeed
+            }
+        }
+      }
+
+      "process a batch of transactions and remove multiple pending tasks simultaneously" in {
+        createFixture().flatMap { fixture =>
+          val otherParty = testData.party2
+          val taskOtherParty = task.copy(partyId = otherParty)
+
+          // Schedule tasks for two distinct parties
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+          fixture.scheduler.pendingClearances.put(taskOtherParty.partyId, taskOtherParty)
+          fixture.scheduler.pendingClearances.size shouldBe 2
+
+          // Create effective clearances for both parties
+          val clearanceTx1 = createTx(partyId, participantId, onboarding = false)
+          val clearanceTx2 = createTx(otherParty, participantId, onboarding = false)
+
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(clearanceTx1, clearanceTx2),
+            )
+            .failOnShutdown
+            .map { _ =>
+              // Both tasks should be cleared in a single `observed` pass
+              fixture.scheduler.pendingClearances.size shouldBe 0
+              succeed
+            }
+        }
+      }
+
+      "not remove a pending task if a Remove transaction targets a different participant" in {
+        createFixture().flatMap { fixture =>
+          fixture.scheduler.pendingClearances.put(task.partyId, task)
+
+          val otherParticipant = testData.p2Id
+          val irrelevantRemoveTx = createRemoveTx(partyId, otherParticipant)
+
+          fixture.scheduler
+            .observed(
+              SequencedTime(CantonTimestamp.now()),
+              EffectiveTime(CantonTimestamp.now()),
+              SequencerCounter.One,
+              Seq(irrelevantRemoveTx),
+            )
+            .failOnShutdown
+            .map { _ =>
+              // Since the target participant was not hosted in this Remove op, our task remains
+              fixture.scheduler.pendingClearances.size shouldBe 1
+              succeed
+            }
+        }
+      }
+
     }
   }
 }

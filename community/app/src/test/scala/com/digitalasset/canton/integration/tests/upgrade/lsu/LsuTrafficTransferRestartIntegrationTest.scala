@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftBlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 
 import java.time.Duration
@@ -36,9 +37,16 @@ import java.time.Duration
   *   - Old synchronizer: sequencer1, sequencer2
   *   - New synchronizer: sequencer3, sequencer4
   */
-abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with TrafficBalanceSupport {
+final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with TrafficBalanceSupport {
 
   override protected def testName: String = "lsu-traffic-transfer-crash-recovery"
+
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
+    )
+  )
 
   registerPlugin(new UsePostgres(loggerFactory))
 
@@ -195,17 +203,15 @@ abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Tra
           LogEntryOptionality.OptionalMany,
           _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
         ),
+        // TODO(#29833) Remove this rule when shutdown of the BFT orderer is improved
+        (
+          LogEntryOptionality.Optional,
+          entry => {
+            entry.loggerName shouldBe include(BftBlockOrderer.getClass.getSimpleName)
+            entry.warningMessage should include("shutdown did not complete gracefully in allotted")
+          },
+        ),
       )
     }
   }
-}
-
-final class LsuBftOrderingTrafficTransferRestartTest
-    extends LsuTrafficTransferRestartIntegrationTest {
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
-    )
-  )
 }

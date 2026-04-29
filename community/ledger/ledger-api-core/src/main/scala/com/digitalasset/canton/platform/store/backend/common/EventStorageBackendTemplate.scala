@@ -479,7 +479,9 @@ abstract class EventStorageBackendTemplate(
       previousIncompleteReassignmentOffsets: Vector[Offset],
       pruneUpToInclusiveOffset: Offset,
       incompleteReassignmentOffsets: Vector[Offset],
-  )(implicit connection: Connection, traceContext: TraceContext): Unit =
+  )(implicit connection: Connection, traceContext: TraceContext): Unit = {
+    // all of these should execute in a single transaction
+    assert(!connection.getAutoCommit)
     // pruning events could be a long-running operation, so we disable the network timeout
     withoutNetworkTimeout { implicit connection =>
       /*
@@ -528,6 +530,19 @@ abstract class EventStorageBackendTemplate(
       val pruningToInclusiveEventSeqId =
         maxEventSequentialId(Some(pruneUpToInclusiveOffset))(connection)
 
+      logger.info("Lock pruning processing table for serialized pruning")
+      lockExclusivelyPruningProcessingTable(connection)
+      logger.info("Locked pruning processing table for serialized pruning")
+
+      def sizeOfPruningProcessingTable() =
+        SQL"SELECT count(*) c FROM lapi_pruning_candidate_deactivated".asSingle(long("c"))
+      if (sizeOfPruningProcessingTable() != 0) {
+        logger.warn(
+          "Pruning processing table is not empty. This table must not be used! The contents of the table will be removed"
+        )
+        SQL"""TRUNCATE TABLE lapi_pruning_candidate_deactivated""".execute().discard
+      }
+
       logger.info(
         s"Start pruning Index DB events. Offsets in range ($previousPruneUpToInclusiveOffset, $pruneUpToInclusiveOffset] event sequential IDs in range ($pruningFromExclusiveEventSeqId, $pruningToInclusiveEventSeqId] with ${previousIncompleteReassignmentOffsets.size} incomplete offsets at the beginning and with ${incompleteReassignmentOffsets.size} at the end of the pruning range."
       )
@@ -536,11 +551,7 @@ abstract class EventStorageBackendTemplate(
       val completedReassignments =
         previousIncompleteReassignmentOffsets.filterNot(currentIncompleteSet)
 
-      logger.info("Lock pruning processing table for serialized pruning")
-      lockExclusivelyPruningProcessingTable(connection)
-      logger.info("Locked pruning processing table for serialized pruning")
-
-      // Please note: the big union + join query is deliberately pu in one CTE due to some H2 bug.
+      // Please note: the big union + join query is deliberately put in one CTE due to some H2 bug.
       // (possibly the H2 bug is around multiple CTEs targeting the same table)
       loadOffsets(completedReassignments, "populating candidates for completed reassignments")(
         """-- first unfolding an offset to all respective event_sequential_id-s
@@ -564,7 +575,12 @@ abstract class EventStorageBackendTemplate(
         |)
         |INSERT INTO lapi_pruning_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
         |SELECT event_sequential_id, deactivated_event_sequential_id
-        |FROM completed_ids""".stripMargin
+        |FROM completed_ids
+        |WHERE NOT EXISTS (
+        |  SELECT 1
+        |  FROM lapi_pruning_candidate_deactivated d3
+        |  WHERE d3.deactivate_event_sequential_id = deactivated_event_sequential_id
+        |)""".stripMargin
       ) { preparedStatement => offset =>
         preparedStatement.setLong(1, offset.unwrap)
         preparedStatement.setLong(2, offset.unwrap)
@@ -573,14 +589,17 @@ abstract class EventStorageBackendTemplate(
 
       logger.info("Populating candidates for deactivated contracts in the pruned range")
       SQL"""
-      -- Create temporary table for storing deactivated_contract candidates for pruning
       INSERT INTO lapi_pruning_candidate_deactivated(deactivate_event_sequential_id, activate_event_sequential_id)
       SELECT event_sequential_id, deactivated_event_sequential_id
       FROM lapi_events_deactivate_contract
       WHERE
         event_sequential_id > $pruningFromExclusiveEventSeqId
         AND event_sequential_id <= $pruningToInclusiveEventSeqId
-      """.execute().discard
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_candidate_deactivated d3
+          WHERE d3.deactivate_event_sequential_id = event_sequential_id
+        )""".execute().discard
 
       logger.info("Analyze lapi_pruning_candidate_deactivated table")
       SQL"${queryStrategy.analyzeTable("lapi_pruning_candidate_deactivated")}".execute().discard
@@ -609,9 +628,81 @@ abstract class EventStorageBackendTemplate(
         preparedStatement.setLong(2, offset.unwrap)
       }
 
-      logger.info("Analyze lapi_pruning_candidate_deactivated table")
+      logger.info(
+        s"Analyze lapi_pruning_candidate_deactivated table, ${sizeOfPruningProcessingTable()} deactivation pairs will be pruned"
+      )
       SQL"${queryStrategy.analyzeTable("lapi_pruning_candidate_deactivated")}".execute().discard
 
+      // populating all contract pruning candidates from this pruning iteration
+      logger.info(
+        "Add contract pruning candidates from lapi_pruning_candidate_deactivated - for deactivate events"
+      )
+      SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_deactivate_contract.internal_contract_id
+      FROM lapi_events_deactivate_contract, lapi_pruning_candidate_deactivated
+      WHERE
+        lapi_events_deactivate_contract.event_sequential_id = lapi_pruning_candidate_deactivated.deactivate_event_sequential_id
+        AND lapi_events_deactivate_contract.internal_contract_id IS NOT NULL
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_deactivate_contract.internal_contract_id
+        )
+        -- only if no other activation event defines it above pruning
+        -- this is an approximation only, not prevents to populate candidates related to activations earlier
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id > $pruningToInclusiveEventSeqId
+          AND activates.internal_contract_id = lapi_events_deactivate_contract.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id > $pruningToInclusiveEventSeqId
+          AND witnessed.internal_contract_id = lapi_events_deactivate_contract.internal_contract_id
+        )
+      """.execute().discard
+      logger.info("Add contract pruning candidates from lapi_events_various_witnessed")
+      SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_various_witnessed.internal_contract_id
+      FROM lapi_events_various_witnessed
+      WHERE
+        event_sequential_id <= $pruningToInclusiveEventSeqId
+        AND event_sequential_id > $pruningFromExclusiveEventSeqId
+        AND lapi_events_various_witnessed.internal_contract_id IS NOT NULL
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other activation event defines it above pruning
+        -- this is an approximation only, not prevents to populate candidates related to activations earlier
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id > $pruningToInclusiveEventSeqId
+          AND activates.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id > $pruningToInclusiveEventSeqId
+          AND witnessed.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+      """.execute().discard
+      logger.info("Analyze lapi_pruning_contract_candidate table")
+      SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+
+      // prune activate tables
       def pruneActivate(tableName: String): Unit =
         pruneWithLogging(s"Pruning $tableName table") {
           SQL"""
@@ -622,14 +713,12 @@ abstract class EventStorageBackendTemplate(
             WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.activate_event_sequential_id
           )"""
         }
-
-      // activate
-      pruneActivate("lapi_events_activate_contract")
       pruneActivate("lapi_filter_activate_stakeholder")
       pruneActivate("lapi_filter_activate_witness")
-      // achs
       pruneActivate("lapi_filter_achs_stakeholder")
+      pruneActivate("lapi_events_activate_contract")
 
+      // prune deactivate tables
       def pruneDeactivate(tableName: String): Unit =
         pruneWithLogging(s"Pruning $tableName table") {
           SQL"""
@@ -640,32 +729,23 @@ abstract class EventStorageBackendTemplate(
             WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.deactivate_event_sequential_id
           )"""
         }
-
-      // deactivate
-      pruneDeactivate("lapi_events_deactivate_contract")
       pruneDeactivate("lapi_filter_deactivate_stakeholder")
       pruneDeactivate("lapi_filter_deactivate_witness")
+      pruneDeactivate("lapi_events_deactivate_contract")
 
-      logger.info("Truncate table for storing pruning candidates")
-      SQL"""TRUNCATE TABLE lapi_pruning_candidate_deactivated;""".execute().discard
+      // prune witnessed tables
+      def pruneWitnessed(tableName: String): Unit =
+        pruneWithLogging(s"Pruning $tableName table") {
+          SQL"""
+          DELETE from #$tableName
+          WHERE
+            event_sequential_id <= $pruningToInclusiveEventSeqId AND
+            event_sequential_id > $pruningFromExclusiveEventSeqId"""
+        }
+      pruneWitnessed("lapi_filter_various_witness")
+      pruneWitnessed("lapi_events_various_witnessed")
 
-      // witnessed
-      pruneWithLogging("Pruning lapi_events_various_witnessed table") {
-        SQL"""
-        DELETE from lapi_events_various_witnessed
-        WHERE
-          event_sequential_id <= $pruningToInclusiveEventSeqId AND
-          event_sequential_id > $pruningFromExclusiveEventSeqId"""
-      }
-      pruneWithLogging("Pruning lapi_filter_various_witness table") {
-        SQL"""
-        DELETE from lapi_filter_various_witness
-        WHERE
-          event_sequential_id <= $pruningToInclusiveEventSeqId AND
-          event_sequential_id > $pruningFromExclusiveEventSeqId"""
-      }
-
-      // meta
+      // prune meta table
       pruneWithLogging("Pruning lapi_update_meta table") {
         SQL"""
         DELETE FROM lapi_update_meta
@@ -674,8 +754,102 @@ abstract class EventStorageBackendTemplate(
           ${QueryStrategy.offsetIsGreater("event_offset", previousPruneUpToInclusiveOffset)}"""
       }
 
+      logger.info("Truncate table for storing pruning candidates")
+      SQL"""TRUNCATE TABLE lapi_pruning_candidate_deactivated;""".execute().discard
+
       logger.info("Finished pruning of Index DB events.")
     }(connection, noTracingLogger)
+  }
+
+  override def pruneContracts()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Iterable[Long] = {
+    // all of these should execute in a single transaction
+    assert(!connection.getAutoCommit)
+    // pruning events could be a long-running operation, so we disable the network timeout
+    withoutNetworkTimeout { implicit connection =>
+      logger.info("Lock contract pruning processing table for serialized pruning")
+      lockExclusivelyContractPruningProcessingTable(connection)
+      logger.info("Locked contract pruning processing table for serialized pruning")
+
+      logger.info("Lock candidate contract rows for removal")
+      try {
+        writeLockInternalContractIds(
+          cSQL"""IN (
+            SELECT internal_contract_id
+            FROM lapi_pruning_contract_candidate
+          )"""
+        )(connection)
+      } catch {
+        case _: CannotAcquireAllRowLocksException =>
+          logger.info(
+            "Unable to acquire write lock for pruning contract candidates - rolling back transaction."
+          )
+          throw new PruningContractsBlockedException
+      }
+
+      // with holding the write lock, we ensure that Indexer is not inserting concurrently
+      logger.info(s"Cleaning candidate contracts")
+      cleanPruningCandidates()
+
+      logger.info(s"Fetching to-be-pruned contract IDs")
+      val prunedContractIds =
+        SQL"""
+        SELECT internal_contract_id
+        FROM lapi_pruning_contract_candidate"""
+          .asVectorOf(long("internal_contract_id"))
+
+      pruneWithLogging(s"Pruning ${prunedContractIds.size} contracts from par_contracts table") {
+        SQL"""
+        DELETE from par_contracts
+        WHERE EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate
+          WHERE par_contracts.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
+        )"""
+      }
+
+      logger.info("Truncate table for storing candidate contracts")
+      SQL"""TRUNCATE TABLE lapi_pruning_contract_candidate;""".execute().discard
+      logger.info(s"Finished pruning of ${prunedContractIds.size} contracts.")
+      prunedContractIds
+    }(connection, noTracingLogger)
+  }
+
+  override def cleanPruningCandidates()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit = {
+    // Please note: these queries are deliberately not constraint by the ledger end watermark, as the actively
+    // inserted events must be also considered for pruning.
+    logger.info(s"Start removing pruning contract candidates")
+    val removedActivate = SQL"""
+    DELETE FROM lapi_pruning_contract_candidate
+    WHERE
+      EXISTS (
+        SELECT 1
+        FROM lapi_events_activate_contract
+        WHERE
+          lapi_events_activate_contract.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
+      )""".executeUpdate()
+    // Please note: deactivations do not need to be considered separately as those are not defining any further contracts
+    logger.info(
+      s"Removed $removedActivate contract pruning candidates used by activate/deactivate events"
+    )
+    val removedWitnessed = SQL"""
+    DELETE FROM lapi_pruning_contract_candidate
+    WHERE
+      EXISTS (
+        SELECT 1
+        FROM lapi_events_various_witnessed
+        WHERE
+          lapi_events_various_witnessed.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
+      )""".executeUpdate()
+    logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
+    logger.info("Analyze lapi_pruning_contract_candidate table")
+    SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+  }
 
   private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(implicit
       connection: Connection,
@@ -1052,38 +1226,6 @@ abstract class EventStorageBackendTemplate(
       .sortBy(_.offset)
       .reverse
       .headOption
-  }
-
-  override def prunableContracts(fromExclusive: Option[Offset], toInclusive: Offset)(
-      connection: Connection
-  ): Set[Long] = {
-    val fromExclusiveSeqId =
-      fromExclusive
-        .map(from => maxEventSequentialId(Some(from))(connection))
-        .getOrElse(-1L)
-    val toInclusiveSeqId = maxEventSequentialId(Some(toInclusive))(connection)
-    val archivals = SQL"""
-        SELECT internal_contract_id
-        FROM lapi_events_deactivate_contract
-        WHERE
-          event_sequential_id > $fromExclusiveSeqId AND
-          event_sequential_id <= $toInclusiveSeqId AND
-          event_type = ${PersistentEventType.ConsumingExercise.asInt}
-        """
-      .asVectorOf(long("internal_contract_id").?)(connection)
-    val divulgedAndTransientContracts = SQL"""
-        SELECT internal_contract_id
-        FROM lapi_events_various_witnessed
-        WHERE
-          event_sequential_id > $fromExclusiveSeqId AND
-          event_sequential_id <= $toInclusiveSeqId AND
-          event_type = ${PersistentEventType.WitnessedCreate.asInt}
-        """
-      .asVectorOf(long("internal_contract_id").?)(connection)
-    archivals.iterator
-      .++(divulgedAndTransientContracts.iterator)
-      .flatten
-      .toSet
   }
 
   override def fetchTopologyPartyEventIds(

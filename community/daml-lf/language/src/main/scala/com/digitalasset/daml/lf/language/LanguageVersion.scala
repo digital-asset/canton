@@ -21,7 +21,11 @@ final case class LanguageVersion private[lf] (
     (this.major, this.minor).compare((that.major, that.minor))
 }
 
-object LanguageVersion extends LanguageFeaturesGenerated {
+object LanguageVersion
+    extends LanguageVersionGenerated
+    with LanguageFeaturesGenerated
+    with LegacyLanguageVersions
+    with LegacyLanguageFeatures {
   // ranges hardcoded (for now)
   lazy val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)
   lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_2)
@@ -74,8 +78,8 @@ object LanguageVersion extends LanguageFeaturesGenerated {
       case (_, Minor.Dev) => -1
 
       case (Minor.Staging(a, rca), Minor.Staging(b, rcb)) => (a, rca).compare((b, rcb))
-      case (Minor.Staging(_, _), Minor.Stable(_)) => 1
-      case (Minor.Stable(_), Minor.Staging(_, _)) => -1
+      case (Minor.Staging(a, _), Minor.Stable(b)) => if (a <= b) -1 else 1
+      case (Minor.Stable(a), Minor.Staging(b, _)) => if (a < b) -1 else 1
 
       case (Minor.Stable(a), Minor.Stable(b)) => a.compare(b)
     }
@@ -127,6 +131,12 @@ object LanguageVersion extends LanguageFeaturesGenerated {
       }
     }
 
+    final case class MinorDiscontinued(input: String) extends MinorParseFailure {
+      override def message: String =
+        s"$input is not supported because it was discontinued, supported minors: ${(allLfVersions ++ allLegacyLfVersions)
+            .map(_.minor)}"
+    }
+
     // MinorNotFound is the default/fallthrough case
     final case class MinorNotFound(input: String) extends MinorParseFailure {
       override def message: String =
@@ -143,24 +153,29 @@ object LanguageVersion extends LanguageFeaturesGenerated {
         .find(_.pretty == str)
         .toRight(())
         .left
-        .flatMap { _ =>
+        .map { _ =>
           // heuristics for detecting parse failures go here. Since parsing already failed, any logic here cannot
           // increase the number of supported versions, but can only provide better error messages for unsupported
           // versions.
-          str match {
-            case stagingPattern(nStr, mStr) =>
-              val n = nStr.toInt
-              val m = mStr.toInt
-              val validRevisions = allMinors.collect {
-                case Minor.Staging(version, revision) if version == n => revision
-              }
-              if (validRevisions.nonEmpty)
-                Left(MinorParseFailure.UnknownRevision(n, m, validRevisions))
-              else
-                Left(MinorParseFailure.MinorNotFound(str))
-            case _ =>
-              Left(MinorParseFailure.MinorNotFound(str))
-          }
+          // 1. try to find it in discontinued versions
+          if (discontinuedLfVersions.map(_.minor).exists(_.pretty == str))
+            MinorParseFailure.MinorDiscontinued(str)
+          else
+            // 2. see if we can find other revisions for the same staging version
+            str match {
+              case stagingPattern(nStr, mStr) =>
+                val n = nStr.toInt
+                val m = mStr.toInt
+                val validRevisions = allMinors.collect {
+                  case Minor.Staging(version, revision) if version == n => revision
+                }
+                if (validRevisions.nonEmpty)
+                  MinorParseFailure.UnknownRevision(n, m, validRevisions)
+                else
+                  MinorParseFailure.MinorNotFound(str)
+              case _ =>
+                MinorParseFailure.MinorNotFound(str)
+            }
         }
     }
 

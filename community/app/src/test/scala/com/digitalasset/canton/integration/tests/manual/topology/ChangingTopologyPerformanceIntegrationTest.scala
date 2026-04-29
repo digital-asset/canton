@@ -19,6 +19,8 @@ import com.digitalasset.canton.console.{
   InstanceReference,
   LocalInstanceReference,
   LocalSequencerReference,
+  MediatorReference,
+  SequencerReference,
 }
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.data.CantonTimestamp
@@ -41,7 +43,6 @@ import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.TopologyManagerError.SerialMismatch
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
@@ -52,6 +53,7 @@ import com.digitalasset.canton.topology.transaction.{
   SynchronizerTrustCertificate,
   TopologyChangeOp,
 }
+import com.digitalasset.canton.topology.{MediatorId, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.{TestEssentials, config}
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.{ActorSystem, Scheduler}
@@ -361,8 +363,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
         runners.foreach(_.close())
 
         val activeSequencer = getActiveSequencer()
-        val activePsid =
-          env.participant1.synchronizers.list_connected().loneElement.physicalSynchronizerId
+        val activePsid = operations.map(_.activePsid).max1
 
         // Before leaving the suppressing logger scope, let the workload finish or time out, so that we
         // don't flake on expected warnings.
@@ -382,24 +383,16 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
           }
         }
 
-        /*
-      TODO(#30088) Consider relaxing this constraint
-      Checking the topology in with LSU chaos is more difficult because we need to track active nodes.
-         */
-        val operationsContainLsu = operations.exists(_.name == LsuChaos.name)
+        // Run one last topology transaction through the synchronizer and wait until all synchronizer members have observed
+        // that transaction to help ensure that no synchronizer member is behind consuming topology changes.
+        val sequencedTimeOfDummyTransaction =
+          waitUntilDummySynchronizerTopologyTransactionsProcessed(activeSequencer, activePsid)
 
-        if (!operationsContainLsu) {
-          // Run one last topology transaction through the synchronizer and wait until all synchronizer members have observed
-          // that transaction to help ensure that no synchronizer member is behind consuming topology changes.
-          val sequencedTimeOfDummyTransaction =
-            waitUntilDummySynchronizerTopologyTransactionsProcessed(activeSequencer, activePsid)
+        // Wait for the duration of a client sequencer acknowledgment interval (+margin) to ensure
+        // that all acknowledgements have been processed by the sequencers.
+        Threading.sleep((sequencerClientAcknowledgementIntervalMs + computationMarginMs).toLong)
 
-          // Wait for the duration of a client sequencer acknowledgment interval (+margin) to ensure
-          // that all acknowledgements have been processed by the sequencers.
-          Threading.sleep((sequencerClientAcknowledgementIntervalMs + computationMarginMs).toLong)
-
-          validateTopologyState(activeSequencer, activePsid, sequencedTimeOfDummyTransaction)
-        }
+        validateTopologyState(activeSequencer, activePsid, sequencedTimeOfDummyTransaction)
       },
       forEvery(_)(acceptableLogMessageIncludingTopologyChangeWarnings),
     )
@@ -453,6 +446,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       TopologyOperations.topologyChangeTimeout.asFiniteApproximation,
       retryOnTestFailuresOnly = false,
     ) {
+
       val synchronizerMembers = activeSequencer.topology.transactions
         .list(
           store = activePsid,
@@ -465,14 +459,18 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
         )
         .result
         .map(_.mapping)
+        // get the instance references
         .flatMap[InstanceReference] {
-          case dtc: SynchronizerTrustCertificate => Seq(p(dtc.participantId.identifier.unwrap))
+          case dtc: SynchronizerTrustCertificate =>
+            Seq(p(dtc.participantId.identifier.unwrap))
           case sds: SequencerSynchronizerState =>
             sds.active.map(sid => s(sid.identifier.unwrap)).forgetNE
           case mds: MediatorSynchronizerState =>
             mds.active.map(mid => m(mid.identifier.unwrap)).forgetNE
           case _ => Seq.empty
         }
+        // filter out instances that belong to previous synchronizers
+        .filter(isActive(_, activePsid))
         .distinct
 
       val membersString = synchronizerMembers.map(_.name).mkString(",")
@@ -498,8 +496,25 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       )
       CantonTimestamp.assertFromInstant(sequencedTime)
     }
-
   }
+
+  /** A node is active:
+    *   - participant: if running
+    *   - mediator, sequencer: if running and belonging to the active synchronizer
+    */
+  private def isActive(
+      instance: InstanceReference,
+      activePsid: PhysicalSynchronizerId,
+  ): Boolean =
+    instance match {
+      case s: SequencerReference =>
+        s.health.is_running() && s.health.status.trySuccess.synchronizerId == activePsid
+
+      case m: MediatorReference =>
+        m.health.is_running() && m.health.status.trySuccess.synchronizerId == activePsid
+
+      case other => other.health.is_running()
+    }
 
   private def validateTopologyState(
       activeSequencer: LocalSequencerReference,
@@ -507,25 +522,23 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       timestampForTopologyChecks: CantonTimestamp,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
-    logger.info(s"Starting topology validations at timestamp $timestampForTopologyChecks")
+    logger.info(
+      s"Starting topology validations at timestamp $timestampForTopologyChecks with active sequencer $activeSequencer and psid $activePsid"
+    )
 
-    val allOnboardedMediators = activeSequencer.topology.mediators
+    val allOnboardedMediators: Set[MediatorId] = activeSequencer.topology.mediators
       .list(activePsid, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
       .flatMap(group => group.item.allMediatorsInGroup)
-      .map(_.identifier.unwrap)
-      .distinct
-      .map(m)
+      .toSet
 
-    val allOnboardedSequencers =
+    val allOnboardedSequencers: Set[SequencerId] =
       activeSequencer.topology.sequencers
         .list(activePsid, timeQuery = TimeQuery.Snapshot(timestampForTopologyChecks))
         .loneElement
         .item
         .allSequencers
         .forgetNE
-        .map(_.identifier.unwrap)
-        .distinct
-        .map(s)
+        .toSet
 
     val allOnboardedParticipants =
       activeSequencer.topology.synchronizer_trust_certificates
@@ -534,9 +547,28 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
         .distinct
         .map(p)
 
+    val allRunningOnboardedSequencers =
+      sequencers.all.filter(s => isActive(s, activePsid) && allOnboardedSequencers.contains(s.id))
+    val allRunningOnboardedMediators =
+      mediators.all.filter(m => isActive(m, activePsid) && allOnboardedMediators.contains(m.id))
+
+    logger.info(
+      s"All onboarded mediators=$allOnboardedMediators. Running: $allRunningOnboardedMediators"
+    )
+    logger.info(
+      s"All onboarded sequencers=$allOnboardedSequencers. Running: $allRunningOnboardedSequencers"
+    )
+    logger.info(s"All onboarded participants=$allOnboardedParticipants")
+
+    if (allRunningOnboardedSequencers.isEmpty)
+      fail("We should have at least one running sequencer")
+
+    if (allRunningOnboardedMediators.isEmpty)
+      fail("We should have at least one running mediator")
+
     val runningNodes =
-      allOnboardedSequencers ++
-        allOnboardedMediators ++
+      allRunningOnboardedSequencers ++
+        allRunningOnboardedMediators ++
         allOnboardedParticipants
 
     val verification = new TopologyStateVerification(
@@ -551,8 +583,8 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       verification.ensureConsistentTopologyState(runningNodes, activePsid)
     )
 
-    clue(s"validating sequencer snapshots of ${allOnboardedSequencers.map(_.name)}")(
-      verification.ensureConsistentSequencerSnapshots(allOnboardedSequencers)
+    clue(s"validating sequencer snapshots of ${allRunningOnboardedSequencers.map(_.name)}")(
+      verification.ensureConsistentSequencerSnapshots(allRunningOnboardedSequencers)
     )
 
     clue(s"validating replayability of topology transactions")(
@@ -676,7 +708,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
   }
 }
 
-class ChangingTopologyPerformanceIntegrationMediatorTest
+final class ChangingTopologyPerformanceIntegrationMediatorTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 10
   protected val numSequencers = 1
@@ -686,7 +718,7 @@ class ChangingTopologyPerformanceIntegrationMediatorTest
     NonEmpty.apply(Seq, new MediatorGroupChaos(Set.empty, logger))
 }
 
-class ChangingTopologyPerformanceIntegrationSequencerTest
+final class ChangingTopologyPerformanceIntegrationSequencerTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 10
@@ -696,7 +728,7 @@ class ChangingTopologyPerformanceIntegrationSequencerTest
     NonEmpty.apply(Seq, new SequencerChaos(logger))
 }
 
-class ChangingTopologyPerformanceIntegrationPartyReplicationTest
+final class ChangingTopologyPerformanceIntegrationPartyReplicationTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -706,7 +738,7 @@ class ChangingTopologyPerformanceIntegrationPartyReplicationTest
     NonEmpty.apply(Seq, new PartyReplicationChaos(logger))
 }
 
-class ChangingTopologyPerformanceIntegrationRestartParticipantTest
+final class ChangingTopologyPerformanceIntegrationRestartParticipantTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -716,7 +748,7 @@ class ChangingTopologyPerformanceIntegrationRestartParticipantTest
     NonEmpty.apply(Seq, new RestartParticipantsChaos(logger))
 }
 
-class ChangingTopologyPerformanceIntegrationRestartSequencersTest
+final class ChangingTopologyPerformanceIntegrationRestartSequencersTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -726,7 +758,7 @@ class ChangingTopologyPerformanceIntegrationRestartSequencersTest
     NonEmpty.apply(Seq, new RestartSequencersChaos(logger))
 }
 
-class ChangingTopologyPerformanceIntegrationRestartMediatorsTest
+final class ChangingTopologyPerformanceIntegrationRestartMediatorsTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -736,7 +768,7 @@ class ChangingTopologyPerformanceIntegrationRestartMediatorsTest
     NonEmpty.apply(Seq, new RestartMediatorsChaos(logger))
 }
 
-class ChangingTopologyPerformanceIntegrationSynchronizerOwnerTest
+final class ChangingTopologyPerformanceIntegrationSynchronizerOwnerTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -746,7 +778,7 @@ class ChangingTopologyPerformanceIntegrationSynchronizerOwnerTest
     NonEmpty.apply(Seq, new SynchronizerOwnerChaos(2, logger))
 }
 
-class ChangingTopologyPerformanceIntegrationDecentralizedPartyTest
+final class ChangingTopologyPerformanceIntegrationDecentralizedPartyTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -756,7 +788,7 @@ class ChangingTopologyPerformanceIntegrationDecentralizedPartyTest
     NonEmpty.apply(Seq, new DecentralizedPartyChaos(2, "0Cleese", "participant2", logger))
 }
 
-class ChangingTopologyPerformanceIntegrationBalanceTopUpsTest
+final class ChangingTopologyPerformanceIntegrationBalanceTopUpsTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 3
@@ -766,7 +798,7 @@ class ChangingTopologyPerformanceIntegrationBalanceTopUpsTest
     NonEmpty.apply(Seq, new BalanceTopUpsChaos(logger))
 }
 
-class ChangingTopologyKeyRotationViaNamespaceDelegationTest
+final class ChangingTopologyKeyRotationViaNamespaceDelegationTest
     extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
@@ -779,7 +811,8 @@ class ChangingTopologyKeyRotationViaNamespaceDelegationTest
     )
 }
 
-class ChangingTopologyKeyRotationOwnerToKeyTest extends ChangingTopologyPerformanceIntegrationTest {
+final class ChangingTopologyKeyRotationOwnerToKeyTest
+    extends ChangingTopologyPerformanceIntegrationTest {
   protected val numMediators = 1
   protected val numSequencers = 1
   protected val numParticipants = 3
@@ -791,7 +824,7 @@ class ChangingTopologyKeyRotationOwnerToKeyTest extends ChangingTopologyPerforma
     )
 }
 
-class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest {
+final class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest {
   private lazy val maxLsu: Int = 6
 
   protected val numMediators: Int = 1 + maxLsu
@@ -878,7 +911,7 @@ trait AllTopologyChaosOperations {
     }
 }
 
-class ChangingTopologyPerformanceIntegrationAllOpsTest
+final class ChangingTopologyPerformanceIntegrationAllOpsTest
     extends ChangingTopologyPerformanceIntegrationTest
     with AllTopologyChaosOperations {
   override lazy val operations: NonEmpty[Seq[TopologyOperations]] =

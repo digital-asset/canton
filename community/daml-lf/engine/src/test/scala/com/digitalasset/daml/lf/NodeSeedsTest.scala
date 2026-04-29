@@ -18,16 +18,15 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.zip.ZipInputStream
 
 
-// TODO(#31853): reactivate {by dropping the abstract}
-abstract class NodeSeedsTestV2 extends NodeSeedsTest(LanguageVersion.Major.V2)
+class NodeSeedsTestV2 extends NodeSeedsTest(LanguageVersion.Major.V2)
 
 class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWordSpec with Matchers with SuppressingLogging {
 
   // Test for https://github.com/DACH-NY/canton/issues/14712
 
   val (mainPkgId, mainPkg, packages) = {
-    val stream = getClass.getClassLoader.getResourceAsStream(s"Demonstrator-v${majorLanguageVersion.pretty}dev.dar")
-    val packages = DarDecoder.readArchive(s"Demonstrator-v${majorLanguageVersion.pretty}dev.dar", new ZipInputStream(stream)).toOption.get
+    val stream = getClass.getClassLoader.getResourceAsStream(s"Demonstrator-v${majorLanguageVersion.pretty}3.dar")
+    val packages = DarDecoder.readArchive(s"Demonstrator-v${majorLanguageVersion.pretty}3.dar", new ZipInputStream(stream)).toOption.get
     (packages.main._1, packages.main._2, packages.all.toMap)
   }
 
@@ -170,8 +169,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
   }
 
   val n = tx.nodes.iterator.collect { case (nid, _: Node.Action) =>
-    // TODO(#31853): Review in context of rollback abd by-key nodes.
-    s"when run with $nid" ignore {
+    s"when run with $nid" in {
       replay(nid) shouldBe projectCreates(nid)
     }
   }.size

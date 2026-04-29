@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.{
@@ -13,8 +12,8 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.store.ContractStoreTest
 import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDbContractStoreForTesting
-import com.digitalasset.canton.participant.store.{ContractStoreTest, UnknownContract}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbStorageIdempotency, DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
@@ -106,15 +105,17 @@ trait DbContractStoreTest extends AsyncWordSpec with BaseTest with ContractStore
     }
   }
 
-  "delete a set of contracts as done by pruning with correct cache behavior" in {
+  "evict a set of contracts as done by pruning with correct cache behavior" in {
     val store = createDbContractStoreForTesting(
       storage,
       loggerFactory,
     )
     store.lookupPersistedIfCached(contractId) shouldBe None
     for {
-      _ <- List(contract, contract2, contract4, contract5)
-        .parTraverse(store.storeContract)
+      storedContracts <- store
+        .storeContracts(
+          List(contract, contract2, contract4, contract5)
+        )
         .failOnShutdown
       p = store.lookupPersistedIfCached(contractId)
       internalContractId = p.value.value.internalContractId
@@ -125,24 +126,22 @@ trait DbContractStoreTest extends AsyncWordSpec with BaseTest with ContractStore
         .internalContractId
       _ = p.value.nonEmpty shouldBe true
       _ = store.lookupPersistedIfCached(internalContractId) shouldEqual p
-      _ <- store
-        .deleteIgnoringUnknown(Seq(contractId, contractId2, contractId3, contractId4))
-        .failOnShutdown
+      foundInCache = List(contractId, contractId2, contractId3, contractId4).map(
+        store.lookupPersistedIfCached
+      )
+      _ = store
+        .contractsPruned(Seq(contractId, contractId2, contractId4).flatMap(storedContracts.get))
       _ = store.lookupPersistedIfCached(contractId) shouldBe None
       _ = store.lookupPersistedIfCached(internalContractId) shouldBe None
-      notFounds <- List(contractId, contractId2, contractId3, contractId4).parTraverse(
-        store.lookupE(_).value
+      notFoundInCache = List(contractId, contractId2, contractId3, contractId4).map(
+        store.lookupPersistedIfCached
       )
-      notDeleted <- store.lookupE(contractId5).value
+      notEvictedFromCache = store.lookupPersistedIfCached(contractId5)
     } yield {
-      notFounds shouldEqual List(
-        Left(UnknownContract(contractId)),
-        Left(UnknownContract(contractId2)),
-        Left(UnknownContract(contractId3)),
-        Left(UnknownContract(contractId4)),
-      )
-      notDeleted shouldEqual Right(contract5)
-      store.lookupPersistedIfCached(contractId) shouldBe Some(None) // already tried to be looked up
+      foundInCache.flatten.flatten
+        .map(_.asContractInstance) shouldEqual List(contract, contract2, contract4)
+      notFoundInCache.flatten.flatten shouldEqual Nil
+      notEvictedFromCache.value.value.asContractInstance shouldEqual contract5
       // the entry from the internal id cache is removed when the contract is deleted
       store.lookupPersistedIfCached(internalContractId) shouldBe None
       store.lookupPersistedIfCached(contractId5).value.nonEmpty shouldBe true

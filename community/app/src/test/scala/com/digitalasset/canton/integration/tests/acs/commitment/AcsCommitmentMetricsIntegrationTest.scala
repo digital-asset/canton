@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.acs.commitment
 
-import cats.Show.Shown
 import com.daml.metrics.MetricsFilterConfig
 import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Inspection.SlowCounterParticipantSynchronizerConfig
@@ -50,7 +49,7 @@ trait AcsCommitmentMetricsIntegrationTest
   private var bob: Party = _
   private var charlie: Party = _
 
-  private var metricsSynchronizerAlias: Shown = _
+  private var metricsSynchronizerContext: Map[String, String] = _
 
   private val metricsPrefix = "daml.participant.sync.commitments"
   private val interval = JDuration.ofSeconds(5)
@@ -65,7 +64,8 @@ trait AcsCommitmentMetricsIntegrationTest
           .replace(
             MetricsConfig(
               qualifiers = Seq[MetricQualification](
-                MetricQualification.Debug
+                MetricQualification.Debug,
+                MetricQualification.Saturation,
               ),
               reporters = Seq(
                 MetricsReporterConfig.Prometheus(
@@ -102,7 +102,7 @@ trait AcsCommitmentMetricsIntegrationTest
           )
         }
 
-        metricsSynchronizerAlias = daName.unquoted
+        metricsSynchronizerContext = Map("synchronizer" -> daName.unwrap)
 
         participants.all.foreach { participant =>
           connect(
@@ -439,7 +439,7 @@ trait AcsCommitmentMetricsIntegrationTest
     postClean shouldBe Seq.empty
   }
 
-  "Cant add slow counter participant to non-existing config" in { implicit env =>
+  "Can't add slow counter participant to non-existing config" in { implicit env =>
     import env.*
     logger.info("since config is empty, then extending it should not do anything")
     val preConfig = participant1.commitments.get_config_for_slow_counter_participants(Seq.empty)
@@ -452,7 +452,7 @@ trait AcsCommitmentMetricsIntegrationTest
     preConfig shouldBe postConfig
   }
 
-  "Cant add slow counter participant to non-existing config with existing different synchronizer" in {
+  "Can't add slow counter participant to non-existing config with existing different synchronizer" in {
     implicit env =>
       import env.*
       val slowConfig = new SlowCounterParticipantSynchronizerConfig(
@@ -596,6 +596,7 @@ trait AcsCommitmentMetricsIntegrationTest
     logger.info("we restart participant2 to build the configs and then stop it again")
 
     participant2.start()
+    val participant2Id = participant2.id
     val slowConfig = new SlowCounterParticipantSynchronizerConfig(
       Seq(daId),
       Seq(participant2.id),
@@ -617,14 +618,16 @@ trait AcsCommitmentMetricsIntegrationTest
     logger.info("we validate participant3 is keeping the default up to date")
     participant1.metrics
       .get_long_point(
-        s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+        s"$metricsPrefix.largest-counter-participant-latency",
+        metricsSynchronizerContext,
       )
       .value shouldBe 0
 
     logger.info("we validate the distinguished participant2 is falling behind")
     participant1.metrics
       .get_long_point(
-        s"$metricsPrefix.$metricsSynchronizerAlias.largest-distinguished-counter-participant-latency"
+        s"$metricsPrefix.largest-distinguished-counter-participant-latency",
+        metricsSynchronizerContext,
       )
       .value should be > 0L
 
@@ -638,12 +641,14 @@ trait AcsCommitmentMetricsIntegrationTest
     eventually() {
       participant1.metrics
         .get_long_point(
-          s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+          s"$metricsPrefix.largest-counter-participant-latency",
+          metricsSynchronizerContext,
         )
         .value shouldBe 0
       participant1.metrics
         .get_long_point(
-          s"$metricsPrefix.$metricsSynchronizerAlias.largest-distinguished-counter-participant-latency"
+          s"$metricsPrefix.largest-distinguished-counter-participant-latency",
+          metricsSynchronizerContext,
         )
         .value shouldBe 0
     }
@@ -655,15 +660,26 @@ trait AcsCommitmentMetricsIntegrationTest
     eventually() {
       participant1.metrics
         .get_long_point(
-          s"$metricsPrefix.$metricsSynchronizerAlias.counter-participant-latency.participant2"
+          s"$metricsPrefix.counter-participant-latency",
+          metricsSynchronizerContext
+            .updated("counter-participant", participant2Id.uid.toProtoPrimitive),
         )
         .value should be > 0L
       participant1.metrics
         .get_long_point(
-          s"$metricsPrefix.$metricsSynchronizerAlias.counter-participant-latency.participant3"
+          s"$metricsPrefix.counter-participant-latency",
+          metricsSynchronizerContext
+            .updated("counter-participant", participant3.id.uid.toProtoPrimitive),
         )
         .value shouldBe 0
     }
+
+    participant1.metrics
+      .get_long_point(
+        s"$metricsPrefix.active-stakeholder-groups",
+        metricsSynchronizerContext,
+      )
+      .value shouldBe 3L
   }
 
   "no wait participants does not affect default latency metric" onlyRunWhen (!isInMemory) in {
@@ -705,7 +721,8 @@ trait AcsCommitmentMetricsIntegrationTest
       eventually() {
         participant1.metrics
           .get_long_point(
-            s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+            s"$metricsPrefix.largest-counter-participant-latency",
+            metricsSynchronizerContext,
           )
           .value should be > 0L
       }
@@ -717,7 +734,8 @@ trait AcsCommitmentMetricsIntegrationTest
       eventually() {
         participant1.metrics
           .get_long_point(
-            s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+            s"$metricsPrefix.largest-counter-participant-latency",
+            metricsSynchronizerContext,
           )
           .value shouldBe 0
       }
@@ -741,7 +759,8 @@ trait AcsCommitmentMetricsIntegrationTest
       incrementIntervals(2)
       val bothBehind = participant1.metrics
         .get_long_point(
-          s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+          s"$metricsPrefix.largest-counter-participant-latency",
+          metricsSynchronizerContext,
         )
 
       participant2.start()
@@ -765,7 +784,8 @@ trait AcsCommitmentMetricsIntegrationTest
       eventually() {
         val afterParticipant2Catchup = participant1.metrics
           .get_long_point(
-            s"$metricsPrefix.$metricsSynchronizerAlias.largest-counter-participant-latency"
+            s"$metricsPrefix.largest-counter-participant-latency",
+            metricsSynchronizerContext,
           )
         afterParticipant2Catchup.value should be > 0L
         bothBehind.value should be > afterParticipant2Catchup.value

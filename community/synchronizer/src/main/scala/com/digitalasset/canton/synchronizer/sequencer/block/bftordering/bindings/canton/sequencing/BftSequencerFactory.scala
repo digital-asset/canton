@@ -154,6 +154,7 @@ class BftSequencerFactory(
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
+      delayRequestsBeforeLsuTrafficInit = nodeParameters.delayRequestsBeforeLsuTrafficInit,
     )
 }
 

@@ -38,7 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
-import com.digitalasset.canton.version.{EngineMode, ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
@@ -80,15 +80,6 @@ object ConfigTransforms {
     val enableAlpha = configTransformsWhen(pv.isAlpha)(enableAlphaVersionSupport)
     val enableBeta = configTransformsWhen(pv.isBeta)(setBetaSupport(true))
 
-    val setContractStateMode: Seq[ConfigTransform] = configTransformsWhen(!pv.isStable)(
-      Seq(
-        updateAllParticipantConfigs_(
-          _.focus(_.parameters.engine.contractStateMode)
-            .replace(EngineMode.forProtocolVersion(pv))
-        )
-      )
-    )
-
     val deprecatedPVWarning = if (pv.isDeprecated) dontWarnOnDeprecatedPV else Seq()
 
     val updateParticipants = Seq(
@@ -98,7 +89,7 @@ object ConfigTransforms {
       )
     )
 
-    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning ++ setContractStateMode
+    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning
   }
 
   val protocolVersionTransforms: Seq[ConfigTransform] = setProtocolVersion(
@@ -270,6 +261,11 @@ object ConfigTransforms {
               h2Config.focus(_.parameters.connectionTimeout).replace(newConnectionTimeout)
           }
         },
+        ConfigTransforms.setSigningKeysIfPV35OrHigher(
+          if (sys.env.get("SESSION_SIGNING_KEYS_ENABLED").contains("true"))
+            SessionSigningKeysConfig.enabled
+          else SessionSigningKeysConfig.disabled
+        ),
       )
 
   lazy val clearMinimumProtocolVersion: Seq[ConfigTransform] =

@@ -17,48 +17,7 @@ slack_red_main_with_volunteer:
           if [ -n "$FIXED" ]; then
             SELECTED_VOLUNTEER="$FIXED"
           else
-            members=(
-              # Architecture
-              "U9AGNADBJ" # Andreas L.
-              "U056R7C1H1A" # Cristina
-              # Security
-              "U03RK2ZNZFH" # Christian
-              "U03A208N537" # João Sá
-              "U990L3H0R" # Matthias
-              "U0A0VU32CS0" # Simran
-              "U276HDDB6" # Soren
-              "U03NCGBFCDP" # Thibault
-              "UPED4TSGN" # Simon
-              # Protocol
-              "U5LC1FB6D" # Gerolf
-              "U046D8XGD7H" # Kirill
-              "U03FH83LRNH" # Meriam
-              "UF766DLN4" # Oliver
-              "U020XUXADCP" # Raf
-              "UDDVDCKD0" # Raphael
-              "U04DC4NAK1S" # Yves
-              # LAPI
-              "U08LBV2U75H" # Adrien
-              "U03HVEFHGLU" # Andreas T.
-              "U9AM249RP" # Andris
-              "U1CNLNUV7" # Gergely
-              "U029VGVV25Q" # Jarek
-              "U57BTEKR9" # Marcin
-              "U01A2K1NWAX" # Marton
-              "U01B2BD2CP4" # Tudor
-              # BFT
-              "U04S25SG9D5" # Daniel
-              "U04TG4XMJ" # Danilo
-              "USE2D5GB1" # Fabio
-              "U04P9CS4F6Z" # Tom
-              # QA
-              "U0AHRL04HPV" #Tbo
-            )
-
-            # Takes the first bytes of the sha and convert to and int
-            WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
-
-            SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+            SELECTED_VOLUNTEER=$(bash scripts/ci/select_volunteer.sh)
           fi
 
           echo "$SELECTED_VOLUNTEER"

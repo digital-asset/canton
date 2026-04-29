@@ -116,6 +116,7 @@ class TransactionProcessor(
         damle.enrichContract,
         new AuthorizationValidator(participantId),
         InternalConsistencyChecker(
+          participantId,
           staticSynchronizerParameters.protocolVersion,
           loggerFactory,
         ),
@@ -507,6 +508,27 @@ object TransactionProcessor {
             cause = "internal error during transaction submission",
             throwableO = Some(throwable),
           )
+    }
+
+    @Explanation(
+      """This error occurs when a transaction is submitted on behalf of a party that is currently onboarding on the participant. Onboarding parties cannot initiate ledger changes until their onboarding is complete."""
+    )
+    @Resolution(
+      """Wait for the party's onboarding to complete before submitting commands on their behalf."""
+    )
+    object PartyCurrentlyOnboarding
+        extends ErrorCode(
+          id = "PARTY_CURRENTLY_ONBOARDING",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Rejection(parties: Seq[LfPartyId])
+          extends TransactionErrorImpl(
+            cause =
+              s"The following submitting parties are currently onboarding: ${parties.mkString(", ")}",
+            // Reported synchronously during Phase 1 validation
+            definiteAnswer = true,
+          )
+          with TransactionSubmissionError
     }
   }
 

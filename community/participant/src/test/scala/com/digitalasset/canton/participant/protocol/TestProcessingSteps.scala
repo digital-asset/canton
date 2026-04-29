@@ -45,6 +45,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   Member,
@@ -156,6 +157,13 @@ class TestProcessingSteps(
     EitherT.rightT((submission, Some(())))
   }
 
+  override def validateSubmittersNotOnboarding(
+      submissionParam: Int,
+      topologySnapshot: TopologySnapshot,
+      participantId: ParticipantId,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, TestProcessingError, Unit] =
+    EitherT.pure(())
+
   override def createSubmissionResult(
       deliver: Deliver[Envelope[?]],
       submissionResultArgs: PendingSubmissionData,
@@ -181,17 +189,27 @@ class TestProcessingSteps(
     }
 
     val decryptedViewTrees = batch.map { envelope =>
-      Hash
-        .fromByteString(envelope.protocolMessage.encryptedView.viewTree.ciphertext)
-        .bimap(
-          err =>
-            SyncCryptoDecryptError(
-              SyncCryptoDecryptionError(FailedToDecrypt(err.toString))
-            ),
-          hash =>
-            WithRecipients(treeFor(envelope.protocolMessage.viewHash, hash), envelope.recipients),
-        )
+      val message = envelope.protocolMessage
+      val hashE = message match {
+        case singleViewMessage: EncryptedSingleViewMessage[TestViewType] =>
+          Hash
+            .fromByteString(singleViewMessage.encryptedView.viewTree.ciphertext)
+        case multipleViewsMessage: EncryptedMultipleViewsMessage[TestViewType] =>
+          Hash
+            .fromByteString(
+              multipleViewsMessage.encryptedViews.viewTrees.ciphertext
+            )
+      }
+
+      hashE.bimap(
+        err =>
+          SyncCryptoDecryptError(
+            SyncCryptoDecryptionError(FailedToDecrypt(err.toString))
+          ),
+        hash => WithRecipients(treeFor(message.viewHashes.head1, hash), envelope.recipients),
+      )
     }
+
     EitherT.rightT(
       DecryptedViews(
         decryptedViewTrees.toList

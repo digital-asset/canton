@@ -28,7 +28,11 @@ final case class TransactionValidationResult(
       ModelConformanceChecker.ErrorWithSubTransaction[ViewAbsoluteLedgerEffect],
       ModelConformanceChecker.Result,
     ],
-    internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
+    internalConsistencyResultET: EitherT[
+      FutureUnlessShutdown,
+      ErrorWithInternalConsistencyCheck,
+      Unit,
+    ],
     consumedInputsOfHostedParties: Map[LfContractId, Set[LfPartyId]],
     witnessed: Map[LfContractId, GenContractInstance],
     createdContracts: Map[LfContractId, NewContractInstance],

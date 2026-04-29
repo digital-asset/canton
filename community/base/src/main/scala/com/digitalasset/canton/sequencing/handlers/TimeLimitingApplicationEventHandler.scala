@@ -8,8 +8,8 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.error.FatalError
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
   NamedLoggerFactory,
@@ -61,14 +61,21 @@ class TimeLimitingApplicationEventHandler(
               now,
             )
             val trigger = ApplicationEventHandlerTimeoutTrigger(logger, exitOnTimeout, data)
-            clock.scheduleAt(trigger.trigger, deadline).discard[FutureUnlessShutdown[Unit]]
+            val (timeoutFuture, timeoutHandle) =
+              clock.scheduleAtCancellable(trigger.trigger, deadline)
+            timeoutFuture.discard[FutureUnlessShutdown[Unit]]
             handler(boxedEnvelopes).transform {
               case Success(Outcome(async)) =>
-                Success(Outcome(async.thereafter(_ => trigger.markFinished())))
+                Success(Outcome(async.thereafter { _ =>
+                  timeoutHandle.cancel(UnlessShutdown.unit)
+                  trigger.markFinished()
+                }))
               case abort @ Success(AbortedDueToShutdown) =>
+                timeoutHandle.cancel(UnlessShutdown.AbortedDueToShutdown)
                 trigger.markFinished()
                 abort
               case failure @ Failure(_) =>
+                timeoutHandle.cancel(UnlessShutdown.unit)
                 trigger.markFinished()
                 failure
             }

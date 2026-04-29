@@ -777,6 +777,22 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     FutureUnlessShutdown.unit
   }
 
+  override def deleteDataChunk(
+      chunkSize: Int
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
+    def removeFromIndex(tx: TopologyStoreEntry) =
+      topologyTransactionsStoreUniqueIndex.remove((tx.from, tx.batchIdx)).discard
+    val deleted = lock.exclusive {
+      if (topologyTransactionStore.nonEmpty && chunkSize > 0) {
+        topologyTransactionStore.view.takeRight(chunkSize).foreach(removeFromIndex)
+        topologyTransactionStore.dropRightInPlace(chunkSize)
+        watermark.set(None) // Assumes this was only set if the store is non-empty.
+        true
+      } else false
+    }
+    FutureUnlessShutdown.pure(deleted)
+  }
+
   override protected def doCopyFromPredecessorSynchronizerStore(
       sourceStore: TopologyStore[TopologyStoreId.SynchronizerStore]
   )(implicit

@@ -281,4 +281,7 @@ private final class DummyCopyTopologyStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = ???
 
+  override def deleteDataChunk(chunkSize: Int)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] = ???
 }

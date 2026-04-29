@@ -199,8 +199,8 @@ class PruningProcessor(
       .flatMap {
         case Some(beforeOrAtOffset) =>
           // under the hood this computation not only pushes back the boundInclusive bound according to the beforeOrAt publication timestamp, but also pushes it back before the ledger-end
-          val rewoundBoundInclusive: Offset =
-            if (beforeOrAtOffset >= boundInclusive) boundInclusive else beforeOrAtOffset
+          val rewoundBoundInclusive: Offset = boundInclusive.min(beforeOrAtOffset)
+
           // wiring through, needed
           firstUnsafeOffsetComputation
             .perform(rewoundBoundInclusive, safeToPruneCommitmentState)
@@ -208,9 +208,8 @@ class PruningProcessor(
               val result = firstUnsafeOffset
                 .map(_.offset)
                 .flatMap(_.decrement)
-                .map(safeOffset =>
-                  if (safeOffset > rewoundBoundInclusive) rewoundBoundInclusive else safeOffset
-                )
+                .map(safeOffset => safeOffset.min(rewoundBoundInclusive))
+
               logger.debug(
                 s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
               )
@@ -313,15 +312,6 @@ class PruningProcessor(
       synchronizerOffsets,
     )
 
-  private def lookUpPrunableInternalContractIds(
-      fromExclusive: Option[Offset],
-      upToInclusive: Offset,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Long]] =
-    participantNodePersistentState.value.ledgerApiStore.prunableContracts(
-      fromExclusive,
-      upToInclusive,
-    )
-
   private def ensurePruningOffsetIsSafe(
       offset: Offset,
       safeToPruneCommitmentState: Option[
@@ -360,22 +350,6 @@ class PruningProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       cutoffs <- lookUpSynchronizerAndParticipantPruningCutoffs(fromExclusive, upToInclusive)
-
-      prunableInternalContractIds <- lookUpPrunableInternalContractIds(
-        fromExclusive = fromExclusive,
-        upToInclusive = upToInclusive,
-      )
-      prunableContractIds <- participantNodePersistentState.value.contractStore
-        .lookupBatchedContractIdsNonReadThrough(prunableInternalContractIds)
-        .map(_.values)
-
-      // We must prune the contract store even if the event log is empty, because there is not necessarily an
-      // archival event reassigned-away contracts.
-      _ = logger.debug("Pruning contract store...")
-      _ <- participantNodePersistentState.value.contractStore.deleteIgnoringUnknown(
-        prunableContractIds
-      )
-
       _ <- cutoffs.synchronizerOffsets.parTraverse(pruneSynchronizer)
       _ <- cutoffs.globalOffsetO.fold(FutureUnlessShutdown.unit) {
         case (globalOffset, publicationTime) =>

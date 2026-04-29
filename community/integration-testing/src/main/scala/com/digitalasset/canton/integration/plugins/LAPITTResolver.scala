@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.language.LanguageVersion
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
@@ -28,11 +29,11 @@ object LAPITTResolver {
 
   def download(
       release: LAPITTRelease,
-      lfVersion: UseLedgerApiTestTool.LfVersion,
+      lfVersion: LanguageVersion,
       destination: File,
       logger: TracedLogger,
   )(implicit tc: TraceContext): Try[Unit] = {
-    val filename = s"ledger-api-test-tool${lfVersion.testToolSuffix}-${release.version}.jar"
+    val filename = s"ledger-api-test-tool-$lfVersion-${release.version}.jar"
     val uri =
       s"https://canton-public-releases.s3.amazonaws.com/ledger-api-test-tool/${release.version}/$filename"
     LAPITTResolver.download(uri, destination, logger, HttpClient.newHttpClient, retries = 1)
@@ -87,6 +88,8 @@ object LAPITTResolver {
 
 final case class LAPITTRelease(version: String) {
   private val versionPattern: Regex = """^(\d+\.\d+\.\d+)-(ad-hoc|snapshot)\.(\d{8}\.\d{4}).*""".r
+  // 3.4.0-ad-hoc.20240917.1234
+  // 3.4.1-rc
 
   // the major.minor.patch part of the version
   def baseVersion: Option[String] = version match {

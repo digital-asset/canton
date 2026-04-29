@@ -596,17 +596,21 @@ class OnboardingClearanceScheduler(
               // Case 2: Offboarding (Remove op, participant was a host)
               val isOffboarding = op == TopologyChangeOp.Remove && hosting.isDefined
 
-              Option.when(isClearance || isOffboarding)(ptp.partyId)
+              // Case 3: Eviction (Replace op, participant is no longer a host)
+              val isEviction = op == TopologyChangeOp.Replace && hosting.isEmpty
+
+              Option.when(
+                pendingClearances
+                  .contains(ptp.partyId) && (isClearance || isOffboarding || isEviction)
+              )(ptp.partyId)
             }
           }
           .toSet
 
         partiesToRemove.foreach { party =>
-          if (pendingClearances.contains(party)) {
-            logger.info(
-              s"Detected effective clearance or offboarding for party $party (at $effectiveTimestamp). Removing pending clearance task."
-            )
-          }
+          logger.info(
+            s"Detected effective clearance or offboarding for party $party (at $effectiveTimestamp). Removing pending clearance task."
+          )
         }
 
         pendingClearances --= partiesToRemove

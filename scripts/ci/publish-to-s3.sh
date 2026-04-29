@@ -41,17 +41,13 @@ run " copy scaladoc to s3" aws s3 cp --no-overwrite /tmp/workspace/scaladoc.tar.
 # run " copy test evidence to s3" aws s3 cp --no-overwrite /tmp/workspace/security-tests.csv "s3://canton-public-releases/releases/canton-security-tests-${RELEASE_SUFFIX}.csv"
 # run " copy test evidence to s3" aws s3 cp --no-overwrite /tmp/workspace/reliability-tests.csv "s3://canton-public-releases/releases/canton-reliability-tests-${RELEASE_SUFFIX}.csv"
 
-list=("2.1" "2.dev")
-for lf_version in "${list[@]}"
-do
-  ls -all "/tmp/workspace/community/ledger-test-tool/lf-v$lf_version/target/scala-2.13"
-  lapitt_filename="ledger-api-test-tool-${lf_version}-$RELEASE_SUFFIX.jar"
-  echo "Publishing $lapitt_filename"
+ls -all "/tmp/workspace/community/ledger-test-tool/target/scala-2.13"
+lapitt_filename="ledger-api-test-tool-2.2-$RELEASE_SUFFIX.jar"
+echo "Publishing $lapitt_filename"
 
-  run " copy jar to s3" aws s3 cp --no-overwrite \
-    "/tmp/workspace/community/ledger-test-tool/lf-v$lf_version/target/scala-2.13/$lapitt_filename" \
-    "s3://canton-public-releases/ledger-api-test-tool/$RELEASE_SUFFIX/$lapitt_filename"
-done
+run " copy jar to s3" aws s3 cp --no-overwrite \
+  "/tmp/workspace/community/ledger-test-tool/target/scala-2.13/$lapitt_filename" \
+  "s3://canton-public-releases/ledger-api-test-tool/$RELEASE_SUFFIX/$lapitt_filename"
 
 # this invalidation is probably unneeded as it's unlikely any prior file has been cached with the same path
 # however it's easy and cheap, so can't hurt

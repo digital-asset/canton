@@ -43,9 +43,11 @@ Canton documentation
   sdk/tutorials/json-api/canton_and_the_json_ledger_api
   sdk/tutorials/json-api/canton_and_the_json_ledger_api_ts
   sdk/tutorials/json-api/canton_and_the_json_ledger_api_ts_websocket
+  sdk/tutorials/json-api/canton_and_the_json_ledger_api_ts_multisync
 
   sdk/sdlc-howtos/applications/develop/manage-daml-packages
   sdk/sdlc-howtos/applications/develop/manage-daml-parties
+  sdk/sdlc-howtos/applications/develop/best-practices-multi-synchronizer
   sdk/explanations/external-signing/external_signing_overview
   sdk/explanations/external-signing/external_signing_hashing_algorithm
   sdk/explanations/json-api/index

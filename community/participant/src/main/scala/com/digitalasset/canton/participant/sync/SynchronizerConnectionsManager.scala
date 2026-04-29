@@ -46,6 +46,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownAlias
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
+import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.FullAutomaticLsuRequest
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceBecamePassive,
   SyncServiceFailedSynchronizerConnection,
@@ -61,7 +62,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   NoAutomaticLsuHandler,
   PerformLsuHandler,
 }
-import com.digitalasset.canton.participant.synchronizer.{PendingLsuOperation, *}
+import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -90,11 +91,13 @@ import com.digitalasset.daml.lf.engine.Engine
 import com.google.common.collect.{BiMap, HashBiMap}
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
+import io.scalaland.chimney.dsl.*
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
+import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters.*
@@ -175,34 +178,6 @@ private[sync] class SynchronizerConnectionsManager(
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
   val connectedSynchronizers: ConnectedSynchronizers = new ConnectedSynchronizers()
-
-  lazy val automaticLogicalSynchronizerUpgrade: AutomaticLogicalSynchronizerUpgrade =
-    new AutomaticLogicalSynchronizerUpgrade(
-      synchronizerConnectionConfigStore,
-      ledgerApiIndexer,
-      syncPersistentStateManager,
-      connectQueue,
-      connectedSynchronizers,
-      connectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-        connectSynchronizer(
-          alias.value,
-          keepRetrying = true,
-          connectSynchronizer = ConnectSynchronizer.Connect,
-          /*
-          After LSU, the likelihood of a failure of the first connection attempt is higher than
-          with normal connects. Sequencers might not be ready yet and/or be hammered with requests.
-          Hence, we decrease the level from WARN to INFO.
-           */
-          logLevelFailureInitialAttempt = Level.INFO,
-        )(alias.traceContext),
-      disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-        disconnectSynchronizer(alias.value)(alias.traceContext),
-      metrics,
-      pendingLsuOperationsStore,
-      parameters.lsuConfig,
-      timeouts,
-      loggerFactory,
-    )
 
   connectedSynchronizersLookupContainer.registerDelegate(connectedSynchronizers)
 
@@ -1513,7 +1488,33 @@ private[sync] class SynchronizerConnectionsManager(
         s"Upgrade time ${synchronizerSuccessor.upgradeTime} not reached: last event in the sequenced event store has timestamp ${event.timestamp}",
       )
 
-      _ <- automaticLogicalSynchronizerUpgrade.upgrade(alias, currentPsid, synchronizerSuccessor)
+      upgrader = new AutomaticLogicalSynchronizerUpgrade(
+        synchronizerConnectionConfigStore,
+        ledgerApiIndexer,
+        syncPersistentStateManager,
+        connectQueue,
+        connectedSynchronizers,
+        connectSynchronizer = tc =>
+          connectSynchronizer(
+            alias,
+            keepRetrying = true,
+            connectSynchronizer = ConnectSynchronizer.Connect,
+            /*
+            After LSU, the likelihood of a failure of the first connection attempt is higher than
+            with normal connects. Sequencers might not be ready yet and/or be hammered with requests.
+            Hence, we decrease the level from WARN to INFO.
+             */
+            logLevelFailureInitialAttempt = Level.INFO,
+          )(tc),
+        disconnectSynchronizer = disconnectSynchronizer(alias)(_),
+        metrics,
+        pendingLsuOperationsStore,
+        parameters.lsuConfig,
+        timeouts,
+        loggerFactory.append("lsu", synchronizerSuccessor.psid.suffix),
+      )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor))
+
+      _ <- upgrader.upgrade()
     } yield ()
   }
 
@@ -1539,14 +1540,15 @@ private[sync] class SynchronizerConnectionsManager(
           synchronizerConnectionConfigStore,
           connectQueue,
           connectedSynchronizers,
-          disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-            disconnectSynchronizer(alias.value)(alias.traceContext),
+          disconnectSynchronizer =
+            disconnectSynchronizer(request.successorConfig.synchronizerAlias)(_),
           metrics,
           pendingLsuOperationsStore,
           parameters.lsuConfig,
           timeouts,
-          loggerFactory,
-        ).upgrade(request)
+          loggerFactory.append("lsu", request.successorPsid.suffix),
+        )(request.into[LogicalSynchronizerUpgrade.LateLsuRequest].enableMethodAccessors.transform)
+          .upgrade()
     } yield ()
 
   def performManualLsu(
@@ -1565,14 +1567,13 @@ private[sync] class SynchronizerConnectionsManager(
         syncPersistentStateManager,
         connectQueue,
         connectedSynchronizers,
-        connectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
+        connectSynchronizer = tc =>
           connectSynchronizer(
-            alias.value,
+            alias,
             keepRetrying = true,
             connectSynchronizer = ConnectSynchronizer.Connect,
-          )(alias.traceContext),
-        disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-          disconnectSynchronizer(alias.value)(alias.traceContext),
+          )(tc),
+        disconnectSynchronizer = disconnectSynchronizer(alias)(_),
         metrics,
         pendingLsuOperationsStore,
         parameters.lsuConfig,
@@ -1752,47 +1753,50 @@ object SynchronizerConnectionsManager {
 
     /** These two maps should stay private. Read-only interface is provided by
       * [[ConnectedSynchronizersLookup]]
+      *
+      * Reads and writes are synchronized using the logs. As such, we don't use thread safe
+      * collections.
       */
-    private val connected: TrieMap[PhysicalSynchronizerId, ConnectedSynchronizer] = TrieMap()
+    private val connected: mutable.HashMap[PhysicalSynchronizerId, ConnectedSynchronizer] =
+      mutable.HashMap.empty
     private val lsidToPsid: BiMap[SynchronizerId, PhysicalSynchronizerId] = HashBiMap.create
     private val lock = new Mutex()
 
-    def get(psid: PhysicalSynchronizerId): Option[ConnectedSynchronizer] = connected.get(psid)
+    def get(psid: PhysicalSynchronizerId): Option[ConnectedSynchronizer] =
+      lock.exclusive(connected.get(psid))
+
     def get(lsid: SynchronizerId): Option[ConnectedSynchronizer] =
-      lock.exclusive {
-        Option(lsidToPsid.get(lsid)).flatMap(connected.get)
-      }
+      lock.exclusive(Option(lsidToPsid.get(lsid)).flatMap(connected.get))
 
     override def getAcsInspection(synchronizerId: SynchronizerId): Option[AcsInspection] =
       get(synchronizerId).map(_.persistent.acsInspection)
 
     override def isConnected(synchronizerId: SynchronizerId): Boolean = get(synchronizerId).nonEmpty
 
-    override def isConnectedToAny: Boolean = connected.nonEmpty
+    override def isConnectedToAny: Boolean = lock.exclusive(connected.nonEmpty)
 
-    def lsids: Set[SynchronizerId] = lsidToPsid.keySet().asScala.toSet
-    def psids: Set[PhysicalSynchronizerId] = lsidToPsid.values().asScala.toSet
-    def snapshot: Map[PhysicalSynchronizerId, ConnectedSynchronizer] = connected.toMap
+    def lsids: Set[SynchronizerId] = lock.exclusive(lsidToPsid.keySet().asScala.toSet)
+    def psids: Set[PhysicalSynchronizerId] = lock.exclusive(lsidToPsid.values().asScala.toSet)
+    def snapshot: Map[PhysicalSynchronizerId, ConnectedSynchronizer] =
+      lock.exclusive(connected.toMap)
 
     def tryAdd(connectedSynchronizer: ConnectedSynchronizer): Unit = {
       val lsid = connectedSynchronizer.psid.logical
       val psid = connectedSynchronizer.psid
 
-      {
-        lock.exclusive {
-          if (connected.isDefinedAt(psid))
-            throw new IllegalArgumentException(
-              s"Cannot add $psid because the node is already connected to it"
-            )
+      lock.exclusive {
+        if (connected.isDefinedAt(psid))
+          throw new IllegalArgumentException(
+            s"Cannot add $psid because the node is already connected to it"
+          )
 
-          if (lsidToPsid.containsKey(lsid))
-            throw new IllegalArgumentException(
-              s"Cannot add $psid because the node is already connected to $lsid"
-            )
+        if (lsidToPsid.containsKey(lsid))
+          throw new IllegalArgumentException(
+            s"Cannot add $psid because the node is already connected to $lsid"
+          )
 
-          connected.addOne(psid -> connectedSynchronizer)
-          lsidToPsid.put(lsid, psid).discard
-        }
+        connected.addOne(psid -> connectedSynchronizer)
+        lsidToPsid.put(lsid, psid).discard
       }
     }
 

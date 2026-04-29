@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -18,6 +20,7 @@ import com.digitalasset.canton.platform.config.{
   UpdatesStreamsConfig,
 }
 import com.digitalasset.canton.platform.store.*
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.PruningContractsBlockedException
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
@@ -27,7 +30,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.actor.Scheduler
+import org.apache.pekko.pattern
 
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -56,6 +62,9 @@ private[platform] class JdbcLedgerDao(
     contractStore: LedgerApiContractStore,
     achsStateCache: AchsStateCache,
     pruningOffsetService: PruningOffsetService,
+    contractPruningMaxRetries: Int,
+    contractPruningDelayBeforeRetry: FiniteDuration,
+    scheduler: Scheduler,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
     with NamedLogging {
@@ -154,7 +163,53 @@ private[platform] class JdbcLedgerDao(
         case Failure(ex) =>
           logger.warn("Pruning failed", ex)
       }
+      .flatMap(_ =>
+        pattern.retry(
+          attempt = () => pruneContracts(),
+          shouldRetry = (_: Unit, t: Throwable) =>
+            t match {
+              case _: PruningContractsBlockedException => true
+              case _ => false
+            },
+          attempts = contractPruningMaxRetries + 1,
+          delayFunction = attempt => {
+            // tracking each attempt individually
+            metrics.services.pruning.contractPruningRetried
+              .mark(attempt.toLong)(MetricsContext.Empty)
+            // fix delay between retries
+            Some(contractPruningDelayBeforeRetry)
+          },
+        )(commandExecutionContext, scheduler)
+      )
+      .transform {
+        case Success(()) =>
+          logger.info(s"Completed pruning of contracts")
+          Success(())
+        case Failure(_: PruningContractsBlockedException) =>
+          metrics.services.pruning.contractPruningBlocked.inc()
+          Failure(
+            LedgerApiErrors.ParticipantContractPruningBlocked
+              .Reject(
+                retries = contractPruningMaxRetries,
+                delay = contractPruningDelayBeforeRetry,
+              )
+              .asGrpcError
+          )
+        case Failure(t) =>
+          logger.warn("Pruning of contracts failed", t)
+          Failure(t)
+      }
   }
+
+  private def pruneContracts()(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
+    for {
+      _ <- dbDispatcher.executeSql(
+        metrics.index.db.cleanPruningCandidateContractsDbMetrics
+      )(implicit conn => readStorageBackend.eventStorageBackend.cleanPruningCandidates())
+      prunedInternalContractIds <- dbDispatcher.executeSql(
+        metrics.index.db.pruneContractsDbMetrics
+      )(implicit conn => readStorageBackend.eventStorageBackend.pruneContracts())
+    } yield contractStore.contractsPruned(prunedInternalContractIds)
 
   def indexDbPrunedUpTo(implicit
       loggingContext: LoggingContextWithTrace

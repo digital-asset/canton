@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.integration.util
 
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.completion.Completion
@@ -417,6 +418,10 @@ object TestSubmissionService {
       enableLfDev: Boolean = false,
       contractStateMode: NextGenContractStateMachine.Mode =
         NextGenContractStateMachine.Mode.devDefault,
+      resolveContractOverride: LfContractId => OptionT[
+        Future,
+        FatContractInstance,
+      ] = _ => OptionT[Future, FatContractInstance](Future.successful(None)),
   )(implicit env: TestConsoleEnvironment): TestSubmissionService = {
     import env.*
 
@@ -438,10 +443,14 @@ object TestSubmissionService {
     def resolveContract(
         coid: LfContractId
     )(traceContext: TraceContext): Future[Option[FatContractInstance]] =
-      participantNode.sync.participantNodePersistentState.value.contractStore
-        .lookupFatContract(coid)(traceContext)
+      resolveContractOverride(coid)
+        .orElse(
+          participantNode.sync.participantNodePersistentState.value.contractStore
+            .lookupFatContract(coid)(traceContext)
+            .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("TestSubmissionService"))
+            .widen[FatContractInstance]
+        )
         .value
-        .failOnShutdownToAbortException("TestSubmissionService")
 
     val keyResolver = customKeyResolver.getOrElse(ActiveKeyResolver(participant))
 

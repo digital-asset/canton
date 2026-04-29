@@ -63,46 +63,45 @@ object DamlPlugin extends AutoPlugin {
     val damlPinProjects =
       taskKey[Seq[File]]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlStudio = taskKey[Unit]("Open Daml studio for all projects in scope")
-
-    lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
-      sourceGenerators += damlGenerateJava.taskValue,
-      resourceGenerators += damlBuild.taskValue,
-      damlSourceDirectory := sourceDirectory.value / "daml",
-      damlCompileDirectory := target.value / "daml",
-      damlDarOutput := resourceManaged.value,
-      damlDarLfVersions := Seq("default"),
-      damlExtractMainDalf := false,
-      damlDependencies := Seq(),
-      damlJavaCodegenOutput := codegenOutput(configuration.value, target.value, "java"),
-      damlTsCodegenOutput := codegenOutput(configuration.value, target.value, "ts"),
-      damlBuildOrder := Seq(),
-      damlJavaCodegen := Seq(),
-      damlTsCodegen := Seq(),
-      useVersionedDarName := false,
-      damlGenerateJava := damlGenerateJavaTask.value,
-      damlGenerateTs := damlGenerateTsTask.value,
-      managedSourceDirectories += damlJavaCodegenOutput.value,
-      damlBuild := damlBuildTask.value,
-      // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
-      (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
-      damlPinProjects := damlPinProjectsTask.value,
-    )
   }
 
   import autoImport._
 
-  class BufferedLogger extends ProcessLogger {
-    private val buffer = mutable.Buffer[String]()
+  override lazy val buildSettings: Seq[Def.Setting[_]] = Seq(
+    damlCompilerVersion := Dependencies.daml_compiler_version,
+    damlUseCustomVersion := Dependencies.use_custom_daml_version,
+    dpmRegistry := Dependencies.dpm_registry,
+    damlInstall := installDaml.value,
+    damlPinnedProjects := Seq(),
+    damlDarLfVersions := Seq("default"),
+    damlExtractMainDalf := false,
+    damlDependencies := Seq(),
+    useVersionedDarName := false,
+  )
 
-    override def out(s: => String): Unit = buffer.append(s)
-    override def err(s: => String): Unit = buffer.append(s)
-    override def buffer[T](f: => T): T = f
+  override lazy val projectSettings: Seq[Def.Setting[_]] =
+    inConfig(Compile)(baseDamlPluginSettings) ++
+      inConfig(Test)(baseDamlPluginSettings)
 
-    /** Output the buffered content to a String applying an optional line prefix.
-      */
-    def output(linePrefix: String = ""): String =
-      buffer.map(l => s"$linePrefix$l").mkString(System.lineSeparator)
-  }
+  private lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
+    sourceGenerators += damlGenerateJava.taskValue,
+    resourceGenerators += damlBuild.taskValue,
+    damlSourceDirectory := sourceDirectory.value / "daml",
+    damlCompileDirectory := target.value / "daml",
+    damlDarOutput := resourceManaged.value,
+    damlJavaCodegenOutput := codegenOutput(configuration.value, target.value, "java"),
+    damlTsCodegenOutput := codegenOutput(configuration.value, target.value, "ts"),
+    damlBuildOrder := Seq(),
+    damlJavaCodegen := Seq(),
+    damlTsCodegen := Seq(),
+    damlGenerateJava := damlGenerateJavaTask.value,
+    damlGenerateTs := damlGenerateTsTask.value,
+    managedSourceDirectories += damlJavaCodegenOutput.value,
+    damlBuild := damlBuildTask.value,
+    // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
+    (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
+    damlPinProjects := damlPinProjectsTask.value,
+  )
 
   def damlStablePackagesManifest = Def.task {
     damlInstall.value
@@ -183,18 +182,6 @@ object DamlPlugin extends AutoPlugin {
     }
     Seq(resource)
   }
-
-  override lazy val buildSettings: Seq[Def.Setting[_]] = Seq(
-    damlCompilerVersion := Dependencies.daml_compiler_version,
-    damlUseCustomVersion := Dependencies.use_custom_daml_version,
-    dpmRegistry := Dependencies.dpm_registry,
-    damlInstall := installDaml.value,
-    damlPinnedProjects := Seq(),
-  )
-
-  override lazy val projectSettings: Seq[Def.Setting[_]] =
-    inConfig(Compile)(baseDamlPluginSettings) ++
-      inConfig(Test)(baseDamlPluginSettings)
 
   // in-memory cache for damlInstall
   // we don't use a file cache, because sbt file cache and dpm cache can be out-of-sync on CI
@@ -531,10 +518,7 @@ object DamlPlugin extends AutoPlugin {
         ""
 
     val lfVersionSuffix =
-      if (useLfVersionAsSuffix)
-        s"-v${outputLfVersion.replace(".", "")}"
-      else
-        ""
+      if (useLfVersionAsSuffix) s"-v${outputLfVersion.replace(".", "")}" else ""
 
     val versionSuffix =
       if (useVersionedDarName)
@@ -561,7 +545,7 @@ object DamlPlugin extends AutoPlugin {
     runCommand(
       Seq("dpm", "build") ++ buildOptions ++ outputOpts ++ targetOpts,
       projectBuildDirectory,
-      extraEnv = Seq("DAML_VERSION" -> damlVersion),
+      extraEnv = Seq("DAML_VERSION" -> damlVersion, "LF_VERSION_SUFFIX" -> lfVersionSuffix),
     )(failureMessage = s"dpm build failed [$originalDamlProjectFile]")
 
     if (shouldExtractMainDalf) {
@@ -641,7 +625,7 @@ object DamlPlugin extends AutoPlugin {
     runCommand(
       Seq("dpm", "codegen-java") ++ outputOpts ++ Seq(s"${darFile.getAbsolutePath}=$packageName"),
       damlPackageDirectory,
-      extraEnv = Seq("DAML_VERSION" -> damlVersion),
+      extraEnv = Seq("DAML_VERSION" -> damlVersion, "LF_VERSION_SUFFIX" -> ""),
     )(failureMessage = s"dpm codegen-java failed [${darFile.getName}]")
   }
 
@@ -673,7 +657,7 @@ object DamlPlugin extends AutoPlugin {
     runCommand(
       Seq("dpm", "codegen-js") ++ outputOpts ++ Seq(darFile.getAbsolutePath),
       damlPackageDirectory,
-      extraEnv = Seq("DAML_VERSION" -> damlVersion),
+      extraEnv = Seq("DAML_VERSION" -> damlVersion, "LF_VERSION_SUFFIX" -> ""),
     )(failureMessage = s"dpm codegen-js failed [${darFile.getName}]")
   }
 
@@ -688,5 +672,18 @@ object DamlPlugin extends AutoPlugin {
         val logs = logger.output(s"$commandName: ")
         throw new MessageOnlyException(s"$failureMessage: ${cause.getMessage}\n" + logs)
     }
+  }
+
+  class BufferedLogger extends ProcessLogger {
+    private val buffer = mutable.Buffer[String]()
+
+    override def out(s: => String): Unit = buffer.append(s)
+    override def err(s: => String): Unit = buffer.append(s)
+    override def buffer[T](f: => T): T = f
+
+    /** Output the buffered content to a String applying an optional line prefix.
+      */
+    def output(linePrefix: String = ""): String =
+      buffer.map(l => s"$linePrefix$l").mkString(System.lineSeparator)
   }
 }
