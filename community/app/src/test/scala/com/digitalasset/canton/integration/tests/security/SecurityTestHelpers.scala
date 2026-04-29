@@ -198,7 +198,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
                   .protocolMessage
               )
               requestsB ++= allProtocolMessages.collect {
-                case encryptedView: EncryptedViewMessage[ViewType] => encryptedView
+                case encryptedViewMessage: EncryptedViewMessage[ViewType] => encryptedViewMessage
               }
             }
           }

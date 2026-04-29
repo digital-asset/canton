@@ -1894,7 +1894,7 @@ jobs:
                 name: Abort if data continuity have been already generated or for nightly non-weekly releases
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
-                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.Create.\*DataContinuityDumpsPostgres_all.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.manual\.ProtobufCompatibilityWriterTest '
+                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.Create.\*DataContinuityDumpsPostgres_all.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.ProtobufCompatibilityWriterTest '
                 num_test_buckets: "1"
                 timeout: 1h
             - run:

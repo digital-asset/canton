@@ -50,11 +50,13 @@ import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, D
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
+import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.{
   DbSupport,
   FlywayMigrations,
+  LedgerApiContractStore,
   LedgerApiContractStoreImpl,
   PruningOffsetService,
 }
@@ -128,6 +130,8 @@ trait IndexComponentTest
   private def testServices: TestServices =
     Option(testServicesRef.get())
       .getOrElse(throw new Exception("TestServices not initialized. Not accessing from a test?"))
+
+  protected def contractStore: LedgerApiContractStore = testServices.participantContractStore
 
   private def ledgerEndOffset = testServices.index.currentLedgerEnd().futureValue
 
@@ -289,18 +293,13 @@ trait IndexComponentTest
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
-  @scala.annotation.unused
-  protected def incompleteOffsets(
-      _o: Offset,
-      _p: Option[Set[Ref.Party]],
-      _tc: TraceContext,
-  ): FutureUnlessShutdown[Vector[Offset]] = FutureUnlessShutdown.pure(Vector.empty)
+  protected lazy val stringInterning = new StringInterningView(loggerFactory)
 
   private lazy val engine =
     new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
   private lazy val participantId =
     Ref.ParticipantId.assertFromString("index-component-test-participant-id")
-  private lazy val pruningOffsetService = new PruningOffsetService {
+  protected lazy val pruningOffsetService = new PruningOffsetService {
     override def pruningOffset(implicit
         traceContext: TraceContext
     ): Future[Option[Offset]] = index.indexDbPrunedUpto
@@ -312,7 +311,10 @@ trait IndexComponentTest
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
       repairMode: Boolean,
-  ): ResourceOwner[(IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport)] =
+      incompleteOffsets: Seq[Offset],
+  ): ResourceOwner[
+    (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+  ] =
     for {
       dbStorage <- ResourceOwner
         .forCloseable(() =>
@@ -345,7 +347,7 @@ trait IndexComponentTest
         LedgerApiServerMetrics.ForTesting,
       )
       mutableLedgerEndCache = MutableLedgerEndCache()
-      stringInterningView = new StringInterningView(loggerFactory)
+      stringInterningView = stringInterning
       (inMemoryState, updaterFlow) <- LedgerApiServerInternals.createInMemoryStateAndUpdater(
         participantId = participantId,
         commandProgressTracker = CommandProgressTracker.NoOp,
@@ -421,7 +423,7 @@ trait IndexComponentTest
         inMemoryState = inMemoryState,
         tracer = NoReportingTracerProvider.tracer,
         loggerFactory = loggerFactory,
-        incompleteOffsets = incompleteOffsets,
+        incompleteOffsets = (_, _, _) => FutureUnlessShutdown.pure(incompleteOffsets.toVector),
         contractLoader = contractLoader,
         getPackageMetadataSnapshot = _ => PackageMetadata(),
         lfValueTranslation = new LfValueTranslation(
@@ -444,15 +446,17 @@ trait IndexComponentTest
         materializer = materializer,
         updateServiceConfig = updateServiceConfig,
       )
-    } yield (indexService, indexer, participantContractStore, dbSupport)
+    } yield (indexService, indexer, participantContractStore, dbSupport, inMemoryState)
 
   private def acquireServices(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
       repairMode: Boolean,
+      incompleteOffsets: Seq[Offset],
   )(implicit resourceContext: ResourceContext): Unit = {
-    val indexResource = indexResourceOwner(config, serviceConfig, repairMode).acquire()
-    val (index, indexer, participantContractStore, dbSupport) =
+    val indexResource =
+      indexResourceOwner(config, serviceConfig, repairMode, incompleteOffsets).acquire()
+    val (index, indexer, participantContractStore, dbSupport, inMemoryState) =
       indexResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
 
     testServicesRef.set(
@@ -462,6 +466,7 @@ trait IndexComponentTest
         indexer = indexer,
         participantContractStore = participantContractStore,
         dbSupport = dbSupport,
+        inMemoryState = inMemoryState,
       )
     )
   }
@@ -473,17 +478,23 @@ trait IndexComponentTest
       config: IndexerConfig = indexerConfig,
       serviceConfig: IndexServiceConfig = indexServiceConfig,
       repairMode: Boolean = false,
+      incompleteOffsets: Seq[Offset] = Vector.empty,
   ): Unit = {
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     testServices.indexResource.release().futureValue
-    acquireServices(config, serviceConfig, repairMode)
+    acquireServices(config, serviceConfig, repairMode, incompleteOffsets)
   }
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
-    acquireServices(config = indexerConfig, serviceConfig = indexServiceConfig, repairMode = false)
+    acquireServices(
+      config = indexerConfig,
+      serviceConfig = indexServiceConfig,
+      repairMode = false,
+      incompleteOffsets = Vector.empty,
+    )
   }
 
   override def afterAll(): Unit = {
@@ -743,7 +754,7 @@ trait IndexComponentTest
       party: Ref.Party,
       updateIdS: String,
       withAcsChange: Boolean,
-      createNode: Node.Create,
+      createNodes: Seq[Node.Create],
   ): Update.ReassignmentAccepted = {
     val synchronizer1 = SynchronizerId.tryFromString("x::synchronizer1")
     val synchronizer2 = SynchronizerId.tryFromString("x::synchronizer2")
@@ -763,13 +774,24 @@ trait IndexComponentTest
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
             ledgerEffectiveTime = Time.Timestamp.now(),
-            createNode = createNode,
+            createNode = createNodes.head,
             contractAuthenticationData = Bytes.Empty,
             reassignmentCounter = 15L,
             nodeId = 0,
             internalContractId =
               -1, // will be filled when contracts are stored in the participant contract store
-          )
+          ),
+          createNodes.tail.map(createNode =>
+            Reassignment.Assign(
+              ledgerEffectiveTime = Time.Timestamp.now(),
+              createNode = createNode,
+              contractAuthenticationData = Bytes.Empty,
+              reassignmentCounter = 15L,
+              nodeId = 0,
+              // will be filled when contracts are stored in the participant contract store
+              internalContractId = -1,
+            )
+          )*
         ),
         repairCounter = RepairCounter.Genesis,
         recordTime = CantonTimestamp(recordTime),
@@ -790,13 +812,24 @@ trait IndexComponentTest
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
             ledgerEffectiveTime = Time.Timestamp.now(),
-            createNode = createNode,
+            createNode = createNodes.head,
             contractAuthenticationData = Bytes.Empty,
             reassignmentCounter = 15L,
             nodeId = 0,
             internalContractId =
               -1, // will be filled when contracts are stored in the participant contract store
-          )
+          ),
+          createNodes.tail.map(createNode =>
+            Reassignment.Assign(
+              ledgerEffectiveTime = Time.Timestamp.now(),
+              createNode = createNode,
+              contractAuthenticationData = Bytes.Empty,
+              reassignmentCounter = 15L,
+              nodeId = 0,
+              // will be filled when contracts are stored in the participant contract store
+              internalContractId = -1,
+            )
+          )*
         ),
         repairCounter = RepairCounter.Genesis,
         recordTime = CantonTimestamp(recordTime),
@@ -827,6 +860,8 @@ trait IndexComponentTest
       contractInfos = sequenced.contractInfos,
     )
 
+  protected def dbDispatcher: DbDispatcher = testServices.dbSupport.dbDispatcher
+  protected def ledgerEndCache: MutableLedgerEndCache = testServices.inMemoryState.ledgerEndCache
 }
 
 object IndexComponentTest {
@@ -839,5 +874,6 @@ object IndexComponentTest {
       indexer: FutureQueue[Update],
       participantContractStore: LedgerApiContractStoreImpl,
       dbSupport: DbSupport,
+      inMemoryState: InMemoryState,
   )
 }

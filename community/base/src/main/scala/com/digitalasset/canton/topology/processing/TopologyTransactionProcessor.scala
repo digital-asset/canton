@@ -411,8 +411,14 @@ class TopologyTransactionProcessor(
     }
   }
 
-  override def onClosed(): Unit =
+  override def onClosed(): Unit = {
+    // TODO(i32384): remove this log when the investigation is done.
+    noTracingLogger.debug(
+      "TopologyTransactionProcessor close initiated",
+      new Throwable("close origin stack"),
+    )
     LifeCycle.close(cache, serializer)(logger)
+  }
 
   private val maxSequencedTimeAtInitializationF =
     TraceContext.withNewTraceContext("max_sequenced_time")(implicit traceContext =>

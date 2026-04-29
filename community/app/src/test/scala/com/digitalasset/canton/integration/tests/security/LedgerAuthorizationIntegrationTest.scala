@@ -43,6 +43,7 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageUtils.Optics.signatureLens
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
@@ -1713,12 +1714,8 @@ trait LedgerAuthorizationIntegrationTest
       val removeSubmitterSignature = GenLens[TransactionConfirmationRequest](_.viewEnvelopes)
         .andThen(Traversal.fromTraverse[Seq, OpenEnvelope[TransactionViewMessage]])
         .andThen(GenLens[OpenEnvelope[TransactionViewMessage]](_.protocolMessage))
-        .modify(transactionViewMessage =>
-          transactionViewMessage
-            .asInstanceOf[EncryptedViewMessage[TransactionViewType]]
-            .focus(_.submittingParticipantSignature)
-            .replace(badSignature)
-        )
+        .andThen(signatureLens[TransactionViewType])
+        .replace(badSignature)
 
       val (_, maliciousCaseEvents) =
         loggerFactory.assertLoggedWarningsAndErrorsSeq(

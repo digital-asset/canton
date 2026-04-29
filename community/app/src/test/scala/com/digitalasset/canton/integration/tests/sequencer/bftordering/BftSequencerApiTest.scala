@@ -54,6 +54,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
       maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
+      delayRequestsBeforeLsuTrafficInit = false,
     )
 
   override final def createSequencer(crypto: SynchronizerCryptoClient)(implicit

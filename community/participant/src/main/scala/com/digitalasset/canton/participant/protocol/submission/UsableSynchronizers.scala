@@ -171,13 +171,22 @@ object UsableSynchronizers {
       .allHaveActiveParticipants(parties)
       .leftMap(MissingActiveParticipant(synchronizerId, _))
 
-  private def unknownPackages(snapshot: TopologySnapshot, ledgerTime: CantonTimestamp)(
+  private def unknownPackages(
+      snapshot: TopologySnapshot,
+      ledgerTime: CantonTimestamp,
+      checkPackageDependencies: Boolean,
+  )(
       participantIdAndRequiredPackages: (ParticipantId, Set[LfPackageId])
   )(implicit
       tc: TraceContext
   ): FutureUnlessShutdown[UnknownOrUnvettedPackages] = {
     val (participantId, required) = participantIdAndRequiredPackages
-    snapshot.loadUnvettedPackagesOrDependencies(participantId, required, ledgerTime)
+    snapshot.loadUnvettedPackagesOrDependencies(
+      participantId,
+      required,
+      ledgerTime,
+      checkPackageDependencies,
+    )
   }
 
   private def resolveParticipants(
@@ -241,15 +250,17 @@ object UsableSynchronizers {
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, UnknownPackage, Unit] =
+  ): EitherT[FutureUnlessShutdown, UnknownPackage, Unit] = {
+    val checkPackageDependencies = synchronizerId.protocolVersion <= ProtocolVersion.v34
     EitherT(
       requiredPackages.toList
-        .parTraverse(unknownPackages(snapshot, ledgerTime))
+        .parTraverse(unknownPackages(snapshot, ledgerTime, checkPackageDependencies))
         .map(_.combineAll.unknownOrUnvetted.toList.flatMap { case (participantId, packageIds) =>
           packageIds.toSeq.map(packageId => PackageUnknownTo(packageId, participantId))
         })
         .map(u => NonEmpty.from(u).map(UnknownPackage(synchronizerId, _)).toLeft(()))
     )
+  }
 
   private def checkProtocolVersion(
       synchronizerId: PhysicalSynchronizerId,

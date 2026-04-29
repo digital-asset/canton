@@ -298,5 +298,23 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
       forAtLeast(1, logLines)(_ should endWith(expectedLine))
       checkOutput(processLogger)
     }
+
+    "sandbox started in nuck mode accepts packages containing keys" in { processLogger =>
+      Process("rm -f log/canton.log", Some(new java.io.File(cantonDir))) !
+      val scriptFile = new java.io.File(s"$resourceDir/scripts/nuck-smoke-test.canton")
+      val cmd = Seq(
+        "bin/canton",
+        "sandbox-interactive",
+        "--nuck",
+        "--no-tty",
+        s"-Dnuck-smoke-test.dar-path=$CantonTestsLF23Path",
+        "-Dnuck-smoke-test.package-name=CantonTestsLF23",
+      )
+      Process(cmd, Some(new java.io.File(cantonDir))) #< scriptFile ! processLogger
+      val logLines = (File(cantonDir) / "log" / "canton.log").lines()
+      val expectedLine = "NUCK: Smoke test success"
+      forAtLeast(1, logLines)(_ should endWith(expectedLine))
+      checkOutput(processLogger)
+    }
   }
 }

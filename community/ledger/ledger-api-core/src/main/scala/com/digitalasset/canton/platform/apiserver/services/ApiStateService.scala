@@ -149,19 +149,25 @@ final class ApiStateService(
           case Some(offset) => Future(Some(offset))
           case None => updateService.currentLedgerEnd()
         }
-        activeContractsWithPointer <- acsService
-          .getActiveContracts(
-            eventFormat,
-            activeAtOffset,
-            rangeInfo = AcsRangeInfo(
-              continuationPointer = pointer,
-              requestChecksum = AcsContinuationToken.emptyChecksum,
-              limit = Some(maxPageSize + 1L),
-            ),
-          )
-          .runWith(
-            Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]]
-          )
+        activeContractsWithPointer <- withEnrichedLoggingContext(
+          logging.eventFormat(eventFormat),
+          logging.maxPageSize(maxPageSize),
+          logging.activeAtOffset(activeAtOffset),
+        ) { implicit loggingContext =>
+          acsService
+            .getActiveContracts(
+              eventFormat,
+              activeAtOffset,
+              rangeInfo = AcsRangeInfo(
+                continuationPointer = pointer,
+                requestChecksum = AcsContinuationToken.emptyChecksum,
+                limit = Some(maxPageSize + 1L),
+              ),
+            )
+            .runWith(
+              Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]]
+            )
+        }
       } yield {
         val responses = activeContractsWithPointer.take(maxPageSize)
         val moreItems = activeContractsWithPointer.sizeIs > maxPageSize

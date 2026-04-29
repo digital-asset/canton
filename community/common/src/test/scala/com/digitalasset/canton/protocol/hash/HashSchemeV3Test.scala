@@ -48,7 +48,7 @@ class HashSchemeV3Test extends BaseTest with AnyWordSpecLike with Matchers with 
     val nodeSeeds1 = Map(tx1.nodes.keys.loneElement -> seed1)
 
     val stableHash =
-      Hash.tryFromHexString("12206a9d55a1dec26c168d06f7425e04cfc7f51c608641d732fa2d3e646f8d794d66")
+      Hash.tryFromHexString("1220b85206ebb70d62fd830e32f4680dfd498d34a4246068bf25836798ecae31fc72")
     val stableTransactionHash =
       Hash.tryFromHexString("1220c63101d7e16740dad5b021c04835ec8e2ad13623916912be6a4f74388d545cc9")
     val stableMetadataHash =
@@ -68,7 +68,7 @@ class HashSchemeV3Test extends BaseTest with AnyWordSpecLike with Matchers with 
       )
       hashTracer.result shouldBe
         s"""'00000030' # Hash Purpose
-           |'02' # 02 (Hashing Scheme Version)
+           |'03' # 03 (Hashing Scheme Version)
            |'${unwrappedHex(stableTransactionHash)}' # Transaction
            |'${unwrappedHex(stableMetadataHash)}' # Metadata
            |""".stripMargin
@@ -82,7 +82,7 @@ class HashSchemeV3Test extends BaseTest with AnyWordSpecLike with Matchers with 
         nodeSeeds1,
         metadata,
       )
-      hash shouldBe stableHash
+      hash.toHexString shouldBe stableHash.toHexString
     }
 
     "create the same hash as v2 for transactions" in {

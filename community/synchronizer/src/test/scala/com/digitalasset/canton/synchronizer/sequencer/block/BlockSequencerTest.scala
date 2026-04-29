@@ -203,6 +203,7 @@ class BlockSequencerTest
         loggerFactory = loggerFactory,
         exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,
+        delayRequestsBeforeLsuTrafficInit = false,
       )
 
     override def close(): Unit = {

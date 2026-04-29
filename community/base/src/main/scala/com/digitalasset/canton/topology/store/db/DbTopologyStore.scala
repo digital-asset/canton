@@ -77,6 +77,15 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       : GetResult[GenericSignedTopologyTransaction] =
     SignedTopologyTransaction.createGetResultSynchronizerTopologyTransaction
 
+  override def onClosed(): Unit = {
+    // TODO(i32384): remove this log when the investigation is done.
+    noTracingLogger.debug(
+      s"DbTopologyStore($storeId) close initiated",
+      new Throwable("close origin stack"),
+    )
+    super.onClosed()
+  }
+
   override def fetchAllDescending(
       items: Seq[StateKeyFetch]
   )(implicit

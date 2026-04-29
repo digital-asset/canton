@@ -35,11 +35,9 @@ import java.util.zip.ZipFile
 import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
 import scala.util.control.NonFatal
+import java.io.IOException
 
 object BuildCommon {
-  lazy val publishToSonatypeEnabled =
-    Def.settingKey[Boolean]("enable publishing to Sonatype repository")
-
   lazy val sbtSettings: Seq[Setting[_]] = {
 
     def alsoTest(taskName: String) = s";$taskName; Test / $taskName"
@@ -93,24 +91,15 @@ object BuildCommon {
         // Remove all additional repository other than Maven Central from POM
         pomIncludeRepository := { _ => false },
         // Publishing to Sonatype must be enabled explicitly
-        publishToSonatypeEnabled := false,
+        Release.publishToSonatypeEnabled := false,
         // Do not publish a sub-project by default, explicitly turn on projects for publishing
         publish / skip := true,
         publishTo := {
-          val googleEnabled = !(Global / googleCredentialsDisable).value
-          val sonatypeEnabled = publishToSonatypeEnabled.value
-          val ver = version.value
-          if (!sonatypeEnabled && googleEnabled && !ver.contains("-SNAPSHOT")) {
-            Some(daArtifactRegistry)
-          } else {
-            // If Sonatype is enabled we publish to the local staging, which will be uploaded as a bundle.
-            // If Sonatype and Google Artifact Registry are not enabled, we also publish to
-            // local staging, to test the full publish task graph, including doc generation.
-            localStaging.value
-          }
+          if (Release.publishToGoogleArtifactRegistryEnabled.value) Some(daArtifactRegistry)
+          else localStaging.value
         },
         credentials ++= {
-          val sonatypeEnabled = publishToSonatypeEnabled.value
+          val sonatypeEnabled = Release.publishToSonatypeEnabled.value
           if (sonatypeEnabled) Release.sonatypeCredentialsEnv.toSeq else Seq.empty
         },
       )
@@ -505,13 +494,41 @@ object BuildCommon {
     publish / skip := true,
   )
 
-  lazy val publishCommunitySettings = Def.settings(
+  // Base of daml and Canton community settings
+  lazy val baseCommunitySettings = Def.settings(
     HouseRules.damlRepoHeaderSettings,
     licenses := List("Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
     // Some links are broken because of the modularization, as they refer to classes in downstream projects
     // This is allowed by unidoc, which computes the scaladoc of all projects at once
     // However, to build the doc JAR of individual projects, we need to allow missing links
     Compile / doc / scalacOptions += "-no-link-warnings",
+  )
+
+  // settings for libraries that we publish to GAR and Maven
+  lazy val enablePublishLibrary = Def.settings(
+    // all published libraries must share the same org name
+    organization := "com.daml",
+    publish / skip := false,
+    // skip upload to GAR if already uploaded
+    publish := {
+      val publishToGar = Release.publishToGoogleArtifactRegistryEnabled.value
+      val logger = streams.value.log
+      val moduleId = projectID.value
+      publish.result.value match {
+        case Inc(cause) =>
+          // sbt rejects uploads of artifacts that already exist. In case of GAR (unstable versions),
+          // we don't want to fail the CI, so we swallow the exception and log instead.
+          // The artifact won't be overwritten.
+          def isFileExistsException(e: Throwable): Boolean =
+            e.isInstanceOf[IOException] && e.getMessage.contains("destination file exists")
+          if (publishToGar && Incomplete.allExceptions(cause).forall(isFileExistsException)) {
+            logger.info(
+              s"Skipping publication of ${moduleId.organization}:${moduleId.name}:${moduleId.revision} to GAR because it already exists."
+            )
+          } else throw cause
+        case Value(value) => value
+      }
+    },
   )
 
   // settings for Java only project
@@ -521,7 +538,7 @@ object BuildCommon {
     autoScalaLibrary := false,
   )
 
-  lazy val sharedCommunitySettings = Def.settings(sharedSettings, publishCommunitySettings)
+  lazy val sharedCommunitySettings = Def.settings(sharedSettings, baseCommunitySettings)
 
   lazy val cantonWarts = {
     val prefix = "com.digitalasset.canton."
@@ -579,8 +596,8 @@ object BuildCommon {
   )
 
   lazy val sharedCantonCommunitySettings = Def.settings(
+    baseCommunitySettings,
     sharedCantonSettings,
-    publishCommunitySettings,
     Compile / bufLintCheck := (Compile / bufLintCheck)
       .dependsOn(DamlProjects.`google-common-protos-scala` / PB.unpackDependencies)
       .value,
@@ -706,10 +723,9 @@ object BuildCommon {
         `wartremover-annotations`
       )
       .settings(
+        baseCommunitySettings,
         sharedCantonSettingsExternal,
-        publishCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           better_files,
           cats,
@@ -735,8 +751,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           grpc_api,
           scalapb_runtime_grpc,
@@ -758,8 +773,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           better_files,
           logback_classic,
@@ -912,6 +926,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "foo-0.0.3.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v3",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "VettingMain",
+            (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
+            "com.digitalasset.canton.tests.vettingmain.v1",
+          ),
         ),
         Test / damlTsCodegen := Seq(
           (
@@ -977,8 +996,7 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           aws_kms,
           aws_sts,
@@ -1132,8 +1150,7 @@ object BuildCommon {
             "com.digitalasset.canton.examples",
           )
         ),
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
 
@@ -1256,8 +1273,7 @@ object BuildCommon {
       .dependsOn(`util-external`, `base-errors` % "compile->compile;test->test")
       .settings(
         sharedCantonCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           scalapb_runtime // not sufficient to include only through the `common` dependency - race conditions ensue
         ),
@@ -1458,8 +1474,7 @@ object BuildCommon {
           slf4j_api,
           opentelemetry_api,
         ),
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `kms-driver-testing` = project
@@ -1605,8 +1620,10 @@ object BuildCommon {
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
         coverageEnabled := false,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
+        licenses := List(
+          "MIT" -> url("https://opensource.org/license/MIT")
+        ),
       )
 
     lazy val `slick-fork` = project
@@ -1618,8 +1635,10 @@ object BuildCommon {
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
         coverageEnabled := false,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
+        licenses := List(
+          "BSD 2-Clause" -> url("https://opensource.org/license/bsd-2-clause")
+        ),
       )
 
     lazy val `wartremover-extension` = project
@@ -1649,8 +1668,7 @@ object BuildCommon {
       .in(file("community/lib/wartremover-annotations"))
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `magnolify-addon` = project
@@ -1660,8 +1678,8 @@ object BuildCommon {
       )
       .settings(
         sharedSettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
+        licenses := List("Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
         libraryDependencies ++= Seq(
           cats,
           magnolia,
@@ -1690,8 +1708,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           cats,
           slf4j_api,
@@ -1711,10 +1728,9 @@ object BuildCommon {
         `wartremover-annotations`,
       )
       .settings(
+        baseCommunitySettings,
         sharedCantonSettingsExternal,
-        publishCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           commons_io,
           grpc_netty_shaded,
@@ -1882,8 +1898,7 @@ object BuildCommon {
       .in(file("community/transcode/schema"))
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         scalaVersion := scala3_version,
         libraryDependencies ++= Seq(
           boopickle,
@@ -1905,8 +1920,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         scalaVersion := scala3_version,
         libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
       )
@@ -1916,8 +1930,7 @@ object BuildCommon {
       .dependsOn(`transcode-schema`, `transcode-test-utils` % Test)
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         scalaVersion := scala3_version,
         libraryDependencies ++= Seq(ujson, zioTest % Test, zioTestSbt % Test),
       )
@@ -1931,8 +1944,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         scalaVersion := scala3_version,
         libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
       )
@@ -1946,8 +1958,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         scalaVersion := scala3_version,
         libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
       )
@@ -2015,8 +2026,7 @@ object BuildCommon {
           anorm,
           scalapb_json4s % Test,
         ),
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         Test / parallelExecution := true,
         Test / fork := false,
         Test / testGrouping := separateRevocationTest((Test / definedTests).value),
@@ -2745,7 +2755,7 @@ object BuildCommon {
           scalatest % Test,
         ),
         coverageEnabled := false,
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `rs-grpc-pekko` = project
@@ -2766,7 +2776,7 @@ object BuildCommon {
           scalatest_wordspec % Test,
           scalatest_shouldmatchers % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `rs-grpc-pekko-test` = project
@@ -2797,7 +2807,7 @@ object BuildCommon {
       .in(file("base/logging-entries"))
       .settings(
         libsScalaSettings,
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           scalatest_shouldmatchers % Test,
           scalatest_wordspec % Test,
@@ -2826,7 +2836,7 @@ object BuildCommon {
           shapeless % Test,
           slf4j_api,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `daml-resources` = project
@@ -2842,7 +2852,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalatest % Test
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `resources-pekko` = project
@@ -2856,7 +2866,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalatest % Test
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `resources-grpc` = project
@@ -2877,7 +2887,7 @@ object BuildCommon {
           logback_classic % Runtime,
           scalatest % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `ledger-resources` = project
@@ -2893,7 +2903,7 @@ object BuildCommon {
           grpc_api,
           grpc_netty_shaded,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `timer-utils` = project
@@ -2905,7 +2915,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalatest % Test
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val crypto = project
@@ -2914,7 +2924,7 @@ object BuildCommon {
       .dependsOn(`scala-utils`)
       .settings(
         libsScalaSettings,
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           bouncycastle_bcprov,
           scalatest % Test,
@@ -2927,7 +2937,7 @@ object BuildCommon {
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           scala_compiler,
           scala_reflect,
@@ -2961,8 +2971,7 @@ object BuildCommon {
           slf4j_api,
           typesafe_config,
         ),
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         Compile / bufLintCheck := {},
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -3040,7 +3049,7 @@ object BuildCommon {
           scalaz_core,
           scalatest % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `executors` = project
@@ -3054,7 +3063,7 @@ object BuildCommon {
           scala_logging,
           slf4j_api,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `observability-metrics` = project
@@ -3080,7 +3089,7 @@ object BuildCommon {
           scalatest % Test,
           slf4j_api,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `observability-tracing` = project
@@ -3095,7 +3104,7 @@ object BuildCommon {
           opentelemetry_sdk_testing % Test,
           scalatest % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `scala-utils` = project
@@ -3103,7 +3112,7 @@ object BuildCommon {
       .dependsOn(`scalatest-utils` % Test)
       .settings(
         libsScalaSettings,
-        publish / skip := false,
+        enablePublishLibrary,
         Test / scalacOptions ++= Seq("--release", "17"),
         libraryDependencies ++= Seq(
           scalatest % Test,
@@ -3127,7 +3136,7 @@ object BuildCommon {
           scalaz_scalacheck_binding % Test,
           shapeless % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `nonempty-cats` = project
@@ -3143,17 +3152,16 @@ object BuildCommon {
           scalatest % Test,
           scalaz_core % Test,
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `daml-jwt` = project
       .in(file("base/daml-jwt"))
       .dependsOn(CommunityProjects.`wartremover-annotations`)
       .settings(
+        baseCommunitySettings,
         sharedCantonSettingsExternal,
-        publishCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         libraryDependencies ++= Seq(
           auth0_java,
           auth0_jwks,
@@ -3181,8 +3189,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
         PB.generate / includeFilter := "status.proto" || "code.proto" || "error_details.proto" || "health.proto",
@@ -3226,11 +3233,9 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        sharedSettings,
-        publishCommunitySettings,
+        sharedCommunitySettings,
         javaOnlySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         Compile / bufLintCheck := (Compile / bufLintCheck)
           .dependsOn(
             // these proto files are loaded by buf.work.yaml
@@ -3263,7 +3268,7 @@ object BuildCommon {
         libsScalaSettings,
         scalacOptions += "-Wconf:src=protobuf/.*:silent",
         javacOptions += "-Xlint:-options",
-        publish / skip := false,
+        enablePublishLibrary,
         Compile / PB.protoSources ++= (`ledger-api-value-proto` / Compile / PB.protoSources).value,
         Compile / PB.targets := Seq(
           scalapb.gen(
@@ -3325,11 +3330,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         // javaOnlySettings,
         wartremoverErrors := damlWarts,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_protobuf_java,
@@ -3395,7 +3399,6 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         // javaOnlySettings,
         wartremoverErrors := damlWarts,
@@ -3434,11 +3437,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         // javaOnlySettings,
         wartremoverErrors := damlWarts,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(jline),
         addProtobufFilesToHeaderCheck(Compile),
@@ -3465,11 +3467,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         // javaOnlySettings,
         wartremoverErrors := damlWarts,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_protobuf_java
@@ -3499,11 +3500,10 @@ object BuildCommon {
           DamlLfVersion.generateVersionsDTOJson.taskValue,
         ),
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           google_protobuf_java,
@@ -3527,11 +3527,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           cats,
@@ -3611,7 +3610,6 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
@@ -3654,11 +3652,10 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_common_protos % "protobuf",
@@ -3699,11 +3696,10 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         Compile / resourceGenerators += DamlPlugin.damlStablePackagesManifest.taskValue,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -3727,11 +3723,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -3765,14 +3760,13 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         Compile / bufLintCheck := {},
         Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
           google_common_protos
         ),
-        publish / skip := false,
+        enablePublishLibrary,
       )
 
     lazy val `daml-lf-snapshot` = project
@@ -3799,8 +3793,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         target := baseDirectory.value / "target" / "scala",
         Compile / scalacOptions ++= Seq(
           "-Wconf:msg=match may not be exhaustive:s",
@@ -3833,11 +3826,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -3926,11 +3918,10 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           cats,
@@ -3976,11 +3967,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           cats,
@@ -4022,11 +4012,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -4050,11 +4039,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -4086,11 +4074,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -4120,11 +4107,10 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
         wartremoverErrors := damlWarts,
         // javaOnlySettings,
-        publish / skip := false,
+        enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
@@ -4144,11 +4130,9 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        sharedSettings,
-        publishCommunitySettings,
+        sharedCommunitySettings,
         javaOnlySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         Compile / bufLintCheck := (Compile / bufLintCheck)
           .dependsOn(
             // these proto files are loaded by buf.work.yaml
@@ -4186,8 +4170,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         Compile / PB.protoSources ++= (`ledger-api-proto` / Compile / PB.protoSources).value,
         Compile / PB.targets := Seq(
           // build scala codegen with java conversions
@@ -4214,8 +4197,7 @@ object BuildCommon {
       .settings(
         javaOnlySettings,
         sharedCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
+        enablePublishLibrary,
         compileOrder := CompileOrder.JavaThenScala,
         Compile / javacOptions ++= Seq("--release", "17"),
         // The main artifact is Java only, even though some tests are written in Scala

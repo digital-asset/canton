@@ -174,6 +174,8 @@ abstract class ProtocolProcessor[
     val recentSnapshot = crypto.create(topologySnapshot)
     val explicitMediatorGroupIndex = steps.explicitMediatorGroup(submissionParam)
     for {
+      _ <- steps.validateSubmittersNotOnboarding(submissionParam, topologySnapshot, participantId)
+
       mediator <- chooseMediator(recentSnapshot.ipsSnapshot, explicitMediatorGroupIndex)
         .leftMap(steps.embedNoMediatorError)
       submissionData <- steps.createSubmission(

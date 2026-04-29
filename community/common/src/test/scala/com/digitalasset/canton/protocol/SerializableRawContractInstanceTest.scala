@@ -69,11 +69,3 @@ class SerializableRawContractInstanceTest
     }
   }
 }
-
-object SerializableRawContractInstanceTest {
-  def toHexString(byte: Byte): String = {
-    val s = byte.toInt.toHexString
-    if (s.length < 2) "0" + s else s
-  }
-
-}

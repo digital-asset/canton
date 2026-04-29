@@ -113,6 +113,7 @@ object ByteStringUtil {
       case ex: ZipException => DefaultDeserializationError(ex.getMessage)
       case _: EOFException =>
         DefaultDeserializationError("Compressed byte input ended too early")
-      case error => DefaultDeserializationError(error.getMessage)
+      case error =>
+        DefaultDeserializationError(error.getMessage)
     }
 }

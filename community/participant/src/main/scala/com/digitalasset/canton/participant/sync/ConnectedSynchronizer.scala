@@ -1155,7 +1155,12 @@ class ConnectedSynchronizer(
     override def run()(implicit traceContext: TraceContext): Unit = promiseUSFactory.close()
   })(TraceContext.empty)
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+    // TODO(i32384): remove this log when the investigation is done.
+    noTracingLogger.debug(
+      "ConnectedSynchronizer close initiated",
+      new Throwable("close origin stack"),
+    )
     // As the commitment and protocol processors use the sequencer client to send messages, close
     // them before closing the synchronizerHandle. Both of them will ignore the requests from the message dispatcher
     // after they get closed.
@@ -1177,6 +1182,7 @@ class ConnectedSynchronizer(
         )(logger),
       )
     )
+  }
 
   override def toString: String =
     s"ConnectedSynchronizer(synchronizerId=$psid, participantId=$participantId)"

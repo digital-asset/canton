@@ -9,7 +9,7 @@ import com.digitalasset.canton.version.HashingSchemeVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
 
-class MetadataHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with HashUtilsTest {
+class MetadataHashV2Test extends BaseTest with AnyWordSpecLike with Matchers with HashUtilsTest {
 
   "Metadata Encoding" should {
     val expectedMetadataHash = Hash

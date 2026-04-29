@@ -25,6 +25,7 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKeyWithMaintainers,
   KeyMapping,
+  MaxContractKeyFetches,
   NeedKey,
   SerializationVersion,
   TransactionError,
@@ -2104,11 +2105,13 @@ private[lf] object SBuiltinFun {
         )
         machine.metrics.incrCount[TxNodeCount]()
         Control.Value(
-          SList(
-            (result.queue.view.map(SContractId(_)) zip payloads)
-              .map { case (cid, payload) => SValue.SPair(cid, payload) }
-              .to(FrontStack)
-          )
+          SOptional(Some(
+            SList(
+              (result.queue.view.map(SContractId(_)) zip payloads)
+                .map { case (cid, payload) => SValue.SPair(cid, payload) }
+                .to(FrontStack)
+            )
+          ))
         )
       }
 
@@ -2118,10 +2121,6 @@ private[lf] object SBuiltinFun {
       ): Either[IE, Unit] =
         machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
-  }
-
-  object SBUKeyBuiltin {
-    private val maxN = 1L<<20 // around 1M
   }
 
   private[speedy] sealed abstract class SBUKeyBuiltin(
@@ -2141,7 +2140,7 @@ private[lf] object SBuiltinFun {
 
       val n =
         if (operation.needN)
-          (getSInt64(args, 1) min SBUKeyBuiltin.maxN).toInt
+          (getSInt64(args, 1) min MaxContractKeyFetches.toLong).toInt
         else
           1
 

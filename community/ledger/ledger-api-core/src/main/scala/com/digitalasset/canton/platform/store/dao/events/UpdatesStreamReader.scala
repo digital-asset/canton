@@ -12,7 +12,12 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.api.{TraceIdentifiers, TransactionShape}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
-import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.UpdatesStreamsConfig
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
@@ -937,32 +942,17 @@ class UpdatesStreamReader(
       .mapAsync(maxParallelPayloadQueries)(ids =>
         payloadQueriesLimiter.execute {
           globalPayloadQueriesLimiter.execute {
-            val pruningCheck: Future[Vector[(RawThinEvent, Option[FatContract])]] => Future[
-              Vector[(RawThinEvent, Option[FatContract])]
-            ] = if (skipPruningChecks) {
-              _.flatMap(events =>
-                pruningOffsetService.pruningOffset.map(prunedTo =>
-                  events.filter(_._1.offset > prunedTo.fold(0L)(_.unwrap))
-                )
-              ) // Remove all elements after a pruning offset not to break tryToResolveFatInstance
-            } else {
-              queryValidRange
-                .withRangeNotPruned(
-                  minOffsetInclusive = queryRange.startInclusiveOffset,
-                  maxOffsetInclusive = queryRange.endInclusiveOffset,
-                  errorPruning = (prunedOffset: Offset) =>
-                    s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
-                  errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-                    s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
-                        .fold(0L)(_.unwrap)}",
-                )(_)
-            }
-            pruningCheck {
-              dbDispatcher
-                .executeSql(dbMetric)(fetchEvents(ids, _))
-                .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
-            }
-              .map(UpdateReader.tryToResolveFatInstance)
+            UpdatesStreamReader.fetchContractPayloadsInternal(
+              queryRange = queryRange,
+              dbMetric = dbMetric,
+              contractStore = contractStore,
+              skipPruningChecks = skipPruningChecks,
+              ids = ids,
+              fetchEvents = fetchEvents,
+              pruningOffsetService = pruningOffsetService,
+              queryValidRange = queryValidRange,
+              dbDispatcher = dbDispatcher,
+            )
           }
         }
       )
@@ -980,5 +970,48 @@ object UpdatesStreamReader {
   final implicit class VectorOps[T](vec: Vector[T]) {
     def reverseIfDescendingOrder(descendingOrder: Boolean): Vector[T] =
       if (descendingOrder) vec.reverse else vec
+  }
+
+  def fetchContractPayloadsInternal(
+      queryRange: EventsRange,
+      dbMetric: DatabaseMetrics,
+      contractStore: LedgerApiContractStore,
+      skipPruningChecks: Boolean,
+      ids: Iterable[Long],
+      fetchEvents: (Iterable[Long], Connection) => Vector[RawThinEvent],
+      pruningOffsetService: PruningOffsetService,
+      queryValidRange: QueryValidRange,
+      dbDispatcher: DbDispatcher,
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      executionContext: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Future[Vector[RawEvent]] = {
+    val pruningCheck: Future[Vector[(RawThinEvent, Option[FatContract])]] => Future[
+      Vector[(RawThinEvent, Option[FatContract])]
+    ] = if (skipPruningChecks) {
+      _.flatMap(events =>
+        pruningOffsetService.pruningOffset.map(prunedTo =>
+          events.filter(_._1.offset > prunedTo.fold(0L)(_.unwrap))
+        )
+      ) // Remove all elements after a pruning offset not to break tryToResolveFatInstance
+    } else {
+      queryValidRange
+        .withRangeNotPruned(
+          minOffsetInclusive = queryRange.startInclusiveOffset,
+          maxOffsetInclusive = queryRange.endInclusiveOffset,
+          errorPruning = (prunedOffset: Offset) =>
+            s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+          errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
+            s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
+                .fold(0L)(_.unwrap)}",
+        )(_)
+    }
+    pruningCheck {
+      dbDispatcher
+        .executeSql(dbMetric)(fetchEvents(ids, _))
+        .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
+    }
+      .map(UpdateReader.tryToResolveFatInstance)
   }
 }

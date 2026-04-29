@@ -16,14 +16,16 @@ import com.google.protobuf.ByteString
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 
-/** The methods of [[HashBuilder]] change its internal state and return `this` for convenience.
+/** The methods of [[com.digitalasset.canton.crypto.HashBuilder]] change its internal state and
+  * return `this` for convenience.
   *
   * Requirements for all implementations:
   *
-  * For any [[HashBuilder]] hb, it is computationally infeasible to find two sequences `as1` and
-  * `as2` of calls to `add` such that the concatenation of `as1` differs from the concatenation
-  * `as2`, yet their computed hashes are the same, i.e., `as1.foldLeft(hb)((hb, a) =>
-  * hb.add(a)).finish` is the same as `as2.foldLeft(hb)((hb, a) => hb.add(a)).finish`.
+  * For any [[com.digitalasset.canton.crypto.HashBuilder]] hb, it is computationally infeasible to
+  * find two sequences `as1` and `as2` of calls to `add` such that the concatenation of `as1`
+  * differs from the concatenation `as2`, yet their computed hashes are the same, i.e.,
+  * `as1.foldLeft(hb)((hb, a) => hb.add(a)).finish` is the same as `as2.foldLeft(hb)((hb, a) =>
+  * hb.add(a)).finish`.
   */
 trait HashBuilder {
 
@@ -35,9 +37,10 @@ trait HashBuilder {
     * prefix.
     *
     * @return
-    *   the updated [[HashBuilder]]
+    *   the updated [[com.digitalasset.canton.crypto.HashBuilder]]
     * @throws java.lang.IllegalStateException
-    *   if the [[finish]] method has already been called on this [[HashBuilder]]
+    *   if the [[finish]] method has already been called on this
+    *   [[com.digitalasset.canton.crypto.HashBuilder]]
     */
   def addWithoutLengthPrefix(a: ByteString): this.type
 
@@ -163,7 +166,7 @@ trait HashBuilder {
     * @return
     *   The hash of the array accumulated so far.
     * @throws java.lang.IllegalStateException
-    *   if [[finish]] had been called before on this [[HashBuilder]]
+    *   if [[finish]] had been called before on this [[com.digitalasset.canton.crypto.HashBuilder]]
     */
   def finish(): Hash
 }
@@ -181,8 +184,8 @@ object HashBuilderFromMessageDigest {
     new HashBuilderFromMessageDigest(algorithm, purpose, hashTracer).addPurpose()
 }
 
-/** Constructs a [[HashBuilder]] from the specified [[java.security.MessageDigest]] ALWAYS use the
-  * apply method unless you know what you're doing.
+/** Constructs a [[com.digitalasset.canton.crypto.HashBuilder]] from the specified
+  * [[java.security.MessageDigest]] ALWAYS use the apply method unless you know what you're doing.
   */
 class HashBuilderFromMessageDigest private[canton] (
     algorithm: HashAlgorithm,

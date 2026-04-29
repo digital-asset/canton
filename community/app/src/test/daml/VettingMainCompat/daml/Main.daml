@@ -10,3 +10,7 @@ template MainT with
     dep: DepT
   where
     signatory p, dep.p
+
+    choice MainT_createDep: ContractId DepT
+      controller p
+      do create DepT with p = p, i = None

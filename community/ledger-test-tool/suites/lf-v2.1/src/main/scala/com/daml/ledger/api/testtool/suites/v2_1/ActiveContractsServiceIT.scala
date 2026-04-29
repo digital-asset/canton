@@ -1090,9 +1090,6 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       } yield {
         continuation
       })
-
-      // archive the contracts to not be active on the next tests
-      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield {
       val activeContractEvents =
         activeContracts.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent))
@@ -1145,8 +1142,6 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           "invalid continuation token",
           RequestValidationErrors.InvalidField,
         )
-      // archive the contracts to not be active on the next tests
-      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield ()
   })
 
@@ -1236,8 +1231,6 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           )
         )
 
-      // archive the contracts to not be active on the next tests
-      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield {
       assert(
         withEmptyLedger.activeContracts.isEmpty,
@@ -1323,14 +1316,6 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
-      end <- ledger.currentEnd()
-      activeContractsWithoutContinuation <- ledger
-        .activeContractResponses(
-          ledger.activeContractsRequest(
-            parties = Some(Seq(party)),
-            activeAtOffset = end,
-          )
-        )
       invalidToken = ByteString.copyFrom(new Array[Byte](55))
       _ <- ledger
         .activeContractsPage(
@@ -1346,9 +1331,66 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
         .mustFailWith(
           "invalid page token",
           RequestValidationErrors.InvalidField,
+          Some(
+            "The submitted command has a field with invalid value: Invalid field page_token: Invalid page token for GetActiveContractsPageRequest"
+          ),
         )
-      // archive the contracts to not be active on the next tests
-      _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
+    } yield ()
+  })
+
+  test(
+    "AcsInvalidMaxPageSize",
+    "Fail if max page size used",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      _ <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(
+              ledger.eventFormat(verbose = true, Some(Seq(party)))
+            ),
+            activeAtOffset = None,
+            maxPageSize = Some(0),
+            pageToken = None,
+          )
+        )
+        .mustFailWith(
+          "invalid max page size",
+          RequestValidationErrors.InvalidArgument,
+          Some(
+            "The submitted request has invalid arguments: Requested page size must be positive, but got 0"
+          ),
+        )
+    } yield ()
+  })
+
+  test(
+    "AcsTooBigMaxPageSize",
+    "Fail if max page size is too big",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
+      _ <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(
+              ledger.eventFormat(verbose = true, Some(Seq(party)))
+            ),
+            activeAtOffset = None,
+            maxPageSize = Some(10000000),
+            pageToken = None,
+          )
+        )
+        .mustFailWith(
+          "too big max page size",
+          RequestValidationErrors.InvalidArgument,
+          Some(
+            "The submitted request has invalid arguments: Requested page size must not exceed 10000, but got 10000000"
+          ),
+        )
     } yield ()
   })
 

@@ -25,6 +25,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.ledger.participant.state.ReassignmentCommandsBatch.NoCommands
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.NotHostedOnParticipant
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
@@ -203,6 +204,92 @@ sealed trait ReassignmentSubmissionIntegrationTest
         _.message should include(NoCommands.error)
       ),
     )
+  }
+
+  "check that an onboarding party cannot submit an unassignment" in { implicit env =>
+    import env.*
+
+    val onboardingPartyUnassign = PartiesAllocator(participants.all.toSet)(
+      Seq("onboardingPartyUnassign" -> participant1),
+      Map(
+        "onboardingPartyUnassign" -> Map(
+          daId -> (PositiveInt.one, Set((participant1, Submission))),
+          acmeId -> (PositiveInt.one, Set((participant1, Submission))),
+        )
+      ),
+    ).head
+
+    val iou = IouSyntax.createIou(participant1, Some(daId))(signatory, onboardingPartyUnassign)
+
+    Seq(daId, acmeId).foreach { synchronizerId =>
+      Seq(participant1, participant2).foreach(
+        _.topology.party_to_participant_mappings.propose_delta(
+          party = onboardingPartyUnassign,
+          adds = Seq(participant2.id -> Submission),
+          store = synchronizerId,
+          requiresPartyToBeOnboarded = true,
+        )
+      )
+    }
+
+    clue("Unassign as the onboarding party on participant2 should fail")(
+      loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+        participant2.ledger_api.commands
+          .submit_unassign(onboardingPartyUnassign, Seq(iou.id.toLf), daId, acmeId),
+        forAll(_)(
+          _.shouldBeCantonErrorCode(
+            ReassignmentProcessingSteps.ReassignmentSubmissionErrors.PartyCurrentlyOnboarding
+              .Reject(onboardingPartyUnassign.toLf)
+              .code
+          )
+        ),
+      )
+    )
+  }
+
+  "check that an onboarding party cannot submit an assignment on a new synchronizer" in {
+    implicit env =>
+      import env.*
+
+      val onboardingPartyAssign = PartiesAllocator(participants.all.toSet)(
+        Seq("onboardingPartyAssign" -> participant1),
+        Map(
+          "onboardingPartyAssign" -> Map(
+            daId -> (PositiveInt.one, Set((participant1, Submission))),
+            acmeId -> (PositiveInt.one, Set((participant1, Submission))),
+          )
+        ),
+      ).head
+
+      Seq(daId, acmeId).foreach { synchronizerId =>
+        Seq(participant1, participant2).foreach(
+          _.topology.party_to_participant_mappings.propose_delta(
+            party = onboardingPartyAssign,
+            adds = Seq(participant2.id -> Submission),
+            store = synchronizerId,
+            requiresPartyToBeOnboarded = true,
+          )
+        )
+      }
+
+      val iou = IouSyntax.createIou(participant1, Some(daId))(signatory, onboardingPartyAssign)
+
+      val unassigned =
+        participant1.ledger_api.commands.submit_unassign(signatory, Seq(iou.id.toLf), daId, acmeId)
+
+      clue("Assign as the onboarding party on participant2 should fail")(
+        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+          participant2.ledger_api.commands
+            .submit_assign(onboardingPartyAssign, unassigned.reassignmentId, daId, acmeId),
+          forAll(_)(
+            _.shouldBeCantonErrorCode(
+              ReassignmentProcessingSteps.ReassignmentSubmissionErrors.PartyCurrentlyOnboarding
+                .Reject(onboardingPartyAssign.toLf)
+                .code
+            )
+          ),
+        )
+      )
   }
 
   // Disable automatic assignment so that we really control it

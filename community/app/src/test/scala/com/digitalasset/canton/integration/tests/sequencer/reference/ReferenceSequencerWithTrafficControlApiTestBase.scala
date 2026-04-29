@@ -308,6 +308,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
+      delayRequestsBeforeLsuTrafficInit = false,
     )
     // Important to create the histograms before the factory, because creating the factory will
     // register them once and for all and we can't add more afterwards

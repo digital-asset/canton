@@ -318,23 +318,32 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
       .via(
         achsConfigEffective match {
           case Some(achsCfg) =>
-            AchsMaintenancePipe(
-              parameterStorageBackend = parameterStorageBackend,
-              eventStorageBackend = eventStorageBackend,
-              dbDispatcher = dbDispatcher,
-              achsStateCache = inMemoryState.achsStateCache,
-              toAchsWorkDistance = (batch: Batch[?]) =>
-                AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
-              initialWork = initialAchsWork,
-              populationParallelism = achsCfg.populationParallelism.unwrap,
-              removalParallelism = achsCfg.removalParallelism.unwrap,
-              aggregationThreshold = achsCfg.aggregationThreshold,
-              metrics = metrics,
-              executionContext = executionContext,
-              logger = logger,
-            )
+            Flow[Batch[?]]
+              .buffered(
+                counter = metrics.indexer.achsBufferLength,
+                size = achsCfg.bufferSize,
+              )
+              .via(
+                AchsMaintenancePipe(
+                  parameterStorageBackend = parameterStorageBackend,
+                  eventStorageBackend = eventStorageBackend,
+                  dbDispatcher = dbDispatcher,
+                  achsStateCache = inMemoryState.achsStateCache,
+                  toAchsWorkDistance = (batch: Batch[?]) =>
+                    AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
+                  initialWork = initialAchsWork,
+                  populationParallelism = achsCfg.populationParallelism.unwrap,
+                  removalParallelism = achsCfg.removalParallelism.unwrap,
+                  aggregationThreshold = achsCfg.aggregationThreshold,
+                  metrics = metrics,
+                  executionContext = executionContext,
+                  logger = logger,
+                  fullDrain = false,
+                )
+              )
+              .map(_ => ())
           // ACHS not configured or repair mode
-          case _ => Flow.apply
+          case _ => Flow.apply.map(_ => ())
         }
       )
       .viaMat(KillSwitches.single)(Keep.both)

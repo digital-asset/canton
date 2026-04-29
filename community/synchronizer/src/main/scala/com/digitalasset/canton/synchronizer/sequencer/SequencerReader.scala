@@ -145,7 +145,49 @@ class SequencerReader(
   ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
     store.readPayloadsByIdWithoutCacheLoading(payloadIds)
 
+  /** @param member
+    *   The subscribing member.
+    * @param requestedTimestampInclusive
+    *   The timestamp of the first event to be returned on the subscription stream. This timestamp
+    *   could still include the decision time offset that is applied to events that have been
+    *   sequenced after the upgrade time. This offset is subtracted before looking up events in the
+    *   store.
+    */
   def read(member: Member, requestedTimestampInclusive: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] = {
+    val synchronizerUpgradeO = announcedLsu.get()
+    for {
+      _ <- EitherT.right(
+        synchronizerUpgradeO.zip(requestedTimestampInclusive).fold(FutureUnlessShutdown.unit) {
+          case (upgrade, requestedTimestamp) =>
+            upgrade.computeAndCacheTimeOffset(syncCryptoApi, requestedTimestamp)
+        }
+      )
+      requestedTimestampInclusiveWithoutLsuOffset = synchronizerUpgradeO.fold(
+        requestedTimestampInclusive
+      ) { announcedLsu =>
+        val subtracted = announcedLsu.subtractOffsetAfterUpgradeTime(requestedTimestampInclusive)
+        logger.info(
+          s"Subtracting LSU offset from subscription timestamp: original=$requestedTimestampInclusive, subtracted=$subtracted"
+        )
+        subtracted
+      }
+      eventSource <- readFromCorrectedTimestamp(member, requestedTimestampInclusiveWithoutLsuOffset)
+    } yield eventSource
+  }
+
+  /** @param member
+    *   The subscribing member.
+    * @param requestedTimestampInclusive
+    *   The timestamp of the first event to returned in the subscription stream. This timestamp MUST
+    *   NOT include the decision time offset applied to events that have been sequenced after the
+    *   upgrade time.
+    */
+  private def readFromCorrectedTimestamp(
+      member: Member,
+      requestedTimestampInclusive: Option[CantonTimestamp],
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] =
     synchronizeWithClosing(functionFullName)(for {
@@ -839,9 +881,11 @@ class SequencerReader(
               case (groupRecipient, groupMembers) if groupMembers.contains(member) => groupRecipient
             }.toSet
             val previousTimestampWithLsuOffset =
-              synchronizerUpgradeO.fold(previousTimestamp)(_.maybeOffsetTime(previousTimestamp))
+              synchronizerUpgradeO.fold(previousTimestamp)(
+                _.addOffsetAfterUpgradeTime(previousTimestamp)
+              )
             val timestampWithLsuOffset =
-              synchronizerUpgradeO.fold(timestamp)(_.maybeOffsetTime(timestamp))
+              synchronizerUpgradeO.fold(timestamp)(_.addOffsetAfterUpgradeTime(timestamp))
             val filteredBatch = Batch.filterClosedEnvelopesFor(batch, member, memberGroupRecipients)
             val deliver = Deliver.create[ClosedEnvelope](
               previousTimestampWithLsuOffset,

@@ -91,8 +91,15 @@ class ForwardingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   /** returns the list of currently known mediators */
   override def mediatorGroups()(implicit
@@ -362,8 +369,15 @@ class CachingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   override def inspectKeys(
       filterOwner: String,

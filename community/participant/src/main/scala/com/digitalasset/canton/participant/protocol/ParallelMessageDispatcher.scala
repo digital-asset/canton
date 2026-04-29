@@ -175,9 +175,20 @@ class ParallelMessageDispatcher(
           events.collect { case WithOpeningErrors(e: OrdinaryProtocolEvent, _) =>
             e.signedEvent.content
           }
-        )
+        ).tapOnShutdown {
+          val batchDesc =
+            s"sc=[${events.headOption.map(_.event.counter)}..${events.lastOption.map(_.event.counter)}]"
+          logger.debug(s"observeSequencing aborted due to shutdown $batchDesc")
+        }
         (observeSequencing, ticks) = observeSequencingAndTicks
-        process <- MonadUtil.sequentialTraverseMonoid(events)(handle(ticks, _))
+        process <- MonadUtil
+          .sequentialTraverseMonoid(events)(e =>
+            handle(ticks, e).tapOnShutdown(
+              logger.debug(
+                s"handle aborted due to shutdown sc=${e.event.counter} ts=${e.event.timestamp}"
+              )
+            )
+          )
       } yield Monoid.combine(observeSequencing, process)
     }
 
@@ -205,9 +216,18 @@ class ParallelMessageDispatcher(
         )
         // TODO(i31797): This needs to be reworked if / when we start making use of
         // UnthrottledAsync in the protocol processor
-        asyncResult.flatMapFUS { (unthrottled: UnthrottledAsync) =>
-          ticksF.map(_ => unthrottled)
-        }
+        AsyncResult(
+          asyncResult
+            .flatMapFUS { (unthrottled: UnthrottledAsync) =>
+              ticksF.map(_ => unthrottled)
+            }
+            .unwrap
+            .tapOnShutdown(
+              logger.debug(
+                s"async tail aborted due to shutdown sc=${eventE.event.counter} ts=${eventE.event.timestamp}"
+              )
+            )
+        )
       }
     }(traceContext, tracer)
   }

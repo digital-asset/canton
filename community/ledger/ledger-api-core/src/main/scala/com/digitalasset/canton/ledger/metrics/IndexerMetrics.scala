@@ -156,6 +156,57 @@ class IndexerMetrics(
   val achsProcessing =
     new DatabaseMetrics(prefix :+ "achs_processing", factory)
 
+  val achsBufferLength: Counter =
+    factory.counter(
+      MetricInfo(
+        prefix :+ "achs_buffer_length",
+        summary = "The size of the queue between the indexer and the ACHS maintenance pipe.",
+        description =
+          """This counter counts batches of updates queued before the ACHS maintenance pipe.
+            |When the buffer is mostly full, it indicates that ACHS maintenance is creating
+            |backpressure on the indexing pipeline.""",
+        qualification = MetricQualification.Debug,
+      )
+    )
+
+  val achsValidAt: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_valid_at",
+        summary = "The event sequential id at which the ACHS is valid.",
+        description =
+          """The event sequential id at which the ACHS is currently valid. It may contain some
+            |deactivated events but they will anyway be removed when fetched.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
+
+  val achsLastPopulated: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_last_populated",
+        summary = "The last event sequential id populated into the ACHS.",
+        description =
+          """The last event sequential id for which activations were added to the ACHS.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
+
+  val achsLastRemoved: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "achs_last_removed",
+        summary =
+          "The last event sequential id for which deactivations were removed from the ACHS.",
+        description = """The last event sequential id for which deactivations were looked up and the
+            |corresponding activations were removed from the ACHS.""",
+        qualification = MetricQualification.Debug,
+      ),
+      0L,
+    )
+
   val indexerQueueBlocked: MetricHandle.Meter = factory.meter(
     MetricInfo(
       prefix :+ "indexer_queue_blocked",

@@ -151,6 +151,8 @@ object IndexerConfig {
     *   Parallelism for ACHS population/removal during initialization.
     * @param initAggregationThreshold
     *   Aggregation threshold for ACHS maintenance batches during initialization.
+    * @param bufferSize
+    *   Size of the ACHS buffer.
     */
   final case class AchsConfig(
       validAtDistanceTarget: NonNegativeLong,
@@ -162,6 +164,7 @@ object IndexerConfig {
       aggregationThreshold: Long = AchsConfig.DefaultAggregationThreshold,
       initParallelism: NonNegativeInt = NonNegativeInt.tryCreate(AchsConfig.DefaultInitParallelism),
       initAggregationThreshold: Long = AchsConfig.DefaultInitAggregationThreshold,
+      bufferSize: Int = AchsConfig.DefaultBufferSize,
   )
 
   object AchsConfig {
@@ -170,6 +173,7 @@ object IndexerConfig {
     val DefaultAggregationThreshold: Long = 10000L
     val DefaultInitParallelism: Int = 8
     val DefaultInitAggregationThreshold: Long = 100000L
+    val DefaultBufferSize: Int = 256
   }
 
 }

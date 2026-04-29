@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.protocol.hash.HashTracer.StringHashTracer
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
+import com.digitalasset.canton.version.HashingSchemeVersion.V2
 import com.digitalasset.daml.lf.data.Ref.IdString
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{
@@ -113,7 +114,7 @@ trait HashUtilsTest { this: Matchers =>
       ),
     )
 
-  def tryHashNodeV1(
+  def tryHashNodeV2(
       node: Node,
       nodeSeeds: Map[NodeId, LfHash] = Map.empty,
       nodeSeed: Option[LfHash] = None,
@@ -121,7 +122,7 @@ trait HashUtilsTest { this: Matchers =>
       hashTracer: HashTracer = HashTracer.NoOp,
       enforceNodeSeedForCreateNodes: Boolean = true,
   ): Hash =
-    new NodeBuilderV1(HashPurpose.PreparedSubmission, hashTracer, enforceNodeSeedForCreateNodes)
-      .hashNode(node, nodeSeed, subNodes, nodeSeeds)
+    NodeHashBuilder(HashPurpose.PreparedSubmission, hashTracer, enforceNodeSeedForCreateNodes, V2)
+      .hashNode(node, nodeSeed, subNodes, nodeSeeds, hashTracer)
 
 }

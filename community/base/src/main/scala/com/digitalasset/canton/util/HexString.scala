@@ -8,6 +8,10 @@ import com.google.protobuf.ByteString
 /** Conversion functions to and from hex strings. */
 object HexString {
 
+  def toHexString(byte: Byte): String = {
+    val s = byte.toInt.toHexString
+    if (s.length < 2) "0" + s else s
+  }
   def toHexString(bytes: ByteString): String = toHexString(bytes.toByteArray)
 
   /** Convert a ByteString to hex-string. The output size will be equal to the length configured if

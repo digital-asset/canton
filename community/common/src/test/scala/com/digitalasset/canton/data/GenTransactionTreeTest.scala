@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, Re
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
@@ -143,7 +142,8 @@ class GenTransactionTreeTest
           fullInformeeTree.toByteString
         ) shouldEqual Right(fullInformeeTree)
 
-        val randomnessLength = computeRandomnessLength(ExampleTransactionFactory.pureCrypto)
+        val randomnessLength =
+          EncryptedViewMessage.computeRandomnessLength(ExampleTransactionFactory.pureCrypto)
         forAll(
           allLightTransactionViewTreesWithRandomKeys(
             example.transactionTree.allTransactionViewTrees
@@ -191,7 +191,7 @@ class GenTransactionTreeTest
         val topology = ExampleTransactionFactory.defaultTopologySnapshot
         val pureCrypto = ExampleTransactionFactory.pureCrypto
 
-        val allLightTrees = example.transactionTree
+        val allLightTrees: Seq[(LightTransactionViewTree, Witnesses)] = example.transactionTree
           .allTransactionViewTreesWithRecipients(topology)
           .valueOrFail("fail set up recipients for transaction view tree")
           .futureValueUS
@@ -200,7 +200,8 @@ class GenTransactionTreeTest
               .valueOrFail("fail to create light transaction trees") -> witnesses
           }
         val allTrees = example.transactionTree.allTransactionViewTrees.toList
-        val allInformees = allLightTrees.map(_._1.informees).fold(Set.empty)(_.union(_))
+        val allInformees: Set[LfPartyId] =
+          allLightTrees.map(_._1.informees).fold(Set.empty)(_.union(_))
 
         forAll(allInformees) { inf =>
           val topLevelHashesForInf = allLightTrees

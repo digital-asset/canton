@@ -877,14 +877,42 @@ final case class UnknownOrUnvettedPackages(
     MapsUtil.mergeMapsOfSets(unknown, unvetted)
 }
 
+/** Wrapper for resolved packages and their dependencies
+  *
+  * @param mainPackageIds
+  *   Requested packages to-be-resolved
+  * @param mainPackageAndDependencyIds
+  *   all dependencies of packages in `mainPackages`, including the packages in `mainPackages`
+  *   themselves
+  */
+final case class ResolvedPackagesAndDependencies(
+    mainPackageIds: Set[PackageId],
+    mainPackageAndDependencyIds: Set[PackageId],
+) {
+  def packageIds(withDependencies: Boolean): Set[PackageId] =
+    if (withDependencies) mainPackageAndDependencyIds else mainPackageIds
+}
+
+object ResolvedPackagesAndDependencies {
+  val empty: ResolvedPackagesAndDependencies = ResolvedPackagesAndDependencies(Set.empty, Set.empty)
+}
+
 trait PackageDependencyResolver {
-  def packageDependencies(packages: Set[PackageId])(implicit
+
+  /** Checks whether all provided packages are known to the participant. If some are not, a Left is
+    * returned with the participant and the set of unknown packages. If all packages are known, a
+    * Right is returned with the requested packages and all their direct and transitive
+    * dependencies.
+    */
+  def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]]
+  ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies]
 }
 
 object NoPackageDependencies extends PackageDependencyResolver {
-  override def packageDependencies(packages: Set[PackageId])(implicit
+  override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] = Right(Set.empty[PackageId])
+  ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] = Right(
+    ResolvedPackagesAndDependencies.empty
+  )
 }

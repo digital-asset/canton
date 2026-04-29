@@ -18,7 +18,7 @@ import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as V
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
 
-class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with HashUtilsTest {
+class NodeHashV2Test extends BaseTest with AnyWordSpecLike with Matchers with HashUtilsTest {
 
   private val globalKey = GlobalKeyWithMaintainers(
     GlobalKey.assertBuild(
@@ -236,7 +236,7 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
       nodeSeed: Option[LfHash],
       subNodes: Map[NodeId, Node] = subNodesMap,
       hashTracer: HashTracer,
-  ): Hash = tryHashNodeV1(
+  ): Hash = tryHashNodeV2(
     node,
     defaultNodeSeedsMap,
     nodeSeed,
@@ -263,25 +263,25 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
   "V1Encoding" should {
     "not encode lookup nodes" in {
       a[NodeHashingError.UnsupportedFeature] shouldBe thrownBy {
-        tryHashNodeV1(lookupNode)
+        tryHashNodeV2(lookupNode)
       }
     }
 
     "not encode create nodes without node seed" in {
       a[NodeHashingError.MissingNodeSeed] shouldBe thrownBy {
-        tryHashNodeV1(createNode, enforceNodeSeedForCreateNodes = true)
+        tryHashNodeV2(createNode, enforceNodeSeedForCreateNodes = true)
       }
     }
 
     "not encode exercise nodes without node seed" in {
       a[NodeHashingError.MissingNodeSeed] shouldBe thrownBy {
-        tryHashNodeV1(exerciseNode, enforceNodeSeedForCreateNodes = true)
+        tryHashNodeV2(exerciseNode, enforceNodeSeedForCreateNodes = true)
       }
     }
 
     "encode create nodes without node seed if explicitly allowed" in {
       scala.util
-        .Try(tryHashNodeV1(createNode, enforceNodeSeedForCreateNodes = false))
+        .Try(tryHashNodeV2(createNode, enforceNodeSeedForCreateNodes = false))
         .isSuccess shouldBe true
     }
   }
@@ -506,7 +506,7 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
     }
 
     "not hash NodeIds" in {
-      tryHashNodeV1(
+      tryHashNodeV2(
         exerciseNode
           // Shift all node ids by one and expect it to have no impact
           .copy(children = shiftNodeIds(exerciseNode.children)),
@@ -686,7 +686,7 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
         subNodes: Map[NodeId, Node] = subNodesMap,
         hashTracer: HashTracer = HashTracer.NoOp,
     ) =
-      tryHashNodeV1(
+      tryHashNodeV2(
         node,
         nodeSeed = Some(nodeSeedRollback),
         nodeSeeds = defaultNodeSeedsMap,
@@ -705,7 +705,7 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
     }
 
     "not hash NodeIds" in {
-      tryHashNodeV1(
+      tryHashNodeV2(
         rollbackNode
           // Change the node Ids values but not the nodes
           .copy(children = shiftNodeIds(rollbackNode.children)),
