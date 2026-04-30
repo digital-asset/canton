@@ -4693,7 +4693,7 @@ External call functions
   hexadecimal-encoded input payload. The update result carries the
   hexadecimal-encoded output payload.
 
-  [*Available in version ≥ 2.dev*]
+  [*Available in version >= 2.dev*]
 
 Debugging functions
 ~~~~~~~~~~~~~~~~~~~
