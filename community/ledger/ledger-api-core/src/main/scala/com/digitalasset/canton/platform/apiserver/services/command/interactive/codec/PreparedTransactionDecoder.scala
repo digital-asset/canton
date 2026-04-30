@@ -149,9 +149,8 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
   private implicit val packageNameTransformer: PartialTransformer[String, lf.data.Ref.PackageName] =
     PartialTransformer(src => lf.data.Ref.PackageName.fromString(src).toResult)
 
-  private implicit val choiceNameTransformer
-      : PartialTransformer[String, lf.data.Ref.ChoiceName] =
-    PartialTransformer(src => lf.data.Ref.ChoiceName.fromString(src).toResult)
+  private implicit val nameTransformer: PartialTransformer[String, lf.data.Ref.Name] =
+    PartialTransformer(src => lf.data.Ref.Name.fromString(src).toResult)
 
   private implicit val partyTransformer: PartialTransformer[String, lf.data.Ref.Party] =
     PartialTransformer(src => lf.data.Ref.Party.fromString(src).toResult)
