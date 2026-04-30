@@ -990,6 +990,20 @@ class DecodeV2Spec
       }
     }
 
+    s"decode EXTERNAL_CALL iff version in ${LV.featureExternalCall}" in {
+      val proto = toProtoExpr(DamlLf2.BuiltinFunction.EXTERNAL_CALL)
+      val expected = Ast.EBuiltinFun(Ast.BExternalCall)
+
+      forEveryVersion { version =>
+        val result = Try(moduleDecoder(version).decodeExprForTest(proto, "test"))
+
+        if (LV.featureExternalCall.enabledIn(version))
+          result shouldBe Success(expected)
+        else
+          inside(result) { case Failure(error) => error shouldBe a[Error.Parsing] }
+      }
+    }
+
     s"decode interface update" in {
       val testCases = {
 

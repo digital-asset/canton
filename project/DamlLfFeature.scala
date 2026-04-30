@@ -138,6 +138,11 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
+  val featureExternalCall = DamlLfFeature(
+    name = "External Call",
+    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+  )
+
   val featureUnsafeFromInterface = DamlLfFeature(
     name = "UnsafeFromInterface builtin",
     cppFlag = "DAML_UnsafeFromInterface",
@@ -165,6 +170,7 @@ object DamlLfFeature {
     "featureComplexAnyType" -> featureComplexAnyType,
     "featureExperimental" -> featureExperimental,
     "featureChoiceAuthority" -> featureChoiceAuthority,
+    "featureExternalCall" -> featureExternalCall,
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
   )
