@@ -157,4 +157,6 @@ module BuiltinMod {
     TYPE_REP_TYCON_NAME;
   val failWithStatus: forall (a: *). Text -> FailureCategory -> Text -> TextMap Text -> a =
     FAIL_WITH_STATUS;
+  val externalCall: Text -> Text -> Text -> Text -> Update Text =
+    EXTERNAL_CALL;
 }
