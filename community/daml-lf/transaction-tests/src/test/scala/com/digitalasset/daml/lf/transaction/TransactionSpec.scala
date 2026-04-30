@@ -1170,6 +1170,7 @@ object TransactionSpec {
       exerciseResult = if (hasExerciseResult) Some(V.ValueUnit) else None,
       keyOpt = None,
       byKey = false,
+      externalCallResults = ImmArray.empty,
       version = SerializationVersion.minVersion,
     )
 

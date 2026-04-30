@@ -203,6 +203,9 @@ private class NodeBuilderV1(
           exerciseResult,
           keyOpt,
           byKey,
+          // TODO(https://github.com/digital-asset/canton/issues/513)
+          // handle external calls
+          _,
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)

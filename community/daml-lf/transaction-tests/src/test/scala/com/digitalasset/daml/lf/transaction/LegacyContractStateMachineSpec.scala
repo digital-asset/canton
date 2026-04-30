@@ -128,6 +128,7 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
       exerciseResult = None,
       keyOpt = toOptKeyWithMaintainers(templateId, key),
       byKey = byKey,
+      externalCallResults = ImmArray.empty,
       version = txVersion,
     )
   }
