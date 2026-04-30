@@ -341,9 +341,13 @@ object ValueGenerators {
     for {
       extensionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
       functionId <- Gen.alphaNumStr.suchThat(_.nonEmpty).map(_.take(50))
-      config <- Gen.listOf(Arbitrary.arbitrary[Byte]).map(bs => data.Bytes.fromByteArray(bs.toArray))
+      config <- Gen
+        .listOf(Arbitrary.arbitrary[Byte])
+        .map(bs => data.Bytes.fromByteArray(bs.toArray))
       input <- Gen.listOf(Arbitrary.arbitrary[Byte]).map(bs => data.Bytes.fromByteArray(bs.toArray))
-      output <- Gen.listOf(Arbitrary.arbitrary[Byte]).map(bs => data.Bytes.fromByteArray(bs.toArray))
+      output <- Gen
+        .listOf(Arbitrary.arbitrary[Byte])
+        .map(bs => data.Bytes.fromByteArray(bs.toArray))
     } yield ExternalCallResult(
       extensionId = extensionId,
       functionId = functionId,
