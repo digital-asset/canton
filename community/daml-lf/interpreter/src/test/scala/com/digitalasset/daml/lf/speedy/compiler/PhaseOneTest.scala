@@ -7,7 +7,6 @@ package compiler
 
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.PackageInterface
 import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
@@ -22,16 +21,7 @@ import scala.annotation.tailrec
 class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
 
   "reject EXTERNAL_CALL until interpreter support exists" in {
-    val phase1 = {
-      def signatures: PartialFunction[PackageId, PackageSignature] = Map.empty
-      def interface = new PackageInterface(signatures)
-      def config =
-        PhaseOne.Config(
-          profiling = Compiler.NoProfile,
-          stacktracing = Compiler.FullStackTrace,
-        )
-      new PhaseOne(interface, config)
-    }
+    val phase1 = phaseOne()
 
     val err = the[Compiler.CompilationError] thrownBy {
       phase1.translateFromLF(PhaseOne.Env.Empty, EBuiltinFun(BExternalCall))
@@ -42,16 +32,7 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
   "compilation (stack-safety)" - {
 
-    val phase1 = {
-      def signatures: PartialFunction[PackageId, PackageSignature] = Map.empty
-      def interface = new PackageInterface(signatures)
-      def config =
-        PhaseOne.Config(
-          profiling = Compiler.NoProfile,
-          stacktracing = Compiler.FullStackTrace,
-        )
-      new PhaseOne(interface, config)
-    }
+    val phase1 = phaseOne()
 
     // we test that increasing prefixes of the compilation pipeline are stack-safe
 
@@ -178,6 +159,15 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       }
     }
   }
+
+  private def phaseOne(): PhaseOne =
+    new PhaseOne(
+      PackageInterface.Empty,
+      PhaseOne.Config(
+        profiling = Compiler.NoProfile,
+        stacktracing = Compiler.FullStackTrace,
+      ),
+    )
 
   // Construct one level of source-expression at various 'recursion-points'.
   private def app1 = (x: Expr) => EApp(x, exp)
