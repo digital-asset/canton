@@ -52,11 +52,11 @@ message Fetch {
 // External calls are deterministic HTTP calls to extension services.
 // Results are stored in the transaction and replayed during validation.
 message ExternalCallResult {
-  string extension_id = 1;    // Extension service identifier (e.g., "oracle-price-feed")
-  string function_id = 2;     // Function identifier within the extension
-  bytes config = 3;           // Extension configuration bytes for version validation
-  bytes input = 4;            // Input data sent to the extension
-  bytes output = 5;           // Output data returned by the extension
+  string extension_id = 1; // Extension service identifier (e.g., "oracle-price-feed")
+  string function_id = 2; // Function identifier within the extension
+  bytes config = 3; // Extension configuration bytes for version validation
+  bytes input = 4; // Input data sent to the extension
+  bytes output = 5; // Output data returned by the extension
 }
 
 // Exercise node

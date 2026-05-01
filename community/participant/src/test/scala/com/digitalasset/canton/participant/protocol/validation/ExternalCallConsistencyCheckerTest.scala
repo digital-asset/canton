@@ -7,7 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsistencyChecker.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.daml.lf.data.{Bytes => LfBytes}
+import com.digitalasset.daml.lf.data.Bytes as LfBytes
 import org.scalatest.wordspec.AnyWordSpec
 
 class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
@@ -109,7 +109,11 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
     "report not allConsistent when any party is inconsistent" in {
       val results = ExternalCallConsistencyResults(
         Map[LfPartyId, PartyConsistencyResult](
-          alice -> Inconsistent(key("func1"), Set(toBytes("out1"), toBytes("out2")), Set(viewPos0, viewPos1)),
+          alice -> Inconsistent(
+            key("func1"),
+            Set(toBytes("out1"), toBytes("out2")),
+            Set(viewPos0, viewPos1),
+          ),
           bob -> Consistent,
         )
       )

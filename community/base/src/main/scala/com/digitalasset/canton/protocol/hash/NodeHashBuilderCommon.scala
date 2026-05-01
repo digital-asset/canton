@@ -111,10 +111,10 @@ private[hash] abstract class NodeHashBuilderCommon(
           keyOpt,
           byKey,
           _, // externalCallResults - not included in the LF node hash.
-             // Security: external call results ARE included in the Canton protocol hash
-             // via ViewParticipantData -> ActionDescription -> ExerciseActionDescription,
-             // which is serialized into the MerkleTreeLeaf and covered by the view signature.
-             // Excluding them from the LF hash avoids upstream changes to the LF hash spec.
+          // Security: external call results ARE included in the Canton protocol hash
+          // via ViewParticipantData -> ActionDescription -> ExerciseActionDescription,
+          // which is serialized into the MerkleTreeLeaf and covered by the view signature.
+          // Excluding them from the LF hash avoids upstream changes to the LF hash spec.
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)

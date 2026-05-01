@@ -41,7 +41,14 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       )
 
       manager
-        .handleExternalCall("unknown-ext", "test-func", "00000000", "deadbeef", "submission", "test-command-id")
+        .handleExternalCall(
+          "unknown-ext",
+          "test-func",
+          "00000000",
+          "deadbeef",
+          "submission",
+          "test-command-id",
+        )
         .failOnShutdown
         .map { result =>
           result.isLeft shouldBe true
@@ -61,7 +68,14 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
 
       val inputHex = "deadbeef"
       manager
-        .handleExternalCall("echo-ext", "echo", "00000000", inputHex, "submission", "test-command-id")
+        .handleExternalCall(
+          "echo-ext",
+          "echo",
+          "00000000",
+          inputHex,
+          "submission",
+          "test-command-id",
+        )
         .failOnShutdown
         .map { result =>
           result shouldBe Right(inputHex)
@@ -97,7 +111,14 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       emptyManager.extensionIds shouldBe Set.empty
 
       emptyManager
-        .handleExternalCall("any-ext", "any-func", "00000000", "deadbeef", "submission", "test-command-id")
+        .handleExternalCall(
+          "any-ext",
+          "any-func",
+          "00000000",
+          "deadbeef",
+          "submission",
+          "test-command-id",
+        )
         .failOnShutdown
         .map { result =>
           result.isLeft shouldBe true
@@ -115,14 +136,23 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
 
       val testInputs = Seq("deadbeef", "cafebabe", "")
 
-      Future.traverse(testInputs) { input =>
-        manager
-          .handleExternalCall("echo-ext", "any-function", "00000000", input, "submission", "test-command-id")
-          .failOnShutdown
-          .map { result =>
-            result shouldBe Right(input)
-          }
-      }.map(_ => succeed)
+      Future
+        .traverse(testInputs) { input =>
+          manager
+            .handleExternalCall(
+              "echo-ext",
+              "any-function",
+              "00000000",
+              input,
+              "submission",
+              "test-command-id",
+            )
+            .failOnShutdown
+            .map { result =>
+              result shouldBe Right(input)
+            }
+        }
+        .map(_ => succeed)
     }
 
     "validate extensions on startup when enabled" in {
@@ -162,8 +192,12 @@ class ExtensionServiceManagerTest extends AsyncWordSpec with BaseTest {
       )
 
       for {
-        result1 <- manager.handleExternalCall("echo1", "func", "00000000", "input1", "submission", "cmd-1").failOnShutdown
-        result2 <- manager.handleExternalCall("echo2", "func", "00000000", "input2", "submission", "cmd-2").failOnShutdown
+        result1 <- manager
+          .handleExternalCall("echo1", "func", "00000000", "input1", "submission", "cmd-1")
+          .failOnShutdown
+        result2 <- manager
+          .handleExternalCall("echo2", "func", "00000000", "input2", "submission", "cmd-2")
+          .failOnShutdown
       } yield {
         result1 shouldBe Right("input1")
         result2 shouldBe Right("input2")

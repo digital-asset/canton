@@ -950,11 +950,6 @@ object BuildCommon {
             (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
             "com.digitalasset.canton.tests.vettingmain.v1",
           ),
-          (
-            (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
-            (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
-            "com.digitalasset.canton.externalcall",
-          ),
         ),
         Test / damlTsCodegen := {
           (`ledger-common-dars` / Compile / damlBuild).value

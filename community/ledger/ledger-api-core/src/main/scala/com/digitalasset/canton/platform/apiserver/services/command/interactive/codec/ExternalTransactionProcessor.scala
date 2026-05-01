@@ -35,7 +35,11 @@ import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.daml.lf.transaction.{SerializationVersion, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{
+  SerializationVersion,
+  SubmittedTransaction,
+  Transaction,
+}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.util.UUID
@@ -254,7 +258,9 @@ class ExternalTransactionProcessor(
         val protocolVersion = commandExecutionResult.synchronizerRank.synchronizerId.protocolVersion
         // Use the transaction's serialization version to select hashing scheme
         val txVersion = enriched.transaction.version
-        val hashVersion: HashingSchemeVersion = if (txVersion == SerializationVersion.VDev) HashingSchemeVersion.V3 else HashingSchemeVersion.V2
+        val hashVersion: HashingSchemeVersion =
+          if (txVersion == SerializationVersion.VDev) HashingSchemeVersion.V3
+          else HashingSchemeVersion.V2
         EitherT
           .fromEither[FutureUnlessShutdown](
             enriched

@@ -6,19 +6,19 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.engine.ExternalCallError
+import com.digitalasset.daml.lf.engine.ResultNeedExternalCall
 
 import scala.concurrent.ExecutionContext
 
 /** ExternalCallHandler implementation that delegates to ExtensionServiceManager.
   *
-  * This bridges the ledger-api-core ExternalCallHandler interface with the
-  * participant's ExtensionServiceManager for handling external calls during
-  * command submission.
+  * This bridges the ledger-api-core ExternalCallHandler interface with the participant's
+  * ExtensionServiceManager for handling external calls during command submission.
   */
 class ExtensionServiceExternalCallHandler(
     extensionServiceManager: ExtensionServiceManager
-)(implicit ec: ExecutionContext) extends ExternalCallHandler {
+)(implicit ec: ExecutionContext)
+    extends ExternalCallHandler {
 
   override def handleExternalCall(
       extensionId: String,
@@ -27,24 +27,24 @@ class ExtensionServiceExternalCallHandler(
       input: String,
       mode: String,
       commandId: String,
-  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExternalCallError, String]] = {
+  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
     extensionServiceManager
       .handleExternalCall(extensionId, functionId, configHash, input, mode, commandId)
       .map(_.left.map { extensionError =>
-        ExternalCallError(
-          statusCode = extensionError.statusCode,
-          message = extensionError.message,
-          requestId = extensionError.requestId,
+        ResultNeedExternalCall.Error(
+          s"External call failed with status ${extensionError.statusCode}: ${extensionError.message}"
         )
       })
-  }
 }
 
 object ExtensionServiceExternalCallHandler {
+
   /** Create an ExternalCallHandler from an optional ExtensionServiceManager.
     *
-    * @param extensionServiceManagerOpt Optional ExtensionServiceManager
-    * @return ExternalCallHandler that delegates to the manager, or notSupported if None
+    * @param extensionServiceManagerOpt
+    *   Optional ExtensionServiceManager
+    * @return
+    *   ExternalCallHandler that delegates to the manager, or notSupported if None
     */
   def create(
       extensionServiceManagerOpt: Option[ExtensionServiceManager]

@@ -7,26 +7,27 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.daml.lf.data.{Bytes => LfBytes}
+import com.digitalasset.daml.lf.data.Bytes as LfBytes
 
 /** Checks consistency of external call results across a transaction on a per-party basis.
   *
   * Two external calls are considered "equal" if they have the same (extensionId, functionId,
-  * config, input). For each party P that is a signatory of contracts being exercised,
-  * this checker verifies that all equal external calls visible to P return the same output.
+  * config, input). For each party P that is a signatory of contracts being exercised, this checker
+  * verifies that all equal external calls visible to P return the same output.
   *
-  * This is required because the same external call can appear multiple times in a transaction
-  * with different signatory sets. Each party must independently verify consistency of all
-  * calls they are responsible for validating.
+  * This is required because the same external call can appear multiple times in a transaction with
+  * different signatory sets. Each party must independently verify consistency of all calls they are
+  * responsible for validating.
   *
-  * @see [[https://github.com/digital-asset/canton/discussions/XXX Design Discussion]]
+  * @see
+  *   [[https://github.com/digital-asset/canton/discussions/XXX Design Discussion]]
   */
 object ExternalCallConsistencyChecker {
 
   /** Equality key for external calls.
     *
-    * Two external calls with the same key are considered "the same call" and must return
-    * identical results for consistency.
+    * Two external calls with the same key are considered "the same call" and must return identical
+    * results for consistency.
     */
   final case class ExternalCallKey(
       extensionId: String,
@@ -44,10 +45,14 @@ object ExternalCallConsistencyChecker {
 
   /** An external call occurrence with its execution context.
     *
-    * @param key The equality key identifying this call
-    * @param output The recorded output of this call
-    * @param viewPosition The position of the view containing this call
-    * @param signatories The signatories of the contract being exercised (the validating parties)
+    * @param key
+    *   The equality key identifying this call
+    * @param output
+    *   The recorded output of this call
+    * @param viewPosition
+    *   The position of the view containing this call
+    * @param signatories
+    *   The signatories of the contract being exercised (the validating parties)
     */
   final case class ExternalCallWithContext(
       key: ExternalCallKey,
@@ -73,9 +78,12 @@ object ExternalCallConsistencyChecker {
 
   /** The party sees inconsistent external call results.
     *
-    * @param key The external call key that has inconsistent results
-    * @param outputs The different output values observed
-    * @param viewPositions The view positions where the inconsistency was detected
+    * @param key
+    *   The external call key that has inconsistent results
+    * @param outputs
+    *   The different output values observed
+    * @param viewPositions
+    *   The view positions where the inconsistency was detected
     */
   final case class Inconsistent(
       key: ExternalCallKey,
@@ -95,8 +103,8 @@ object ExternalCallConsistencyChecker {
   ) extends PrettyPrinting {
 
     /** Returns parties that have inconsistent results. */
-    def inconsistentParties: Set[LfPartyId] = results.collect {
-      case (party, _: Inconsistent) => party
+    def inconsistentParties: Set[LfPartyId] = results.collect { case (party, _: Inconsistent) =>
+      party
     }.toSet
 
     /** Returns true if all parties have consistent results. */
@@ -120,12 +128,14 @@ class ExternalCallConsistencyChecker {
     * For each view containing an exercise action with external call results, extracts the calls
     * along with the signatories of the contract being exercised.
     *
-    * @param viewValidationResults The validation results for all views in the transaction
-    * @return All external calls with their signatory contexts
+    * @param viewValidationResults
+    *   The validation results for all views in the transaction
+    * @return
+    *   All external calls with their signatory contexts
     */
   def collectExternalCalls(
       viewValidationResults: Map[ViewPosition, ViewValidationResult]
-  ): Seq[ExternalCallWithContext] = {
+  ): Seq[ExternalCallWithContext] =
     viewValidationResults.toSeq.flatMap { case (viewPosition, viewResult) =>
       val viewParticipantData = viewResult.view.viewParticipantData
       val actionDescription = viewParticipantData.actionDescription
@@ -154,24 +164,25 @@ class ExternalCallConsistencyChecker {
         case _ => Seq.empty
       }
     }
-  }
 
   /** Checks consistency of external calls for each hosted confirming party.
     *
     * For each party in `hostedConfirmingParties`:
-    * 1. Filters to external calls where this party is a signatory
-    * 2. Groups those calls by their equality key
-    * 3. For each group, verifies all outputs are identical
-    * 4. Returns Inconsistent if any group has differing outputs
+    *   1. Filters to external calls where this party is a signatory 2. Groups those calls by their
+    *      equality key 3. For each group, verifies all outputs are identical 4. Returns
+    *      Inconsistent if any group has differing outputs
     *
-    * @param allCalls All external calls collected from the transaction
-    * @param hostedConfirmingParties The confirming parties hosted by this participant
-    * @return Per-party consistency results
+    * @param allCalls
+    *   All external calls collected from the transaction
+    * @param hostedConfirmingParties
+    *   The confirming parties hosted by this participant
+    * @return
+    *   Per-party consistency results
     */
   def checkConsistency(
       allCalls: Seq[ExternalCallWithContext],
       hostedConfirmingParties: Set[LfPartyId],
-  ): ExternalCallConsistencyResults = {
+  ): ExternalCallConsistencyResults =
     if (allCalls.isEmpty || hostedConfirmingParties.isEmpty) {
       ExternalCallConsistencyResults.empty
     } else {
@@ -203,5 +214,4 @@ class ExternalCallConsistencyChecker {
 
       ExternalCallConsistencyResults(results)
     }
-  }
 }

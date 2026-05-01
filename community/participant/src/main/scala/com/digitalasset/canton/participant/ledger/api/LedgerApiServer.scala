@@ -58,7 +58,10 @@ import com.digitalasset.canton.participant.store.{
   PruningOffsetServiceImpl,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.extension.{ExtensionServiceExternalCallHandler, ExtensionServiceManager}
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
   ParticipantNodeParameters,

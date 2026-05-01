@@ -140,8 +140,7 @@ final class PreparedTransactionEncoder(
    */
   object v1 {
     // Transformer for LfBytes -> ByteString (used by external call results)
-    private implicit val lfBytesToByteStringTransformer
-        : Transformer[lf.data.Bytes, ByteString] =
+    private implicit val lfBytesToByteStringTransformer: Transformer[lf.data.Bytes, ByteString] =
       (bytes: lf.data.Bytes) => bytes.toByteString
 
     // Transformer for external call results

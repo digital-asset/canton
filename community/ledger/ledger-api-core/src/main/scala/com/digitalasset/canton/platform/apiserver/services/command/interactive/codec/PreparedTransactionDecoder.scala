@@ -47,7 +47,7 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import io.scalaland.chimney.PartialTransformer
+import io.scalaland.chimney.{PartialTransformer, Transformer}
 import io.scalaland.chimney.dsl.TransformerConfiguration.UpdateFlag
 import io.scalaland.chimney.dsl.{TransformedNamesComparison, TransformerConfiguration}
 import io.scalaland.chimney.inlined.*
@@ -291,8 +291,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       }
 
     // Transformer for ByteString -> LfBytes (used by external call results)
-    private implicit val byteStringToLfBytesTransformer
-        : Transformer[ByteString, lf.data.Bytes] =
+    private implicit val byteStringToLfBytesTransformer: Transformer[ByteString, lf.data.Bytes] =
       (bs: ByteString) => lf.data.Bytes.fromByteString(bs)
 
     // Transformer for external call results
@@ -314,10 +313,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
               _.choiceObservers,
               _.choiceObservers.traverse(_.transformIntoPartial[lf.data.Ref.Party]).map(_.toSet),
             )
-            .withFieldComputedPartial(
-              _.version,
-              _.lfVersion.transformIntoPartial[LfSerializationVersion],
-            )
+            .withFieldConst(_.version, version)
             .withFieldComputedPartial(
               _.keyOpt,
               _.key.traverse(_.transformIntoPartial[GlobalKeyWithMaintainers]),

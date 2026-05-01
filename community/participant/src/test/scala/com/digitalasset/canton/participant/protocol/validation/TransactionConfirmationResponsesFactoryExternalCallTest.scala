@@ -9,12 +9,13 @@ import com.digitalasset.canton.protocol.LocalRejectError
 import com.digitalasset.canton.protocol.messages.{ConfirmationResponse, LocalApprove}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.daml.lf.data.Bytes as LfBytes
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Unit tests for external call consistency integration in TransactionConfirmationResponsesFactory.
   *
-  * These tests verify that the factory correctly partitions parties based on their
-  * external call consistency results, generating appropriate per-party verdicts.
+  * These tests verify that the factory correctly partitions parties based on their external call
+  * consistency results, generating appropriate per-party verdicts.
   *
   * Note: Full integration tests are in ExternalCallConsistencyIntegrationTest.
   */
@@ -29,9 +30,13 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
   private val synchronizerId = DefaultTestIdentities.physicalSynchronizerId
   private val protocolVersion = synchronizerId.protocolVersion
 
+  private def bytes(hex: String): LfBytes = LfBytes.assertFromString(hex)
+
+  private def outputs(hex: String*): Set[LfBytes] = hex.map(bytes).toSet
+
   // Helper to create test keys
   private def key(functionId: String): ExternalCallKey =
-    ExternalCallKey("test-ext", functionId, "config", "input")
+    ExternalCallKey("test-ext", functionId, bytes("c0ffee"), bytes("cafe"))
 
   "ExternalCallConsistencyResults" when {
 
@@ -40,7 +45,7 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       "identify inconsistent parties correctly" in {
         val results = ExternalCallConsistencyResults(
           Map[LfPartyId, PartyConsistencyResult](
-            alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+            alice -> Inconsistent(key("func1"), outputs("01", "02"), Set(viewPos0)),
             bob -> Consistent,
             charlie -> Consistent,
           )
@@ -65,8 +70,8 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       "handle multiple inconsistent parties" in {
         val results = ExternalCallConsistencyResults(
           Map[LfPartyId, PartyConsistencyResult](
-            alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
-            bob -> Inconsistent(key("func2"), Set("outA", "outB"), Set(viewPos0)),
+            alice -> Inconsistent(key("func1"), outputs("01", "02"), Set(viewPos0)),
+            bob -> Inconsistent(key("func2"), outputs("0a", "0b"), Set(viewPos0)),
             charlie -> Consistent,
           )
         )
@@ -93,7 +98,7 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
 
       // The detailed message should be preserved in the rejection
       reject.toString should include("getPrice")
-      reject.toString should include("3000") 
+      reject.toString should include("3000")
       reject.toString should include("3001")
     }
   }
@@ -106,7 +111,7 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       val allParties = Set(alice, bob, charlie)
       val consistencyResults = ExternalCallConsistencyResults(
         Map[LfPartyId, PartyConsistencyResult](
-          alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+          alice -> Inconsistent(key("func1"), outputs("01", "02"), Set(viewPos0)),
           bob -> Consistent,
           charlie -> Consistent,
         )
@@ -127,8 +132,8 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
       val allParties = Set(alice, bob)
       val consistencyResults = ExternalCallConsistencyResults(
         Map(
-          alice -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
-          bob -> Inconsistent(key("func1"), Set("out1", "out2"), Set(viewPos0)),
+          alice -> Inconsistent(key("func1"), outputs("01", "02"), Set(viewPos0)),
+          bob -> Inconsistent(key("func1"), outputs("01", "02"), Set(viewPos0)),
         )
       )
 

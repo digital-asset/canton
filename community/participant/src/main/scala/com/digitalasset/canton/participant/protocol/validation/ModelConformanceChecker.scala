@@ -51,7 +51,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
@@ -274,7 +274,7 @@ class ModelConformanceChecker(
     // in nested exercises (child views) but need to be replayed when reinterpreting the parent view.
     val storedExternalCallResults: StoredExternalCallResults = {
       // Helper to extract results from a single view's action description
-      def extractFromView(v: TransactionView): StoredExternalCallResults = {
+      def extractFromView(v: TransactionView): StoredExternalCallResults =
         v.viewParticipantData.unwrap match {
           case Right(vpd) =>
             vpd.actionDescription match {
@@ -287,7 +287,6 @@ class ModelConformanceChecker(
             // Blinded view - no data available
             StoredExternalCallResults.empty
         }
-      }
 
       // Collect results from this view AND all subviews (flatten includes this view as first element)
       val allViewResults = view.flatten.map(extractFromView)

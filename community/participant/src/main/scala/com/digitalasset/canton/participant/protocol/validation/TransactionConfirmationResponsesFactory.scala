@@ -25,7 +25,8 @@ class TransactionConfirmationResponsesFactory(
     participantId: ParticipantId,
     synchronizerId: PhysicalSynchronizerId,
     protected val loggerFactory: NamedLoggerFactory,
-    externalCallConsistencyChecker: ExternalCallConsistencyChecker = new ExternalCallConsistencyChecker(),
+    externalCallConsistencyChecker: ExternalCallConsistencyChecker =
+      new ExternalCallConsistencyChecker(),
 ) extends NamedLogging {
 
   import com.digitalasset.canton.util.ShowUtil.*
@@ -322,15 +323,21 @@ class TransactionConfirmationResponsesFactory(
 
     /** Partitions parties based on their external call consistency results.
       *
-      * Parties with inconsistent external call results get a malformed rejection,
-      * while parties with consistent results get the general verdict.
+      * Parties with inconsistent external call results get a malformed rejection, while parties
+      * with consistent results get the general verdict.
       *
-      * @param hostedConfirmingParties All hosted confirming parties for this view
-      * @param consistencyResults Per-party external call consistency results
-      * @param generalVerdictO The general verdict (and whether it's malformed) to apply to consistent parties
-      * @param viewPosition The position of the view being processed
-      * @param requestId The request ID for logging
-      * @return Confirmation responses partitioned by verdict
+      * @param hostedConfirmingParties
+      *   All hosted confirming parties for this view
+      * @param consistencyResults
+      *   Per-party external call consistency results
+      * @param generalVerdictO
+      *   The general verdict (and whether it's malformed) to apply to consistent parties
+      * @param viewPosition
+      *   The position of the view being processed
+      * @param requestId
+      *   The request ID for logging
+      * @return
+      *   Confirmation responses partitioned by verdict
       */
     def partitionByExternalCallConsistency(
         hostedConfirmingParties: Set[LfPartyId],
@@ -338,7 +345,7 @@ class TransactionConfirmationResponsesFactory(
         generalVerdictO: Option[(LocalVerdict, Boolean)],
         viewPosition: com.digitalasset.canton.data.ViewPosition,
         requestId: RequestId,
-    )(implicit traceContext: TraceContext): Seq[ConfirmationResponse] = {
+    )(implicit traceContext: TraceContext): Seq[ConfirmationResponse] =
       if (hostedConfirmingParties.isEmpty) {
         Seq.empty
       } else {
@@ -406,7 +413,6 @@ class TransactionConfirmationResponsesFactory(
 
         responses.result()
       }
-    }
 
     if (malformedPayloads.nonEmpty) {
       FutureUnlessShutdown.pure(

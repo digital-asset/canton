@@ -338,8 +338,7 @@ object LocalRejectError extends LocalRejectionGroup {
         ) {
       final case class Reject(override val _details: String)
           extends Malformed(
-            _causePrefix =
-              "Rejected transaction due to missing external call result for replay: "
+            _causePrefix = "Rejected transaction due to missing external call result for replay: "
           )
     }
   }
