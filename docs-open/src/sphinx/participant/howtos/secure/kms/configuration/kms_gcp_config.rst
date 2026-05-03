@@ -21,6 +21,18 @@ node's configuration file. A KMS for GCP is configured in the following way:
 - ``project-id`` specifies which project are we binding to.
 - ``key-ring-id`` specifies the keyring to use. Multi region keys are enabled for an entire keyring. Therefore, the KMS operator is responsible for setting the keyring correctly depending on the systems' needs.
 - ``audit-logging`` flag that enables logging of every call made to the GCP KMS
+- ``key-version-overrides`` (optional) maps a GCP cryptoKey id to the cryptoKey version Canton
+  should use for that key. Keys not listed default to version ``"1"``, which matches Canton's
+  behavior of creating a new cryptoKey rather than adding a version to an existing one. This
+  is intended for cryptoKeys whose key material was
+  `imported into GCP KMS <https://cloud.google.com/kms/docs/importing-a-key>`_, where each
+  import creates a new cryptoKey version and multiple versions can be relevant even for
+  asymmetric keys. Example::
+
+      key-version-overrides = {
+          "my-imported-signing-key" = "3"
+          "my-imported-encryption-key" = "2"
+      }
 
 Configure GCP credentials and permissions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
