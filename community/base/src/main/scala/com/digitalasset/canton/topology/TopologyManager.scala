@@ -1184,7 +1184,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       .map(_ => ())
 
   override protected def onClosed(): Unit =
-    LifeCycle.close(sequentialQueue, processor, store)(logger)
+    LifeCycle.close(sequentialQueue, processor)(logger)
 
   override def toString: String = s"TopologyManager[${store.storeId}]"
 }

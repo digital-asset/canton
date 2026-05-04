@@ -10,7 +10,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.{LfPackageId, ReassignmentCounter}
-import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionCoder}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
 import com.google.protobuf.ByteString
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
@@ -56,7 +56,7 @@ object RepairContract {
 
       blob = event.createdEventBlob
 
-      fattyContract <- TransactionCoder
+      fattyContract <- ContractInstanceCoder
         .decodeFatContractInstance(blob)
         .leftMap(decodeError =>
           s"Unable to decode contract event payload: ${decodeError.errorMessage}"
@@ -91,7 +91,7 @@ object RepairContract {
       targetSynchronizerId: SynchronizerId,
   ): Either[String, LapiActiveContract] =
     for {
-      blob <- TransactionCoder
+      blob <- ContractInstanceCoder
         .encodeFatContractInstance(repairContract.contract)
         .leftMap(err => s"Unable to encode contract event payload: ${err.errorMessage}")
     } yield {

@@ -755,7 +755,7 @@ final class ChangingTopologyPerformanceIntegrationRestartSequencersTest
   protected val numParticipants = 3
 
   override lazy val operations: NonEmpty[Seq[TopologyOperations]] =
-    NonEmpty.apply(Seq, new RestartSequencersChaos(logger))
+    NonEmpty.apply(Seq, new RestartSequencerChaos(logger))
 }
 
 final class ChangingTopologyPerformanceIntegrationRestartMediatorsTest

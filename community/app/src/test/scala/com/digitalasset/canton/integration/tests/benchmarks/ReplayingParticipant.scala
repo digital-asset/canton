@@ -191,6 +191,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
             loggerFactory,
           ),
           synchronizerUpgradeTime = None,
+          sequencerSnapshotTimestamp = None,
           NoPackageDependencies,
           CachingConfigs(),
           // turn off consistency checks for performance tests
@@ -199,7 +200,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           timeouts,
           futureSupervisor,
           extendedLoggerFactory,
-        )()
+        )
         .futureValueUS
     val synchronizerCryptoClient =
       SynchronizerCryptoClient.create(

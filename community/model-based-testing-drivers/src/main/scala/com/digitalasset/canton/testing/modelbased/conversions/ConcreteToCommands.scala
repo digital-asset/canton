@@ -8,9 +8,12 @@ import cats.instances.all.*
 import com.daml.ledger.api.v2.commands as proto
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.testing.modelbased.ast.Concrete.*
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.value.Value as V
+
+import scala.language.implicitConversions
 
 object ConcreteToCommands {
   sealed trait SomeContractId {
@@ -20,7 +23,13 @@ object ConcreteToCommands {
   final case class UniversalWithKeyContractId(contractId: V.ContractId) extends SomeContractId
 
   type PartyIdMapping = Map[PartyId, Ref.Party]
+  type CantonPartyIdMapping = Map[PartyId, Party]
   type ContractIdMapping = Map[ContractId, SomeContractId]
+
+  implicit def cantonMappingToLfMapping(
+      cantonPartyIdMapping: CantonPartyIdMapping
+  ): PartyIdMapping =
+    cantonPartyIdMapping.view.mapValues(_.toLf).toMap
 
   sealed trait TranslationError
   final case class PartyIdNotFound(partyId: PartyId) extends TranslationError

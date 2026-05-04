@@ -12,7 +12,7 @@ import com.digitalasset.canton.serialization.{
   SerializationCheckFailed,
 }
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.daml.lf.transaction.{TransactionCoder, TransactionOuterClass}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, TransactionOuterClass}
 import com.digitalasset.daml.lf.value.ValueCoder
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -29,7 +29,7 @@ import scala.annotation.unused
   * @param deserializedFrom
   *   If set, the given [[ByteString]] will be deemed to be the valid serialization for the given
   *   contract instance. If [[None]], the serialization is produced by
-  *   [[TransactionCoder.encodeContractInstance]].
+  *   [[ContractInstanceCoder.encodeContractInstance]].
   */
 final case class SerializableRawContractInstance private (
     contractInstance: LfThinContractInst
@@ -42,7 +42,7 @@ final case class SerializableRawContractInstance private (
     */
   @throws[SerializationCheckFailed[ValueCoder.EncodeError]]
   protected[this] override def toByteStringChecked: Either[ValueCoder.EncodeError, ByteString] =
-    TransactionCoder
+    ContractInstanceCoder
       .encodeContractInstance(coinst = contractInstance)
       .map(_.toByteString)
 
@@ -95,7 +95,7 @@ object SerializableRawContractInstance {
       contractInstanceP <- ProtoConverter.protoParser(
         TransactionOuterClass.ThinContractInstance.parseFrom
       )(bytes)
-      contractInstance <- TransactionCoder
+      contractInstance <- ContractInstanceCoder
         .decodeContractInstance(protoCoinst = contractInstanceP)
         .leftMap(error => ValueConversionError("", error.toString))
     } yield createWithSerialization(contractInstance)(bytes)

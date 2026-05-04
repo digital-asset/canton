@@ -424,7 +424,7 @@ object EventStorageBackendTemplate {
       )
       .toSet
 
-  private def submittersInQueryingParties(
+  def submittersInQueryingParties(
       allQueryingPartiesO: Option[Set[Party]],
       submitters: Option[Seq[Party]],
   ): Boolean = allQueryingPartiesO match {

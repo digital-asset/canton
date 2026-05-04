@@ -20,6 +20,7 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId}
 import com.digitalasset.daml.lf.engine.Error as LfError
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
+import com.digitalasset.daml.lf.language
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Reference}
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
@@ -28,7 +29,6 @@ import com.digitalasset.daml.lf.transaction.{
 }
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.{Value, ValueCoder}
-import com.digitalasset.daml.lf.{VersionRange, language}
 import com.google.common.io.BaseEncoding
 import org.slf4j.event.Level
 
@@ -219,7 +219,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
       def buildCause(
           packageId: PackageId,
           languageVersion: LanguageVersion,
-          allowedLanguageVersions: VersionRange[LanguageVersion],
+          allowedLanguageVersions: Seq[LanguageVersion],
       ): String =
         LfError.Package
           .AllowedLanguageVersion(packageId, languageVersion, allowedLanguageVersions)
@@ -228,7 +228,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
       final case class Error(
           packageId: Ref.PackageId,
           languageVersion: language.LanguageVersion,
-          allowedLanguageVersions: VersionRange[language.LanguageVersion],
+          allowedLanguageVersions: Seq[language.LanguageVersion],
       )(implicit
           val loggingContext: ErrorLoggingContext
       ) extends DamlErrorWithDefiniteAnswer(

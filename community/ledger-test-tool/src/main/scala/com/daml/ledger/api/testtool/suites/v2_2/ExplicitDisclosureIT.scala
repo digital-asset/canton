@@ -30,7 +30,7 @@ import com.digitalasset.canton.ledger.error.groups.{
   ConsistencyErrors,
   RequestValidationErrors,
 }
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.google.protobuf.ByteString
 import org.scalatest.Inside.inside
 
@@ -288,14 +288,14 @@ final class ExplicitDisclosureIT extends LedgerTestSuite {
         // Ensure participants are synchronized
         _ <- p.synchronize
 
-        otherSalt = TransactionCoder
+        otherSalt = ContractInstanceCoder
           .decodeFatContractInstance(delegateContext.disclosedContract.createdEventBlob)
           .map(_.authenticationData)
           .getOrElse(fail("contract decode failed"))
 
-        tamperedEventBlob = TransactionCoder
+        tamperedEventBlob = ContractInstanceCoder
           .encodeFatContractInstance(
-            TransactionCoder
+            ContractInstanceCoder
               .decodeFatContractInstance(ownerContext.disclosedContract.createdEventBlob)
               .map(_.setAuthenticationData(otherSalt))
               .getOrElse(fail("contract decode failed"))

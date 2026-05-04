@@ -7,7 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
@@ -41,7 +41,6 @@ import com.digitalasset.canton.synchronizer.sequencer.time.{
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.synchronizer.sequencer.{AnnouncedLsu, SubmissionOutcome}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.util.collection.IterableUtil
@@ -216,7 +215,6 @@ class BlockUpdateGeneratorImpl(
                 _ <- checkLsuSequencingBounds(event, lsuSequencingBounds)
                 _ <- checkDrSequencingTimeUpperBound(event, drSequencingTimeUpperBound)
               } yield ()
-
               checksResult.fold(
                 err => {
                   err.log()
@@ -477,7 +475,7 @@ object BlockUpdateGeneratorImpl {
       orderingSequencerId: SequencerId,
       consumeTraffic: SubmissionRequestValidator.TrafficConsumption,
       errorOrPrevalidationOutcome: Either[SubmissionOutcome, PrevalidationOutcome],
-      sequencingSnapshot: TopologySnapshot,
+      sequencingSnapshot: SyncCryptoApi,
   )(val traceContext: TraceContext)
 
 }

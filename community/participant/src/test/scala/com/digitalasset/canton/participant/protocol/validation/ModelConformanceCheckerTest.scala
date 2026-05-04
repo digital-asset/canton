@@ -42,23 +42,19 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   Result,
   ViewReconstructionError,
 }
-import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant.util.DAMLe.HasReinterpret
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.{ContractHasher, ContractValidator, RoseTree, TestEngine}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
   HasExecutionContext,
-  LfCommand,
   LfGlobalKeyMapping,
   LfPackageId,
   LfPartyId,
@@ -66,8 +62,8 @@ import com.digitalasset.canton.{
   config,
 }
 import com.digitalasset.daml.lf
-import com.digitalasset.daml.lf.data.Ref.{FullReference, PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.digitalasset.daml.lf.data.Ref.FullReference
+import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.engine.Error.Interpretation.DamlException
 import com.digitalasset.daml.lf.engine.{Error, Error as LfError}
 import com.digitalasset.daml.lf.interpretation.Error.ContractNotFound
@@ -175,8 +171,7 @@ class ModelConformanceCheckerTest
   }
 
   private def buildUnderTest(
-      contractValidator: ContractValidator = ContractValidator.AllowAll,
-      flattenTx: Boolean = false,
+      contractValidator: ContractValidator = ContractValidator.AllowAll
   ): ModelConformanceChecker = {
 
     val damlE: DAMLe = new DAMLe(
@@ -187,49 +182,9 @@ class ModelConformanceCheckerTest
       loggerFactory = loggerFactory,
     )
 
-    val reinterpreter = if (flattenTx) {
-      new HasReinterpret {
-        override def reinterpret(
-            contracts: ReplayContractLookup,
-            contractAuthenticator: ContractAuthenticatorFn,
-            submitters: Set[LfPartyId],
-            command: LfCommand,
-            topologySnapshot: TopologySnapshot,
-            ledgerTime: CantonTimestamp,
-            preparationTime: CantonTimestamp,
-            rootSeed: Option[LfHash],
-            packageResolution: Map[PackageName, PackageId],
-            expectFailure: Boolean,
-            getEngineAbortStatus: GetEngineAbortStatus,
-        )(implicit traceContext: TraceContext): EitherT[
-          FutureUnlessShutdown,
-          DAMLe.ReinterpretationError,
-          DAMLe.ReInterpretationResult,
-        ] = damlE
-          .reinterpret(
-            contracts,
-            contractAuthenticator,
-            submitters,
-            command,
-            topologySnapshot,
-            ledgerTime,
-            preparationTime,
-            rootSeed,
-            packageResolution,
-            expectFailure,
-            getEngineAbortStatus,
-          )
-          .map { result =>
-            result.copy(
-              transaction = flattenRollback(result.transaction)
-            )
-          }
-      }
-    } else damlE
-
     ModelConformanceChecker(
       participantId = participantId,
-      reinterpreter = reinterpreter,
+      reinterpreter = damlE,
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,
       packageResolver = testEngine.packageResolver,
@@ -268,19 +223,15 @@ class ModelConformanceCheckerTest
   // and ones that are not allowed as part of PV35 (contract creation, consuming execution).
   "When exceptions are thrown during submission" should {
 
-    val testWithFlattenedTx = testedProtocolVersion >= ProtocolVersion.v35
-
-    val underTest: ModelConformanceChecker = buildUnderTest(flattenTx = testWithFlattenedTx)
+    val underTest: ModelConformanceChecker = buildUnderTest()
 
     "exceptionTesterFail" in {
-      val base = exampleFactory.exceptionTesterFail()
-      val example = if (testWithFlattenedTx) base.flattened else base
+      val example = exampleFactory.exceptionTesterFail()
       verifyExample(underTest, example)
     }
 
     "exceptionTesterNonConsumingExec" in {
-      val base = exampleFactory.exceptionTesterNonConsumingExec()
-      val example = if (testWithFlattenedTx) base.flattened else base
+      val example = exampleFactory.exceptionTesterNonConsumingExec()
       verifyExample(underTest, example)
     }
 
@@ -954,7 +905,7 @@ object CheckOutcome {
 object ModelConformanceCheckerTest extends OptionValues {
 
   object LfLenses {
-    def fullReferencePkg[M]: Lens[FullReference[M], M] = GenLens[FullReference[M]](_.pkg)
+    def fullReferencePkg[M]: Lens[FullReference[M], M] = GenLens[FullReference[M]].apply(_.pkg)
   }
 
   final case class Example(
@@ -963,9 +914,7 @@ object ModelConformanceCheckerTest extends OptionValues {
       metadata: Transaction.Metadata,
       ledgerTime: CantonTimestamp,
       contracts: Map[LfContractId, GenContractInstance],
-  ) {
-    def flattened: Example = copy(tx = SubmittedTransaction(flattenRollback(tx)))
-  }
+  )
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {
 
@@ -1191,49 +1140,6 @@ object ModelConformanceCheckerTest extends OptionValues {
         { case c1 :: c2 :: c3 :: Nil => c1.exerciseET_CatchExecFail(c2, c3).commands().loneElement },
       )
 
-  }
-
-  /** Flatten any rollback nodes.
-    *
-    * Transactions in PV35 will may contain exercises that did not complete but they will not
-    * contain any rollback nodes. This function strips out rollback nodes for test purposes and can
-    * be removed once the engine no longer produces them when running in mode
-    * ContractStateMachine.Mode.UCKWithoutRollback.
-    */
-
-  private def flattenRollback(tx: VersionedTransaction): VersionedTransaction = {
-
-    def flattenExercise(orig: List[NodeId]): List[NodeId] =
-      orig match {
-        case Nil => Nil
-        case nodeId :: rest =>
-          tx.nodes(nodeId) match {
-            case rollback: Node.Rollback =>
-              flattenExercise(rollback.children.toList) ++ flattenExercise(rest)
-            case _ =>
-              nodeId :: flattenExercise(rest)
-          }
-      }
-
-    def flattenNode(nodeId: NodeId, node: Node): Map[NodeId, Node] = node match {
-      case exercise: Node.Exercise =>
-        val children = flattenExercise(exercise.children.toList)
-        Map(nodeId -> exercise.copy(children = ImmArray.from(children))) ++ flattenNodes(children)
-      case _: Node.Rollback =>
-        throw new IllegalStateException("Did not expect rollback here!")
-      case other: Node =>
-        Map(nodeId -> other)
-    }
-
-    def flattenNodes(todo: List[NodeId]): Map[NodeId, Node] =
-      todo match {
-        case Nil => Map.empty
-        case nodeId :: rest =>
-          val node = tx.nodes(nodeId)
-          flattenNode(nodeId, node) ++ flattenNodes(rest)
-      }
-
-    VersionedTransaction(tx.version, flattenNodes(tx.roots.toList), tx.roots)
   }
 
 }

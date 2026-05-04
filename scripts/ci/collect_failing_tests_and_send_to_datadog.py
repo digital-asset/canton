@@ -6,7 +6,6 @@ import re
 import sys
 import subprocess
 import datetime
-import tempfile
 from pathlib import Path
 import json
 import urllib.request
@@ -18,7 +17,7 @@ metric_short_version = "canton.failed_test_grouped"
 # Set to 3 to avoid alerting on single transient failures or manual CircleCI job retries.
 CONSECUTIVE_FAILURES_THRESHOLD: Final[int] = 3
 
-hub_milestone = "31" # flaky tests milestone M97
+hub_milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN" # https://github.com/orgs/DACH-NY/projects/38/
 
 release_line_field = "PVTSSF_lADOAJX-Fc4AbncNzgcWE1k" # ID of the custom field "Release Line"
@@ -31,7 +30,6 @@ branches_to_report = {
     "main-2.x" : "073b4df3" # ID of the value "main-2.x" for the Release Line field in the project
 }
 
-hub_cmd = ["hub"]
 gh_cmd = ["gh"]
 
 branch = os.environ.get('CIRCLE_BRANCH', '')
@@ -263,32 +261,43 @@ def gh_assign_release_line(idx: str, project_item_id: str):
 
 def check_result(result):
     if result.returncode != 0:
-        print(f"### ERROR while executing hub command!")
+        print(f"### ERROR while executing gh command!")
         print(f"Command was {result.args}")
         print(f"stderr was {result.stderr}")
         print(f"stdout was {result.stdout}")
-        raise Exception("hub command failed")
+        raise Exception("gh command failed")
 
-def hub_cmd_with_input(cmd, body):
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        f.write(body)
-        path = f.name
-    try:
-        result = subprocess.run(hub_cmd + cmd + ["-F", path], capture_output=True, text=True)
-    finally:
-        os.unlink(path)
+def gh_issue_create_cmd(title: str, body: str):
+    result = subprocess.run(
+        gh_cmd + ["issue", "create", "--repo", "DACH-NY/canton",
+                  "--title", title, "--body", body, "--milestone", hub_milestone],
+        capture_output=True, text=True, env=gh_flaky_test_env
+    )
+    check_result(result)
+    return result
+
+def gh_issue_edit_cmd(idx: str, title: str, body: str):
+    # gh issue edit has no --state flag; reopen separately first
+    reopen_result = subprocess.run(
+        gh_cmd + ["issue", "reopen", idx, "--repo", "DACH-NY/canton"],
+        capture_output=True, text=True, env=gh_flaky_test_env
+    )
+    if reopen_result.returncode != 0 and "already open" not in reopen_result.stderr.lower():
+        check_result(reopen_result)
+    result = subprocess.run(
+        gh_cmd + ["issue", "edit", idx, "--repo", "DACH-NY/canton",
+                  "--title", title, "--body", body],
+        capture_output=True, text=True, env=gh_flaky_test_env
+    )
     check_result(result)
     return result
 
 def hub_create_issue(title: str):
-    msg = f"""{title}
-
-This issue was created automatically by the CI system. Please fix the test before closing the issue.
+    body = f"""This issue was created automatically by the CI system. Please fix the test before closing the issue.
 
 {hub_create_issue_table_header()}
-{hub_create_issue_line()}
-    """
-    result = hub_cmd_with_input(["issue", "create", "-M", hub_milestone], msg)
+{hub_create_issue_line()}"""
+    result = gh_issue_create_cmd(title, body)
     print(f"Created issue: {result.stdout}")
 
 def select_volunteer() -> str:
@@ -388,8 +397,8 @@ def hub_update_issue(idx: str, title: str, body: str, threshold: Optional[int] =
             if all(are_consecutive_commits(a, b) for a, b in zip(all_commits, all_commits[1:])):
                 consecutive_streak = True
 
-    msg = f"{title}\n\n{body}\n{hub_create_issue_line()}"
-    hub_cmd_with_input(["issue", "update",  "-s", "open", f"{idx}"], msg)
+    new_body = f"{body}\n{hub_create_issue_line()}"
+    gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: {idx} for {title}")
     if consecutive_streak:
         return (idx, title, commit_hash)
@@ -438,10 +447,10 @@ def test_hub_update_issue_old_format():
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
     with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input') as mock_hub:
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
         hub_update_issue("42", "Flaky test", old_body)
-        mock_hub.assert_called_once()
-        msg = mock_hub.call_args[0][1]
+        mock_gh.assert_called_once()
+        msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
         assert header in msg, f"Table header was not injected into old-format body: {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once"
@@ -460,10 +469,10 @@ def test_hub_update_issue_new_format():
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
     with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input') as mock_hub:
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
         hub_update_issue("42", "Flaky test", new_body)
-        mock_hub.assert_called_once()
-        msg = mock_hub.call_args[0][1]
+        mock_gh.assert_called_once()
+        msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
         assert msg.count(header) == 1, f"Table header must appear exactly once in updated body: {msg}"
 
@@ -498,7 +507,7 @@ def test_hub_update_issue_returns_consecutive_streak_info():
 
     # exactly threshold-1 prior commits, all consecutive → streak fires
     with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input'), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = hub_update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {CONSECUTIVE_FAILURES_THRESHOLD} consecutive commits"
@@ -508,14 +517,14 @@ def test_hub_update_issue_returns_consecutive_streak_info():
 
     # one commit short → not enough history, no streak
     with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input'), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = hub_update_issue("42", "Flaky test", make_body(prior[:-1]))
         assert result is None, f"Expected None with only {len(prior) - 1} prior commits"
 
     # full history but not consecutive → no streak
     with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input'), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
         result = hub_update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits"
@@ -523,7 +532,7 @@ def test_hub_update_issue_returns_consecutive_streak_info():
     # consecutive streak from unstable_test → no alert
     unstable_env = {**env, 'CIRCLE_JOB': 'unstable_test'}
     with patch.dict(os.environ, unstable_env, clear=False), \
-         patch(f'{__name__}.hub_cmd_with_input'), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = hub_update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None when job is unstable_test"

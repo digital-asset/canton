@@ -25,11 +25,15 @@ class DarValidationSpec extends AnyFlatSpec with Matchers {
         resource should not be null
       }
 
-      val Right(dar) = DarDecoder.readArchiveFromFile(new File(resource.toURI))
+      val dar = DarDecoder.readArchiveFromFile(new File(resource.toURI)) match {
+        case Right(value) => value
+        case Left(err) => fail(s"Failed to decode $resourceName: $err")
+      }
 
-      val result = Validation.checkPackages(dar.all.toMap)
-
-      result shouldBe Right(())
+      Validation.checkPackages(dar.all.toMap) match {
+        case Right(()) => succeed
+        case Left(err) => fail(s"Validation failed for $resourceName: $err")
+      }
     }
   }
 }

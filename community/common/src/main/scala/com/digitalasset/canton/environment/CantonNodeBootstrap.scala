@@ -771,6 +771,7 @@ abstract class CantonNodeBootstrapImpl[
         // as we are only expecting namespace delegations that end up in the authorized store, this is fine
         staticSynchronizerParameters = None,
         timeouts = this.timeouts,
+        futureSupervisor = futureSupervisor,
         loggerFactory = this.loggerFactory,
       )
 
@@ -1035,7 +1036,6 @@ abstract class CantonNodeBootstrapImpl[
                       .managers() ++ sequencedTopologyManagers :+ topologyManager,
                     lookupActivePsid,
                     temporaryStoreRegistry,
-                    parameters,
                     bootstrapStageCallback.loggerFactory,
                   ),
                   executionContext,

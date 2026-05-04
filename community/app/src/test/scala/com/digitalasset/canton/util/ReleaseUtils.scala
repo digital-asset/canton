@@ -9,7 +9,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.*
-import com.digitalasset.canton.integration.plugins.LAPITTRelease
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.version.{
   ProtocolVersion,
@@ -25,7 +24,6 @@ import scala.concurrent.{ExecutionContext, Future}
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
 object ReleaseUtils {
   final case class TestedRelease(
-      ledgerApiTestTool: LAPITTRelease,
       releaseVersion: ReleaseVersion,
       protocolVersions: NonEmpty[List[ProtocolVersion]],
   )
@@ -123,7 +121,7 @@ object ReleaseUtils {
       release: ReleaseVersion
   )(implicit elc: ErrorLoggingContext): String = {
     import scala.sys.process.*
-    val cantonDir = s"tmp/canton-enterprise-$release/bin/canton"
+    val cantonDir = s"tmp/canton-open-source-$release/bin/canton"
     if (Files.exists(Paths.get(cantonDir))) {
       elc.info(s"Release $release already downloaded.")
       cantonDir

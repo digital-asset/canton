@@ -35,7 +35,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
     includeTransactions = Some(
       TransactionFormat(
         eventFormat = EventFormat(
-          filtersByParty = Map(dsoParty -> CumulativeFilter.templateWildcardFilter(true)),
+          filtersByParty = Map(dsoParty.value -> CumulativeFilter.templateWildcardFilter(true)),
           filtersForAnyParty = None,
           verbose = false,
         ),

@@ -34,7 +34,7 @@ import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.Assertion
 
@@ -120,7 +120,7 @@ abstract class LedgerApiDynamicTemplateFilterIntegrationTest
   ): Assertion = {
     toJavaProto(create.templateId.value) shouldBe expectedIdentifier
     create.createdEventBlob should not be empty
-    TransactionCoder
+    ContractInstanceCoder
       .decodeFatContractInstance(create.createdEventBlob)
       .value
       .packageName shouldBe UpgradingV1.PACKAGE_NAME

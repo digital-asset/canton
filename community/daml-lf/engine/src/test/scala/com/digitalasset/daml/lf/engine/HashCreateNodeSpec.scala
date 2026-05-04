@@ -23,13 +23,17 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.collection.immutable.ArraySeq
 
 /** Tests for [[Engine.hashCreateNode]]. */
-class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers with SuppressingLogging {
+class HashCreateNodeSpec
+    extends AnyWordSpec
+    with EitherValues
+    with Matchers
+    with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default[this.type]
 
   val pkgId = defaultParserParameters.defaultPackageId
-  val pkg = {
+  val pkg =
     p""" metadata ( 'test-pkg' : '1.0.0' )
         module M {
           record @serializable T = { p: Party, cid : ContractId M:T, trailer : Option Int64 };
@@ -40,13 +44,12 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           };
         }
     """
-  }
 
   val compilerConfig = Compiler.Config.Default
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId -> pkg), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    EngineConfig(LanguageVersion.stableLfVersions),
     loggerFactory,
   )
 

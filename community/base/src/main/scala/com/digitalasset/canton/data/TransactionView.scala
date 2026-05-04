@@ -174,9 +174,11 @@ final case class TransactionView private (
     subviews = Some(subviews.toProtoV30),
   )
 
-  /** The key maintainers associated with each global key, the resolved contracts are always empty.
+  /** The key maintainers associated with each queried global key.
     *
     * Use to support protocol behaviour from [[com.digitalasset.canton.version.ProtocolVersion.v35]]
+    *
+    * For more information on the population see [[ViewParticipantData.keyResolution]].
     *
     * @throws java.lang.IllegalStateException
     *   if the [[ViewParticipantData]] of this view is blinded

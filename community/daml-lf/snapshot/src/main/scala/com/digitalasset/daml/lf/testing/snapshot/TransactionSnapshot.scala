@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
-import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error}
+import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, TransactionCoder as TxCoder}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.Speedy
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
@@ -21,7 +21,6 @@ import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine as ContractStateMachine,
   Node,
   SubmittedTransaction as SubmittedTx,
-  TransactionCoder as TxCoder,
   TransactionOuterClass as TxOuterClass,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -113,7 +112,7 @@ private[snapshot] object TransactionSnapshot {
     println(s"%%% compile ${pkgs.size} packages ...")
     val engine = new Engine(
       EngineConfig(
-        allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+        allowedLanguageVersions = LanguageVersion.allLfVersions,
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         gasBudget = gasBudget,

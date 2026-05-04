@@ -10,10 +10,10 @@ import com.digitalasset.canton.protocol.{ExampleContractFactory, LfSerialization
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
   GlobalKeyWithMaintainers,
-  TransactionCoder,
 }
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueTrue}
 
@@ -81,7 +81,7 @@ object DisclosedContractCreator {
   val disclosedContract: DisclosedContract = DisclosedContract(
     templateId = Some(api.templateId),
     contractId = lf.fatContractInstance.contractId.coid,
-    createdEventBlob = TransactionCoder
+    createdEventBlob = ContractInstanceCoder
       .encodeFatContractInstance(lf.fatContractInstance)
       .fold(
         err =>

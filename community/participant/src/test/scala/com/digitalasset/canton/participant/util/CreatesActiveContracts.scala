@@ -66,7 +66,9 @@ private[participant] trait CreatesActiveContracts {
     // Use the authenticated contract to come up with the contract proto serialization.
     val authenticatedFatContractInstance = unauthenticatedLfFatContract.mapCid(_ => contractId)
     val serialization = valueOrFail(
-      lf.transaction.TransactionCoder.encodeFatContractInstance(authenticatedFatContractInstance)
+      lf.transaction.ContractInstanceCoder.encodeFatContractInstance(
+        authenticatedFatContractInstance
+      )
     )("serialize contract instance")
 
     // 2. Create LAPI active contract

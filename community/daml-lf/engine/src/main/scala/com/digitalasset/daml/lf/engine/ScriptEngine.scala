@@ -42,7 +42,7 @@ object ScriptEngine {
   val defaultCompilerConfig: Compiler.Config = {
     import Compiler._
     Config(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       packageValidation = FullPackageValidation,
       profiling = NoProfile,
       stacktracing = FullStackTrace,

@@ -123,7 +123,7 @@ final class SerializationDeserializationTest
         }
 
         test(AcknowledgeRequest, version)
-        test(AggregationRule, version)
+        testContext(AggregationRule, version, version)
         if (version < ProtocolVersion.v35) {
           test(ClosedUncompressedEnvelope, version)
         }
@@ -171,7 +171,7 @@ final class SerializationDeserializationTest
         testContext(TopologyTransactionsBroadcast, version, version)
         testContext(SignedTopologyTransaction, ProtocolVersionValidation(version), version)
         testContext(SignedTopologyTransactions, ProtocolVersionValidation(version), version)
-        test(SequencerSnapshot, version)
+        testContext(SequencerSnapshot, version, version)
         test(OnboardingStateForSequencer, version)
         test(OnboardingStateForSequencerV2, version)
         test(LsuTrafficState, version)

@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.{BaseTest, LfPackageId, ReassignmentCounter}
-import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionCoder}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
 import org.scalatest.Assertion
 
 import scala.jdk.CollectionConverters.*
@@ -76,7 +76,7 @@ trait RepairTestUtil {
         else sys.error(s"No created event for ${contractId.toLf.coid}")
       )
     val contractCreatedEventBlob = createdEvent.getCreatedEventBlob
-    val contractInst = TransactionCoder
+    val contractInst = ContractInstanceCoder
       .decodeFatContractInstance(contractCreatedEventBlob)
       .fold(
         err => sys.error(s"Failed to decode created event blob for ${contractId.toLf.coid}: $err"),

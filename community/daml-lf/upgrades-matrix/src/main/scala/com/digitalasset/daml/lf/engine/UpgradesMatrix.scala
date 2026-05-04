@@ -200,8 +200,9 @@ class UpgradesMatrixCases(
       languageVersion = langVersion,
     )
 
+  // TODO[#32409] delete dead code or adapt to NUCK since featureLegacyLookupByKey.enabledIn is always false
   def ifLookupByKeys[A](ifTrue: => A, ifFalse: => A): A =
-    if (LanguageVersion.featureLookupBykey.enabledIn(langVersion)) ifTrue else ifFalse
+    if (LanguageVersion.featureLegacyLookupByKey.enabledIn(langVersion)) ifTrue else ifFalse
   def whenLookupByKeysOtherwiseEmpty[A](a: => A)(implicit m: Monoid[A]) = ifLookupByKeys(a, m.empty)
 
   val serializationVersion =
@@ -2066,7 +2067,7 @@ class UpgradesMatrixCases(
 
   val engineConfig: EngineConfig =
     EngineConfig(
-      allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion)
+      allowedLanguageVersions = language.LanguageVersion.allLfVersions.filter(_ <= langVersion)
     )
 
   val contractIdVersion: ContractIdVersion = ContractIdVersion.V1

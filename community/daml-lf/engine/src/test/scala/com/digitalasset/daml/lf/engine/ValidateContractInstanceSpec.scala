@@ -28,9 +28,10 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-/** Tests for [[Engine.validateContractInstance]]. This method is a proxy for [fetchTemplate] which is
-  * already thoroughly tested in [[EngineTest]] and [[com.digitalasset.daml.lf.speedy.ValueTranslatorSpec]] so we only
-  * test here that things are properly wired. For instance, we don't test every single way a contract can be ill-typed.
+/** Tests for [[Engine.validateContractInstance]]. This method is a proxy for [fetchTemplate] which
+  * is already thoroughly tested in [[EngineTest]] and
+  * [[com.digitalasset.daml.lf.speedy.ValueTranslatorSpec]] so we only test here that things are
+  * properly wired. For instance, we don't test every single way a contract can be ill-typed.
   */
 class ValidateContractInstanceSpec
     extends AnyWordSpec
@@ -156,7 +157,7 @@ class ValidateContractInstanceSpec
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId1 -> pkg1, pkgId2 -> pkg2), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    EngineConfig(LanguageVersion.stableLfVersions),
     loggerFactory,
   )
 

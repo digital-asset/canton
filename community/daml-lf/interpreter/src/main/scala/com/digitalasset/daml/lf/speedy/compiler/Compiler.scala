@@ -42,7 +42,7 @@ private[lf] object Compiler {
   final case class LanguageVersionError(
       packageId: Ref.PackageId,
       languageVersion: language.LanguageVersion,
-      allowedLanguageVersions: VersionRange[language.LanguageVersion],
+      allowedLanguageVersions: Seq[language.LanguageVersion],
   ) extends RuntimeException(s"Disallowed language version $languageVersion", null, true, false)
   final case class PackageNotFound(pkgId: PackageId, context: language.Reference)
       extends RuntimeException(
@@ -68,7 +68,7 @@ private[lf] object Compiler {
   case object FullPackageValidation extends PackageValidationMode
 
   final case class Config(
-      allowedLanguageVersions: VersionRange[LanguageVersion],
+      allowedLanguageVersions: Seq[LanguageVersion],
       packageValidation: PackageValidationMode,
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
@@ -77,14 +77,14 @@ private[lf] object Compiler {
   object Config {
     def Default =
       Config(
-        allowedLanguageVersions = LanguageVersion.stableLfVersionsRange,
+        allowedLanguageVersions = LanguageVersion.stableLfVersions,
         packageValidation = FullPackageValidation,
         profiling = NoProfile,
         stacktracing = NoStackTrace,
       )
 
     def Dev = Config(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       packageValidation = FullPackageValidation,
       profiling = NoProfile,
       stacktracing = NoStackTrace,

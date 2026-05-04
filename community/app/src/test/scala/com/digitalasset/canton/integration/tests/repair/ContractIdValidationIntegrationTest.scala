@@ -25,7 +25,7 @@ import com.digitalasset.canton.topology.ForceFlag.DisablePartyWithActiveContract
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ForceFlags, PartyId}
 import com.digitalasset.daml.lf.data.Bytes
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, TransactionCoder}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, FatContractInstance}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 
@@ -63,7 +63,7 @@ final class ContractIdValidationIntegrationTest
         )
       )
 
-      val fatContract = TransactionCoder
+      val fatContract = ContractInstanceCoder
         .decodeFatContractInstance(event.createdEventBlob)
         .leftMap(decodeError =>
           s"Unable to decode contract event payload: ${decodeError.errorMessage}"
@@ -79,7 +79,7 @@ final class ContractIdValidationIntegrationTest
 
       updatedActiveContract.update(
         _.createdEvent.createdEventBlob.set(
-          TransactionCoder.encodeFatContractInstance(updatedFatContract).value
+          ContractInstanceCoder.encodeFatContractInstance(updatedFatContract).value
         )
       )
     }

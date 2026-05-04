@@ -110,9 +110,7 @@ class InMemorySequencerStateManagerStore(
           inFlightAggregation
       }
       aggregatedSenders.foldLeft(inFlightAggregation)((inFlightAgg, senderAggregation) =>
-        inFlightAgg
-          .tryAggregate(senderAggregation)
-          .getOrElse(inFlightAgg)
+        inFlightAgg.extendWithValidButMaybeDuplicateAggregation(senderAggregation)
       )
     }
 

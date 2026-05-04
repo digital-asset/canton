@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchron
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
 
@@ -35,7 +36,7 @@ class TestSequencerClientSend(override protected[canton] val clock: Clock)(impli
   def requests: Iterable[Request] = requestsQueue.asScala
 
   override def psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId
-
+  @nowarn("cat=deprecation")
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       timestamps: SendRequestTimestamps,

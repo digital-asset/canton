@@ -3,19 +3,15 @@
 
 package com.digitalasset.daml
 package lf
-package transaction
+package engine
 
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName, Party}
-import com.digitalasset.daml.lf.transaction.TransactionCoderSpec.{
+import com.digitalasset.daml.lf.engine.TransactionCoderSpec.{
   absCid,
-  addUnknownField,
-  adjustStakeholders,
-  bytesGen,
   dummyPackageName,
   externalCallResult,
-  makePartyFresh,
   normalizeCreate,
   normalizeExe,
   normalizeFetch,
@@ -25,21 +21,18 @@ import com.digitalasset.daml.lf.transaction.TransactionCoderSpec.{
   versionInIncreasingOrder,
   versionInStrictIncreasingOrder,
 }
-import com.digitalasset.daml.lf.transaction.TransactionOuterClass as proto
+import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers, ExternalCallResult, Node, NodeId, SerializationVersion, TransactionOuterClass => proto, Util, VersionedTransaction}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
-import com.google.protobuf
-import com.google.protobuf.{ByteString, Message}
-import org.scalacheck.{Arbitrary, Gen}
+import com.google.protobuf.ByteString
+import org.scalacheck.Gen
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-import collection.immutable.TreeSet
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.jdk.CollectionConverters.*
 
 final class TransactionCoderSpec
     extends AnyWordSpec
@@ -332,317 +325,6 @@ final class TransactionCoderSpec
       }
     }
 
-    "do Versioned" in {
-      forAll(Gen.oneOf(SerializationVersion.All), bytesGen, minSuccessful(5)) { (version, bytes) =>
-        val encoded = TransactionCoder.encodeVersioned(version, bytes)
-        val Right(decoded) = TransactionCoder.decodeVersioned(encoded)
-        decoded shouldBe Versioned(version, bytes)
-      }
-    }
-
-    "reject versioned message with trailing data" in {
-      forAll(
-        Gen.oneOf(SerializationVersion.All),
-        bytesGen,
-        bytesGen.filterNot(_.isEmpty),
-        minSuccessful(5),
-      ) { (version, bytes1, bytes2) =>
-        val encoded = TransactionCoder.encodeVersioned(version, bytes1)
-        TransactionCoder.decodeVersioned(encoded concat bytes2) shouldBe a[Left[?, ?]]
-      }
-    }
-
-    "reject Versioned message with unknown fields" in {
-      forAll(
-        Gen.oneOf(SerializationVersion.All),
-        bytesGen,
-        Arbitrary.arbInt.arbitrary,
-        bytesGen.filterNot(_.isEmpty),
-        minSuccessful(5),
-      ) { (version, payload, i, extraData) =>
-        val encoded = TransactionCoder.encodeVersioned(version, payload)
-        val proto = TransactionOuterClass.Versioned.parseFrom(encoded)
-        val reencoded = addUnknownField(proto.toBuilder, i, extraData).toByteString
-        assert(reencoded != encoded)
-        inside(TransactionCoder.decodeVersioned(reencoded)) {
-          case Left(DecodeError(errorMessage)) =>
-            errorMessage should include("unknown field")
-        }
-      }
-    }
-
-    "do ThinContractInstance" in {
-      forAll(
-        malformedCreateNodeGen(),
-        minSuccessful(5),
-      ) { create =>
-        val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-        val instance = normalizedCreate.versionedCoinst
-        val Right(encoded) =
-          TransactionCoder.encodeContractInstance(coinst = instance)
-        val Right(decoded) =
-          TransactionCoder.decodeContractInstance(protoCoinst = encoded)
-
-        decoded shouldBe instance
-      }
-    }
-
-    "do FatContractInstance" in {
-      forAll(
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(5),
-      ) { (create, time, salt) =>
-        val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-        val instance = FatContractInstance.fromCreateNode(
-          normalizedCreate,
-          CreationTime.CreatedAt(time),
-          data.Bytes.fromByteString(salt),
-        )
-        val Right(encoded) = TransactionCoder.encodeFatContractInstance(instance)
-        val Right(decoded) = TransactionCoder.decodeFatContractInstance(encoded)
-
-        decoded shouldBe instance
-      }
-    }
-
-    def hackProto(
-        instance: FatContractInstance,
-        f: TransactionOuterClass.FatContractInstance.Builder => Message,
-    ): ByteString = {
-      val Right(encoded) = TransactionCoder.encodeFatContractInstance(instance)
-      val Right(Versioned(v, bytes)) = TransactionCoder.decodeVersioned(encoded)
-      val builder = TransactionOuterClass.FatContractInstance.parseFrom(bytes).toBuilder
-      TransactionCoder.encodeVersioned(v, f(builder).toByteString)
-    }
-
-    "reject FatContractInstance with unknown fields" in {
-      forAll(
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        Arbitrary.arbInt.arbitrary,
-        bytesGen.filterNot(_.isEmpty),
-        minSuccessful(5),
-      ) { (create, time, salt, i, extraBytes) =>
-        val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-        val instance = FatContractInstance.fromCreateNode(
-          normalizedCreate,
-          CreationTime.CreatedAt(time),
-          data.Bytes.fromByteString(salt),
-        )
-        val bytes = hackProto(instance, addUnknownField(_, i, extraBytes))
-        inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-          case Left(DecodeError(errorMessage)) =>
-            errorMessage should include("unknown field")
-        }
-      }
-    }
-
-    "reject FatContractInstance with key but empty maintainers" in {
-      forAll(
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(2),
-      ) { (create, time, salt) =>
-        forAll(
-          keyWithMaintainersGen(create.templateId, create.packageName),
-          minSuccessful(2),
-        ) { key =>
-          val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-          val instance = FatContractInstance.fromCreateNode(
-            normalizedCreate,
-            CreationTime.CreatedAt(time),
-            data.Bytes.fromByteString(salt),
-          )
-          val Right(protoKey) =
-            TransactionCoder.internal.encodeKeyWithMaintainers(create.version, key)
-          val bytes = hackProto(
-            instance,
-            _.setContractKeyWithMaintainers(protoKey.toBuilder.clearMaintainers()).build(),
-          )
-          inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-            case Left(DecodeError(errorMessage)) =>
-              errorMessage should include("key without maintainers")
-          }
-        }
-      }
-    }
-
-    "reject FatContractInstance with empty signatories" in {
-      forAll(
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(3),
-      ) { (create, time, salt) =>
-        val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-        val instance = FatContractInstance.fromCreateNode(
-          normalizedCreate,
-          CreationTime.CreatedAt(time),
-          data.Bytes.fromByteString(salt),
-        )
-        val bytes =
-          hackProto(
-            instance,
-            _.clearContractKeyWithMaintainers().clearNonMaintainerSignatories().build(),
-          )
-        inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-          case Left(DecodeError(errorMessage)) =>
-            errorMessage should include(
-              "maintainers or non_maintainer_signatories should be non empty"
-            )
-        }
-      }
-    }
-
-    def hackKeyProto(
-        version: SerializationVersion,
-        key: GlobalKeyWithMaintainers,
-        f: TransactionOuterClass.KeyWithMaintainers.Builder => TransactionOuterClass.KeyWithMaintainers.Builder,
-    ): TransactionOuterClass.KeyWithMaintainers = {
-      val Right(encoded) = TransactionCoder.internal.encodeKeyWithMaintainers(version, key)
-      f(encoded.toBuilder).build()
-    }
-
-    "reject FatContractInstance with nonMaintainerSignatories containing maintainers" in {
-      forAll(
-        party,
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(2),
-      ) { (party, create, time, salt) =>
-        forAll(
-          keyWithMaintainersGen(create.templateId, create.packageName),
-          minSuccessful(2),
-        ) { key =>
-          val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-          val instance = FatContractInstance.fromCreateNode(
-            normalizedCreate,
-            CreationTime.CreatedAt(time),
-            data.Bytes.fromByteString(salt),
-          )
-          val nonMaintainerSignatories = instance.nonMaintainerSignatories + party
-          val maintainers = TreeSet.from(key.maintainers + party)
-          val protoKey = hackKeyProto(
-            create.version,
-            key,
-            { builder =>
-              builder.clearMaintainers()
-              maintainers.foreach(builder.addMaintainers)
-              builder
-            },
-          )
-
-          val bytes = hackProto(
-            instance,
-            { builder =>
-              builder.clearNonMaintainerSignatories()
-              nonMaintainerSignatories.foreach(builder.addNonMaintainerSignatories)
-              builder.setContractKeyWithMaintainers(protoKey)
-              builder.build()
-            },
-          )
-          inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-            case Left(DecodeError(errorMessage)) =>
-              errorMessage should include("is declared as maintainer and nonMaintainerSignatory")
-          }
-        }
-      }
-    }
-
-    "reject FatContractInstance with nonSignatoryStakeholders containing maintainers" in {
-      forAll(
-        party,
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(2),
-      ) { (party, create, time, salt) =>
-        forAll(
-          keyWithMaintainersGen(create.templateId, create.packageName),
-          minSuccessful(2),
-        ) { key =>
-          val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-          val instance = FatContractInstance.fromCreateNode(
-            normalizedCreate,
-            CreationTime.CreatedAt(time),
-            data.Bytes.fromByteString(salt),
-          )
-          val maintainers = TreeSet.from(key.maintainers + party)
-          val nonMaintainerSignatories =
-            instance.nonMaintainerSignatories -- key.maintainers - party
-          val nonSignatoryStakeholders = instance.nonSignatoryStakeholders + party
-          val protoKey = hackKeyProto(
-            create.version,
-            key,
-            { builder =>
-              builder.clearMaintainers()
-              maintainers.foreach(builder.addMaintainers)
-              builder
-            },
-          )
-
-          val bytes = hackProto(
-            instance,
-            { builder =>
-              builder.setContractKeyWithMaintainers(protoKey)
-              builder.clearNonMaintainerSignatories()
-              nonMaintainerSignatories.foreach(builder.addNonMaintainerSignatories)
-              builder.clearNonSignatoryStakeholders()
-              nonSignatoryStakeholders.foreach(builder.addNonSignatoryStakeholders)
-              builder.build()
-            },
-          )
-          inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-            case Left(DecodeError(errorMessage)) =>
-              errorMessage should include("is declared as signatory and nonSignatoryStakeholder")
-          }
-        }
-      }
-
-    }
-
-    "reject FatContractInstance with nonSignatoryStakeholders containing nonMaintainerSignatories" in {
-      forAll(
-        party,
-        malformedCreateNodeGen(),
-        timestampGen,
-        bytesGen,
-        minSuccessful(4),
-      ) { (party, create, time, salt) =>
-        val normalizedCreate = adjustStakeholders(normalizeCreate(create))
-        val instance = FatContractInstance.fromCreateNode(
-          normalizedCreate,
-          CreationTime.CreatedAt(time),
-          data.Bytes.fromByteString(salt),
-        )
-        val party_ = makePartyFresh(party, create)
-
-        val nonMaintainerSignatories = instance.nonMaintainerSignatories + party_
-        val nonSignatoryStakeholders = instance.nonSignatoryStakeholders + party_
-
-        val bytes = hackProto(
-          instance,
-          { builder =>
-            builder.clearNonMaintainerSignatories()
-            nonMaintainerSignatories.foreach(builder.addNonMaintainerSignatories)
-            builder.clearNonSignatoryStakeholders()
-            nonSignatoryStakeholders.foreach(builder.addNonSignatoryStakeholders)
-            builder.build()
-          },
-        )
-        inside(TransactionCoder.decodeFatContractInstance(bytes)) {
-          case Left(DecodeError(errorMessage)) =>
-            errorMessage should include("is declared as signatory and nonSignatoryStakeholder")
-
-        }
-      }
-    }
-
     "fail if try to decode a node in a version newer than the enclosing Transaction message version" in {
 
       val gen = for {
@@ -704,51 +386,6 @@ final class TransactionCoderSpec
     }
   }
 
-  "toOrderPartySet" should {
-    import com.google.protobuf.LazyStringArrayList
-    import scala.util.Random.shuffle
-
-    def toProto(strings: Seq[String]) = {
-      val l = new LazyStringArrayList()
-      strings.foreach(s => l.add(ByteString.copyFromUtf8(s)))
-      l
-    }
-
-    "accept strictly order list of parties" in {
-      forAll(Gen.listOf(party)) { parties =>
-        val sortedParties = parties.sorted.distinct
-        val proto = toProto(sortedParties)
-        inside(TransactionCoder.internal.toPartyTreeSet(proto)) {
-          case Right(decoded: TreeSet[Party]) =>
-            decoded shouldBe TreeSet.from(sortedParties)
-        }
-      }
-    }
-
-    "reject non sorted list of parties" in {
-      forAll(party, Gen.nonEmptyListOf(party)) { (party0, parties0) =>
-        val party = Iterator
-          .iterate(party0)(p => Party.assertFromString("_" + p))
-          .filterNot(parties0.contains)
-          .next()
-        val parties = party :: parties0
-        val sortedParties = parties.sorted
-        val nonSortedParties =
-          Iterator.iterate(parties)(shuffle(_)).filterNot(_ == sortedParties).next()
-        val proto = toProto(nonSortedParties)
-        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[?, ?]]
-      }
-    }
-
-    "reject non list with duplicate" in {
-      forAll(party, Gen.listOf(party)) { (party, parties) =>
-        val partiesWithDuplicate = (party :: party :: parties).sorted
-        val proto = toProto(partiesWithDuplicate)
-        TransactionCoder.internal.toPartyTreeSet(proto) shouldBe a[Left[?, ?]]
-      }
-    }
-  }
-
 }
 
 private object TransactionCoderSpec {
@@ -778,11 +415,6 @@ private object TransactionCoderSpec {
       v2 <- Gen.oneOf(versions.filter(_ > v1))
     } yield (v1, v2)
 
-  private val bytesGen: Gen[ByteString] =
-    Gen
-      .listOf(Arbitrary.arbByte.arbitrary)
-      .map(x => ByteString.copyFrom(x.toArray))
-
   private def normalizeNode(node: Node) =
     node match {
       case rb: Node.Rollback => rb // nothing to normalize
@@ -791,21 +423,6 @@ private object TransactionCoderSpec {
       case create: Node.Create => normalizeCreate(create)
       case queryByKey: Node.QueryByKey => normalizeQueryByKey(queryByKey)
     }
-
-  private def adjustStakeholders(create: Node.Create) = {
-    val maintainers = create.keyOpt.fold(Set.empty[Party])(_.maintainers)
-    val signatories = create.signatories | maintainers
-    val stakeholders = create.stakeholders | signatories
-    create.copy(
-      signatories = signatories,
-      stakeholders = stakeholders,
-    )
-  }
-
-  private def makePartyFresh(party: Party, create: Node.Create): Party = {
-    val contractParties = create.stakeholders ++ create.keyOpt.fold(Set.empty[Party])(_.maintainers)
-    Iterator.iterate(party)(p => Party.assertFromString(p + "_")).filterNot(contractParties).next()
-  }
 
   private val dummyPackageName = PackageName.assertFromString("package-name")
 
@@ -903,20 +520,6 @@ private object TransactionCoderSpec {
   ): Node = node match {
     case node: Node.Action => normalizeNode(node.updateVersion(version))
     case node: Node.Rollback => node
-  }
-
-  private def addUnknownField(
-      builder: Message.Builder,
-      i: Int,
-      content: ByteString,
-  ): Message = {
-    require(!content.isEmpty)
-    def norm(i: Int) = (i % 536870911).abs + 1 // valid proto field index are 1 to 536870911
-    val knownFieldIndex = builder.getDescriptorForType.getFields.asScala.map(_.getNumber).toSet
-    val j = Iterator.iterate(norm(i))(i => norm(i + 1)).filterNot(knownFieldIndex).next()
-    val field = protobuf.UnknownFieldSet.Field.newBuilder().addLengthDelimited(content).build()
-    val extraFields = protobuf.UnknownFieldSet.newBuilder().addField(j, field).build()
-    builder.setUnknownFields(extraFields).build()
   }
 
 }

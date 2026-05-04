@@ -27,6 +27,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
           TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
           Some(defaultStaticSynchronizerParameters),
           timeouts,
+          futureSupervisor = futureSupervisor,
           loggerFactory,
         ).validateAndApplyInitialTopologySnapshot(largeTestSnapshot)
           .valueOrFail("topology bootstrap")
@@ -95,6 +96,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
             topologyConfig = TopologyConfig.forTesting,
             staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
             timeouts,
+            futureSupervisor = futureSupervisor,
             loggerFactory = loggerFactory.appendUnnamedKey("TestName", "case12"),
             cleanupTopologySnapshot = true,
           ).validateAndApplyInitialTopologySnapshot(testData.bootstrapTransactions)

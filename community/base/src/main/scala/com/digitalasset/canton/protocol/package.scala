@@ -119,6 +119,9 @@ package object protocol {
   type LfChoiceName = Ref.ChoiceName
   val LfChoiceName: Ref.ChoiceName.type = Ref.ChoiceName
 
+  type LfContractStateMode = NextGenContractStateMachine.Mode
+  val LfContractStateMode: NextGenContractStateMachine.Mode.type = NextGenContractStateMachine.Mode
+
   type RequestProcessor[VT <: ViewType, Event] =
     Phase37Processor[RequestAndRootHashMessage[
       OpenEnvelope[EncryptedViewMessage[VT]]

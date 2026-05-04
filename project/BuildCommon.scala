@@ -1983,6 +1983,7 @@ object BuildCommon {
         `daml-adjustable-clock` % "test->test",
         `ledger-common-dars` % Test,
       )
+      .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonCommunitySettings,
         Compile / PB.targets := Seq(
@@ -2002,8 +2003,16 @@ object BuildCommon {
         enablePublishLibrary,
         Test / parallelExecution := true,
         Test / fork := false,
+        Test / damlBuild := (Test / damlBuild)
+          .dependsOn(Def.task {
+            ComponentTestDamlGenerator
+              .generateProjectForComponentTest((Test / sourceManaged).value / "damlForTests")
+          })
+          .value,
+        Test / damlSourceDirectory := (Test / sourceManaged).value / "damlForTests",
         Test / testGrouping := separateRevocationTest((Test / definedTests).value),
         coverageEnabled := false,
+        Compile / damlDarLfVersions := Seq("2.2"),
       )
 
     lazy val `ledger-json-api` =

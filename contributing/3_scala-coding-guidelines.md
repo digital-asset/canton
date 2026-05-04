@@ -330,7 +330,10 @@ MonadUtil.sequentialTraverse(xs)(f)
 
 # TODO Comments
 TODO comments should have the form `TODO(#<issue-number>): <description>`, where
-`<issue-number>` is the reference number of a GitHub issue.
+`<issue-number>` is the reference number of a GitHub issue in the DACH-NY/canton repo.
+
+External contributors who cannot create issues in the internal repo should instead use the full
+OSS GitHub URL: `TODO(https://github.com/digital-asset/canton/issues/<issue-number>): <description>`.
 
 A script is used to aggregate TODOs and detect problems such as TODOs without an issue number or referencing a closed issue.
 The script uses a more complex pattern than described above to cover existing TODOs from the codebase,

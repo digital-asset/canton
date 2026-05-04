@@ -51,8 +51,10 @@ import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
+@nowarn("cat=deprecation")
 class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
 
   import TimeAdvancingTopologySubscriberV1Test.*
@@ -148,7 +150,8 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         NonEmpty
           .from(sequencerGroup.active)
           .map(sequencerGroup =>
-            AggregationRule(sequencerGroup, threshold = PositiveInt.one, testedProtocolVersion)
+            AggregationRule
+              .sequencerTimeAdvancingRequest(sequencerGroup, testedProtocolVersion)
           )
 
       // when

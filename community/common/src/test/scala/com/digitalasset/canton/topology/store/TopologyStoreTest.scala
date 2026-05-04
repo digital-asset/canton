@@ -463,6 +463,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory = loggerFactory.appendUnnamedKey("TestName", "case6"),
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -626,6 +627,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -838,6 +840,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
               cleanupTopologySnapshot = false,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)

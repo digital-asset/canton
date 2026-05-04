@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
@@ -136,7 +137,10 @@ trait SequencerConnectionPool extends FlagCloseable with NamedLogging {
   ): Map[SequencerId, SequencerConnection]
 
   /** Obtain all the connections present in the pool. */
-  def getAllConnections()(implicit traceContext: TraceContext): Seq[SequencerConnection]
+  def getAllConnections: Seq[SequencerConnection]
+
+  /** Obtain all the sequencer IDs present in the pool, associated to their sequencer alias */
+  def getAllSequencerIds(implicit traceContext: TraceContext): Map[SequencerAlias, SequencerId]
 
   /** Determine whether the connection pool can still reach the given threshold, ignoring the
     * `ignored` connections and considering an additional `extraUndecided` number of undecided

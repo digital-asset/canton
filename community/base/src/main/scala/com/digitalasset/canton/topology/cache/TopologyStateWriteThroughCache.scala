@@ -17,7 +17,6 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -65,6 +64,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{Namespace, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, FutureUtil, MonadUtil, Mutex}
 import com.google.common.annotations.VisibleForTesting
 
@@ -74,7 +74,6 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
-import scala.util.Try
 
 trait TopologyStateLookupByNamespace {
 
@@ -307,6 +306,7 @@ class TopologyStateWriteThroughCache(
   // state processing doesn't like concurrent evictions
   private val evictionLock =
     new AtomicReference[FutureUnlessShutdown[Unit]](FutureUnlessShutdown.unit)
+  private val evictionLockCheckRunning = new AtomicBoolean(false)
   // we use this to detect races in the eviction logic due to programming errors
   private val detectRacingEviction = new AtomicBoolean(false)
 
@@ -388,12 +388,18 @@ class TopologyStateWriteThroughCache(
     */
   def acquireEvictionLock()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[PromiseUnlessShutdown[Unit]] = {
-    val lock = PromiseUnlessShutdown.unsupervised[Unit]()
-    supervisor.supervisedUS("acquire-topology-eviction-lock")(
-      evictionLock
-        .getAndSet(lock.futureUS)
-        .transformIntoSuccess(_ => UnlessShutdown.Outcome(lock))
+  ): (FutureUnlessShutdown[Unit], PromiseUnlessShutdown[Unit]) = {
+    val newLock = PromiseUnlessShutdown.supervised[Unit]("topology-eviction-lock", supervisor)
+    val existingLock = evictionLock.getAndSet(newLock.futureUS)
+    (
+      supervisor.supervisedUS("acquire-topology-eviction-lock")(
+        existingLock
+          .recover { case ex =>
+            logger.error("Eviction lock threw an exception. This should not happen.", ex)
+            UnlessShutdown.unit
+          }
+      ),
+      newLock,
     )
   }
 
@@ -404,22 +410,26 @@ class TopologyStateWriteThroughCache(
 
   @VisibleForTesting
   def evictIfNecessary()(implicit traceContext: TraceContext): Unit =
-    // optimistically only start eviction if it isn't already running
-    // doesn't matter much if we start it twice
-    if (evictionLock.get().isCompleted) {
-      val size = lock.exclusive(cachedKeys.size) + fresh.get()._1
-      if (size > maxCacheSize.value + cacheEvictionThreshold.value) {
-        logger.debug(s"Topology cache size is $size, starting eviction run")
-        FutureUtil.doNotAwait(
-          acquireEvictionLock()
-            .map { promise =>
-              promise.complete(Try(Outcome(evict().discard)))
-              ()
-            }
-            .onShutdown(()),
-          "topology cache eviction",
-        )
+    if (evictionLockCheckRunning.compareAndSet(false, true)) {
+      if (evictionLock.get().isCompleted) {
+        val size = lock.exclusive(cachedKeys.size) + fresh.get()._1
+        if (size > maxCacheSize.value + cacheEvictionThreshold.value) {
+          logger.debug(s"Topology cache size is $size, starting eviction run")
+          val (currentLock, promise) = acquireEvictionLock()
+          FutureUtil.doNotAwait(
+            currentLock
+              .map { _ =>
+                evict().discard
+              }
+              .thereafter { _ =>
+                promise.success(UnlessShutdown.unit)
+              }
+              .onShutdown(()),
+            "topology cache eviction",
+          )
+        }
       }
+      evictionLockCheckRunning.set(false)
     }
 
   /** Evict unused items from cache

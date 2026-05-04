@@ -67,7 +67,7 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.{MaliciousParticipantNode, MaxBytesToDecompress}
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueText}
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
@@ -190,7 +190,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               contract.inst.createdAt,
               contract.inst.authenticationData,
             )
-            val _serialization = new TransactionCoder(allowNullCharacters = true)
+            val _serialization = new ContractInstanceCoder(allowNullCharacters = true)
               .encodeFatContractInstance(_inst)
               .value
             val _createdContract = CreatedContract.tryCreate(

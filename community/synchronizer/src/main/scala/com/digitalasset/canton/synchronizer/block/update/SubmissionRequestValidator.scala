@@ -143,8 +143,6 @@ private[update] final class SubmissionRequestValidator(
           topologyTimestampError,
         )
       )
-      // TODO(i17584): revisit the consequences of no longer enforcing that
-      //  aggregated submissions with signed envelopes define a topology snapshot
       topologyOrSequencingSnapshot = topologySnapshotFromRequestO.getOrElse(
         snapshotToValidateSubmissionRequest
       )
@@ -173,6 +171,7 @@ private[update] final class SubmissionRequestValidator(
       aggregationInfo <- inFlightAggregationHandler
         .computeAggregationIdAndValidateAggregationRule(
           sequencingTimestamp,
+          snapshotToValidateSubmissionRequest,
           topologyOrSequencingSnapshot,
           submissionRequest,
           skipFreshInFlightValidationCheck,

@@ -61,6 +61,7 @@ object DamlLfVersion {
   private val discontinuedLfVersions = List(v2_3_1)
   private val stableLfVersions = List(v2_1, v2_2, v2_3)
   private val compilerLfVersions = allLfVersions
+  private val earlyAccessLfVersions = stableLfVersions
 
   val versionLists: Map[String, List[DamlLfVersion]] = Map(
     "allLfVersions" -> allLfVersions,
@@ -69,6 +70,7 @@ object DamlLfVersion {
     "compilerInputLfVersions" -> compilerLfVersions,
     "compilerOutputLfVersions" -> compilerLfVersions,
     "compilerLfVersions" -> compilerLfVersions,
+    "earlyAccessLfVersions" -> earlyAccessLfVersions,
   )
 
   def generateVersionsScala = Def.task {

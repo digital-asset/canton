@@ -29,10 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BftNodeId,
-  EpochLength,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
@@ -49,7 +46,6 @@ import scala.concurrent.ExecutionContext
 
 private[canton] final class CantonOrderingTopologyProvider(
     cryptoApi: SynchronizerCryptoClient,
-    epochLength: EpochLength, // TODO(#24184) make this dynamic sequencing parameter
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
 )(implicit
@@ -160,7 +156,7 @@ private[canton] final class CantonOrderingTopologyProvider(
       val topology =
         OrderingTopology(
           nodesTopologyInfo,
-          epochLength, // TODO(#24184) make this dynamic sequencing parameter
+          sequencingDynamicParameters.segmentLength.epochLength(sequencers.size.toLong),
           sequencingDynamicParameters,
           MaxBytesToDecompress(maxRequestSize),
           TopologyActivationTime(snapshot.ipsSnapshot.timestamp),
@@ -284,7 +280,9 @@ private[canton] final class CantonOrderingTopologyProvider(
       parametersE <- snapshot.findDynamicSequencingParameters()
       parametersO = parametersE.toOption
       payloadO = parametersO.flatMap(_.parameters.payload)
-      sequencingParametersO = payloadO.map(SequencingParameters.fromPayload)
+      sequencingParametersO = payloadO.map(
+        SequencingParameters.fromByteString(synchronizerProtocolVersion, _)
+      )
     } yield sequencingParametersO match {
       case Some(value) =>
         value match {

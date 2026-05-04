@@ -5,10 +5,16 @@ package com.digitalasset.canton.platform
 
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
+import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{
   AcsRangeInfo,
+  CumulativeFilter,
+  EventFormat,
+  ParticipantAuthorizationFormat,
+  TopologyFormat,
   TransactionFormat,
   TransactionShape,
   UpdateFormat,
@@ -30,6 +36,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.daml.lf.data.Time
+import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.flatspec.AnyFlatSpec
@@ -47,6 +54,9 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   */
 @Ignore
 class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
+  // How long to wait for a benchmarked data fetch to finish. The test will fail if this is exceeded.
+  private val benchmarkedTaskPatience =
+    PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
 
   override val dbConfig: com.digitalasset.canton.config.DbConfig =
     DbBasicConfig(
@@ -159,6 +169,30 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       restartIndexer()
   }
 
+  it should "Fetch updates stream in ascending order" ignore {
+    fetchUpdatesStream(descendingOrder = false)
+  }
+
+  it should "Fetch updates pages of size 100 in ascending order" ignore {
+    fetchUpdatesPaged(100, descendingOrder = false)
+  }
+
+  it should "Fetch updates pages of size 500 in ascending order" ignore {
+    fetchUpdatesPaged(500, descendingOrder = false)
+  }
+
+  it should "Fetch updates stream in descending order" ignore {
+    fetchUpdatesStream(descendingOrder = true)
+  }
+
+  it should "Fetch updates pages of size 100 in descending order" ignore {
+    fetchUpdatesPaged(100, descendingOrder = true)
+  }
+
+  it should "Fetch updates pages of size 500 in descending order" ignore {
+    fetchUpdatesPaged(500, descendingOrder = true)
+  }
+
   it should "Measure ACHS rendering time during initialization with small survival region" ignore {
     measureAchsInitializationTime(
       regionName = "small",
@@ -248,7 +282,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
     val startTime = System.currentTimeMillis()
     index
       .getActiveContracts(
-        eventFormat = eventFormat(dsoParty),
+        eventFormat = eventFormat(dsoParty.value),
         activeAt = ledgerEndOffset,
         rangeInfo = AcsRangeInfo.empty,
       )
@@ -262,7 +296,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
         logger.warn(s"last active contract acs: $last")
       }
       .futureValue(
-        PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
+        benchmarkedTaskPatience
       )
   }
 
@@ -567,7 +601,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       contractId = coid,
       templateId = templates(0),
       packageName = packageName,
-      stakeholders = Set(dsoParty),
+      stakeholders = Set(dsoParty.value),
       assignmentExclusivity = None,
       reassignmentCounter = 11L,
       nodeId = nodeId,
@@ -587,7 +621,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       reassignmentInfo = ReassignmentInfo(
         sourceSynchronizer = ReassignmentTag.Source(sourceSynchronizerId),
         targetSynchronizer = ReassignmentTag.Target(targetSynchronizerId),
-        submitter = Some(dsoParty),
+        submitter = Some(dsoParty.value),
         reassignmentId = ReassignmentId.tryCreate("000123"),
         isReassigningParticipant = false,
       ),
@@ -596,4 +630,120 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       synchronizerId = synchronizerId,
       acsChangeFactory = testAcsChangeFactory,
     )
+
+  def updateFormat(transactionShape: TransactionShape) = UpdateFormat(
+    includeTransactions = Some(
+      TransactionFormat(
+        eventFormat = EventFormat(
+          filtersByParty = Map(),
+          filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
+          verbose = true,
+        ),
+        transactionShape = transactionShape,
+      )
+    ),
+    includeReassignments = Some(
+      EventFormat(
+        filtersByParty = Map(),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
+        verbose = true,
+      )
+    ),
+    includeTopologyEvents = Some(
+      TopologyFormat(
+        Some(
+          ParticipantAuthorizationFormat(None)
+        )
+      )
+    ),
+  )
+
+  private def fetchUpdatesStream(descendingOrder: Boolean): Unit = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)
+    logger.warn("start fetching updates stream...")
+    val startTime = System.currentTimeMillis()
+    val fetchAndCountUpdates = for {
+      ledgerEnd <- index.currentLedgerEnd()
+      source = index.updates(
+        begin = None,
+        endAt = ledgerEnd,
+        updateFormat = updateFormat(LedgerEffects),
+        descendingOrder = descendingOrder,
+        skipPruningChecks = false,
+      )
+      updates <- source.grouped(1000).map(_.size).runWith(Sink.seq)(materializer)
+    } yield updates.sum
+
+    fetchAndCountUpdates
+      .map { count =>
+        val totalMillis = System.currentTimeMillis() - startTime
+        logger.warn(
+          s"finished fetching updates in ${if (descendingOrder) "descending"
+            else "ascending"} order in ${seconds(totalMillis)} s, $count transactions returned."
+        )
+      }
+      .futureValue(
+        benchmarkedTaskPatience
+      )
+  }
+
+  private def fetchUpdatesPaged(pageSize: Int, descendingOrder: Boolean): Unit = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)
+
+    def fetchAllPages(
+        request: GetUpdatesPageRequest,
+        fetchedSoFar: Int,
+    ): Future[Int] =
+      index
+        .updatesPage(request)
+        .flatMap(response =>
+          response.nextPageToken match {
+            case Some(_) =>
+              fetchAllPages(
+                request.copy(continueStreamFromIncl =
+                  Some(
+                    if (descendingOrder)
+                      Offset.tryFromLong(response.lowestPageOffsetExclusive)
+                    else
+                      Offset.tryFromLong(response.highestPageOffsetInclusive + 1)
+                  )
+                ),
+                fetchedSoFar + response.updates.size,
+              )
+            case None => Future.successful(fetchedSoFar + response.updates.size)
+          }
+        )
+
+    logger.warn(s"start fetching updates pages($pageSize) in ${if (descendingOrder) "descending"
+      else "ascending"} order...")
+    val startTime = System.currentTimeMillis()
+    val fetchAndCountUpdates = for {
+      ledgerEnd <- index.currentLedgerEnd()
+      request = GetUpdatesPageRequest(
+        startExclusive = None,
+        endInclusive = ledgerEnd,
+        continueStreamFromIncl = None,
+        maxPageSize = pageSize,
+        updateFormat = updateFormat(LedgerEffects),
+        descendingOrder = descendingOrder,
+        requestChecksum = ByteString.empty(),
+        participantChecksum = ByteString.empty(),
+      )
+      res <- fetchAllPages(request, 0)
+    } yield res
+
+    fetchAndCountUpdates
+      .map { count =>
+        val totalMillis = System.currentTimeMillis() - startTime
+        logger.warn(
+          s"finished fetching paged($pageSize) updates in ${if (descendingOrder) "descending"
+            else "ascending"} order in ${seconds(totalMillis)} s, $count transactions returned."
+        )
+      }
+      .futureValue(
+        benchmarkedTaskPatience
+      )
+  }
 }

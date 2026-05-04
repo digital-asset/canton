@@ -47,7 +47,7 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
         .map(_.packageId)
         .toSet - parameters.defaultPackageId
       val mentionedPackageIdsMinusStablePackages =
-        mentionedPackageIds.diff(StablePackages.ids(LV.allUpToVersion(languageVersion)))
+        mentionedPackageIds.diff(StablePackages.ids(LV.allLfVersions.filter(_ <= languageVersion)))
       Package.build(
         modules = modules,
         directDeps = mentionedPackageIds,

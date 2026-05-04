@@ -38,11 +38,11 @@ import com.digitalasset.daml.lf.data.Ref.TypeConId
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
   NodeId,
   SerializationVersion as LfSerializationVersion,
-  TransactionCoder,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.google.common.annotations.VisibleForTesting
@@ -351,7 +351,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       for {
         createNode <- createNodeResult
         createTime <- src.createdAt.transformIntoPartial[Time.Timestamp]
-        originalContract <- TransactionCoder
+        originalContract <- ContractInstanceCoder
           .decodeFatContractInstance(src.eventBlob)
           .leftMap(_.errorMessage)
           .toResult

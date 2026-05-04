@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.UseStandaloneConfig
 import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.ToxiproxyConfig
 import com.digitalasset.canton.integration.plugins.toxiproxy.{
   BftSequencerPeerToPeer,
@@ -38,7 +39,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.dabft.DaBftBindingFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.{
   BftBenchmarkConfig,
@@ -95,11 +95,11 @@ class BftOrderingBenchmark
       .map(_.toInt)
       .getOrElse(4)
 
-  // Use a bigger epoch length by default for better performance
-  private val epochLength: EpochLength =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.epoch-length"))
-      .map(len => EpochLength(len.toLong))
-      .getOrElse(EpochLength(512L))
+  // Use a bigger segment length by default for better performance
+  private val segmentLength: Long =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.segment-length"))
+      .map(len => len.toLong)
+      .getOrElse(10L)
 
   private val consensusEmptyBlockCreationTimeout: FiniteDuration =
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.empty-block-timeout"))
@@ -253,8 +253,7 @@ class BftOrderingBenchmark
       shouldOverwriteStoredEndpoints = true,
       shouldUseMemoryStorageForBftOrderer = useInMemoryStorageForBftOrderer,
       shouldBenchmarkBftSequencer = true,
-      standaloneOrderingNodes = true,
-      epochLength = epochLength,
+      standaloneOrderingNodes = Some(UseStandaloneConfig(segmentLength)),
       consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
       maxRequestsInBatch = maxRequestsInBatch,
       minRequestsInBatch = minRequestsInBatch,

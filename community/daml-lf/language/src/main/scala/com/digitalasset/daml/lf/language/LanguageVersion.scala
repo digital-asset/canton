@@ -44,7 +44,7 @@ object LanguageVersion
   // TODO: remove after https://github.com/digital-asset/daml/issues/22403
   def supportsPackageUpgrades(lv: LanguageVersion): Boolean =
     lv.major match {
-      case Major.V2 => featurePackageUpgrades.enabledIn(lv)
+      case Major.V2 => true
       case Major.V1 => lv >= LegacyFeatures.packageUpgrades
     }
 

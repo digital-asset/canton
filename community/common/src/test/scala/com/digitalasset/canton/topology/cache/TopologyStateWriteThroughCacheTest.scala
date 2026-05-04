@@ -608,7 +608,7 @@ class TopologyStateWriteThroughCacheTest
         )
 
         // acquire eviction lock
-        val lockP = cache.acquireEvictionLock()
+        val (lockP, unlockP) = cache.acquireEvictionLock()
 
         // loaded in first batch
         val c1F = grabNs(ts(0), ns1)
@@ -619,11 +619,12 @@ class TopologyStateWriteThroughCacheTest
         cache.cacheSize() shouldBe (0, 0)
         f.logger.debug("waiting on eviction lock")
         for {
-          unlockP <- lockP.failOnShutdown
-          lockP2 = cache.acquireEvictionLock()
+          _ <- lockP.failOnShutdown
+          lockP2AndUnlockP2 = cache.acquireEvictionLock()
+          (lockP2, unlockP2) = lockP2AndUnlockP2
           _ = {
             // immediately complete second wait here
-            lockP2.map(_.outcome_(()))
+            unlockP2.outcome_(())
           }
           _ = cache.evictIfNecessary()
           // complete first read

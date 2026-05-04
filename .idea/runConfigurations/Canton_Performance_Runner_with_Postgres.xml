@@ -6,6 +6,7 @@
       <env name="POSTGRES_USER" value="test-user" />
       <env name="POSTGRES_PASSWORD" value="test-password" />
       <env name="POSTGRES_HOST" value="localhost" />
+      <env name="SINGLE_SYNCHRONIZER" value="1" />
     </envs>
     <option name="MAIN_CLASS_NAME" value="com.digitalasset.canton.CantonCommunityApp" />
     <module name="canton.community-app" />

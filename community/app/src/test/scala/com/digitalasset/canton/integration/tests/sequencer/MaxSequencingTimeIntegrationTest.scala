@@ -101,7 +101,7 @@ final class MaxSequencingTimeIntegrationTest
           .assertEventuallyLogsSeq(
             SuppressionRule.Level(Level.INFO) && (SuppressionRule
               .forLogger[BlockUpdateGeneratorImpl] || LoggerNameContains(
-              WritePayloadsFlow.getClass.getSimpleName
+              WritePayloadsFlow.getClass.getSimpleName.dropRight(1) // Drop final $
             ))
           )(
             {

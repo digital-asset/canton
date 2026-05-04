@@ -45,7 +45,7 @@ import java.nio.file.Path
   *   migrated to the new `ResultNeedContract` question.
   */
 final case class EngineConfig(
-    allowedLanguageVersions: VersionRange[language.LanguageVersion],
+    allowedLanguageVersions: Seq[language.LanguageVersion],
     packageValidation: Boolean = true,
     transactionTraceMaxLength: Int = 10,
     stackTraceMode: Boolean = false,

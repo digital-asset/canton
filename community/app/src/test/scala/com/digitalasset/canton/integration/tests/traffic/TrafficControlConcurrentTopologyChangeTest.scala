@@ -33,6 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Promise
 import scala.concurrent.duration.*
@@ -138,7 +139,6 @@ trait TrafficControlConcurrentTopologyChangeTest
       val (serial, _) = getLatestSerialAndBalanceForMember(participant1)
       val newSerial = serial.increment
       newSerial should be > PositiveInt.one
-
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
           sequencer1.traffic_control
@@ -153,15 +153,21 @@ trait TrafficControlConcurrentTopologyChangeTest
           }
         },
         LogEntry.assertLogSeq(
-          mustContainWithClue = Seq(
-            (
-              _.shouldBeCantonError(
-                InvalidTrafficPurchasedMessage,
-                _ should include(s"signature threshold not reached"),
-              ),
-              "rejected top-up",
-            )
-          )
+          mustContainWithClue =
+            if (testedProtocolVersion <= ProtocolVersion.v34) {
+              // with pv34, the event is delivered as it reached threshold 1 but then rejected by the traffic control processor
+              Seq(
+                (
+                  _.shouldBeCantonError(
+                    InvalidTrafficPurchasedMessage,
+                    _ should include(s"signature threshold not reached"),
+                  ),
+                  "rejected top-up",
+                )
+              )
+            }
+            // with pv35, the event will not even be delivered, as the threshold is checked at delivery time
+            else Seq.empty
         ),
       )
 
@@ -229,4 +235,5 @@ class TrafficControlConcurrentTopologyChangeTestPostgres
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+
 }

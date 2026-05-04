@@ -9,7 +9,11 @@ import sbt.Keys.*
 import sbt.nio.Keys as _
 import DamlLfVersion.*
 
-final case class DamlLfFeature(name: String, versionRange: DamlLfFeature.VersionRange) {
+final case class DamlLfFeature(
+    name: String,
+    cppFlag: String,
+    versionRange: DamlLfFeature.VersionRange,
+) {
   def toScala: String = s"""Feature(name = "$name", versionRange = ${versionRange.toScala})"""
 }
 
@@ -52,129 +56,114 @@ object DamlLfFeature {
 
   val featureUnstable = DamlLfFeature(
     name = "Unstable, experimental features",
-    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
-  )
-
-  val featureTextMap = DamlLfFeature(
-    name = "TextMap type",
+    cppFlag = "DAML_UNSTABLE",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
   val featureBigNumeric = DamlLfFeature(
     name = "BigNumeric type",
+    cppFlag = "DAML_BIGNUMERIC",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
   val featureExceptions = DamlLfFeature(
     name = "Daml Exceptions",
+    cppFlag = "DAML_EXCEPTIONS",
     versionRange = VersionRange.From(v2_1),
   )
 
   val featureExtendedInterfaces = DamlLfFeature(
     name = "Guards in interfaces",
+    cppFlag = "DAML_INTERFACE_EXTENDED",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
   val featureChoiceFuncs = DamlLfFeature(
     name = "choiceController and choiceObserver functions",
+    cppFlag = "DAML_CHOICE_FUNCS",
     versionRange = VersionRange.Empty(),
   )
 
   val featureTemplateTypeRepToText = DamlLfFeature(
     name = "templateTypeRepToText function",
+    cppFlag = "DAML_TEMPLATE_TYPEREP_TO_TEXT",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
-  val featureUCKBuiltins = DamlLfFeature(
-    name =
-      "Old style (UCK) key builtins (fetchByKey, exerciseByKey (UCK semantics), lookupByKey (UCK semantics), ...)",
-    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+  val featureLegacyLookupByKey = DamlLfFeature(
+    name = "Lookup by key (legacy, UCK variant)",
+    cppFlag = "DAML_LEGACY_LOOKUP_BY_KEY",
+    versionRange = VersionRange.Empty(),
   )
 
   val featureNUCK = DamlLfFeature(
     name = "Non-unique contract keys",
+    cppFlag = "DAML_NUCK",
     versionRange = VersionRange.From(v2_3_1),
-  )
-
-  val featureFetchBykey = DamlLfFeature(
-    name = "Fetch by key",
-    versionRange = featureNUCK.versionRange,
-  )
-
-  val featureExerciseBykey = DamlLfFeature(
-    name = "Exercise by key",
-    versionRange = featureNUCK.versionRange,
-  )
-
-  val featureLookupBykey = DamlLfFeature(
-    name = "Lookup by key",
-    versionRange = featureUCKBuiltins.versionRange,
   )
 
   val featureContractKeys = DamlLfFeature(
     name = "Contract Keys",
-    versionRange = VersionRange.From(v2_3_1),
+    cppFlag = "DAML_CONTRACT_KEYS",
+    versionRange = featureNUCK.versionRange,
   )
 
   val featureFlatArchive = DamlLfFeature(
     name = "Flat Archive",
+    cppFlag = "DAML_FLATARCHIVE",
     versionRange = VersionRange.From(v2_2),
   )
 
   val featurePackageImports = DamlLfFeature(
     name = "Explicit package imports",
+    cppFlag = "DAML_PackageImports",
     versionRange = VersionRange.From(v2_2),
   )
 
   val featureComplexAnyType = DamlLfFeature(
     name = "Complex Any type",
+    cppFlag = "DAML_COMPLEX_ANY_TYPE",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
   val featureExperimental = DamlLfFeature(
     name = "Daml Experimental",
+    cppFlag = "DAML_EXPERIMENTAL",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
-  )
-
-  val featurePackageUpgrades = DamlLfFeature(
-    name = "Package upgrades",
-    versionRange = VersionRange.From(v2_1),
   )
 
   val featureChoiceAuthority = DamlLfFeature(
     name = "Choice Authorizers",
+    cppFlag = "DAML_ChoiceAuthority",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
   val featureUnsafeFromInterface = DamlLfFeature(
     name = "UnsafeFromInterface builtin",
+    cppFlag = "DAML_UnsafeFromInterface",
     versionRange = VersionRange.Until(v2_1),
   )
 
   val featureExtendedCryptoPrimitives = DamlLfFeature(
     name = "Extended crypto primitives",
+    cppFlag = "DAML_ExtendedCryptoPrimitives",
     versionRange = VersionRange.From(v2_3_1),
   )
 
   val allFeatures: Map[String, DamlLfFeature] = Map(
     "featureUnstable" -> featureUnstable,
-    "featureTextMap" -> featureTextMap,
     "featureBigNumeric" -> featureBigNumeric,
     "featureExceptions" -> featureExceptions,
     "featureExtendedInterfaces" -> featureExtendedInterfaces,
     "featureChoiceFuncs" -> featureChoiceFuncs,
     "featureTemplateTypeRepToText" -> featureTemplateTypeRepToText,
-    "featureUCKBuiltins" -> featureUCKBuiltins,
     "featureNUCK" -> featureNUCK,
-    "featureFetchBykey" -> featureFetchBykey,
-    "featureExerciseBykey" -> featureExerciseBykey,
-    "featureLookupBykey" -> featureLookupBykey,
+    "featureLegacyLookupByKey" -> featureLegacyLookupByKey,
     "featureContractKeys" -> featureContractKeys,
     "featureFlatArchive" -> featureFlatArchive,
     "featurePackageImports" -> featurePackageImports,
     "featureComplexAnyType" -> featureComplexAnyType,
     "featureExperimental" -> featureExperimental,
-    "featurePackageUpgrades" -> featurePackageUpgrades,
     "featureChoiceAuthority" -> featureChoiceAuthority,
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,

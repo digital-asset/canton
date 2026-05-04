@@ -21,9 +21,10 @@ object SendResult {
 
   /** Send caused a deliver event to be successfully sequenced. For aggregatable submission
     * requests, success means that the aggregatable submission was assigned a timestamp. It does not
-    * mean that the [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]] was
-    * reached and the envelopes are delivered. Accordingly, the
-    * [[com.digitalasset.canton.sequencing.protocol.Deliver]] event may contain an empty batch.
+    * mean that the threshold represented by
+    * [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] was reached and the envelopes
+    * are delivered. Accordingly, the [[com.digitalasset.canton.sequencing.protocol.Deliver]] event
+    * may contain an empty batch.
     */
   final case class Success(deliver: Deliver[Envelope[?]]) extends SendResult
 

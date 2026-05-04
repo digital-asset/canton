@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftBlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 
 import java.time.Duration
 
@@ -56,7 +57,7 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2S4M2_Config
+    EnvironmentDefinition.P3S4M2_Config
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(
           S2M1(synchronizerOwnersOverride =
@@ -75,6 +76,7 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
         )
         participant1.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer1))
         participant2.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer2))
+        participant3.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer2))
 
         participants.all.dars.upload(CantonExamplesPath)
 
@@ -107,6 +109,7 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
       initialTrafficPurchase(
         Map(
           participant1 -> participantTopUpAmount,
+          participant3 -> participantTopUpAmount,
           mediator1 -> mediatorTopUpAmount,
         ),
         sequencer1,
@@ -114,7 +117,10 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
 
       // The top-up only becomes active on the next sequencing timestamp.
       // Sufficiently many pings to consume extra traffic are made.
-      (1 to 4).foreach(_ => participant1.health.ping(participant1.id))
+      (1 to 4).foreach { _ =>
+        participant1.health.ping(participant1.id)
+        participant3.health.ping(participant3.id)
+      }
 
       clue("check nodes traffic state on sequencer1") {
         eventually() {
@@ -122,17 +128,31 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
             sequencer1,
             Map(
               participant1.id -> participantTopUpAmount.value,
+              participant3.id -> participantTopUpAmount.value,
               mediator1.id -> mediatorTopUpAmount.value,
             ),
           )
         }
       }
 
-      val trafficState = participant1.traffic_control.traffic_state(daId)
-      trafficState.extraTrafficPurchased.value shouldBe 500000L
-      trafficState.extraTrafficRemainder should be < 500000L
-      trafficState.baseTrafficRemainder.value should be < (maxBaseTrafficAmount)
-      trafficState.serial shouldBe Some(PositiveInt.tryCreate(1))
+      forAll(Seq(participant1, participant3)) { participant =>
+        val trafficState = participant.traffic_control.traffic_state(daId)
+        trafficState.extraTrafficPurchased.value shouldBe 500000L
+        trafficState.extraTrafficRemainder should be < 500000L
+        trafficState.baseTrafficRemainder.value should be < (maxBaseTrafficAmount)
+        trafficState.serial shouldBe Some(PositiveInt.tryCreate(1))
+      }
+    }
+
+    "offboard participant3" in { implicit env =>
+      import env.*
+
+      participant3.topology.synchronizer_trust_certificates.propose(
+        participant3,
+        daId,
+        change = Remove,
+      )
+      participant3.stop()
     }
 
     "perform an LSU and ensure traffic setting works with restarts" in { implicit env =>
@@ -179,7 +199,9 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
 
           eventually() {
             environment.simClock.value.advance(Duration.ofSeconds(1))
-            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
+            Seq(participant1, participant2).forall(
+              _.synchronizers.is_connected(fixture.newPsid)
+            ) shouldBe true
           }
           oldSynchronizerNodes.all.stop()
           waitForTargetTimeOnSequencer(sequencer3, upgradeTime.immediateSuccessor, logger)
@@ -207,7 +229,8 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
         (
           LogEntryOptionality.Optional,
           entry => {
-            entry.loggerName shouldBe include(BftBlockOrderer.getClass.getSimpleName)
+            val loggerName = BftBlockOrderer.getClass.getSimpleName.dropRight(1) // Drop final $
+            entry.loggerName shouldBe include(loggerName)
             entry.warningMessage should include("shutdown did not complete gracefully in allotted")
           },
         ),

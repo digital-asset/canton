@@ -12,10 +12,10 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
+import com.digitalasset.canton.protocol.LfContractStateMode
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.version.EngineMode
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 
 import scala.concurrent.ExecutionContext
 
@@ -85,13 +85,13 @@ private[execution] class DefaultCommandExecutor(
   private def establishMode(
       synchronizerId: Option[SynchronizerId],
       candidateSynchronizers: Set[PhysicalSynchronizerId],
-  ): NextGenContractStateMachine.Mode =
+  ): LfContractStateMode =
     synchronizerId
       .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
       .map(_.protocolVersion)
       .maxOption
       .map(pv => EngineMode.forProtocolVersion(pv))
-      .getOrElse(NextGenContractStateMachine.Mode.default)
+      .getOrElse(LfContractStateMode.default)
 
   override def execute(
       commands: Commands,
@@ -108,7 +108,7 @@ private[execution] class DefaultCommandExecutor(
       )
     }
 
-    val mode: NextGenContractStateMachine.Mode = establishMode(
+    val mode: LfContractStateMode = establishMode(
       commands.synchronizerId,
       routingSynchronizerState.topologySnapshots.keySet,
     )

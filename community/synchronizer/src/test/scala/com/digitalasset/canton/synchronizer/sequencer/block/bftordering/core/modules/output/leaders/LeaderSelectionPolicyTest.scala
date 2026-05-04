@@ -4,43 +4,19 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.IgnoringUnitTestEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.util.Random
+import scala.collection.immutable.SortedSet
 
-class SimpleLeaderSelectionPolicyTest extends AsyncWordSpec with BaseTest {
-
-  import SimpleLeaderSelectionPolicyTest.*
-
+class LeaderSelectionPolicyTest extends AsyncWordSpec with BaseTest {
   implicit val pv: ProtocolVersion = testedProtocolVersion
 
-  "SimpleLeaderSelectionPolicy" should {
-    "return sorted leaders" in {
-      val random = new Random(RandomSeed)
-      val indexes: Seq[Int] = 0 until NumNodes
-      val shuffledIndexes = random.shuffle(indexes)
-      val nodes = shuffledIndexes.map { index =>
-        BftNodeId(s"node$index")
-      }
-      val sortedNodes = nodes.sorted
-
-      // Note that the seed is fixed and so are the nodes. The following assertions check the test itself.
-      shuffledIndexes shouldNot be(indexes)
-      nodes shouldNot be(sortedNodes)
-      val orderingTopology = OrderingTopology.forTesting(nodes.toSet)
-
-      new SimpleLeaderSelectionPolicy[IgnoringUnitTestEnv]
-        .selectLeaders(orderingTopology)
-        .toSeq shouldBe sortedNodes
-    }
-
+  "LeaderSelectionPolicy" should {
     "rotate leaders" in {
       forAll(
         Table[Set[Int], Long, Seq[BftNodeId]](
@@ -96,19 +72,11 @@ class SimpleLeaderSelectionPolicyTest extends AsyncWordSpec with BaseTest {
         val nodes = nodeIndexes.map { index =>
           BftNodeId(s"node$index")
         }
-        val orderingTopology = OrderingTopology.forTesting(nodes)
-        val selectedLeaders = new SimpleLeaderSelectionPolicy[IgnoringUnitTestEnv]
-          .selectLeaders(orderingTopology)
         val rotatedLeaders =
-          LeaderSelectionPolicy.rotateLeaders(selectedLeaders, EpochNumber(epochNumber))
+          LeaderSelectionPolicy.rotateLeaders(SortedSet.from(nodes), EpochNumber(epochNumber))
 
         rotatedLeaders should contain theSameElementsInOrderAs expectedRotatedLeaders
       }
     }
   }
-}
-
-object SimpleLeaderSelectionPolicyTest {
-  private val NumNodes = 16
-  private val RandomSeed = 4L
 }

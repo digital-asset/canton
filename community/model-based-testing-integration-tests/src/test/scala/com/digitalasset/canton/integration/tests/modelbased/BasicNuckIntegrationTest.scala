@@ -18,7 +18,7 @@ import com.digitalasset.canton.testing.modelbased.universal.java.universal.{
   UniversalWithKey,
   txaction,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util as ju
@@ -26,7 +26,7 @@ import scala.jdk.CollectionConverters.*
 
 class BasicNuckIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
-  private var alice: PartyId = _
+  private var alice: Party = _
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -34,7 +34,7 @@ class BasicNuckIntegrationTest extends CommunityIntegrationTest with SharedEnvir
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.dars.upload(BaseTest.UniversalPath)
-        alice = participant1.parties.enable("alice")
+        alice = participant1.parties.testing.enable("alice")
       }
 
   def buildUniversalWithKey(
