@@ -4682,6 +4682,19 @@ Error functions
 
   Extract the error message from an ``'AnyException'``.
 
+External call functions
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``EXTERNAL_CALL : 'Text' → 'Text' → 'Text' → 'Text' → 'Update' 'Text'``
+
+  Represents an external call request in LF. The first argument is the extension
+  identifier, the second argument is the function identifier, the third argument
+  is the hexadecimal-encoded configuration hash, and the fourth argument is the
+  hexadecimal-encoded input payload. The update result carries the
+  hexadecimal-encoded output payload.
+
+  [*Available in version >= 2.dev*]
+
 Debugging functions
 ~~~~~~~~~~~~~~~~~~~
 
@@ -5027,6 +5040,14 @@ program exception using:
 - ``ToAnyException``, ``FromAnyException``, and ``Throw`` expressions,
 - ``TryCatch`` update,
 - ``ANY_EXCEPTION_MESSAGE`` builtin functions.
+
+External Call
+.............
+
+[*Available in versions >= 2.dev*]
+
+The deserialization process will reject any Daml-LF program whose language
+version is before 2.dev and that uses the builtin function ``EXTERNAL_CALL``.
 
 .. Local Variables:
 .. eval: (flyspell-mode 1)

@@ -237,6 +237,7 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
         "ANY_EXCEPTION_MESSAGE" -> BAnyExceptionMessage,
         "TYPE_REP_TYCON_NAME" -> BTypeRepTyConName,
         "FAIL_WITH_STATUS" -> BFailWithStatus,
+        "EXTERNAL_CALL" -> BExternalCall,
       )
 
       forEvery(testCases)((stringToParse, expectedBuiltin) =>
