@@ -191,8 +191,6 @@ object LedgerApiConformanceBase {
     "UserManagementServiceIT:RaceConditionCreateUsers", // See LedgerApiConformanceSuppressedLogs
     // Following value normalisation (https://github.com/digital-asset/daml/pull/19912), this throws a different, equally correct, error
     "CommandServiceIT:CSRefuseBadParameter",
-    // TODO(i31186): enable this once the issue is fixed
-    "TransactionServiceVisibilityIT:TXLedgerEffectsHideCommandIdToNonSubmittingStakeholders",
   )
 }
 

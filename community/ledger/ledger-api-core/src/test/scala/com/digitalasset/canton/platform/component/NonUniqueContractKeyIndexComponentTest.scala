@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.participant.store.PersistedContractInstance
+import com.digitalasset.canton.platform.ContractId
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,

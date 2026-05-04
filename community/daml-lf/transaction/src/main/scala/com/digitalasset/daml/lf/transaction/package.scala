@@ -11,6 +11,8 @@ import scala.collection.BuildFrom
 
 package object transaction {
 
+  val MaxContractKeyFetches: Int = 1_000_000
+
   /** This traversal fails the identity law so is unsuitable for [[scalaz.Traverse]].
     * It is, nevertheless, what is meant sometimes.
     */

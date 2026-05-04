@@ -104,7 +104,7 @@ class DbSequencedEventStore(
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit] =
-    storage.queryAndUpdate(bulkInsertQuery(eventsNE), functionFullName)(traceContext, closeContext)
+    storage.queryAndUpdate(bulkInsertQuery(eventsNE), functionFullName)
 
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]

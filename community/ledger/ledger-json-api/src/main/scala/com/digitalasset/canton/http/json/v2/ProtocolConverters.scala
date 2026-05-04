@@ -1513,6 +1513,7 @@ class ProtocolConverters(
     } yield obj
       .into[js.PrefetchContractKey]
       .withFieldConst(_.contractKey, toCirce(contractKey.getOrElse(ujson.Null)))
+      .withFieldConst(_.limit, obj.limit)
       .transform
   }
 

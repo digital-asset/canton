@@ -1,35 +1,18 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
-import com.digitalasset.canton.ledger.api.{
-  CumulativeFilter,
-  EventFormat,
-  TransactionFormat,
-  TransactionShape,
-  UpdateFormat,
-}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.util.concurrent.atomic.AtomicReference
-
 class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
-  private val recordTimeRef = new AtomicReference(CantonTimestamp.now())
-  private val nextRecordTime: () => CantonTimestamp =
-    () => recordTimeRef.updateAndGet(_.immediateSuccessor)
-
-  private var previousPruneUpTo: Option[Offset] = None
-  private def nextPruneUpTo(pruneUpTo: Offset): Option[Offset] = {
-    val ret = previousPruneUpTo
-    previousPruneUpTo = Some(pruneUpTo)
-    ret
-  }
+  private val nextRecordTime = new SingleStepIncreasingRecordTime
 
   def updateFormat(transactionShape: TransactionShape) = UpdateFormat(
     includeTransactions = Some(
@@ -110,7 +93,9 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdates(create4)
 
       val firstPage = index.updatesPage(request).futureValue
-      index.prune(nextPruneUpTo(pruneTo), Vector(), pruneTo, Vector()).futureValue
+      index
+        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
       }
@@ -149,7 +134,9 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdates(create4)
 
       val firstPage = index.updatesPage(request).futureValue
-      index.prune(nextPruneUpTo(pruneTo), Vector(), pruneTo, Vector()).futureValue
+      index
+        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
       }
@@ -191,7 +178,9 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val firstPage = index.updatesPage(request).futureValue
-      index.prune(nextPruneUpTo(pruneTo), Vector(), pruneTo, Vector()).futureValue
+      index
+        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
       }
@@ -230,7 +219,9 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val firstPage = index.updatesPage(request).futureValue
-      index.prune(nextPruneUpTo(pruneTo), Vector(), pruneTo, Vector()).futureValue
+      index
+        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .futureValue
       val exception = index
         .updatesPage(
           request.copy(continueStreamFromIncl =

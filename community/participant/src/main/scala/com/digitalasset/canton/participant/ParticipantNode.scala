@@ -50,7 +50,10 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
-import com.digitalasset.canton.participant.scheduler.ParticipantPruningScheduler
+import com.digitalasset.canton.participant.scheduler.{
+  ParticipantPruningScheduler,
+  ParticipantPurgeObsoleteTopologyScheduler,
+}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.MutablePackageMetadataViewImpl
 import com.digitalasset.canton.participant.sync.*
@@ -653,13 +656,30 @@ class ParticipantNodeBootstrap(
           arguments.loggerFactory,
         )
 
+        // For now we re-use the pruning scheduler for purging obsolete topology data, so we can piggy-back
+        // on the window the customer can define, for when they're less sensitive to extra db load.
+        pruningSchedule <- EitherT.right(
+          FutureUnlessShutdown.outcomeF(pruningScheduler.initializeSchedule())
+        )
+        purgeObsoleteTopologyScheduler = ParticipantPurgeObsoleteTopologyScheduler.create(
+          schedule = pruningSchedule, // TODO(i31974): decouple from pruning schedule
+          chunkSize = PositiveInt.tryCreate(1000), // TODO(i31974) make configurable
+          synchronizerConnectionConfigStore,
+          syncPersistentStateManager,
+          timeouts,
+          loggerFactory,
+        )
+
         schedulers <-
           EitherT
             .liftF(
               {
                 val schedulers =
                   new SchedulersImpl(
-                    Map("pruning" -> pruningScheduler),
+                    Map(
+                      "pruning" -> pruningScheduler,
+                      "obsoleteTopology" -> purgeObsoleteTopologyScheduler,
+                    ),
                     arguments.loggerFactory,
                   )
                 if (isActive) {

@@ -13,7 +13,12 @@ import com.digitalasset.daml.lf.command.{ApiContractKey, ReplayCommand}
 import com.digitalasset.daml.lf.data.{CostModel, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction.{GlobalKey, Node, SubmittedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  GlobalKey,
+  MaxContractKeyFetches,
+  Node,
+  SubmittedTransaction,
+}
 import com.digitalasset.daml.lf.value.Value
 
 import scala.annotation.tailrec
@@ -305,7 +310,7 @@ private[engine] final class Preprocessor(
   def preprocessApiContractKeys(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       keys: Seq[ApiContractKey],
-  ): Result[Seq[GlobalKey]] = {
+  ): Result[Seq[(GlobalKey, Int)]] = {
     updateInputCost(keys)
 
     safelyRun(pullPackage(pkgResolution, keys.view.map(_.templateRef))) {
@@ -315,14 +320,14 @@ private[engine] final class Preprocessor(
 
   private[engine] def prefetchContractIdsAndKeys(
       commands: ImmArray[speedy.ApiCommand],
-      prefetchKeys: Seq[GlobalKey],
+      prefetchKeys: Seq[(GlobalKey, Int)],
       unprocessedCommands: Option[ImmArray[command.ApiCommand]] = None,
   )(implicit traceContext: TraceContext): Result[Unit] = {
     // TODO: https://github.com/digital-asset/daml/issues/21953: implement size cost model for speedy.ApiCommand and speedy.SValue
     unprocessedCommands.foreach { cmds =>
       updateInputCost(cmds)
     }
-    updateInputCost(prefetchKeys)
+    updateInputCost(prefetchKeys.map(_._1))
 
     safelyRun(
       ResultError(
@@ -364,17 +369,19 @@ private[engine] final class Preprocessor(
 
   private def unsafePrefetchKeys(
       commands: ImmArray[speedy.Command],
-      prefetchKeys: Seq[GlobalKey],
-  ): Seq[GlobalKey] = {
-    val exercisedKeys = commands.iterator.collect {
+      prefetchKeys: Seq[(GlobalKey, Int)],
+  ): Map[GlobalKey, Int] = {
+    // ExerciseByKey commands exercise exactly one contract per key, so they get max_contracts=1.
+    val exercisedKeys: Iterator[(GlobalKey, Int)] = commands.iterator.collect {
       case speedy.Command.ExerciseByKey(templateId, contractKey, _, _) =>
-        speedy.Speedy.Machine
+        val key = speedy.Speedy.Machine
           .globalKey(pkgInterface, templateId, contractKey)
           .getOrElse(
             throw Error.Preprocessing.ContractIdInContractKey(contractKey.toUnnormalizedValue)
           )
+        key -> 1
     }
-    (exercisedKeys ++ prefetchKeys).distinct.toSeq
+    (exercisedKeys.toMap ++ prefetchKeys).transform((_, x) => x min MaxContractKeyFetches)
   }
 }
 

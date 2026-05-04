@@ -1,23 +1,12 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
-import com.digitalasset.canton.ledger.api.{
-  CumulativeFilter,
-  EventFormat,
-  ParticipantAuthorizationFormat,
-  TopologyFormat,
-  TransactionFormat,
-  TransactionShape,
-  UpdateFormat,
-}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
-
-import java.util.concurrent.atomic.AtomicReference
 
 class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
   def updateFormat(transactionShape: TransactionShape) = UpdateFormat(
@@ -34,10 +23,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     includeReassignments = None,
     includeTopologyEvents = None,
   )
-
-  private val recordTimeRef = new AtomicReference(CantonTimestamp.now())
-  private val nextRecordTime: () => CantonTimestamp =
-    () => recordTimeRef.updateAndGet(_.immediateSuccessor)
+  private val nextRecordTime = new SingleStepIncreasingRecordTime
 
   "update stream in reverse order" should {
     "stream create transactions" in {

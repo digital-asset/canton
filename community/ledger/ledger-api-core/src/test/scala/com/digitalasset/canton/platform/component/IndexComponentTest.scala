@@ -1,10 +1,8 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
-import anorm.SqlParser.long
-import anorm.~
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.DatabaseMetrics
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
@@ -12,7 +10,12 @@ import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, Processin
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
-import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat, TemplateWildcardFilter}
+import com.digitalasset.canton.ledger.api.{
+  AcsRangeInfo,
+  CumulativeFilter,
+  EventFormat,
+  TemplateWildcardFilter,
+}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
@@ -39,7 +42,6 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.{CommonMockMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiJdbcUrl
 import com.digitalasset.canton.participant.store.{ContractStore, PersistedContractInstance}
-import com.digitalasset.canton.platform.IndexComponentTest.TestServices
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
@@ -47,7 +49,6 @@ import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
-import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
@@ -59,6 +60,12 @@ import com.digitalasset.canton.platform.store.{
   LedgerApiContractStore,
   LedgerApiContractStoreImpl,
   PruningOffsetService,
+}
+import com.digitalasset.canton.platform.{
+  InMemoryState,
+  LedgerApiServerInternals,
+  PackageId,
+  PackageName,
 }
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -87,16 +94,18 @@ import com.digitalasset.daml.lf.transaction.{CommittedTransaction, CreationTime,
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueParty
 import com.google.protobuf.ByteString
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
 
 import java.sql.Connection
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
+
+import IndexComponentTest.TestServices
 
 trait IndexComponentTest
     extends PekkoBeforeAndAfterAll
@@ -108,8 +117,8 @@ trait IndexComponentTest
 
   private val clock = new WallClock(ProcessingTimeout(), loggerFactory)
 
+  implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
   implicit val ec: ExecutionContext = system.dispatcher
-
   protected implicit val loggingContextWithTrace: LoggingContextWithTrace =
     LoggingContextWithTrace.ForTesting
 
@@ -149,6 +158,10 @@ trait IndexComponentTest
     Option(testServicesRef.get())
       .getOrElse(throw new Exception("TestServices not initialized. Not accessing from a test?"))
 
+  protected def index: IndexService = testServices.index
+  protected def dbSupport: DbSupport = testServices.dbSupport
+  protected def dbDispatcher: DbDispatcher = testServices.dbSupport.dbDispatcher
+  protected def ledgerEndCache: MutableLedgerEndCache = testServices.inMemoryState.ledgerEndCache
   protected def contractStore: LedgerApiContractStore = testServices.participantContractStore
 
   private def ledgerEndOffset = testServices.index.currentLedgerEnd().futureValue
@@ -171,6 +184,17 @@ trait IndexComponentTest
 
   protected def ingestUpdateAsync(update: Update): Future[Unit] =
     testServices.indexer.offer(update).map(_ => ())
+
+  protected def ingestUpdateSync(update: Update): Offset = {
+    val ledgerEndBefore = index.currentLedgerEnd().futureValue
+    ingestUpdateAsync(update).futureValue
+
+    eventually() {
+      val ledgerEndAfter = index.currentLedgerEnd().futureValue
+      ledgerEndAfter should be > ledgerEndBefore
+      ledgerEndAfter.value
+    }
+  }
 
   protected def storeContracts(
       update: Update,
@@ -270,45 +294,12 @@ trait IndexComponentTest
     verbose = false,
   )
 
-  protected def index: IndexService = testServices.index
-
-  protected def dbSupport: DbSupport = testServices.dbSupport
-
   private val indexComponentTestDbMetrics = DatabaseMetrics.ForTesting("index-component-test")
 
   protected def withConnection[T](f: Connection => T): T =
     dbSupport.dbDispatcher
       .executeSql(indexComponentTestDbMetrics)(f)
       .futureValue
-
-  protected def getLastEventSeqId: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT ledger_end_sequential_id FROM lapi_parameters"
-        .as(long("ledger_end_sequential_id").?.single)
-        .getOrElse(0L)
-    }
-
-  protected def getAchsState: (Long, Long, Long) =
-    withConnection { implicit connection =>
-      SQL"SELECT valid_at, last_populated, last_removed FROM lapi_achs_state"
-        .as((long("valid_at") ~ long("last_populated") ~ long("last_removed")).single)(
-          connection
-        ) match {
-        case v ~ lp ~ lr => (v, lp, lr)
-      }
-    }
-
-  protected def getAchsSize: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT COUNT(DISTINCT event_sequential_id) AS count FROM lapi_filter_achs_stakeholder"
-        .as(long("count").single)
-    }
-
-  protected def getAchsStateRowCount: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT COUNT(*) AS count FROM lapi_achs_state"
-        .as(long("count").single)
-    }
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
@@ -323,8 +314,6 @@ trait IndexComponentTest
         traceContext: TraceContext
     ): Future[Option[Offset]] = index.indexDbPrunedUpto
   }
-
-  implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
   private def indexResourceOwner(
       config: IndexerConfig,
@@ -545,13 +534,8 @@ trait IndexComponentTest
     .assertFromString("01cf85cfeb36d628ca2e6f583fa2331be029b6b28e877e1008fb3f862306c086")
 
   private val random = new scala.util.Random
-  private def randomString(length: Int) = {
-    val sb = new mutable.StringBuilder()
-    for (_ <- 1 to length) {
-      sb.append(random.alphanumeric.head)
-    }
-    sb.toString
-  }
+  protected def randomString(length: Int) =
+    String.valueOf(random.alphanumeric.take(length).toArray)
 
   private def randomTemplate = templates(random.nextInt(templates.size))
   private def randomParty = parties(random.nextInt(parties.size))
@@ -867,16 +851,6 @@ trait IndexComponentTest
       )
   }
 
-  protected def ingestUpdateSync(update: Update): Offset = {
-    val ledgerEndBefore = index.currentLedgerEnd().futureValue
-    ingestUpdateAsync(update).futureValue
-
-    eventually() {
-      val ledgerEndAfter = index.currentLedgerEnd().futureValue
-      ledgerEndAfter should be > ledgerEndBefore
-      ledgerEndAfter.value
-    }
-  }
   protected def repairTransaction(
       sequenced: Update.SequencedTransactionAccepted
   ): Update.RepairTransactionAccepted =
@@ -890,8 +864,19 @@ trait IndexComponentTest
       contractInfos = sequenced.contractInfos,
     )
 
-  protected def dbDispatcher: DbDispatcher = testServices.dbSupport.dbDispatcher
-  protected def ledgerEndCache: MutableLedgerEndCache = testServices.inMemoryState.ledgerEndCache
+  protected def activeContractIds(activeAt: Long): Seq[(String, Long)] =
+    index
+      .getActiveContracts(
+        eventFormat = allPartyEventFormat,
+        activeAt = Some(Offset.tryFromLong(activeAt)),
+        rangeInfo = AcsRangeInfo.empty,
+      )
+      .runWith(Sink.seq)
+      .futureValue
+      .flatMap(
+        _.contractEntry.activeContract
+          .flatMap(_.createdEvent.map(event => event.contractId -> event.offset))
+      )
 }
 
 object IndexComponentTest {

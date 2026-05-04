@@ -28,9 +28,9 @@ object LanguageVersion
     with LegacyLanguageFeatures {
   // ranges hardcoded (for now)
   lazy val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)
-  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_2)
+  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_3)
   lazy val earlyAccessLfVersionsRange: VersionRange.Inclusive[LanguageVersion] =
-    VersionRange(v2_1, v2_2)
+    VersionRange(v2_1, v2_3)
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 

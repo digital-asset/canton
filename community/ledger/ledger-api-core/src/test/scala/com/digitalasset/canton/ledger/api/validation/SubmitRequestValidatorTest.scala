@@ -86,7 +86,8 @@ class SubmitRequestValidatorTest
     val command = commandDef(packageId)
     val packageNameEncoded = Ref.PackageRef.Name(packageName).toString
     val commandWithPackageNameScoping = commandDef(packageNameEncoded)
-    val prefetchKey = PrefetchContractKey(Some(identifier), Some(ApiMocks.values.validApiParty))
+    val prefetchKey =
+      PrefetchContractKey(Some(identifier), Some(ApiMocks.values.validApiParty), Some(1))
     val prefetchKeyWithPackageNameScoping =
       prefetchKey.copy(templateId = Some(Identifier(packageNameEncoded, moduleName, entityName)))
 
@@ -638,7 +639,7 @@ class SubmitRequestValidatorTest
               Ref.PackageRef.Name(packageName),
               packageMap = packageMap,
               prefetchKeys =
-                Seq(ApiContractKey(internal.templateRefByName, ApiMocks.values.validLfParty)),
+                Seq(ApiContractKey(internal.templateRefByName, ApiMocks.values.validLfParty, 1)),
             )
           )
         }
@@ -672,7 +673,8 @@ class SubmitRequestValidatorTest
           internal.maxDeduplicationDuration,
         ) shouldEqual Right(
           internal.emptyCommands.copy(
-            prefetchKeys = Seq(ApiContractKey(internal.templateRef, ApiMocks.values.validLfParty))
+            prefetchKeys =
+              Seq(ApiContractKey(internal.templateRef, ApiMocks.values.validLfParty, 1))
           )
         )
       }

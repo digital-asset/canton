@@ -131,13 +131,15 @@ trait TopologyStoreTest
         update(store1, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
         update(store2, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
 
+        import PositiveInt.two
+
         // store1 can be incrementally cleared
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 3
-        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.deleteDataChunk(two).futureValueUS shouldBe true
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 1
-        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.deleteDataChunk(two).futureValueUS shouldBe true
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 0
-        store1.deleteDataChunk(2).futureValueUS shouldBe false
+        store1.deleteDataChunk(two).futureValueUS shouldBe false
 
         // store2 is unaffected
         store2.dumpStoreContent().futureValueUS.result.size shouldBe 3

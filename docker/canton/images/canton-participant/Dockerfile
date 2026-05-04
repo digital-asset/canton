@@ -18,4 +18,4 @@ EXPOSE 10013
 COPY app.conf /app/
 
 HEALTHCHECK --start-period=10m \
-  CMD grpcurl -plaintext localhost:5061 grpc.health.v1.Health/Check || exit 1
+  CMD grpc_health_probe -addr=:5061 || exit 1

@@ -367,10 +367,9 @@ class DbAcsCommitmentStore(
       sqlu"delete from par_outstanding_acs_commitments where synchronizer_idx=$indexedSynchronizer and from_exclusive < $before and to_inclusive < $before"
     storage
       .queryAndUpdate(
-        query1.zip(query2.zip(query3)),
+        query1.zip(query2.zip(query3)).map { case (q1, (q2, q3)) => q1 + q2 + q3 },
         operationName = "commitments: prune",
       )
-      .map { case (q1, (q2, q3)) => q1 + q2 + q3 }
   }
 
   override def lastComputedAndSent(implicit
