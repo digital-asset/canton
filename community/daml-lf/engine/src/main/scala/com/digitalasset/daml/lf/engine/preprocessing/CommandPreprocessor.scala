@@ -12,7 +12,7 @@ import com.digitalasset.daml.lf.value.Value
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.command.ApiContractKey
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.transaction.{GlobalKey, MaxContractKeyFetches}
 
 private[lf] final class CommandPreprocessor(
     pkgInterface: language.PackageInterface,
@@ -340,14 +340,14 @@ private[lf] final class CommandPreprocessor(
   def unsafePreprocessApiContractKeys(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       keys: Seq[ApiContractKey],
-  ): Seq[GlobalKey] =
+  ): Seq[(GlobalKey, Int)] =
     keys.map(unsafePreprocessApiContractKey(pkgResolution, _))
 
   @throws[Error.Preprocessing.Error]
   def unsafePreprocessApiContractKey(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       key: ApiContractKey,
-  ): GlobalKey = {
+  ): (GlobalKey, Int) = {
     val templateRef = key.templateRef
     val templateId = unsafeResolveTyConId(
       pkgResolution,
@@ -360,11 +360,12 @@ private[lf] final class CommandPreprocessor(
         templateRef,
         key.contractKey,
       )
-    unsafePreprocessContractKey(
+    val globalKey = unsafePreprocessContractKey(
       key.contractKey,
       templateId,
       extendLocalIdForbiddanceToRelativeV2 = true,
     )
+    globalKey -> (key.limit min MaxContractKeyFetches)
   }
 
   @throws[Error.Preprocessing.Error]

@@ -33,8 +33,10 @@ sealed trait JobSchedule {
 }
 
 /** Trait for individual schedule (i.e. non-compound schedule)
+  *
+  * Not sealed, so we can extend it in testing.
   */
-sealed trait IndividualSchedule extends JobSchedule
+trait IndividualSchedule extends JobSchedule
 
 /** Schedule based on a utc-based cron expression and the clock
   */

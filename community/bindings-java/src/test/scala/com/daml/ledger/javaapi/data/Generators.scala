@@ -1329,10 +1329,12 @@ object Generators {
     for {
       templateId <- identifierGen
       contractKey <- valueGen
+      limit <- Gen.posNum[Int]
     } yield CommandsOuterClass.PrefetchContractKey
       .newBuilder()
       .setTemplateId(templateId)
       .setContractKey(contractKey)
+      .setLimit(limit)
       .build()
 
   val eventFormatGen: Gen[TransactionFilterOuterClass.EventFormat] =

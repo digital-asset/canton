@@ -256,8 +256,10 @@ message Commands {
   repeated string package_id_selection_preference = 14;
 
   // Fetches the contract keys into the caches to speed up the command processing.
-  // Should only contain contract keys that are expected to be resolved during interpretation of the commands.
-  // Keys of disclosed contracts do not need prefetching.
+  // Each entry specifies a key and a limit on how many contracts to prefetch for that key.
+  // The limit does not count disclosed contracts, and should reflect the number of
+  // additional contracts expected to be resolved during interpretation of the commands.
+  // If a key appears multiple times, the last entry's limit wins.
   //
   // Optional: can be empty
   repeated PrefetchContractKey prefetch_contract_keys = 15;
@@ -284,4 +286,13 @@ message PrefetchContractKey {
   //
   // Required
   Value contract_key = 2;
+
+  // The number of contracts to prefetch for this key, if available.
+  // This is in addition to disclosed contracts.
+  // - for backward compatibility reason, absence is interpreted as 1
+  // - 0 is forbidden
+  // - capped at 2^31 - 1. The system may impose further limits.
+  //
+  // Optional
+  optional uint32 limit = 3;
 }

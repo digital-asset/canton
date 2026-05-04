@@ -85,8 +85,16 @@ case class ApiCommands(
     commandsReference: String,
 )
 
-/** A contract key passed in over the ledger API command submission */
+/** A contract key passed in over the ledger API command submission
+  *
+  * @param templateRef the template whose key is being prefetched
+  * @param contractKey the key value to prefetch
+  * @param limit       the number of contracts to prefetch for this key, if available.
+  */
 final case class ApiContractKey(
     templateRef: TypeConRef,
     contractKey: Value,
-)
+    limit: Int,
+) {
+  require(limit > 0, "limit must be greater than 0")
+}

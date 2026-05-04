@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
 import anorm.SqlParser.long
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.logging.SuppressionRule
@@ -21,12 +21,13 @@ import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.flatspec.AnyFlatSpec
 import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
 
-class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
-
+class AchsIndexComponentTest
+    extends AnyFlatSpec
+    with IndexComponentTest
+    with PersistenceSqlQueries {
   val aggregationThreshold: Long = 5L
 
   val achsConfig: AchsConfig = AchsConfig(
@@ -40,9 +41,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
     achsConfig = Some(achsConfig)
   )
 
-  private val recordTimeRef = new AtomicReference(CantonTimestamp.now())
-  private val nextRecordTime: () => CantonTimestamp =
-    () => recordTimeRef.updateAndGet(_.immediateSuccessor)
+  private val nextRecordTime = new SingleStepIncreasingRecordTime
 
   behavior of "ACHS maintenance"
 
@@ -148,7 +147,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
     ingestUpdates(allUpdates*)
 
     val validAt = getAchsValidAt
-    val beforeValidAt = offsetForEventSeqId(validAt) - 1L
+    val beforeValidAt = offsetForActivateContractEventSeqId(validAt) - 1L
 
     val contractsBeforeValidAt = activeContractIds(beforeValidAt).filter(_._2 > start)
 
@@ -185,7 +184,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
     contractsAtLedgerEnd.size shouldBe txsCreatedNotArchived * txSize * repetitions
 
     // offset at validAt so that ACHS is used
-    val atValidAtOffset = offsetForEventSeqId(getAchsValidAt)
+    val atValidAtOffset = offsetForActivateContractEventSeqId(getAchsValidAt)
     // offset before validAt so that ACHS is not used
     val beforeValidAtOffset = atValidAtOffset - 1
 
@@ -243,8 +242,8 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
 
     // activeAtEventSeqId should be >= validAt, so ACHS is initially used.
     val validAtBefore = getAchsValidAt
-    val queryOffset = offsetForEventSeqId(validAtBefore) + 1
-    val queryEventSeqId = eventSeqIdForOffset(queryOffset)
+    val queryOffset = offsetForActivateContractEventSeqId(validAtBefore) + 1
+    val queryEventSeqId = eventSeqIdForActivateContractOffset(queryOffset)
 
     // Start ACS retrieval and concurrently ingest more data to make validAt overtake queryEventSeqId.
     val concurrentRepetitions = 10
@@ -804,58 +803,4 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest {
       achsIds should not be empty
       achsIds shouldBe activeIds
     }
-
-  private def getAchsValidAt: Long =
-    withConnection { implicit connection =>
-      SQL"SELECT valid_at FROM lapi_achs_state"
-        .as(long("valid_at").single)
-    }
-
-  private def getAchsEventSeqIds: List[Long] =
-    withConnection { implicit connection =>
-      SQL"""SELECT event_sequential_id
-          FROM lapi_filter_achs_stakeholder
-          ORDER BY event_sequential_id"""
-        .as(long("event_sequential_id").*)
-    }
-
-  private def getActivateEventSeqIds: List[Long] =
-    withConnection { implicit connection =>
-      SQL"""SELECT event_sequential_id
-          FROM lapi_filter_activate_stakeholder
-          ORDER BY event_sequential_id"""
-        .as(long("event_sequential_id").*)
-    }
-
-  private def offsetForEventSeqId(seqId: Long): Long =
-    withConnection { implicit connection =>
-      SQL"""SELECT MAX(event_offset) AS max_offset
-              FROM lapi_events_activate_contract
-              WHERE event_sequential_id <= $seqId"""
-        .as(long("max_offset").?.single)
-        .getOrElse(0L)
-    }
-
-  private def eventSeqIdForOffset(offset: Long): Long =
-    withConnection { implicit connection =>
-      SQL"""SELECT MAX(event_sequential_id) AS max_seq_id
-            FROM lapi_events_activate_contract
-            WHERE event_offset <= $offset"""
-        .as(long("max_seq_id").?.single)
-        .getOrElse(0L)
-    }
-
-  private def activeContractIds(activeAt: Long): Seq[(String, Long)] =
-    index
-      .getActiveContracts(
-        eventFormat = allPartyEventFormat,
-        activeAt = Some(Offset.tryFromLong(activeAt)),
-        rangeInfo = AcsRangeInfo.empty,
-      )
-      .runWith(Sink.seq)
-      .futureValue
-      .flatMap(
-        _.contractEntry.activeContract
-          .flatMap(_.createdEvent.map(event => event.contractId -> event.offset))
-      )
 }

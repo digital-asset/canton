@@ -191,7 +191,7 @@ def hub_report_issue(issue: str):
     # let's look for the exact title in the search result
     for result in search_result_json["data"]["search"]["nodes"]:
         if result["title"] == title:
-            idx = result["number"]
+            idx = str(result["number"])
             body = result["body"]
             # look at the projects the issue is linked to
             for project_relation in result["projectItems"]["nodes"]:
@@ -278,6 +278,7 @@ def gh_issue_create_cmd(title: str, body: str):
 
 def gh_issue_edit_cmd(idx: str, title: str, body: str):
     # gh issue edit has no --state flag; reopen separately first
+    idx = str(idx)
     reopen_result = subprocess.run(
         gh_cmd + ["issue", "reopen", idx, "--repo", "DACH-NY/canton"],
         capture_output=True, text=True, env=gh_flaky_test_env

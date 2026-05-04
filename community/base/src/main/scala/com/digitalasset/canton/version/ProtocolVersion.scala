@@ -17,6 +17,7 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   stable,
   supported,
 }
+import com.digitalasset.daml.lf.language.LanguageVersion
 import io.circe.Encoder
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -248,6 +249,10 @@ object ProtocolVersion {
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
     NonEmpty.mk(List, ProtocolVersion.v34)
+
+  // LF versions that should only be used with alpha/beta protocol versions
+  val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
+    NonEmpty.mk(List, LanguageVersion.v2_3)
 
   // Stable protocol versions supported by this release as printed in the release version information.
   // Note: Adding a new stable PV above is not enough, it needs to be added to build info key `stableProtocolVersions` in `BuildCommon` as well.

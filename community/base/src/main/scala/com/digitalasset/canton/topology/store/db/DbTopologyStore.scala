@@ -1416,11 +1416,11 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   override def deleteDataChunk(
-      chunkSize: Int
+      chunkSize: PositiveInt
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
     // We materialize the full chunk rather than using a subquery, as the update statement must be idempotent
     val queryChunkIds =
-      sql"select id from common_topology_transactions where store_id = $storeIndex limit $chunkSize"
+      sql"select id from common_topology_transactions where store_id = $storeIndex limit ${chunkSize.value}"
         .as[Long]
     for {
       // There can be at most one of these rows, so we don't include it in our chunking.

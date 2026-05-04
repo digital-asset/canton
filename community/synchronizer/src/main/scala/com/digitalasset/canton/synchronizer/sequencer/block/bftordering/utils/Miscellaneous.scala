@@ -33,7 +33,11 @@ private[bftordering] object Miscellaneous {
       action: DBIOAction[A, NoStream, Effect.All],
       operationName: String,
       maxRetries: Int = StorageRetries,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[A] =
     storage.runWrite(action, operationName, maxRetries)
 
   val TestBootstrapTopologyActivationTime: TopologyActivationTime =

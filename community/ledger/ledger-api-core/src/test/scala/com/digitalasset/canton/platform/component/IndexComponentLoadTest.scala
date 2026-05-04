@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
@@ -30,6 +30,7 @@ import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.platform.{ContractId, WorkflowId}
 import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.topology.SynchronizerId
@@ -44,7 +45,6 @@ import org.scalatest.time.Span
 import org.scalatest.{Assertion, Ignore}
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
-import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -53,7 +53,10 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   * ignored, and logs on WARN log level).
   */
 @Ignore
-class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
+class IndexComponentLoadTest
+    extends AnyFlatSpec
+    with IndexComponentTest
+    with PersistenceSqlQueries {
   // How long to wait for a benchmarked data fetch to finish. The test will fail if this is exceeded.
   private val benchmarkedTaskPatience =
     PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
@@ -501,15 +504,6 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       action = "storing contracts of updates",
       sink = Sink.seq,
     ).toVector
-
-  private val random = new scala.util.Random
-  private def randomString(length: Int) = {
-    val sb = new mutable.StringBuilder()
-    for (i <- 1 to length) {
-      sb.append(random.alphanumeric.head)
-    }
-    sb.toString
-  }
 
   private def allAssignsThenAllUnassigns(
       nextRecordTime: () => CantonTimestamp,

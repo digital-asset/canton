@@ -460,79 +460,103 @@ class MaliciousParticipantNode(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, SendResult.Success] =
-    ResourceUtil.withResourceM(
-      new SessionKeyStoreWithInMemoryCache(
-        SessionEncryptionKeyCacheConfig(),
-        timeouts,
-        loggerFactory,
+    for {
+      transactionAndMetadata <- testSubmissionService
+        .interpret(command)
+        .leftMap(err => s"Unable to create transaction: $err")
+        .mapK(FutureUnlessShutdown.outcomeK)
+      (_submittedTransaction, metadata) = transactionAndMetadata
+      submittedTransaction = transactionInterceptor(_submittedTransaction)
+      transactionMeta = command.transactionMeta(submittedTransaction, metadata)
+      transactionMetadata = TransactionMetadata
+        .fromTransactionMeta(
+          metaLedgerEffectiveTime = transactionMeta.ledgerEffectiveTime,
+          metaPreparationTime = transactionMeta.preparationTime,
+          metaOptNodeSeeds = transactionMeta.optNodeSeeds,
+        )
+        .value
+
+      wfTransaction = WellFormedTransaction.checkOrThrow(
+        submittedTransaction,
+        transactionMetadata,
+        WellFormedTransaction.WithoutSuffixes,
       )
-    ) { sessionKeyStore =>
-      for {
-        transactionAndMetadata <- testSubmissionService
-          .interpret(command)
-          .leftMap(err => s"Unable to create transaction: $err")
-          .mapK(FutureUnlessShutdown.outcomeK)
-        (_submittedTransaction, metadata) = transactionAndMetadata
-        submittedTransaction = transactionInterceptor(_submittedTransaction)
-        transactionMeta = command.transactionMeta(submittedTransaction, metadata)
-        transactionMetadata = TransactionMetadata
-          .fromTransactionMeta(
-            metaLedgerEffectiveTime = transactionMeta.ledgerEffectiveTime,
-            metaPreparationTime = transactionMeta.preparationTime,
-            metaOptNodeSeeds = transactionMeta.optNodeSeeds,
-          )
-          .value
 
-        wfTransaction = WellFormedTransaction.checkOrThrow(
-          submittedTransaction,
-          transactionMetadata,
-          WellFormedTransaction.WithoutSuffixes,
+      now = sequencerClient.clock.now
+      maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+
+      transactionTree <- transactionTreeFactory
+        .createTransactionTree(
+          wfTransaction,
+          submitterInfoInterceptor(command.submitterInfo(maxDeduplicationDuration)),
+          command.workflowIdO.map(WorkflowId(_)),
+          mediator,
+          command.transactionSeed,
+          command.transactionUuid,
+          cryptoSnapshot.ipsSnapshot,
+          contractOfId,
+          metadata.globalKeyMapping,
+          maxSequencingTime,
+          validatePackageVettings = false,
         )
+        .leftMap(err => s"Unable to create transaction tree: $err")
 
-        now = sequencerClient.clock.now
-        maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
-        signingTimestampOverrides = Some(
-          SigningTimestampOverrides(
-            approximateTimestamp = now,
-            validityPeriodEnd = Some(maxSequencingTime),
-          )
+      modifiedTransactionTree = transactionTreeInterceptor(transactionTree)
+
+      sendResult <- submitTransactionTree(
+        modifiedTransactionTree,
+        confirmationRequestInterceptor,
+        envelopeInterceptor,
+        now,
+        cryptoSnapshot,
+        protocolVersion,
+      )
+    } yield sendResult
+
+  def submitTransactionTree(
+      transactionTree: GenTransactionTree,
+      confirmationRequestInterceptor: TransactionConfirmationRequest => TransactionConfirmationRequest =
+        identity,
+      envelopeInterceptor: DefaultOpenEnvelope => DefaultOpenEnvelope = identity,
+      now: CantonTimestamp = sequencerClient.clock.now,
+      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = defaultCryptoSnapshot(),
+      protocolVersion: ProtocolVersion = defaultProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = ResourceUtil.withResourceM(
+    new SessionKeyStoreWithInMemoryCache(
+      SessionEncryptionKeyCacheConfig(),
+      timeouts,
+      loggerFactory,
+    )
+  ) { sessionKeyStore =>
+    val maxSequencingTime = transactionTree.submitterMetadata.tryUnwrap.maxSequencingTime
+
+    val signingTimestampOverrides = Some(
+      SigningTimestampOverrides(
+        approximateTimestamp = now,
+        validityPeriodEnd = Some(maxSequencingTime),
+      )
+    )
+
+    for {
+      confirmationRequest <- confirmationRequestFactory
+        .createConfirmationRequest(
+          transactionTree,
+          cryptoSnapshot,
+          signingTimestampOverrides,
+          sessionKeyStore,
+          protocolVersion,
         )
+        .leftMap(err => s"Unable to create confirmation request: $err")
 
-        transactionTree <- transactionTreeFactory
-          .createTransactionTree(
-            wfTransaction,
-            submitterInfoInterceptor(command.submitterInfo(maxDeduplicationDuration)),
-            command.workflowIdO.map(WorkflowId(_)),
-            mediator,
-            command.transactionSeed,
-            command.transactionUuid,
-            cryptoSnapshot.ipsSnapshot,
-            contractOfId,
-            metadata.globalKeyMapping,
-            maxSequencingTime,
-            validatePackageVettings = false,
-          )
-          .leftMap(err => s"Unable to create transaction tree: $err")
-
-        modifiedTransactionTree = transactionTreeInterceptor(transactionTree)
-
-        confirmationRequest <- confirmationRequestFactory
-          .createConfirmationRequest(
-            modifiedTransactionTree,
-            cryptoSnapshot,
-            signingTimestampOverrides,
-            sessionKeyStore,
-            protocolVersion,
-          )
-          .leftMap(err => s"Unable to create confirmation request: $err")
-
-        modifiedConfirmationRequest = confirmationRequestInterceptor(confirmationRequest)
-        batch <- EitherT
-          .right(modifiedConfirmationRequest.asBatch(cryptoSnapshot.ipsSnapshot))
-        modifiedBatch = batch.map(envelopeInterceptor)
-        sendResult <- sendRequestBatchToSequencer(modifiedBatch, now, maxSequencingTime)
-      } yield sendResult
-    }
+      modifiedConfirmationRequest = confirmationRequestInterceptor(confirmationRequest)
+      batch <- EitherT
+        .right(modifiedConfirmationRequest.asBatch(cryptoSnapshot.ipsSnapshot))
+      modifiedBatch = batch.map(envelopeInterceptor)
+      sendResult <- sendRequestBatchToSequencer(modifiedBatch, now, maxSequencingTime)
+    } yield sendResult
+  }
 }
 
 object MaliciousParticipantNode extends FutureHelpers {

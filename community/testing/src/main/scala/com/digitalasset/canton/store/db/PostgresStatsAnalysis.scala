@@ -91,6 +91,7 @@ class PostgresStatsAnalysis(storage: DbStorage, override val timeouts: Processin
       .update(createExtensions, "create_pg_stat_statements_and_store_plans")(
         TraceContext.empty,
         closeContext,
+        implicitly,
       )
       .recover {
         case e: SQLException if e.getSQLState == "42P07" => // duplicate

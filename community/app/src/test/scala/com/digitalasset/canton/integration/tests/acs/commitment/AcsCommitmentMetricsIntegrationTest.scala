@@ -674,12 +674,14 @@ trait AcsCommitmentMetricsIntegrationTest
         .value shouldBe 0
     }
 
-    participant1.metrics
-      .get_long_point(
-        s"$metricsPrefix.active-stakeholder-groups",
-        metricsSynchronizerContext,
-      )
-      .value shouldBe 3L
+    eventually() {
+      participant1.metrics
+        .get_long_point(
+          s"$metricsPrefix.active-stakeholder-groups",
+          metricsSynchronizerContext,
+        )
+        .value shouldBe 3L
+    }
   }
 
   "no wait participants does not affect default latency metric" onlyRunWhen (!isInMemory) in {

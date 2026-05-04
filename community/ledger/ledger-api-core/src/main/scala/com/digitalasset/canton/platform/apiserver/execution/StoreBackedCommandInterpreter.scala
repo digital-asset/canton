@@ -11,7 +11,7 @@ import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.ledger.api.DisclosedContract
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStore}
+import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
@@ -226,31 +226,6 @@ final class StoreBackedCommandInterpreter(
       })),
     )
 
-  /** recursively prefetch contract ids up to a certain level */
-  private def recursiveLoad(
-      depth: Int,
-      loaded: Set[ContractId],
-      fresh: Set[ContractId],
-  )(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Set[ContractId]] = if (fresh.isEmpty || depth <= 0) {
-    Future.successful(loaded)
-  } else {
-    Future
-      .sequence(fresh.map(contractStore.lookupContractState))
-      .map(_.foldLeft(Set.empty[ContractId]) {
-        case (acc, ContractState.NotFound) => acc
-        case (acc, ContractState.Archived) => acc
-        case (acc, ContractState.Active(ci)) =>
-          ci.collectCids(acc)
-      })
-      .flatMap { found =>
-        val newLoaded = loaded ++ fresh
-        val nextFresh = found.diff(newLoaded)
-        recursiveLoad(depth - 1, newLoaded, nextFresh)
-      }
-  }
-
   // TODO(#30398): add unit testing of the NUCK lookups (especially the intersection with explicit disclosure)
   private def consume[A](
       actAs: Set[Ref.Party],
@@ -446,25 +421,23 @@ final class StoreBackedCommandInterpreter(
           val initialCids = coids.toSet.diff(disclosedCids)
           import com.digitalasset.canton.util.FutureInstances.*
           // load all contracts
-          val initialLoadCidF =
-            initialCids.toSeq
-              .parTraverse(contractStore.lookupContractState)
-              .map(_.foldLeft(Set.empty[ContractId]) {
-                case (acc, ContractState.Active(ci)) => ci.collectCids(acc)
-                case (acc, _) => acc
-              })
-          // TODO(#31845): restore the prefetching of keys
-          val initialLoadKeyF = Future.successful(Seq.empty[ContractId])
-          // then prefetch the found referenced or key contracts recursively
-          val loadContractsF = initialLoadCidF.flatMap { referencedCids =>
-            initialLoadKeyF.flatMap { keyCids =>
-              recursiveLoad(
-                prefetchingRecursionLevel.value - 1,
-                disclosedCids ++ initialCids,
-                referencedCids ++ keyCids,
-              )
-            }
-          }
+
+          val loadContractsF = for {
+            contractsById <- initialCids.toSeq
+              .parTraverse(contractStore.lookupContractState(_))
+              .map(_.flatMap(_.toContractOption.toList))
+            contractsByKey <- keys.toSeq
+              .parTraverse { case (key, limit) =>
+                contractStore.lookupNonUniqueContractKey(Set.empty, key, None, limit)
+              }
+              .map(_.flatMap(_.contracts))
+            contracts = contractsById ++ contractsByKey
+            res <- recursiveLoad(
+              prefetchingRecursionLevel.value - 1,
+              disclosedCids,
+              contracts,
+            )
+          } yield res
 
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
@@ -484,6 +457,27 @@ final class StoreBackedCommandInterpreter(
         .update(interpretationTimeNanos.get(), TimeUnit.NANOSECONDS)
     }
   }
+
+  /** recursively prefetch contract ids up to a certain level */
+  private def recursiveLoad(
+      depth: Int,
+      loaded: Set[ContractId],
+      justLoaded: Seq[LfFatContractInst],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Set[ContractId]] =
+    if (justLoaded.isEmpty || depth <= 0) {
+      Future.successful(loaded)
+    } else {
+      import com.digitalasset.canton.util.FutureInstances.*
+      val found =
+        justLoaded.foldLeft(Set.empty[ContractId])((acc, contract) => contract.collectCids(acc))
+      val fresh = found -- loaded
+      fresh.toSeq
+        .parTraverse(contractStore.lookupContractState)
+        .map(_.flatMap(_.toContractOption.toList))
+        .flatMap(recursiveLoad(depth - 1, loaded ++ fresh, _))
+    }
 
   private def trackSyncExecution[T](atomicNano: AtomicLong)(computation: => T): T = {
     val start = System.nanoTime()

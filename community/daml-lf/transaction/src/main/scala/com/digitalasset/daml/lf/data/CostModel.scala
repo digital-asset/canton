@@ -289,9 +289,9 @@ private[lf] object CostModel {
     }
 
     implicit def costOfApiContractKey(value: ApiContractKey): Cost = {
-      val ApiContractKey(templateRef, contractKey) = value
+      val ApiContractKey(templateRef, contractKey, _) = value
 
-      1 + costOfTypeConRef(templateRef) + costOfValue(contractKey)
+      2 + costOfTypeConRef(templateRef) + costOfValue(contractKey)
     }
 
     implicit def costOfBytes(value: Bytes): Cost = 1 + value.length.toLong

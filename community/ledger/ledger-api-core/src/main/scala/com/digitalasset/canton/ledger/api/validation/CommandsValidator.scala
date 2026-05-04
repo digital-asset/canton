@@ -435,13 +435,19 @@ final class CommandsValidator(
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, ApiContractKey] = {
-    val PrefetchContractKey(templateIdO, contractKeyO) = key
+    val PrefetchContractKey(templateIdO, contractKeyO, limitOpt) = key
     for {
       templateId <- requirePresence(templateIdO, "template_id")
       templateRef <- validateTypeConRef(templateId)
       contractKey <- requirePresence(contractKeyO, "contract_key")
       validatedKey <- validateValue(contractKey)
-    } yield ApiContractKey(templateRef, validatedKey)
+      validatedLimit <- limitOpt match {
+        case None => Right(1)
+        case Some(limit) if limit > 0 => Right(limit)
+        case Some(0) => Left(invalidArgument("limit must be a positive integer, but got 0"))
+        case Some(_) => Right(Int.MaxValue) // limit is a proto uint32 capped by (1<<31) - 1
+      }
+    } yield ApiContractKey(templateRef, validatedKey, validatedLimit)
   }
 
   private def validateTapsMaxPasses(

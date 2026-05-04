@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform
+package com.digitalasset.canton.platform.component
 
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import com.digitalasset.canton.platform.store.dao.events.{
@@ -14,19 +14,17 @@ import com.digitalasset.canton.platform.store.dao.events.{
 }
 import org.scalatest.flatspec.AnyFlatSpec
 
-import java.util.concurrent.atomic.AtomicReference
-
-class UpdateStreamReaderComponentTest extends AnyFlatSpec with IndexComponentTest {
+class UpdateStreamReaderPruningComponentTest
+    extends AnyFlatSpec
+    with IndexComponentTest
+    with PersistenceSqlQueries {
+  private val nextRecordTime = new SingleStepIncreasingRecordTime
 
   private lazy val eventStorageBackend = dbSupport.storageBackendFactory.createEventStorageBackend(
     ledgerEndCache = ledgerEndCache,
     stringInterning = stringInterning,
     loggerFactory = loggerFactory,
   )
-
-  private val recordTimeRef = new AtomicReference(CantonTimestamp.now())
-  private val nextRecordTime: () => CantonTimestamp =
-    () => recordTimeRef.updateAndGet(_.immediateSuccessor)
 
   private val create1 = creates(nextRecordTime, 10)(1)
   private val create2 = creates(nextRecordTime, 10)(1)
@@ -47,7 +45,7 @@ class UpdateStreamReaderComponentTest extends AnyFlatSpec with IndexComponentTes
   private def readUpdates =
     UpdatesStreamReader
       .fetchContractPayloadsInternal(
-        queryRange = EventsRange(upd1, 1, upd4, 1000),
+        queryRange = EventsRange(upd1, 1, upd4, 1000L),
         dbMetric = DatabaseMetrics.ForTesting("test"),
         contractStore = contractStore,
         skipPruningChecks = true,

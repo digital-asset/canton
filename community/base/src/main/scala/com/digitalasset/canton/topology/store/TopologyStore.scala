@@ -588,7 +588,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     * @return
     *   Whether any items were found to delete.
     */
-  def deleteDataChunk(chunkSize: Int)(implicit
+  def deleteDataChunk(chunkSize: PositiveInt)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
 

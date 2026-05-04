@@ -85,7 +85,7 @@ class DbTrafficPurchasedStore(
 
         storage
           .queryAndUpdate(
-            DbStorage.bulkOperation_(insertSql, items, storage.profile) { pp => balance =>
+            DbStorage.bulkOperation(insertSql, items, storage.profile) { pp => balance =>
               val memberId = memberMap(balance.value.member).memberId
 
               pp >> memberId
@@ -94,7 +94,7 @@ class DbTrafficPurchasedStore(
               pp >> balance.value.serial
             },
             functionFullName,
-          )(traceContext, callerCloseContext)
+          )(traceContext, callerCloseContext, implicitly)
           .map(_ => Seq.fill(items.size)(()))
       }
 

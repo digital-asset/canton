@@ -299,7 +299,7 @@ class PreprocessorSpec
           )
         inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds shouldBe Seq(contractId)
-          keys shouldBe Seq(globalKey1, globalKey2)
+          keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
           resume() shouldBe Result.Unit
         }
       }
@@ -308,19 +308,19 @@ class PreprocessorSpec
         val preprocessor = preprocessing.Preprocessor.forTesting(compilerConfig, loggerFactory)
 
         val prefetch = Seq(
-          ApiContractKey(withKeyTmplRef, parties),
-          ApiContractKey(withKeyTmplRef, bobKey),
+          ApiContractKey(withKeyTmplRef, parties, 1),
+          ApiContractKey(withKeyTmplRef, bobKey, 1),
         )
 
         val Right(globalKeys) =
           preprocessor.preprocessApiContractKeys(priority, prefetch).consume(pkgs = pkgs)
-        globalKeys shouldBe Seq(globalKey1, globalKey2)
+        globalKeys shouldBe Seq((globalKey1, 1), (globalKey2, 1))
 
         val resultAllUndisclosed =
           preprocessor.prefetchContractIdsAndKeys(ImmArray.empty, globalKeys)
         inside(resultAllUndisclosed) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds shouldBe Seq.empty
-          keys shouldBe Seq(globalKey1, globalKey2)
+          keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
           resume() shouldBe Result.Unit
         }
       }
@@ -382,7 +382,7 @@ class PreprocessorSpec
           )
         inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds.toSet shouldBe ((contractId +: moreContractIds).toSet)
-          keys shouldBe Seq(
+          keys shouldBe Map(
             GlobalKey.assertBuild(
               withContractIdTmplId,
               pkgName,
@@ -392,7 +392,7 @@ class PreprocessorSpec
                 withContractIdTmplId.qualifiedName,
                 partiesSValue,
               ),
-            )
+            ) -> 1
           )
           resume() shouldBe Result.Unit
         }
