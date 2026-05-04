@@ -54,13 +54,13 @@ class DbTrafficConsumedStore(
     val uniqueMembers = trafficUpdates.map(_.member).distinct
 
     for {
-      memberMap <- sequencerStore.lookupMembers(uniqueMembers)
+      memberMap <- sequencerStore.lookupMembers(uniqueMembers).map(MapsUtil.skipEmpty)
       _ = if (!uniqueMembers.forall(memberMap.contains))
         ErrorUtil.invalidState(
           s"All members must be registered, not registered: ${uniqueMembers.diff(memberMap.keys.toSeq)}."
         )
 
-      _ <- doStore(trafficUpdates, MapsUtil.skipEmpty(memberMap))
+      _ <- doStore(trafficUpdates, memberMap)
     } yield ()
   }
 

@@ -17,6 +17,7 @@ trait SequencerParameters {
   def maxConfirmationRequestsBurstFactor: PositiveDouble
   def processingTimeouts: ProcessingTimeout
   def maxSubscriptionsPerMember: PositiveInt
+  def disableSubmissionChecksForTesting: Boolean
 }
 
 /** Parameters for a SequencerNode. We "merge" parameters that are valid for all nodes (i.e.
@@ -63,6 +64,7 @@ final case class SequencerNodeParameters(
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
     delayRequestsBeforeLsuTrafficInit: Boolean,
+    disableSubmissionChecksForTesting: Boolean = false,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

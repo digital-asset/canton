@@ -131,6 +131,7 @@ class HADatabaseSequencerFactory(
       lsuSequencingBounds,
       drSequencingTimeUpperBound,
       rateLimitManagerO = None,
+      disableSubmissionChecksForTesting = nodeParameters.disableSubmissionChecksForTesting,
     ) {
       override def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = {
         (storage: Storage) =>

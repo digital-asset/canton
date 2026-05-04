@@ -18,7 +18,7 @@ import scala.collection.immutable.SortedMap
 class InFlightAggregationsTest extends BaseTestWordSpec {
 
   private def mkRule(senders: Seq[Member]): AggregationRule =
-    AggregationRule(
+    AggregationRule.testing(
       eligibleSenders = NonEmpty.from(senders).value,
       threshold = PositiveInt.one,
       protocolVersion = testedProtocolVersion,

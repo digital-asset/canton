@@ -167,7 +167,8 @@ private[mediator] class DefaultVerdictSender(
           .send(
             batch,
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = Some(requestId.unwrap),
+              topologyTimestamp =
+                if (protocolVersion <= ProtocolVersion.v34) Some(requestId.unwrap) else None,
               // We use `clock.now` to stay consistent with how other submission requests are signed.
               approximateTimestampForSigning = sequencerSend.clock.now,
               maxSequencingTime = decisionTime,
@@ -308,7 +309,12 @@ private[mediator] class DefaultVerdictSender(
         )
       // We need aggregation only if the mediator group is truly decentralized
       Option.when(mediatorGroup.threshold.unwrap > 1)(
-        AggregationRule(activeNE, mediatorGroup.threshold, protocolVersion)
+        AggregationRule.activeMediators(
+          activeNE,
+          mediatorGroup.index,
+          mediatorGroup.threshold,
+          protocolVersion,
+        )
       )
     }
   }

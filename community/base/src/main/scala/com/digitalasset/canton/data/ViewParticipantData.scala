@@ -60,9 +60,11 @@ import scala.math.Ordered.orderingToOrdered
   *   the creation therefore is not rolled back either as the archival can only refer to non-rolled
   *   back creates.
   * @param keyResolution
-  *   Specifies how to resolve [[com.digitalasset.daml.lf.engine.ResultNeedKey]] requests from DAMLe
-  *   (resulting from e.g., fetchByKey, lookupByKey, queryByKey) when interpreting the view. The
-  *   resolved contract IDs must be in the [[coreInputs]].
+  *   Post PV35 contains key, maintainers and ordered contract ids for keys that are used to resolve
+  *   a key to one or more contract ids. These keys will be ones referenced in nodes for which
+  *   [[com.digitalasset.daml.lf.transaction.Node.Action.byKey]] is true. A used contract that has a
+  *   key but which is not queried is not included. The contract id ordering applies to all
+  *   contracts used in the view or its subviews so may contain contract ids not in [[coreInputs]].
   * @param actionDescription
   *   The description of the root action of the view
   * @param rollbackContext
@@ -70,9 +72,7 @@ import scala.math.Ordered.orderingToOrdered
   * @throws ViewParticipantData$.InvalidViewParticipantData
   *   if [[createdCore]] contains two elements with the same contract id, if
   *   [[coreInputs]]`(id).contractId != id` if [[createdInSubviewArchivedInCore]] overlaps with
-  *   [[createdCore]]'s ids or [[coreInputs]] if [[coreInputs]] does not contain the resolved
-  *   [[keyResolution]] pre pv35 empty, post pv35 holds the the maintainers of all keys used in the
-  *   view. May reference input contracts in child views.
+  *   [[createdCore]]'s ids.
   * @throws com.digitalasset.canton.serialization.SerializationCheckFailed
   *   if this instance cannot be serialized
   */

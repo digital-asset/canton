@@ -276,6 +276,7 @@ class TopologyComponentFactory(
       topology,
       Some(crypto.staticSynchronizerParameters),
       timeouts,
+      futureSupervisor = futureSupervisor,
       loggerFactory,
     )
 
@@ -292,6 +293,7 @@ class TopologyComponentFactory(
       topologyStore,
       topologyStateCache,
       synchronizerUpgradeTime = synchronizerPredecessor.map(_.upgradeTime),
+      sequencerSnapshotTimestamp = None,
       packageDependencyResolver,
       caching,
       enableConsistencyChecks,
@@ -299,7 +301,7 @@ class TopologyComponentFactory(
       timeouts,
       futureSupervisor,
       loggerFactory,
-    )()
+    )
   def createTopologySnapshot(
       asOf: CantonTimestamp,
       packageDependencyResolver: PackageDependencyResolver,

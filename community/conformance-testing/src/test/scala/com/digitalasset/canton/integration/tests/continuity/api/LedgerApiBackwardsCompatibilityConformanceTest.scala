@@ -9,6 +9,7 @@ import com.digitalasset.canton.integration.tests.continuity.{
 }
 import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvironments}
 import com.digitalasset.canton.util.ReleaseUtils
+import com.digitalasset.canton.version.ReleaseVersion
 
 /** Tests various TestTools (as external processes) against the current canton. No canton is
   * downloaded from a zip; the current build is used directly.
@@ -50,8 +51,8 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     }
   }
 
-  override def excludedTests(): Seq[String] =
-    super.excludedTests() ++ ledgerApiCompatiblityExcludedTests
+  override def excludedTests(version: ReleaseVersion): Seq[String] =
+    super.excludedTests(version) ++ ledgerApiCompatiblityExcludedTests
 
   private val ledgerApiCompatiblityExcludedTests: Seq[String] = Seq(
     // TODO (i31463) Recheck excluded tests

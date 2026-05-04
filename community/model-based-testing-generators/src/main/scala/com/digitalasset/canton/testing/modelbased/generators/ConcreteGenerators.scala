@@ -14,12 +14,13 @@ class ConcreteGenerators(
     readOnlyRollbacks: Boolean,
     generateQueryByKey: Boolean = false,
     keyMode: KeyMode = SymbolicSolver.KeyMode.NonUniqueContractKeys,
+    singleCommand: Boolean = false,
 ) {
 
   import ConcreteGenerators.*
 
   private val skeletonEnumerator =
-    new SkeletonEnumerator(languageVersion, readOnlyRollbacks, generateQueryByKey)
+    new SkeletonEnumerator(languageVersion, readOnlyRollbacks, generateQueryByKey, singleCommand)
 
   @scala.annotation.tailrec
   private def randomBigIntLessThan(n: BigInt): BigInt = {

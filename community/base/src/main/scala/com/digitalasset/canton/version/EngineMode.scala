@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.version
 
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
+import com.digitalasset.canton.protocol.LfContractStateMode
 
 object EngineMode {
 
-  def forProtocolVersion(protocolVersion: ProtocolVersion): ContractStateMachine.Mode =
+  def forProtocolVersion(protocolVersion: ProtocolVersion): LfContractStateMode =
     protocolVersion match {
-      case ProtocolVersion.v34 => ContractStateMachine.Mode.NoKey
-      case ProtocolVersion.v35 => ContractStateMachine.Mode.NUCK
-      case ProtocolVersion.dev => ContractStateMachine.Mode.devDefault
+      case ProtocolVersion.v34 => LfContractStateMode.NoKey
+      case ProtocolVersion.v35 => LfContractStateMode.NUCK
+      case ProtocolVersion.dev => LfContractStateMode.devDefault
       case other => throw new IllegalArgumentException(s"Unsupported protocol version: $other")
     }
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import cats.syntax.all.*
 import com.digitalasset.canton.Generators.*
 import com.digitalasset.canton.config.GeneratorsConfig.*
 import com.digitalasset.canton.crypto.GeneratorsCrypto.*
@@ -11,21 +12,22 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.GeneratorsDataTime.*
 import com.digitalasset.canton.protocol.{GeneratorsProtocol, StaticSynchronizerParameters}
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregationBySender,
   AggregationId,
   AggregationRule,
+  AggregationRuleInput,
   GeneratorsProtocol as GeneratorsProtocolSeq,
   TrafficState,
 }
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.VersionedStatus
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.synchronizer.sequencing.integrations.state.DbSequencerStateManagerStore.AggregatedSignaturesOfSender
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.GeneratorsTransaction
-import com.digitalasset.canton.topology.{GeneratorsTopology, Member}
+import com.digitalasset.canton.topology.{GeneratorsTopology, MediatorId, Member, SequencerId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 import magnolify.scalacheck.auto.*
@@ -51,8 +53,16 @@ final class GeneratorsSequencer(
       rule <- Arbitrary.arbitrary[AggregationRule]
       maxSequencingTimestamp <- Arbitrary.arbitrary[CantonTimestamp]
       signatures <- boundedListGen(boundedListGen[Signature])
+      senders <- rule.input match {
+        case AggregationRuleInput.Resolved(eligibleSenders, _) =>
+          Gen.const(eligibleSenders.forgetNE)
+        case AggregationRuleInput.MediatorGroup(_) =>
+          boundedListGen[MediatorId].map(_.widen[Member])
+        case AggregationRuleInput.SequencerGroup => boundedListGen[SequencerId].map(_.widen[Member])
+        case AggregationRuleInput.SenderDedup => Arbitrary.arbitrary[Member].map(List(_))
+      }
       aggregatedSendersList <- Gen.sequence(
-        rule.eligibleSenders.forgetNE.map(member =>
+        senders.map(member =>
           Gen
             .choose(CantonTimestamp.MinValue, maxSequencingTimestamp)
             .map(sequencingTimestamp =>
@@ -116,12 +126,13 @@ final class GeneratorsSequencer(
   implicit val onboardingStateForSequencerV2: Arbitrary[OnboardingStateForSequencerV2] = Arbitrary(
     for {
       topologySnapshotO <- Gen.option(Arbitrary.arbitrary[GenericStoredTopologyTransaction])
-      staticSynchronizerParametersO <- Gen.option(Arbitrary.arbitrary[StaticSynchronizerParameters])
-      sequencerSnapshotO <- Gen.option(Arbitrary.arbitrary[SequencerSnapshot])
+      syncParamsAndSnapshotO <- Gen.option(
+        Arbitrary.arbitrary[(StaticSynchronizerParameters, SequencerSnapshot)]
+      )
     } yield OnboardingStateForSequencerV2(
       topologySnapshotO,
-      staticSynchronizerParametersO,
-      sequencerSnapshotO,
+      syncParamsAndSnapshotO.map(_._1),
+      syncParamsAndSnapshotO.map(_._2),
       protocolVersion,
     )
   )

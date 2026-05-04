@@ -62,8 +62,8 @@ final class BlockChunkProcessor(
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
 
   private val inFlightAggregationHandler = new InFlightAggregationHandler(
-    synchronizerSyncCryptoApi.pureCrypto,
     memberValidator,
+    synchronizerSyncCryptoApi,
     loggerFactory,
     protocolVersion,
   )
@@ -411,28 +411,37 @@ final class BlockChunkProcessor(
               for {
                 topologySnapshotOrErrO <- submissionRequest.topologyTimestamp.traverse(
                   topologyTimestamp =>
-                    SequencedEventValidator
-                      .validateTopologyTimestamp(
-                        synchronizerSyncCryptoApi,
-                        topologyTimestamp,
-                        sequencingTimestamp,
-                        latestSequencerEventTimestamp,
-                        warnIfApproximate,
-                        _.sequencerTopologyTimestampTolerance,
+                    EitherTUtil
+                      .condUnitET[FutureUnlessShutdown](
+                        protocolVersion <= ProtocolVersion.v34,
+                        SequencerErrors.UnsupportedFeature(
+                          "topology timestamp in submission request is not supported in protocol versions > 34"
+                        ),
                       )
-                      .leftMap {
-                        case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
-                          SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
+                      .flatMap(_ =>
+                        SequencedEventValidator
+                          .validateTopologyTimestamp(
+                            synchronizerSyncCryptoApi,
                             topologyTimestamp,
                             sequencingTimestamp,
+                            latestSequencerEventTimestamp,
+                            warnIfApproximate,
+                            _.sequencerTopologyTimestampTolerance,
                           )
-                        case SequencedEventValidator.TopologyTimestampTooOld(_) |
-                            SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
-                          SequencerErrors.TopologyTimestampTooEarly(
-                            topologyTimestamp,
-                            sequencingTimestamp,
-                          )
-                      }
+                          .leftMap {
+                            case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
+                              SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
+                                topologyTimestamp,
+                                sequencingTimestamp,
+                              )
+                            case SequencedEventValidator.TopologyTimestampTooOld(_) |
+                                SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
+                              SequencerErrors.TopologyTimestampTooEarly(
+                                topologyTimestamp,
+                                sequencingTimestamp,
+                              )
+                          }
+                      )
                       .value
                 )
                 (topologyTimestampFromRequestError, topologySnapshotFromRequestO) =
@@ -490,7 +499,7 @@ final class BlockChunkProcessor(
                         orderingSequencerId,
                         trafficConsumption,
                         prevalidationOutcome,
-                        snapshotAtSequencingTime.ipsSnapshot,
+                        snapshotAtSequencingTime,
                       )(traceContext)
                     }
                 }

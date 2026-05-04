@@ -27,7 +27,6 @@ import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{
   TrafficControlError,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficControlProcessor.TrafficControlSubscriber
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
@@ -53,8 +52,7 @@ class TrafficControlProcessor(
     listeners.updateAndGet(subscriber :: _).discard
 
   override def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
+      start: SubscriptionStart
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {

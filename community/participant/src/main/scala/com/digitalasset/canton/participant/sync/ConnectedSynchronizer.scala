@@ -585,15 +585,9 @@ class ConnectedSynchronizer(
       // once the first event is dispatched.
       // however, this is bad for reassignment processing as we need to be able to access the topology state
       // across synchronizers and this requires that the clients are separately initialised on the participants
+
       val resubscriptionTs = ephemeral.startingPoints.processing.lastSequencerTimestamp
       logger.debug(s"Initializing topology client at clean head=$resubscriptionTs")
-      // startup with the resubscription-ts
-      topologyClient.updateHead(
-        SequencedTime(resubscriptionTs),
-        EffectiveTime(resubscriptionTs),
-        ApproximateTime(resubscriptionTs),
-      )
-      // now, compute epsilon at resubscriptionTs and update client
       topologyClient.updateHead(
         SequencedTime(resubscriptionTs),
         EffectiveTime(
@@ -791,14 +785,11 @@ class ConnectedSynchronizer(
             override def name: String = s"connected-synchronizer-$psid"
 
             override def subscriptionStartsAt(
-                start: SubscriptionStart,
-                synchronizerTimeTracker: SynchronizerTimeTracker,
+                start: SubscriptionStart
             )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
               Seq(
-                topologyProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(
-                  traceContext
-                ),
-                trafficProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(traceContext),
+                topologyProcessor.subscriptionStartsAt(start)(traceContext),
+                trafficProcessor.subscriptionStartsAt(start)(traceContext),
               ).parSequence_
 
             override def apply(

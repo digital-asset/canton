@@ -204,6 +204,7 @@ class BlockSequencerTest
         exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,
         delayRequestsBeforeLsuTrafficInit = false,
+        disableSubmissionChecksForTesting = false,
       )
 
     override def close(): Unit = {

@@ -74,16 +74,18 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.{SimClock, WallClock}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.util.{JarResourceUtils, MonadUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RepairCounter, platform}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.archive.DarParser
+import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, CreationTime, Node}
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.ValueParty
 import com.google.protobuf.ByteString
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
@@ -94,6 +96,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.chaining.scalaUtilChainingOps
 
 trait IndexComponentTest
     extends PekkoBeforeAndAfterAll
@@ -126,6 +129,21 @@ trait IndexComponentTest
   protected val indexReadConnectionPoolSize: Int = 10
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
+
+  private[this] lazy val dar = "P.dar"
+    .pipe(JarResourceUtils.extractFileFromJar)
+    .pipe(DarParser.assertReadArchiveFromFile)
+
+  protected final lazy val packageMap =
+    dar.all.map(archive => archive.getHash -> archive).toMap
+
+  private lazy val testDarPackageHash = dar.main.getHash
+  private val choiceNames = Range
+    .inclusive(1, 300)
+    .map(id =>
+      Ref.Name.assertFromString(s"Archivingarchivingarchivingarchivingarchivingarchiving$id")
+    )
+    .toVector
 
   private def testServices: TestServices =
     Option(testServicesRef.get())
@@ -297,7 +315,7 @@ trait IndexComponentTest
   protected lazy val stringInterning = new StringInterningView(loggerFactory)
 
   private lazy val engine =
-    new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
+    new Engine(EngineConfig(LanguageVersion.stableLfVersions), loggerFactory)
   private lazy val participantId =
     Ref.ParticipantId.assertFromString("index-component-test-participant-id")
   protected lazy val pruningOffsetService = new PruningOffsetService {
@@ -430,8 +448,7 @@ trait IndexComponentTest
         lfValueTranslation = new LfValueTranslation(
           metrics = LedgerApiServerMetrics.ForTesting,
           engineO = Some(engine),
-          // Not used
-          loadPackage = (_, _) => Future(None),
+          loadPackage = (packageId, _) => Future.successful(packageMap.get(packageId)),
           loggerFactory = loggerFactory,
         ),
         queryExecutionContext = executorService,
@@ -512,11 +529,17 @@ trait IndexComponentTest
   protected val synchronizer1: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
   protected val synchronizer2: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
   protected val packageName: Ref.PackageName = Ref.PackageName.assertFromString("-package-name-")
-  protected val dsoParty: Party = Ref.Party.assertFromString("dsoParty") // sees all
-  private lazy val parties =
-    (1 to 10000).view.map(index => Ref.Party.assertFromString(s"party$index")).toVector
+  protected val dsoParty: ValueParty =
+    ValueParty(Ref.Party.assertFromString("dsoParty")) // sees all
+  private lazy val parties: Seq[ValueParty] =
+    (1 to 10000).view
+      .map(index => Ref.Party.assertFromString(s"party$index"))
+      .map(p => ValueParty(p))
+      .toVector
   protected lazy val templates: Seq[Ref.FullReference[PackageId]] =
-    (1 to 300).view.map(index => Ref.Identifier.assertFromString(s"P:M:T$index")).toVector
+    (1 to 300).view
+      .map(index => Ref.Identifier.assertFromString(s"$testDarPackageHash:M:T$index"))
+      .toVector
 
   private val someLFHash = com.digitalasset.daml.lf.crypto.Hash
     .assertFromString("01cf85cfeb36d628ca2e6f583fa2331be029b6b28e877e1008fb3f862306c086")
@@ -677,11 +700,10 @@ trait IndexComponentTest
       argumentPayload = randomString(argumentLength),
       resultPayload = randomString(resultLength),
     )
-
   def genContract(
       argumentPayload: String,
       template: Ref.Identifier,
-      signatories: Set[Party],
+      signatories: Set[ValueParty],
       ledgerEffectiveTime: Time.Timestamp,
   ): ContractInstance =
     ExampleContractFactory
@@ -689,38 +711,38 @@ trait IndexComponentTest
         templateId = template,
         argument = Value.ValueRecord(
           tycon = None,
-          fields = ImmArray(None -> Value.ValueText(argumentPayload)),
+          fields = ImmArray(
+            None -> Value.ValueText(argumentPayload),
+            None -> Value.ValueList(FrontStack.from(signatories)),
+          ),
         ),
-        signatories = signatories,
-        stakeholders = signatories,
+        signatories = signatories.map(_.value),
+        stakeholders = signatories.map(_.value),
         packageName = packageName,
         createdAt = CreationTime.CreatedAt(ledgerEffectiveTime),
       )
 
   private def archive(
       create: Node.Create,
-      actingParties: Set[Ref.Party],
+      actingParties: Set[ValueParty],
       argumentPayload: String,
       resultPayload: String,
-  ): platform.Exercise =
+  ): platform.Exercise = {
+    val id = create.templateId.qualifiedName.name.toString.substring(1).toInt // Skip T in T123
     builder.exercise(
       contract = create,
-      choice = Ref.Name.assertFromString("archivingarchivingarchivingarchivingarchivingarchiving"),
+      choice = choiceNames(id - 1),
       consuming = true,
-      actingParties = actingParties,
+      actingParties = actingParties.map(_.value),
       argument = Value.ValueRecord(
         tycon = None,
         fields = ImmArray(None -> Value.ValueText(argumentPayload)),
       ),
       byKey = false,
       interfaceId = None,
-      result = Some(
-        Value.ValueRecord(
-          tycon = None,
-          fields = ImmArray(None -> Value.ValueText(resultPayload)),
-        )
-      ),
+      result = Some(Value.ValueText(resultPayload)),
     )
+  }
 
   protected def transaction(
       synchronizerId: SynchronizerId,

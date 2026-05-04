@@ -7,8 +7,6 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
@@ -24,7 +22,6 @@ import scala.collection.mutable
 class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     initialState: BlacklistLeaderSelectionPolicyState,
     initialOrderingTopology: OrderingTopology,
-    config: BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig,
     store: OutputMetadataStore[E],
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
@@ -36,7 +33,7 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     BlacklistLeaderSelectionPolicyStateWithTopology(initialState, initialOrderingTopology)
 
   private var blockToLeader: Map[BlockNumber, BftNodeId] =
-    state.computeBlockToLeader(config)
+    state.computeBlockToLeader()
 
   private val nodesToPunish: mutable.Set[BftNodeId] = mutable.Set.empty
 
@@ -79,7 +76,7 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
       s"Leader selection is asked for leaders in epoch $epochNumber but expects epoch ${state.epochNumber}",
     )
 
-    state.computeLeaders(config)
+    state.computeLeaders()
   }
 
   private def updateState(
@@ -89,13 +86,13 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     assert(EpochNumber(state.epochNumber + 1) == epochNumber)
 
     logger.trace(s"old blacklist state $state")(TraceContext.empty)
-    state = state.update(topology, config, blockToLeader, nodesToPunish.toSet)
+    state = state.update(topology, blockToLeader, nodesToPunish.toSet)
     logger.trace(s"new blacklist state $state")(TraceContext.empty)
     nodesToPunish.clear()
 
     updateMetrics(topology)
 
-    val newBlockToLeader = state.computeBlockToLeader(config)
+    val newBlockToLeader = state.computeBlockToLeader()
     blockToLeader = newBlockToLeader
   }
 
@@ -151,7 +148,6 @@ object BlacklistLeaderSelectionPolicy {
 
   def create[E <: Env[E]](
       state: BlacklistLeaderSelectionPolicyState,
-      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       orderingTopology: OrderingTopology,
       store: OutputMetadataStore[E],
       metrics: BftOrderingMetrics,
@@ -160,7 +156,6 @@ object BlacklistLeaderSelectionPolicy {
     new BlacklistLeaderSelectionPolicy(
       state,
       orderingTopology,
-      blacklistLeaderSelectionPolicyConfig,
       store,
       metrics,
       loggerFactory,

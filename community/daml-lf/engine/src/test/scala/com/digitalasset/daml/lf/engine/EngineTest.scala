@@ -1363,12 +1363,10 @@ class EngineTest(contractIdVersion: ContractIdVersion)
   }
 
   "Engine.preloadPackage" should {
-    import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
-
-    def engine(min: LV, max: LV) =
+    def engine(versions: Seq[language.LanguageVersion]) =
       new Engine(
         EngineConfig(
-          allowedLanguageVersions = VersionRange(min, max),
+          allowedLanguageVersions = versions,
           forbidLocalContractIds = true,
         ),
         loggerFactory,
@@ -1393,7 +1391,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     s"accept stable packages from ${devVersion} even if version is smaller than min version" in {
       for {
         lv <- compatibleLanguageVersions.filter(_ <= devVersion)
-        eng = engine(min = lv, max = devVersion)
+        eng = engine(compatibleLanguageVersions.filter(_ >= lv))
         pkg <- stablePackages
         pkgId = pkg.packageId
         pkg <- allPackagesDev.get(pkgId).toList
@@ -1403,7 +1401,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     s"reject stable packages from ${devVersion} if version is greater than max version" in {
       for {
         lv <- compatibleLanguageVersions
-        eng = engine(min = compatibleLanguageVersions.min, max = lv)
+        eng = engine(compatibleLanguageVersions.filter(_ <= lv))
         pkg <- stablePackages
         pkgId = pkg.packageId
         pkg <- allPackagesDev.get(pkgId).toList
@@ -3109,10 +3107,10 @@ class EngineTestAllVersions
 
     import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
 
-    def engine(min: LV, max: LV) =
+    def engine(versions: Seq[language.LanguageVersion]) =
       new Engine(
         EngineConfig(
-          allowedLanguageVersions = VersionRange(min, max),
+          allowedLanguageVersions = versions,
           forbidLocalContractIds = true,
         ),
         loggerFactory,
@@ -3144,7 +3142,8 @@ class EngineTestAllVersions
       )
 
       forEvery(negativeTestCases)((v, min, max) =>
-        engine(min, max).preloadPackage(pkgId, pkg(v)) shouldBe a[ResultDone[_]]
+        engine(LanguageVersion.allLfVersions.filter(lv => lv >= min && lv <= max))
+          .preloadPackage(pkgId, pkg(v)) shouldBe a[ResultDone[?]]
       )
     }
   }
@@ -3297,7 +3296,7 @@ class EngineTestHelpers(
   def newEngine(requireCidSuffixes: Boolean = false) =
     new Engine(
       EngineConfig(
-        allowedLanguageVersions = language.LanguageVersion.allLfVersionsRange,
+        allowedLanguageVersions = language.LanguageVersion.allLfVersions,
         forbidLocalContractIds = requireCidSuffixes,
       ),
       loggerFactory,

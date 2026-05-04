@@ -22,7 +22,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.{LfPartyId, checked}
-import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionCoder}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
 import com.google.protobuf.ByteString
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, SetParameter}
@@ -54,7 +54,7 @@ class DbContractStore(
   ): GetResult[PersistedContractInstance] = GetResult { r =>
     PersistedContractInstance(
       internalContractId = r.nextLong(),
-      inst = TransactionCoder
+      inst = ContractInstanceCoder
         .decodeFatContractInstance(ByteString.copyFrom(r.<<[Array[Byte]]))
         .leftMap(e => s"Failed to decode contract instance: $e")
         .flatMap { decoded =>

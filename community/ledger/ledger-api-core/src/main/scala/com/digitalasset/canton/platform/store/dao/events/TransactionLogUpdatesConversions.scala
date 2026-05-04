@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.api.{ParticipantAuthorizationFormat, Trans
 import com.digitalasset.canton.ledger.participant.state.Reassignment
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
+import com.digitalasset.canton.platform.store.backend.common.EventStorageBackendTemplate
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions.toTopologyEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
@@ -72,14 +73,9 @@ private[events] object TransactionLogUpdatesConversions {
 
         transactionFormat.transactionShape match {
           case AcsDelta =>
-            val commandId = getCommandId(
-              filteredEvents,
-              transactionFormat.internalEventFormat.templatePartiesFilter.allFilterParties,
-            )
             Option.when(filteredEvents.nonEmpty)(
               transaction.copy(
-                commandId = commandId,
-                events = filteredEvents,
+                events = filteredEvents
               )(transaction.traceContext)
             )
 
@@ -236,6 +232,7 @@ private[events] object TransactionLogUpdatesConversions {
   ): Future[FlatTransaction] = {
     val requestingParties: Option[Set[Party]] =
       internalTransactionFormat.internalEventFormat.templatePartiesFilter.allFilterParties
+    val commandId = getCommandId(transactionAccepted.events, requestingParties)
     Future.delegate {
       MonadUtil
         .sequentialTraverse(transactionAccepted.events)(event =>
@@ -248,7 +245,7 @@ private[events] object TransactionLogUpdatesConversions {
         .map(events =>
           FlatTransaction(
             updateId = transactionAccepted.updateId,
-            commandId = transactionAccepted.commandId,
+            commandId = commandId,
             workflowId = transactionAccepted.workflowId,
             effectiveAt = Some(TimestampConversion.fromLf(transactionAccepted.effectiveAt)),
             events = events,
@@ -559,7 +556,11 @@ private[events] object TransactionLogUpdatesConversions {
   ) =
     flatTransactionEvents
       .collectFirst {
-        case event if requestingPartiesO.fold(true)(_.exists(event.submitters)) =>
+        case event
+            if EventStorageBackendTemplate.submittersInQueryingParties(
+              requestingPartiesO,
+              Some(event.submitters.toSeq),
+            ) =>
           event.commandId
       }
       .getOrElse("")

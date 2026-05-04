@@ -11,33 +11,34 @@ import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
-import com.digitalasset.canton.integration.EnvironmentSetupPlugin
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.UseStandaloneConfig
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.{
   MultiSynchronizer,
   SequencerSynchronizerGroups,
   SingleSynchronizer,
 }
+import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DynamicSequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandalonePeerConfig,
-  DefaultConsensusBlockCompletionTimeout,
   DefaultDedicatedExecutionContextDivisor,
-  DefaultEpochLength,
   DefaultMaxBatchCreationInterval,
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
   P2PNetworkConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerConfig,
   BlockSequencerStreamInstrumentationConfig,
   SequencerConfig,
 }
+import com.digitalasset.canton.topology.transaction.DynamicSequencingParametersState
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import com.digitalasset.canton.util.SingleUseCell
 import monocle.macros.GenLens
@@ -68,12 +69,11 @@ final class UseBftSequencer(
     shouldOverwriteStoredEndpoints: Boolean = false,
     shouldUseMemoryStorageForBftOrderer: Boolean = false,
     shouldBenchmarkBftSequencer: Boolean = false,
-    standaloneOrderingNodes: Boolean = false,
-    epochLength: EpochLength = DefaultEpochLength,
+    standaloneOrderingNodes: Option[UseStandaloneConfig] = None,
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
-    consensusBlockCompletionTimeout: FiniteDuration = DefaultConsensusBlockCompletionTimeout,
+    dynamicSequencingParameters: Option[SequencingParameters] = None,
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
@@ -91,6 +91,27 @@ final class UseBftSequencer(
     if (shouldGenerateEndpointsOnly) generateEndpoints(config)
     else createFullConfig(config)
 
+  override def afterEnvironmentCreated(
+      config: CantonConfig,
+      environment: TestConsoleEnvironment,
+  ): Unit =
+    dynamicSequencingParameters.foreach { sequencingParameters =>
+      val sequencingParametersByteString = sequencingParameters.toByteString
+      environment.runOnAllInitializedSynchronizersForAllOwners { case (owner, synchronizer) =>
+        owner.topology.transactions.propose(
+          mapping = DynamicSequencingParametersState(
+            synchronizer.synchronizerId,
+            DynamicSequencingParameters(Option(sequencingParametersByteString))(
+              DynamicSequencingParameters.protocolVersionRepresentativeFor(
+                sequencingParameters.representativeProtocolVersion.representative
+              )
+            ),
+          ),
+          store = synchronizer.synchronizerId,
+        )
+      }
+    }
+
   private def generateEndpoints(config: CantonConfig) = {
     val instanceNameToPort =
       config.sequencers.keys.map(_ -> UniquePortGenerator.next).toMap
@@ -104,9 +125,7 @@ final class UseBftSequencer(
                 blockSequencerConfig,
                 bftOrdererConfig
                   .copy(
-                    epochLength = epochLength,
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
-                    consensusBlockCompletionTimeout = consensusBlockCompletionTimeout,
                     maxRequestsInBatch = maxRequestsInBatch,
                     minRequestsInBatch = minRequestsInBatch,
                     maxBatchCreationInterval = maxBatchCreationInterval,
@@ -199,7 +218,7 @@ final class UseBftSequencer(
             peerEndpoints = otherInitialEndpoints,
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
           )
-          val standaloneOpt = Option.when(standaloneOrderingNodes) {
+          val standaloneOpt = standaloneOrderingNodes.map { standaloneConfig =>
             val keyPair = JcePrivateCrypto
               .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
               .getOrElse(throw new RuntimeException("Failed to generate keypair"))
@@ -213,6 +232,7 @@ final class UseBftSequencer(
               thisSequencerId = sequencerId(selfInstanceName),
               signingPrivateKeyProtoFile = privKeyFile.toJava,
               signingPublicKeyProtoFile = pubKeyFile.toJava,
+              segmentLength = standaloneConfig.segmentLength,
               peers = otherInitialNames
                 .map { otherInitialInstanceName =>
                   BftBlockOrderingStandalonePeerConfig(
@@ -233,9 +253,7 @@ final class UseBftSequencer(
           selfInstanceName -> SequencerConfig.BftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(
-              epochLength = epochLength,
               consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
-              consensusBlockCompletionTimeout = consensusBlockCompletionTimeout,
               maxRequestsInBatch = maxRequestsInBatch,
               minRequestsInBatch = minRequestsInBatch,
               maxBatchCreationInterval = maxBatchCreationInterval,
@@ -278,4 +296,8 @@ final class UseBftSequencer(
     SequencerId
       .tryCreate(instanceName.unwrap, Namespace(Fingerprint.tryFromString("default")))
       .toProtoPrimitive
+}
+
+object UseBftSequencer {
+  final case class UseStandaloneConfig(segmentLength: Long)
 }

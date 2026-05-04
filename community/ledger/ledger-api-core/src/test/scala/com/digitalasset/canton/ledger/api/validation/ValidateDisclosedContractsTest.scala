@@ -73,7 +73,7 @@ class ValidateDisclosedContractsTest
             api.protoDisclosedContract
               .copy(
                 createdEventBlob =
-                  TransactionCoder.encodeFatContractInstance(lf.fatContractInstance).value
+                  ContractInstanceCoder.encodeFatContractInstance(lf.fatContractInstance).value
               )
               .copy(contractId = "")
           )
@@ -104,7 +104,7 @@ class ValidateDisclosedContractsTest
             api.protoDisclosedContract
               .copy(
                 createdEventBlob =
-                  TransactionCoder.encodeFatContractInstance(lf.fatContractInstance).value
+                  ContractInstanceCoder.encodeFatContractInstance(lf.fatContractInstance).value
               )
               .copy(contractId = invalidContractId)
           )
@@ -126,7 +126,7 @@ class ValidateDisclosedContractsTest
             api.protoDisclosedContract
               .copy(
                 createdEventBlob =
-                  TransactionCoder.encodeFatContractInstance(lf.fatContractInstance).value
+                  ContractInstanceCoder.encodeFatContractInstance(lf.fatContractInstance).value
               )
               .copy(templateId = Some(invalidTemplateId))
           )
@@ -148,7 +148,7 @@ class ValidateDisclosedContractsTest
             api.protoDisclosedContract
               .copy(
                 createdEventBlob =
-                  TransactionCoder.encodeFatContractInstance(lf.fatContractInstance).value
+                  ContractInstanceCoder.encodeFatContractInstance(lf.fatContractInstance).value
               )
               .copy(contractId = otherContractId)
           )
@@ -170,7 +170,7 @@ class ValidateDisclosedContractsTest
             api.protoDisclosedContract
               .copy(
                 createdEventBlob =
-                  TransactionCoder.encodeFatContractInstance(lf.fatContractInstance).value
+                  ContractInstanceCoder.encodeFatContractInstance(lf.fatContractInstance).value
               )
               .copy(templateId = Some(otherTemplateId))
           )
@@ -273,7 +273,7 @@ object ValidateDisclosedContractsTest {
     val protoDisclosedContract: ProtoDisclosedContract = ProtoDisclosedContract(
       templateId = Some(templateId),
       contractId = contractId,
-      createdEventBlob = TransactionCoder
+      createdEventBlob = ContractInstanceCoder
         .encodeFatContractInstance(lf.fatContractInstance)
         .fold(
           err =>
@@ -285,7 +285,7 @@ object ValidateDisclosedContractsTest {
     val protoConflictingDisclosedContractDuplicate: ProtoDisclosedContract = ProtoDisclosedContract(
       templateId = Some(templateId),
       contractId = contractId,
-      createdEventBlob = TransactionCoder
+      createdEventBlob = ContractInstanceCoder
         .encodeFatContractInstance(lf.fatContractInstance2)
         .fold(
           err =>
@@ -297,7 +297,7 @@ object ValidateDisclosedContractsTest {
 
     val dupKeyProtoDisclosedContract: ProtoDisclosedContract = protoDisclosedContract.copy(
       contractId = lf.dupKeyFatContractInstance.contractId.coid,
-      createdEventBlob = TransactionCoder
+      createdEventBlob = ContractInstanceCoder
         .encodeFatContractInstance(lf.dupKeyFatContractInstance)
         .fold(
           err =>

@@ -90,6 +90,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
       TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
       Some(static),
       timeouts,
+      futureSupervisor = env.environment.futureSupervisor,
       loggerFactory,
       cleanupTopologySnapshot = cleanupTopologyState,
     )

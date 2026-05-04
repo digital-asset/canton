@@ -53,7 +53,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    contractStateMode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.NoKey,
+    contractStateMode: LfContractStateMode = LfContractStateMode.NoKey,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {
@@ -105,7 +105,7 @@ class TestEngine(
 
   val engine = new Engine(
     EngineConfig(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
     ),
     loggerFactory,
@@ -269,7 +269,7 @@ class TestEngine(
         )
       ),
       contractId = fat.contractId.coid,
-      createdEventBlob = TransactionCoder.encodeFatContractInstance(fat).value,
+      createdEventBlob = ContractInstanceCoder.encodeFatContractInstance(fat).value,
       synchronizerId = "",
     )
   }
@@ -282,7 +282,7 @@ class TestEngine(
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       preparationTime: Time.Timestamp = testTimestamp,
       ledgerEffectiveTime: Time.Timestamp = testTimestamp,
-      contractStateMode: NextGenContractStateMachine.Mode,
+      contractStateMode: LfContractStateMode,
   )(implicit traceContext: TraceContext): TxAndMeta = {
 
     val result = engine.reinterpret(
@@ -304,7 +304,7 @@ class TestEngine(
       meta: Transaction.Metadata,
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       ledgerTime: Time.Timestamp = testTimestamp,
-      contractStateMode: NextGenContractStateMachine.Mode,
+      contractStateMode: LfContractStateMode,
   )(implicit traceContext: TraceContext): (SubmittedTransaction, Transaction.Metadata) = {
 
     val nodeSeeds = Map.from(meta.nodeSeeds.toList)

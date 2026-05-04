@@ -515,8 +515,8 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
     finally env.participant1.synchronizers.reconnect(env.daName)
   }
 
-  private def withNewParty[T](f: FixtureParam => PartyId => T): FixtureParam => T =
-    env => {
+  private def withNewParty[T](f: FixtureParam => PartyId => T): FixtureParam => T = {
+    implicit env =>
       import env.*
 
       val partyHint = s"alice-${partyHintSuffixRef.getAndIncrement()}"
@@ -533,7 +533,7 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
         ),
       ).headOption.valueOrFail("Expected Alice to be allocated")
       f(env)(party)
-    }
+  }
 
   private def create(
       templateInstance: Template,

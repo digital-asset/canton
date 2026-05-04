@@ -23,7 +23,11 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
+import com.digitalasset.canton.protocol.{
+  CantonContractIdVersion,
+  LfContractStateMode,
+  LfFatContractInst,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +41,6 @@ import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   NeedKeyProgression,
-  NextGenContractStateMachine,
   Node,
   SubmittedTransaction,
   Transaction,
@@ -55,7 +58,7 @@ private[apiserver] trait CommandInterpreter {
 
   def interpret(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      mode: LfContractStateMode,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -87,7 +90,7 @@ final class StoreBackedCommandInterpreter(
 
   override def interpret(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      mode: LfContractStateMode,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -192,7 +195,7 @@ final class StoreBackedCommandInterpreter(
 
   private def submitToEngine(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      mode: LfContractStateMode,
       submissionSeed: crypto.Hash,
       interpretationTimeNanos: AtomicLong,
   )(implicit

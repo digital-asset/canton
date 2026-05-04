@@ -130,7 +130,8 @@ final class BftOrderingSequencerAdminService(
       GetOrderingTopologyResponse(
         response.epochNumber,
         response.nodes.toSeq.sorted,
-        Option(response.sequencingParameters.toProto),
+        GetOrderingTopologyResponse.DynamicSequencingParameters
+          .DynamicSequencingParametersPayload31(response.sequencingParameters.toProto31),
       )
     }
   }

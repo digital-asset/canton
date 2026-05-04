@@ -301,15 +301,9 @@ class GrpcSynchronizerRegistry(
           )
         )
 
-        NonEmpty.from(connectionPool.getAllConnections()) match {
-          case Some(allConnectionsNE) =>
-            val expectedSequencers = allConnectionsNE.map { connection =>
-              val name = connection.config.name
-              val alias = name.substring(0, name.lastIndexOf('-'))
-              val sequencerId = connection.attributes.sequencerId
-              SequencerAlias.tryCreate(alias) -> sequencerId
-            }.toMap
-            val aliasToSequencerConnection = expectedSequencers.map { case (alias, sequencerId) =>
+        NonEmpty.from(connectionPool.getAllSequencerIds) match {
+          case Some(aliasToSequencerIdNE) =>
+            val aliasToSequencerConnection = aliasToSequencerIdNE.map { case (alias, sequencerId) =>
               val sequencerConnection = config.sequencerConnections.aliasToConnection
                 .getOrElse(alias, ErrorUtil.invalidState(s"Unknown alias: $alias"))
               alias -> sequencerConnection.withSequencerId(sequencerId)
@@ -331,7 +325,7 @@ class GrpcSynchronizerRegistry(
                 SequencerAggregatedInfo(
                   psid = psid,
                   staticSynchronizerParameters = staticParameters,
-                  expectedSequencersO = Some(expectedSequencers),
+                  expectedSequencersO = Some(aliasToSequencerIdNE),
                   sequencerConnections = newSequencerConnections,
                 )
               )

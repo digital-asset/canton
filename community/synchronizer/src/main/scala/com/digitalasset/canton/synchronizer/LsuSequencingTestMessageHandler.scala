@@ -22,7 +22,6 @@ import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError, OpenEnvelope}
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.InvalidLsuSequencingTestSignature
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 
@@ -43,8 +42,7 @@ final class LsuSequencingTestMessageHandler(
   private val psid = cryptoApi.psid
 
   override def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
+      start: SubscriptionStart
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
   override def apply(

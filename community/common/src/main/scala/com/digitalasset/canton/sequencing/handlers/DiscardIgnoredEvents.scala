@@ -19,7 +19,6 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Forwards only [[com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent]]s to
@@ -38,12 +37,9 @@ class DiscardIgnoredEvents[Env <: Envelope[?], +A](
 
   override def name: String = handler.name
 
-  override def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit
+  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start, synchronizerTimeTracker)
+  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start)
 
   override def apply(
       tracedEvents: BoxedEnvelope[PossiblyIgnoredEnvelopeBox, Env]

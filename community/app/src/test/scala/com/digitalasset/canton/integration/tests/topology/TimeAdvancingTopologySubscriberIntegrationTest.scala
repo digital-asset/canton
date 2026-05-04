@@ -91,7 +91,6 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
             )
           )
         }
-
         connect(participant1, sequencer1)
         connect(participant2, sequencer2)
       }
@@ -146,8 +145,9 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
           }
 
         override def apply(event: SequencedSerializedEvent): DelaySequencerClient = {
-          if (isBroadcastEvent(event.underlying.value.content))
+          if (isBroadcastEvent(event.underlying.value.content)) {
             broadcastsObservedByP1.getAndUpdate(_ :+ event).discard
+          }
           DelayedSequencerClient.Immediate
         }
       })
@@ -175,6 +175,7 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
 
 class TimeAdvancingTopologySubscriberBftOrderingIntegrationTestPostgres
     extends TimeAdvancingTopologySubscriberIntegrationTest {
+
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

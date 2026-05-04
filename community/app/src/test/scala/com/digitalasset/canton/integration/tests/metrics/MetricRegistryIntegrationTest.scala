@@ -205,9 +205,21 @@ sealed trait MetricRegistryIntegrationTest
       loggerFactory.assertLogs(
         participant1.health.ping(participant1)
       )
-
     }
-
+    "disconnecting and reconnecting participant again" in { implicit env =>
+      import env.*
+      (0 until 1).foreach { _ =>
+        loggerFactory.assertLogs {
+          participant1.synchronizers.disconnect_all()
+          participant1.synchronizers.reconnect_all()
+          participant1.health.ping(participant1)
+          participant1.stop()
+          participant1.start()
+          participant1.synchronizers.reconnect_all()
+          participant1.health.ping(participant1)
+        }
+      }
+    }
   }
 
 }

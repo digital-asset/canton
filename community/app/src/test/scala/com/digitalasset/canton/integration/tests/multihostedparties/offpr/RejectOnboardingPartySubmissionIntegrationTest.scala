@@ -50,6 +50,16 @@ final class RejectOnboardingPartySubmissionIntegrationTest
           requiresPartyToBeOnboarded = true,
         )
 
+        // Flake prevention: Wait for the topology transaction to become effective on the target participant
+        utils.retry_until_true({
+          target.topology.party_to_participant_mappings
+            .list(
+              synchronizerId = daId,
+              filterParty = alice.filterString,
+              filterParticipant = target.id.filterString,
+            )
+            .nonEmpty
+        })
       }
 
   "Reject an onboarding party's submission" in { implicit env =>

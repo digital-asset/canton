@@ -396,7 +396,7 @@ final class LfValueTranslation(
 
     def asyncCreatedEventBlob = condFuture(renderResult.createdEventBlob) {
       (for {
-        encoded <- TransactionCoder
+        encoded <- ContractInstanceCoder
           .encodeFatContractInstance(fatContractInstance)
           .left
           .map(_.errorMessage)

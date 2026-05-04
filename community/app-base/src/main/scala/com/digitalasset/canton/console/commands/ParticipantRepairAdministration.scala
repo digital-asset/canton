@@ -518,7 +518,6 @@ class ParticipantRepairAdministration(
       }
     }
 
-  // TODO(#28972) Remove preview flag
   @Help.Summary("Perform a late logical synchronizer upgrade")
   @Help.Description(
     """This command allows to perform an offline logical synchronizer upgrade.
@@ -539,7 +538,7 @@ class ParticipantRepairAdministration(
       announcedUpgradeTime: CantonTimestamp,
       successorConfig: SynchronizerConnectionConfig,
       validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
-  ): Unit = check(FeatureFlag.Preview) {
+  ): Unit =
     check(FeatureFlag.Repair) {
       consoleEnvironment.run {
         runner.adminCommand(
@@ -554,5 +553,4 @@ class ParticipantRepairAdministration(
         )
       }
     }
-  }
 }

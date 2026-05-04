@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.protocol.Envelope
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -23,13 +22,8 @@ trait ApplicationHandler[-Box[+_ <: Envelope[?]], -Env <: Envelope[?], +A]
 
   /** Called by the [[com.digitalasset.canton.sequencing.client.SequencerClient]] before the start
     * of a subscription.
-    * @param synchronizerTimeTracker
-    *   The synchronizer time tracker that listens to this application handler's subscription
     */
-  def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit
+  def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -43,12 +37,11 @@ trait ApplicationHandler[-Box[+_ <: Envelope[?]], -Env <: Envelope[?], +A]
     override def name: String = ApplicationHandler.this.name
 
     override def subscriptionStartsAt(
-        start: SubscriptionStart,
-        synchronizerTimeTracker: SynchronizerTimeTracker,
+        start: SubscriptionStart
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit] =
-      ApplicationHandler.this.subscriptionStartsAt(start, synchronizerTimeTracker)
+      ApplicationHandler.this.subscriptionStartsAt(start)
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): GenericHandlerResult[A2] =
       f(boxedEnvelope)
@@ -65,12 +58,11 @@ trait ApplicationHandler[-Box[+_ <: Envelope[?]], -Env <: Envelope[?], +A]
       s"${ApplicationHandler.this.name}+${other.name}"
 
     override def subscriptionStartsAt(
-        start: SubscriptionStart,
-        synchronizerTimeTracker: SynchronizerTimeTracker,
+        start: SubscriptionStart
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
       for {
-        _ <- ApplicationHandler.this.subscriptionStartsAt(start, synchronizerTimeTracker)
-        _ <- other.subscriptionStartsAt(start, synchronizerTimeTracker)
+        _ <- ApplicationHandler.this.subscriptionStartsAt(start)
+        _ <- other.subscriptionStartsAt(start)
       } yield ()
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): GenericHandlerResult[A3] =
@@ -95,8 +87,7 @@ object ApplicationHandler {
       override val name: String = handlerName
 
       override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          synchronizerTimeTracker: SynchronizerTimeTracker,
+          start: SubscriptionStart
       )(implicit
           traceContext: TraceContext
       ): FutureUnlessShutdown[Unit] =

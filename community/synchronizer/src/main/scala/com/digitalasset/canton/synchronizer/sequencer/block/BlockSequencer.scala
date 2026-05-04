@@ -138,6 +138,7 @@ class BlockSequencer(
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
     consistencyChecks: Boolean,
+    disableSubmissionChecksForTesting: Boolean,
     loggerFactory: NamedLoggerFactory,
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
@@ -168,6 +169,7 @@ class BlockSequencer(
       lsuSequencingBounds,
       drSequencingTimeUpperBound,
       rateLimitManagerO = Some(blockRateLimitManager),
+      disableSubmissionChecksForTesting = disableSubmissionChecksForTesting,
     )
     with DatabaseSequencerIntegration
     with NamedLogging
@@ -530,52 +532,58 @@ class BlockSequencer(
     logger.debug(
       s"Request to send submission with id ${submission.messageId} with max sequencing time $maxSequencingTime from $sender to ${batch.allRecipients}. $maybeDelayedProcessingMessage"
     )
+    val validateET: EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+      if (disableSubmissionChecksForTesting) {
+        EitherTUtil.unitUS
+      } else
+        for {
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+            !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
+            TrafficControlErrors.LsuTrafficNotInitialized.Error(),
+          )
+          _ <-
+            if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
+              EitherT.right(lsuTrafficInitialized.futureUS)
+            else EitherTUtil.unitUS
+          _ <-
+            if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
+            else EitherTUtil.unitUS
+          _ <- enforceThroughputCap(submission)
+          _ <- rejectSubmissionsIfOverloaded(submission)
+          _ <- validateMaxSequencingTime(submission)
+          // TODO(#19476): Why we don't check group recipients here?
+          approximateSnapshot <- EitherT.liftF(
+            cryptoApi.currentSnapshotApproximation
+          )
+          _ <- SubmissionRequestValidations
+            .checkSenderAndRecipientsAreRegistered(
+              submission,
+              // Using currentSnapshotApproximation due to members registration date
+              // expected to be before submission sequencing time
+              approximateSnapshot.ipsSnapshot,
+            )
+            .leftMap(_.toSequencerDeliverError)
+          _ <- {
+            if (batch.envelopes.isEmpty)
+              EitherT.right(FutureUnlessShutdown.unit) // Allow timeproofs
+            else checkBeforeUpgradeTime(approximateSnapshot)
+          }
+          _ = if (logEventDetails)
+            logger.debug(
+              s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
+                  .printAdHoc(submission.toProtoVersioned)}"
+            )
+          _ <- enforceRateLimiting(signedSubmission).leftWiden[CantonBaseError]
+        } yield ()
 
-    for {
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
-        TrafficControlErrors.LsuTrafficNotInitialized.Error(),
-      )
-      _ <-
-        if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
-          EitherT.right(lsuTrafficInitialized.futureUS)
-        else EitherTUtil.unitUS
-      _ <-
-        if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
-        else EitherTUtil.unitUS
-      _ <- enforceThroughputCap(submission)
-      _ <- rejectSubmissionsIfOverloaded(submission)
-      // TODO(i17584): revisit the consequences of no longer enforcing that
-      //  aggregated submissions with signed envelopes define a topology snapshot
-      _ <- validateMaxSequencingTime(submission)
-      // TODO(#19476): Why we don't check group recipients here?
-      approximateSnapshot <- EitherT.liftF(
-        cryptoApi.currentSnapshotApproximation
-      )
-      _ <- SubmissionRequestValidations
-        .checkSenderAndRecipientsAreRegistered(
-          submission,
-          // Using currentSnapshotApproximation due to members registration date
-          // expected to be before submission sequencing time
-          approximateSnapshot.ipsSnapshot,
-        )
-        .leftMap(_.toSequencerDeliverError)
-      _ <- {
-        if (batch.envelopes.isEmpty) EitherT.right(FutureUnlessShutdown.unit) // Allow timeproofs
-        else checkBeforeUpgradeTime(approximateSnapshot)
-      }
-      _ = if (logEventDetails)
-        logger.debug(
-          s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
-              .printAdHoc(submission.toProtoVersioned)}"
-        )
-      _ <- enforceRateLimiting(signedSubmission)
-      _ <- EitherT(
+    validateET.flatMap { _ =>
+      EitherT(
         futureSupervisor.supervised(
           s"Sending submission request with id ${submission.messageId} from $sender to ${batch.allRecipients}"
         )(blockOrderer.send(signedSubmission).value)
       ).mapK(FutureUnlessShutdown.outcomeK).leftWiden[CantonBaseError]
-    } yield ()
+    }
+
   }
 
   private def checkBeforeUpgradeTime(
@@ -1220,7 +1228,7 @@ class BlockSequencer(
       // We use the topology snapshot at upgrade time to await the processing of member registrations,
       // so that traffic state doesn't miss any members.
       // Technically this should not be necessary due to the topology freeze around LSU.
-      _ <- EitherT.right[LsuSequencerError](
+      snapshot <- EitherT.right[LsuSequencerError](
         SyncCryptoClient.getSnapshotForTimestamp(
           cryptoApi,
           ts,
@@ -1232,6 +1240,9 @@ class BlockSequencer(
       allMembers <- EitherT.right[LsuSequencerError](
         dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive = ts)
       )
+      allKnownMembers <- EitherT.right[LsuSequencerError](
+        snapshot.ipsSnapshot.areMembersKnown(allMembers)
+      )
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
         blockRateLimitManager.trafficConsumedStore
@@ -1241,7 +1252,7 @@ class BlockSequencer(
       // TODO(#29997): This doesn't scale to millions of traffic accounts, need a batch method or a different approach
       trafficStates <-
         MonadUtil
-          .parTraverseWithLimit(batchingConfig.parallelism)(allMembers.toList) { member =>
+          .parTraverseWithLimit(batchingConfig.parallelism)(allKnownMembers.toList) { member =>
             val trafficConsumedO = consumedRecordsPerMember.get(member)
             val trafficPurchasedET =
               blockRateLimitManager.trafficPurchasedManager.getTrafficPurchasedAt(

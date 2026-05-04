@@ -8,7 +8,7 @@ import cats.implicits.catsStdInstancesForFuture
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApi}
+import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -19,10 +19,8 @@ import com.digitalasset.canton.sequencing.protocol.{
   ClosedUncompressedEnvelope,
   SequencerErrors,
   SubmissionRequest,
-  SubmissionRequestValidations,
   *,
 }
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.synchronizer.sequencer.{
   AggregatedSender,
@@ -31,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   InFlightAggregationUpdate,
   SubmissionOutcome,
 }
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
@@ -99,8 +98,8 @@ object InFlightAggregations {
 
 /** Helper class containing all the methods around aggregations */
 class InFlightAggregationHandler(
-    pureCrypto: CryptoPureApi,
     memberValidator: SequencerMemberValidator,
+    syncCryptoClient: SynchronizerCryptoClient,
     val loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
 ) extends NamedLogging {
@@ -108,6 +107,7 @@ class InFlightAggregationHandler(
   /** Parallel aggregation prevalidation */
   def computeAggregationIdAndValidateAggregationRule(
       sequencingTimestamp: CantonTimestamp,
+      sequencingSnapshot: SyncCryptoApi,
       topologyOrSequencingSnapshot: SyncCryptoApi,
       submissionRequest: SubmissionRequest,
       skipMemberCheck: AggregationId => Boolean,
@@ -118,7 +118,7 @@ class InFlightAggregationHandler(
 
     val aggregationIdETO = EitherT.fromEither[FutureUnlessShutdown](
       submissionRequest
-        .aggregationId(pureCrypto)
+        .aggregationId(syncCryptoClient.pureCrypto)
         .leftMap { err =>
           logger.error(
             s"Internal error occurred when processing request $sequencingTimestamp: computation of aggregation id: ${err.message}"
@@ -143,17 +143,24 @@ class InFlightAggregationHandler(
         else EitherTUtil.unitUS
       aggregationIdAndRuleO <- aggregationIdETO
       _ <- aggregationIdAndRuleO.traverse { case (_, rule) =>
-        wellFormedAggregationRule(submissionRequest, rule)
+        wellFormedAggregationRule(submissionRequest, rule, sequencingSnapshot.ipsSnapshot)
       }
       _ <- aggregationIdAndRuleO
         .map { case (aggregationId, aggregationRule) =>
           // check whether we can optimistically skip the member check (no harm if we do it twice in parallel in case we race)
-          (aggregationRule, skipMemberCheck(aggregationId))
+          (aggregationRule.input, skipMemberCheck(aggregationId))
         }
         .traverse {
-          case (rule, false) =>
-            validateAllMembersInAggregationAreKnown(submissionRequest, sequencingTimestamp, rule)
-          case (_, true) =>
+          // check if explicitly mentioned members in the aggregation rule are registered
+          // with pv35, we don't mention them explicitly but implicitly via the group, which means that
+          // we can skip this test.
+          // This is because the notification of member changes will inform the SequencerRuntime
+          // before it updates the cryptoApi (val executionOrder: Int = 1) which means
+          // that a topology snapshot that delivers the updated member can only be accessed
+          // after the member registration completed!
+          case (input: AggregationRuleInput.Resolved, false) =>
+            validateAllMembersInAggregationAreKnown(submissionRequest, sequencingTimestamp, input)
+          case (_, _) =>
             EitherTUtil.unitUS[SubmissionOutcome]
         }
     } yield aggregationIdAndRuleO
@@ -203,7 +210,7 @@ class InFlightAggregationHandler(
   private def validateAllMembersInAggregationAreKnown(
       submissionRequest: SubmissionRequest,
       sequencingTimestamp: CantonTimestamp,
-      rule: AggregationRule,
+      rule: AggregationRuleInput.Resolved,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -237,20 +244,18 @@ class InFlightAggregationHandler(
   private def wellFormedAggregationRule(
       submissionRequest: SubmissionRequest,
       rule: AggregationRule,
+      snapshot: TopologySnapshot,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
-    EitherT.fromEither(
-      SubmissionRequestValidations
-        .wellformedAggregationRule(submissionRequest.sender, rule)
-        .leftMap { message =>
-          val alarm = SequencerErrors.SubmissionRequestMalformed.Error(submissionRequest, message)
-          alarm.report()
-
-          SubmissionOutcome.Discard
-        }
-    )
+    InFlightAggregationHandler
+      .senderIsAuthorizedAndAggregationRuleIsWellFormed(submissionRequest.sender, rule, snapshot)
+      .leftMap { message =>
+        val alarm = SequencerErrors.SubmissionRequestMalformed.Error(submissionRequest, message)
+        alarm.report()
+        SubmissionOutcome.Discard: SubmissionOutcome
+      }
 
   /** Sequential part of aggregation producing what we are ultimately going to deliver (unless
     * traffic rejects it)
@@ -258,7 +263,8 @@ class InFlightAggregationHandler(
   def computeAggregationUpdateAndSubmissionOutcome(
       submissionRequest: SubmissionRequest,
       sequencingTimestamp: CantonTimestamp,
-      topologySnapshot: TopologySnapshot,
+      latestSequencerEventTimestamp: Option[CantonTimestamp],
+      sequencingSyncCryptoApi: SyncCryptoApi,
       aggregationInfo: Option[(AggregationId, AggregationRule)],
       inFlightAggregations: InFlightAggregations,
   )(implicit traceContext: TraceContext, executionContext: ExecutionContext): EitherT[
@@ -286,10 +292,11 @@ class InFlightAggregationHandler(
               submissionRequest,
               uncompressedBatch,
               sequencingTimestamp,
+              latestSequencerEventTimestamp,
               aggregationId,
               aggregationRule,
               inFlightAggregation,
-              topologySnapshot,
+              sequencingSyncCryptoApi,
             ).map { case (updatedInFlightAggregation, inFlightAggregationUpdate) =>
               (
                 aggregationId,
@@ -329,10 +336,11 @@ class InFlightAggregationHandler(
       submissionRequest: SubmissionRequest,
       uncompressedBatch: Batch[ClosedUncompressedEnvelope],
       sequencingTimestamp: CantonTimestamp,
+      latestSequencerEventTimestamp: Option[CantonTimestamp],
       aggregationId: AggregationId,
       rule: AggregationRule,
       inFlightAggregationO: Option[InFlightAggregation],
-      topologySnapshot: TopologySnapshot,
+      sequencingSyncCryptoApi: SyncCryptoApi,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -343,7 +351,7 @@ class InFlightAggregationHandler(
   ] = {
     ErrorUtil.requireState(
       submissionRequest.aggregationRule.contains(rule),
-      s"Mismatch in aggregation rule $rule vs ${submissionRequest.aggregationRule} at ${topologySnapshot.timestamp}",
+      s"Mismatch in aggregation rule $rule vs ${submissionRequest.aggregationRule} at ${sequencingSyncCryptoApi.ipsSnapshot.timestamp}",
     )
     val (inFlightAggregation, inFlightAggregationUpdate) = inFlightAggregationO match {
       case None =>
@@ -372,42 +380,48 @@ class InFlightAggregationHandler(
       ),
     )
     for {
-      updatedAggregation <-
-        EitherT.fromEither[FutureUnlessShutdown](
-          inFlightAggregation
-            .tryAggregate(aggregatedSender)
-            .leftMap {
-              case InFlightAggregation.AlreadyDelivered(deliveredAt) =>
-                val message =
-                  s"The aggregatable request with aggregation ID $aggregationId was previously delivered at $deliveredAt"
-                SubmissionOutcome.Reject.logAndCreate(
-                  submissionRequest,
-                  sequencingTimestamp,
-                  SequencerErrors.AggregateSubmissionAlreadySent(message),
-                )
-              case InFlightAggregation.AggregationStuffing(_, at) =>
-                val message =
-                  s"The sender ${submissionRequest.sender} previously contributed to the aggregatable submission with ID $aggregationId at $at"
-                SubmissionOutcome.Reject.logAndCreate(
-                  submissionRequest,
-                  sequencingTimestamp,
-                  SequencerErrors.AggregateSubmissionStuffing(message),
-                )
-            }
+      preparedInFlightAggregation <- EitherT.right(
+        inFlightAggregation.prepareForNewAggregation(
+          sequencingTimestamp,
+          latestSequencerEventTimestamp,
+          syncCryptoClient,
         )
-
+      )
+      updatedAggregation <- preparedInFlightAggregation
+        .tryAggregate(
+          aggregatedSender,
+          sequencingSyncCryptoApi,
+        )
+        .leftMap {
+          case InFlightAggregation.AlreadyDelivered(deliveredAt) =>
+            val message =
+              s"The aggregatable request with aggregation ID $aggregationId was previously delivered at $deliveredAt"
+            SubmissionOutcome.Reject.logAndCreate(
+              submissionRequest,
+              sequencingTimestamp,
+              SequencerErrors.AggregateSubmissionAlreadySent(message),
+            )
+          case InFlightAggregation.AggregationStuffing(_, at) =>
+            val message =
+              s"The sender ${submissionRequest.sender} previously contributed to the aggregatable submission with ID $aggregationId at $at"
+            SubmissionOutcome.Reject.logAndCreate(
+              submissionRequest,
+              sequencingTimestamp,
+              SequencerErrors.AggregateSubmissionStuffing(message),
+            )
+        }
       fullInFlightAggregationUpdate = inFlightAggregationUpdate.tryMerge(
         InFlightAggregationUpdate(None, Chain.one(aggregatedSender))
       )
       // If we're not delivering the request to all recipients right now, just send a receipt back to the sender
       _ <- EitherT
         .cond(
-          updatedAggregation.deliveredAt.nonEmpty,
+          updatedAggregation.tryIsDeliveredAt.nonEmpty,
           logger.debug(
-            s"Aggregation ID $aggregationId has reached its threshold ${updatedAggregation.rule.threshold} and will be delivered at $sequencingTimestamp."
+            s"Aggregation ID $aggregationId has reached its threshold of the rule ${updatedAggregation.rule} and will be delivered at $sequencingTimestamp."
           ), {
             logger.debug(
-              s"Aggregation ID $aggregationId has now ${updatedAggregation.aggregatedSenders.size} senders aggregated. Threshold is ${updatedAggregation.rule.threshold.value}."
+              s"Aggregation ID $aggregationId has now ${updatedAggregation.aggregatedSenders.size} senders aggregated. Rule is ${updatedAggregation.rule}."
             )
             // we only return a receipt, as we are still collecting aggregation results
             SubmissionOutcome.DeliverReceipt(
@@ -424,4 +438,67 @@ class InFlightAggregationHandler(
     } yield (updatedAggregation, fullInFlightAggregationUpdate)
   }
 
+}
+
+object InFlightAggregationHandler {
+
+  def senderIsAuthorizedAndAggregationRuleIsWellFormed(
+      sender: Member,
+      rule: AggregationRule,
+      snapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    rule.input match {
+      case AggregationRuleInput.Resolved(eligibleSenders, threshold) =>
+        EitherT.fromEither[FutureUnlessShutdown](for {
+          _ <- Either.cond(
+            eligibleSenders.distinct.sizeIs >= threshold.unwrap,
+            (),
+            s"Threshold $threshold cannot be reached",
+          )
+          _ <- Either.cond(
+            eligibleSenders.contains(sender),
+            (),
+            s"Sender [$sender] is not eligible according to the aggregation rule",
+          )
+        } yield ())
+      case AggregationRuleInput.MediatorGroup(index) =>
+        EitherT(
+          snapshot
+            .mediatorGroup(index)
+            .map {
+              case Some(group) =>
+                Either.cond(
+                  group.active.contains(sender),
+                  (),
+                  s"Sender [$sender] is not part of the mediator group with index $index",
+                )
+              case None =>
+                Left(
+                  s"Invalid aggregation rule with mediator index $index as there is no such mediator group"
+                )
+            }
+        )
+      case AggregationRuleInput.SequencerGroup =>
+        EitherT(
+          snapshot
+            .sequencerGroup()
+            .map {
+              case Some(group) =>
+                Either.cond(
+                  group.active.contains(sender),
+                  (),
+                  s"Sender [$sender] is not part of the sequencer group",
+                )
+              case None =>
+                Left(s"Invalid sequencer aggregation rule as there is no sequencer group")
+            }
+        )
+      case AggregationRuleInput.SenderDedup =>
+        // Aggregation-id includes the sender, so this is always well-formed
+        EitherT.rightT(())
+
+    }
 }

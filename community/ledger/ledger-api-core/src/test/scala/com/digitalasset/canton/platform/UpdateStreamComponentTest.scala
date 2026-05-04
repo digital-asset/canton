@@ -24,7 +24,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     includeTransactions = Some(
       TransactionFormat(
         eventFormat = EventFormat(
-          filtersByParty = Map(dsoParty -> CumulativeFilter.templateWildcardFilter(true)),
+          filtersByParty = Map(dsoParty.value -> CumulativeFilter.templateWildcardFilter(true)),
           filtersForAnyParty = None,
           verbose = false,
         ),
@@ -120,7 +120,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdates(create2)
 
       val reassignment1 = mkReassignmentAccepted(
-        dsoParty,
+        dsoParty.value,
         "upd-id-ra-1",
         withAcsChange = true,
         create1._2,
@@ -128,7 +128,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdateSync(reassignment1)
 
       val reassignment2 = mkReassignmentAccepted(
-        dsoParty,
+        dsoParty.value,
         "upd-id-ra-2",
         withAcsChange = true,
         create2._2,
@@ -179,7 +179,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdates(create1)
       ingestPartyOnboarding(Set("new-party-1"), nextRecordTime())
       val reassignment1 = mkReassignmentAccepted(
-        dsoParty,
+        dsoParty.value,
         "upd-id-ra-interleave-1",
         withAcsChange = true,
         create1._2,
@@ -190,7 +190,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       ingestUpdates(create2)
       ingestPartyOnboarding(Set("new-party-2"), nextRecordTime())
       val reassignment2 = mkReassignmentAccepted(
-        dsoParty,
+        dsoParty.value,
         "upd-id-ra-interleave-2",
         withAcsChange = true,
         create2._2,

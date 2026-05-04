@@ -103,6 +103,7 @@ final class IndexServiceOwner(
         loggerFactory = loggerFactory,
         contractStore = participantContractStore,
         ledgerEndCache = inMemoryState.ledgerEndCache,
+        maxLookupLimit = config.maxLookupLimit,
       )(commandExecutionContext)
 
       bufferedTransactionsReader = BufferedUpdateReader(

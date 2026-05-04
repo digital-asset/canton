@@ -293,7 +293,7 @@ class ContractKeySpec
       import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
       val engine = new Engine(
         EngineConfig(
-          allowedLanguageVersions = LV.allLfVersionsRange,
+          allowedLanguageVersions = LV.allLfVersions,
           forbidLocalContractIds = true,
         ),
         loggerFactory,

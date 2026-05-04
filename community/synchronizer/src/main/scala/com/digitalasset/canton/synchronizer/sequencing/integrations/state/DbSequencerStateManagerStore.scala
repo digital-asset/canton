@@ -20,7 +20,6 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.protocol.v30
 import com.digitalasset.canton.synchronizer.sequencer.*
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   DbSequencerStorePruning,
   RegisteredMember,
@@ -31,7 +30,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.*
-import slick.jdbc.SetParameter
+import slick.jdbc.{GetResult, SetParameter}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -81,6 +80,16 @@ class DbSequencerStateManagerStore(
       }
       .map(_.fold(Map.empty)(_ ++ _))
       .map(InFlightAggregations.fromMap)
+  }
+
+  implicit def readVersionedAggregationRule(implicit
+      getResultByteArray: GetResult[Array[Byte]]
+  ): GetResult[AggregationRule] = GetResult { r =>
+    AggregationRule
+      .fromTrustedByteArray(protocolVersion, r.<<[Array[Byte]])
+      .valueOr(err =>
+        throw new DbDeserializationException(s"Failed to deserialize aggregation rule: $err")
+      )
   }
 
   /** Compute the state up until (inclusive) the given timestamp. */

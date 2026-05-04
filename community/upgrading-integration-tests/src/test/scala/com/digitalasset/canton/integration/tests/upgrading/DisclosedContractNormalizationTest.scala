@@ -21,10 +21,10 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   FatContractInstance,
   NextGenContractStateMachine,
   Node,
-  TransactionCoder,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -43,7 +43,7 @@ class DisclosedContractNormalizationTest
   private val ec: ExecutionContext = executorService
 
   val engine = new Engine(
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange),
+    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersions),
     loggerFactory,
   )
 
@@ -97,8 +97,8 @@ class DisclosedContractNormalizationTest
     )
 
     // Here we recode to strip any type info that does not make it into the blob
-    val v10fatRecoded = TransactionCoder
-      .decodeFatContractInstance(TransactionCoder.encodeFatContractInstance(v10fat).value)
+    val v10fatRecoded = ContractInstanceCoder
+      .decodeFatContractInstance(ContractInstanceCoder.encodeFatContractInstance(v10fat).value)
       .value
       .asInstanceOf[LfFatContractInst]
 

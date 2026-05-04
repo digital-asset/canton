@@ -8,9 +8,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
-  TransactionCoder,
   Versioned,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -144,7 +144,7 @@ object ContractInstance {
 
   def decode(bytes: ByteString): Either[String, GenContractInstance] =
     for {
-      decoded <- TransactionCoder
+      decoded <- ContractInstanceCoder
         .decodeFatContractInstance(bytes)
         .leftMap(e => s"Failed to decode contract instance: $e")
       contract <- create[decoded.CreatedAtTime](decoded)
@@ -170,7 +170,7 @@ object ContractInstance {
     }
 
   private def encodeInst(inst: FatContractInstance): Either[String, ByteString] =
-    TransactionCoder
+    ContractInstanceCoder
       .encodeFatContractInstance(inst)
       .leftMap(e => s"Failed to encode contract instance: $e")
 

@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCo
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
+import com.digitalasset.canton.sequencing.protocol.{SequencerErrors, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.PartyId
 import com.google.rpc.Code
@@ -148,10 +148,11 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
           assertThrowsAndLogsCommandFailures(
             participant1.ledger_api.javaapi.commands
               .submit(Seq(bank), createIouCmd, commandId = cmdIdAtUpgradeTime),
-            _.commandFailureMessage should (
+            _.message should (
               include(SyncServiceInjectionError.NotConnectedToAnySynchronizer.id) or
                 include(ConfigurationErrors.SubmissionSynchronizerNotReady.id) or
-                include(SubmissionErrors.TimeoutError.id)
+                include(SubmissionErrors.TimeoutError.id) or
+                include(SequencerErrors.PassedUpgradeTime.id)
             ),
           )
 

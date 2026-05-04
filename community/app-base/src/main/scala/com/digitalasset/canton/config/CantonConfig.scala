@@ -544,6 +544,8 @@ final case class CantonConfig(
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
         delayRequestsBeforeLsuTrafficInit =
           sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
+        disableSubmissionChecksForTesting =
+          sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
       )
 
     }
@@ -1173,26 +1175,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneNetworkConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigReader
-        : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist] =
-      deriveEnumerationReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowManyCanWeBlacklistConfigReader
-        : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowManyCanWeBlacklist] =
-      deriveEnumerationReader[
-        BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowManyCanWeBlacklist
-      ]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyConfigHint
-        : FieldCoproductHint[BftBlockOrdererConfig.LeaderSelectionPolicyConfig] =
-      new FieldCoproductHint[BftBlockOrdererConfig.LeaderSelectionPolicyConfig]("type")
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicySimple
-        : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Simple.type] =
-      deriveReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Simple.type]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyBlacklisting
-        : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting] =
-      deriveReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyConfigReader
-        : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig] =
-      deriveReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig]
     lazy implicit val bftBlockOrdererConfigReader: ConfigReader[BftBlockOrdererConfig] =
       deriveReader[BftBlockOrdererConfig]
     lazy implicit val sequencerConfigBftSequencerReader
@@ -1993,23 +1975,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftP2PConnectionManagementConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig] =
       deriveWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigWriter
-        : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist] =
-      deriveEnumerationWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowManyCanWeBlacklistConfigWriter
-        : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowManyCanWeBlacklist] =
-      deriveEnumerationWriter[
-        BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowManyCanWeBlacklist
-      ]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicySimple
-        : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Simple.type] =
-      deriveWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Simple.type]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyBlacklisting
-        : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting] =
-      deriveWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting]
-    lazy implicit val bftBlockOrdererLeaderSelectionPolicyConfigWriter
-        : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig] =
-      deriveWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig]
     lazy implicit val bftBlockOrdererConfigWriter: ConfigWriter[BftBlockOrdererConfig] =
       deriveWriter[BftBlockOrdererConfig]
 

@@ -20,7 +20,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
-import com.digitalasset.canton.console.FeatureFlag.Preview
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   CommandErrors,
@@ -269,11 +268,14 @@ class TopologyAdministrationGroup(
         |OwnerToKeyMapping.
         """
     )
-    def identity_transactions(): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    def identity_transactions(
+        protocolVersion: Option[ProtocolVersion] = None
+    ): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
       instance.topology.transactions
         .list(
           filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
           filterNamespace = instance.namespace.filterString,
+          protocolVersion = protocolVersion.map(_.toProtoPrimitiveS),
         )
         .result
         .map(_.transaction)
@@ -550,8 +552,25 @@ class TopologyAdministrationGroup(
             .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
         )
       }
+      // TODO(#32454): TopologyMapping.Code should carry the protocol version it was introduced in
+      // so we can automatically filter the mappings based on the target protocol version without hardcoding this information here.
+      val introducedAfterPv34: Set[TopologyMapping.Code] =
+        Set(
+          TopologyMapping.Code.LsuAnnouncement,
+          TopologyMapping.Code.LsuSequencerConnectionSuccessor,
+        )
+
+      val targetPv = protocolVersion.map(p =>
+        ProtocolVersion
+          .create(p)
+          .valueOr(consoleEnvironment.raiseError)
+      )
+      val safeAll =
+        if (targetPv.exists(_ < ProtocolVersion.v35))
+          TopologyMapping.Code.all.filterNot(introducedAfterPv34)
+        else TopologyMapping.Code.all
       val excludeMappingsCodes = if (filterMappings.nonEmpty) {
-        TopologyMapping.Code.all.diff(filterMappings).map(_.code)
+        safeAll.diff(filterMappings).map(_.code)
       } else excludeMappings.map(_.code)
 
       consoleEnvironment
@@ -564,7 +583,7 @@ class TopologyAdministrationGroup(
                 timeQuery,
                 operation,
                 filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
-                protocolVersion.map(ProtocolVersion.tryCreate),
+                targetPv,
               ),
               excludeMappings = excludeMappingsCodes,
               filterNamespace = filterNamespace,
@@ -3123,7 +3142,7 @@ class TopologyAdministrationGroup(
       }
   }
 
-  @Help.Summary("Manage synchronizer parameters state", FeatureFlag.Preview)
+  @Help.Summary("Manage synchronizer parameters state")
   @Help.Group("Synchronizer Parameters State")
   object synchronizer_parameters extends Helpful {
     @Help.Summary("List dynamic synchronizer parameters")
@@ -3516,9 +3535,8 @@ class TopologyAdministrationGroup(
 
   object lsu extends Helpful {
 
-    // TODO(#28972) Remove preview flag once LSU is stable
-    @Help.Summary("Inspect synchronizer migration announcements", FeatureFlag.Preview)
-    @Help.Group("Synchronizer Migration Announcement")
+    @Help.Summary("Inspect synchronizer upgrade announcements")
+    @Help.Group("Synchronizer Upgrade Announcement")
     object announcement extends Helpful {
       def list(
           store: Option[TopologyStoreId] = None,
@@ -3543,7 +3561,7 @@ class TopologyAdministrationGroup(
         )
       }
 
-      @Help.Summary("Propose the announcement of a synchronizer migration", FeatureFlag.Preview)
+      @Help.Summary("Propose the announcement of a synchronizer upgrade")
       @Help.Description(
         """Parameters:
           |- physicalSynchronizerId: The physical synchronizer id of the synchronizer on which the
@@ -3583,35 +3601,33 @@ class TopologyAdministrationGroup(
           synchronize: Option[config.NonNegativeDuration] = Some(
             consoleEnvironment.commandTimeouts.unbounded
           ),
-      ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] =
-        // TODO(#28972) Remove preview flag once LSU is stable
-        check(FeatureFlag.Preview) {
-          val mapping = LsuAnnouncement(
-            successorPhysicalSynchronizerId,
-            upgradeTime,
-          )
+      ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
+        val mapping = LsuAnnouncement(
+          successorPhysicalSynchronizerId,
+          upgradeTime,
+        )
 
-          consoleEnvironment.run {
-            adminCommand(
-              TopologyAdminCommands.Write.Propose(
-                mapping = mapping,
-                signedBy = signedBy.toList,
-                serial = serial,
-                change = TopologyChangeOp.Replace,
-                mustFullyAuthorize = mustFullyAuthorize,
-                forceChanges = ForceFlags.none,
-                store = store.getOrElse(successorPhysicalSynchronizerId.logical),
-                waitToBecomeEffective = synchronize,
-              )
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write.Propose(
+              mapping = mapping,
+              signedBy = signedBy.toList,
+              serial = serial,
+              change = TopologyChangeOp.Replace,
+              mustFullyAuthorize = mustFullyAuthorize,
+              forceChanges = ForceFlags.none,
+              store = store.getOrElse(successorPhysicalSynchronizerId.logical),
+              waitToBecomeEffective = synchronize,
             )
-          }
+          )
         }
+      }
 
-      @Help.Summary("Propose the revocation of a synchronizer migration announcement")
+      @Help.Summary("Propose the revocation of a synchronizer upgrade announcement")
       @Help.Description(
         """Parameters:
           |- physicalSynchronizerId: The physical synchronizer id of the synchronizer on which the
-          |  synchronizer migration announcement will be revoked.
+          |  synchronizer upgrade announcement will be revoked.
           |- successorPhysicalSynchronizerId: The id of the physical synchronizer that was supposed
           |  to succeed the current physical synchronizer.
           |- upgradeTime: When will the upgrade happen.
@@ -3647,35 +3663,32 @@ class TopologyAdministrationGroup(
           synchronize: Option[config.NonNegativeDuration] = Some(
             consoleEnvironment.commandTimeouts.unbounded
           ),
-      ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] =
-        // TODO(#28972) Remove preview flag once LSU is stable
-        check(FeatureFlag.Preview) {
-          val mapping = LsuAnnouncement(
-            successorPhysicalSynchronizerId,
-            upgradeTime,
-          )
+      ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
+        val mapping = LsuAnnouncement(
+          successorPhysicalSynchronizerId,
+          upgradeTime,
+        )
 
-          consoleEnvironment.run {
-            adminCommand(
-              TopologyAdminCommands.Write.Propose(
-                mapping = mapping,
-                signedBy = signedBy.toList,
-                serial = serial,
-                change = TopologyChangeOp.Remove,
-                mustFullyAuthorize = mustFullyAuthorize,
-                forceChanges = ForceFlags.none,
-                store = store.getOrElse(successorPhysicalSynchronizerId.logical),
-                waitToBecomeEffective = synchronize,
-              )
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write.Propose(
+              mapping = mapping,
+              signedBy = signedBy.toList,
+              serial = serial,
+              change = TopologyChangeOp.Remove,
+              mustFullyAuthorize = mustFullyAuthorize,
+              forceChanges = ForceFlags.none,
+              store = store.getOrElse(successorPhysicalSynchronizerId.logical),
+              waitToBecomeEffective = synchronize,
             )
-          }
+          )
         }
+      }
     }
 
     object sequencer_successors extends Helpful {
       @Help.Summary(
-        "Propose the connection details of a sequencer on the successor synchronizer",
-        FeatureFlag.Preview,
+        "Propose the connection details of a sequencer on the successor synchronizer"
       )
       @Help.Description(
         """Parameters:
@@ -3722,33 +3735,31 @@ class TopologyAdministrationGroup(
             consoleEnvironment.commandTimeouts.unbounded
           ),
       ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] =
-        check(Preview) {
-          consoleEnvironment.run {
-            adminCommand(
-              TopologyAdminCommands.Write.Propose(
-                mapping = networking.Endpoint
-                  .fromUris(endpoints.toSeq)
-                  .map { case (validatedEndpoints, useTls) =>
-                    LsuSequencerConnectionSuccessor(
-                      sequencerId,
-                      successorSynchronizerId,
-                      GrpcConnection(
-                        validatedEndpoints,
-                        useTls,
-                        customTrustCertificates,
-                      ),
-                    )
-                  },
-                signedBy = signedBy.toList,
-                serial = serial,
-                change = operation,
-                mustFullyAuthorize = mustFullyAuthorize,
-                forceChanges = ForceFlags.none,
-                store = store.getOrElse(successorSynchronizerId.logical),
-                waitToBecomeEffective = synchronize,
-              )
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write.Propose(
+              mapping = networking.Endpoint
+                .fromUris(endpoints.toSeq)
+                .map { case (validatedEndpoints, useTls) =>
+                  LsuSequencerConnectionSuccessor(
+                    sequencerId,
+                    successorSynchronizerId,
+                    GrpcConnection(
+                      validatedEndpoints,
+                      useTls,
+                      customTrustCertificates,
+                    ),
+                  )
+                },
+              signedBy = signedBy.toList,
+              serial = serial,
+              change = operation,
+              mustFullyAuthorize = mustFullyAuthorize,
+              forceChanges = ForceFlags.none,
+              store = store.getOrElse(successorSynchronizerId.logical),
+              waitToBecomeEffective = synchronize,
             )
-          }
+          )
         }
 
       def list(

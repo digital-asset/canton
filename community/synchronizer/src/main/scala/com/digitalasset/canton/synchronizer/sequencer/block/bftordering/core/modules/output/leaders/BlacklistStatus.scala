@@ -4,8 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
 import com.digitalasset.canton.sequencer.admin.v30
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistStatus.HowEpochWent
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
 
 sealed trait BlacklistStatus {
   def update(howEpochWent: HowEpochWent, howLongToBlacklist: HowLongToBlacklist): BlacklistStatus
@@ -27,7 +27,7 @@ object BlacklistStatus {
         howLongToBlacklist: HowLongToBlacklist,
     ): BlacklistStatus = howEpochWent match {
       case HowEpochWent.Succeeded => Clean
-      case HowEpochWent.ShouldBePunished => howLongToBlacklist.compute(1)
+      case HowEpochWent.ShouldBePunished => howLongToBlacklist.punishNodeThatFailed(1)
       case HowEpochWent.DidNotParticipate => Clean
     }
   }
@@ -43,7 +43,7 @@ object BlacklistStatus {
     ): BlacklistStatus = howEpochWent match {
       case HowEpochWent.Succeeded => Clean
       case HowEpochWent.ShouldBePunished =>
-        howLongToBlacklist.compute(numberOfConsecutiveFailedAttempts + 1)
+        howLongToBlacklist.punishNodeThatFailed(numberOfConsecutiveFailedAttempts + 1)
       case HowEpochWent.DidNotParticipate => this
     }
 
@@ -65,13 +65,12 @@ object BlacklistStatus {
       // Even if the node is blacklisted it might have participated in the last epoch
       case HowEpochWent.Succeeded => Clean
       case HowEpochWent.ShouldBePunished =>
-        howLongToBlacklist.compute(failedAttemptsBefore + 1)
+        howLongToBlacklist.punishNodeThatFailed(failedAttemptsBefore + 1)
       case HowEpochWent.DidNotParticipate =>
-        if (epochsLeftUntilNewTrial <= 0) {
-          OnTrial(failedAttemptsBefore)
-        } else {
-          Blacklisted(failedAttemptsBefore, epochsLeftUntilNewTrial - 1)
-        }
+        // Because howLongToBlacklist might have changed, we update this number here first
+        val updatedEpochsLeftUntilNewTrial =
+          howLongToBlacklist.updateLeftUntilNextTrial(epochsLeftUntilNewTrial)
+        Blacklisted.create(failedAttemptsBefore, updatedEpochsLeftUntilNewTrial - 1)
     }
 
     override def toProto30: v30.BlacklistLeaderSelectionPolicyState.BlacklistStatus =
@@ -81,6 +80,15 @@ object BlacklistStatus {
             .Blacklisted(failedAttemptsBefore, epochsLeftUntilNewTrial)
         )
       )
+  }
+
+  object Blacklisted {
+    def create(failedAttemptsBefore: Long, epochsLeftUntilNewTrial: Long): BlacklistStatusMark =
+      if (epochsLeftUntilNewTrial <= 0) {
+        OnTrial(failedAttemptsBefore)
+      } else {
+        Blacklisted(failedAttemptsBefore, epochsLeftUntilNewTrial)
+      }
   }
 
   private def toMark(status: BlacklistStatus): Option[BlacklistStatusMark] = status match {

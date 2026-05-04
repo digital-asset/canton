@@ -2,17 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.daml.lf
-package transaction
+package engine
 
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.{Name, Party}
 import com.digitalasset.daml.lf.data.{BackStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.{
+  ensuresNoUnknownFieldsThenDecode,
+  ContractInstanceCoder,
+  CreationTime,
+  ExternalCallResult,
+  FatContractInstance,
+  GlobalKey,
+  GlobalKeyWithMaintainers,
+  Node,
+  NodeId,
+  sequence,
+  SerializationVersion,
+  TransactionOuterClass => proto,
+  VersionedTransaction,
+}
 import com.digitalasset.daml.lf.transaction.TransactionOuterClass.Node.NodeTypeCase
-import com.digitalasset.daml.lf.value.{DecodeError, EncodeError, Value, ValueOuterClass}
+import com.digitalasset.daml.lf.value.{DecodeError, EncodeError, Value}
+import com.digitalasset.daml.lf.{crypto, data, value}
 import com.google.protobuf.{ByteString, ProtocolStringList}
 
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.annotation.nowarn
 import scala.collection.immutable.{HashMap, TreeSet}
 import scala.jdk.CollectionConverters._
 
@@ -20,71 +35,36 @@ object TransactionCoder extends TransactionCoder(allowNullCharacters = false)
 
 class TransactionCoder(allowNullCharacters: Boolean) {
 
-  val ValueCoder = new value.ValueCoder(allowNullCharacters = allowNullCharacters).internal
+  private[this] val ValueCoder =
+    new value.ValueCoder(allowNullCharacters = allowNullCharacters).internal
+  private[this] val ContractCoder = new ContractInstanceCoder(
+    allowNullCharacters = allowNullCharacters
+  )
 
-  /** Decode a contract instance from wire format
+  /** Reads a [[com.digitalasset.daml.lf.transaction.VersionedTransaction]] from protobuf and checks if
+    * [[com.digitalasset.daml.lf.transaction.SerializationVersion]] passed in the protobuf is currently supported.
     *
-    * @param protoCoinst protocol buffer encoded contract instance
-    * @return contract instance value
-    */
-  def decodeContractInstance(
-      protoCoinst: TransactionOuterClass.ThinContractInstance
-  ): Either[DecodeError, Versioned[Value.ThinContractInstance]] =
-    ensuresNoUnknownFieldsThenDecode(protoCoinst)(internal.decodeContractInstance)
-
-  /** Encodes a contract instance with the help of the contractId encoding function
-    *
-    * @param coinst the contract instance to be encoded
-    * @return protobuf wire format contract instance
-    */
-  def encodeContractInstance(
-      coinst: Versioned[Value.ThinContractInstance]
-  ): Either[EncodeError, TransactionOuterClass.ThinContractInstance] =
-    internal.encodeContractInstance(coinst)
-
-  /** Reads a [[VersionedTransaction]] from protobuf and checks if
-    * [[SerializationVersion]] passed in the protobuf is currently supported.
-    *
-    * Supported serialization versions configured in [[SerializationVersion]].
+    * Supported serialization versions configured in [[com.digitalasset.daml.lf.transaction.SerializationVersion]].
     *
     * @param protoTx protobuf encoded transaction
     * @return decoded transaction
     */
-  def decodeTransaction(
-      protoTx: TransactionOuterClass.Transaction
+  private[lf] def decodeTransaction(
+      protoTx: proto.Transaction
   ): Either[DecodeError, VersionedTransaction] =
     ensuresNoUnknownFieldsThenDecode(protoTx)(internal.decodeTransaction)
 
-  /** Encode a [[Transaction]] to protobuf using [[SerializationVersion]] provided by the libary.
+  /** Encode a [[com.digitalasset.daml.lf.transaction.Transaction]] to protobuf using [[com.digitalasset.daml.lf.transaction.SerializationVersion]] provided by the libary.
     *
     * @param tx the transaction to be encoded
     * @return protobuf encoded transaction
     */
-  def encodeTransaction(
+  private[engine] def encodeTransaction(
       tx: VersionedTransaction
-  ): Either[EncodeError, TransactionOuterClass.Transaction] =
+  ): Either[EncodeError, proto.Transaction] =
     internal.encodeTransaction(tx)
 
-  def decodeFatContractInstance(bytes: ByteString): Either[DecodeError, FatContractInstance] =
-    internal.decodeFatContractInstance(bytes)
-
-  def encodeFatContractInstance(
-      contractInstance: FatContractInstance
-  ): Either[EncodeError, ByteString] =
-    internal.encodeFatContractInstance(contractInstance)
-
-  private[transaction] def encodeVersioned(
-      version: SerializationVersion,
-      payload: ByteString,
-  ): ByteString =
-    internal.encodeVersioned(version, payload)
-
-  private[transaction] def decodeVersioned(
-      bytes: ByteString
-  ): Either[DecodeError, Versioned[ByteString]] =
-    internal.decodeVersioned(bytes)
-
-  private[transaction] object internal {
+  private[engine] object internal {
 
     private[this] def encodeNodeId(id: NodeId): String = id.index.toString
 
@@ -93,39 +73,13 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         .parseInt(s)
         .fold(_ => Left(DecodeError(s"cannot parse node Id $s")), idx => Right(NodeId(idx)))
 
-    def encodeVersionedValue(
-        enclosingVersion: SerializationVersion,
-        value: Value.VersionedValue,
-    ): Either[EncodeError, ValueOuterClass.VersionedValue] =
-      if (enclosingVersion == value.version)
-        ValueCoder.encodeVersionedValue(value)
-      else
-        Left(
-          EncodeError(
-            s"A node of version $enclosingVersion cannot contain value of different version version ${value.version}"
-          )
-        )
-
     private[this] def encodeValue(
         nodeVersion: SerializationVersion,
         value: Value,
     ): Either[EncodeError, ByteString] =
       ValueCoder.encodeValue(nodeVersion, value)
 
-    def encodeContractInstance(
-        coinst: Versioned[Value.ThinContractInstance]
-    ): Either[EncodeError, TransactionOuterClass.ThinContractInstance] =
-      for {
-        value <- ValueCoder.encodeVersionedValue(coinst.version, coinst.unversioned.arg)
-      } yield {
-        val builder = TransactionOuterClass.ThinContractInstance.newBuilder()
-        discard(builder.setPackageName(coinst.unversioned.packageName))
-        discard(builder.setTemplateId(ValueCoder.encodeIdentifier(coinst.unversioned.template)))
-        discard(builder.setArgVersioned(value))
-        builder.build()
-      }
-
-    def decodePackageName(s: String): Either[DecodeError, Ref.PackageName] =
+    private[this] def decodePackageName(s: String): Either[DecodeError, Ref.PackageName] =
       Either
         .cond(
           s.nonEmpty,
@@ -139,21 +93,12 @@ class TransactionCoder(allowNullCharacters: Boolean) {
             .map(err => DecodeError(s"Invalid package name '$s': $err"))
         )
 
-    def decodeContractInstance(
-        protoCoinst: TransactionOuterClass.ThinContractInstance
-    ): Either[DecodeError, Versioned[Value.ThinContractInstance]] =
-      for {
-        id <- ValueCoder.decodeIdentifier(protoCoinst.getTemplateId)
-        value <- ValueCoder.decodeVersionedValue(protoCoinst.getArgVersioned)
-        pkgName <- decodePackageName(protoCoinst.getPackageName)
-      } yield value.map(arg => Value.ThinContractInstance(pkgName, id, arg))
-
-    private[transaction] def encodeKeyWithMaintainers(
+    private[this] def encodeKeyWithMaintainers(
         version: SerializationVersion,
         key: GlobalKeyWithMaintainers,
-    ): Either[EncodeError, TransactionOuterClass.KeyWithMaintainers] =
+    ): Either[EncodeError, proto.KeyWithMaintainers] =
       if (version >= SerializationVersion.minVersion) {
-        val builder = TransactionOuterClass.KeyWithMaintainers.newBuilder()
+        val builder = proto.KeyWithMaintainers.newBuilder()
         TreeSet.from(key.maintainers).foreach(builder.addMaintainers(_))
         ValueCoder.encodeValue(version, key.globalKey.key).map { bs =>
           builder.setKey(bs)
@@ -171,7 +116,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def encodeOptKeyWithMaintainers(
         version: SerializationVersion,
         key: Option[GlobalKeyWithMaintainers],
-    ): Either[EncodeError, Option[TransactionOuterClass.KeyWithMaintainers]] =
+    ): Either[EncodeError, Option[proto.KeyWithMaintainers]] =
       key match {
         case Some(key) =>
           encodeKeyWithMaintainers(version, key).map(Some(_))
@@ -197,17 +142,17 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       * @param node             the node to be encoded
       * @return protocol buffer format node
       */
-    private[lf] def encodeNode(
+    private[engine] def encodeNode(
         enclosingVersion: SerializationVersion,
         nodeId: NodeId,
         node: Node,
     ) = {
       val nodeBuilder =
-        TransactionOuterClass.Node.newBuilder().setNodeId(encodeNodeId(nodeId))
+        proto.Node.newBuilder().setNodeId(encodeNodeId(nodeId))
 
       node match {
         case Node.Rollback(children) =>
-          val builder = TransactionOuterClass.Node.Rollback.newBuilder()
+          val builder = proto.Node.Rollback.newBuilder()
           children.foreach(id => discard(builder.addChildren(encodeNodeId(id))))
           Right(nodeBuilder.setRollback(builder).build())
 
@@ -230,7 +175,9 @@ class TransactionCoder(allowNullCharacters: Boolean) {
                   authenticationData = data.Bytes.Empty,
                 )
                 for {
-                  unversioned <- encodeFatContractInstanceInternal(fatContractInstance)
+                  unversioned <- ContractCoder.encodeFatContractInstanceInternal(
+                    fatContractInstance
+                  )
                 } yield nodeBuilder.setCreate(unversioned).build()
 
               case nf: Node.Fetch =>
@@ -255,7 +202,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeFetch(
         node: Node.Fetch
-    ): Either[EncodeError, TransactionOuterClass.Node.Fetch] = {
+    ): Either[EncodeError, proto.Node.Fetch] = {
       val version = node.version
       val maintainers = node.keyOpt.fold(Set.empty[Party])(_.maintainers)
       val signatories = node.signatories
@@ -265,7 +212,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       val non_maintainer_signatories = signatories -- maintainers
       val non_signatory_stakeholders = stakeholders -- signatories
 
-      val builder = TransactionOuterClass.Node.Fetch.newBuilder()
+      val builder = proto.Node.Fetch.newBuilder()
       discard(builder.setContractId(node.coid.toBytes.toByteString))
       discard(builder.setPackageName(node.packageName))
       discard(builder.setTemplateId(ValueCoder.encodeIdentifier(node.templateId)))
@@ -291,8 +238,8 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeExercise(
         node: Node.Exercise
-    ): Either[EncodeError, TransactionOuterClass.Node.Exercise] = {
-      val builder = TransactionOuterClass.Node.Exercise.newBuilder()
+    ): Either[EncodeError, proto.Node.Exercise] = {
+      val builder = proto.Node.Exercise.newBuilder()
       val fetch = Node.Fetch(
         coid = node.targetCoid,
         packageName = node.packageName,
@@ -343,7 +290,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeQueryByKey(
         node: Node.QueryByKey
-    ): Either[EncodeError, TransactionOuterClass.Node.QueryByKey] =
+    ): Either[EncodeError, proto.Node.QueryByKey] =
       for {
         _ <- Either.cond(
           node.version >= SerializationVersion.minContractKeys,
@@ -355,7 +302,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           (),
           EncodeError("non exhaustive query by key node must have at least one contract id"),
         )
-        builder = TransactionOuterClass.Node.QueryByKey.newBuilder()
+        builder = proto.Node.QueryByKey.newBuilder()
         _ = discard(builder.setPackageName(node.packageName))
         _ = discard(builder.setTemplateId(ValueCoder.encodeIdentifier(node.templateId)))
         _ = node.result.foreach(cid => discard(builder.addContractId(cid.toBytes.toByteString)))
@@ -367,7 +314,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         version: SerializationVersion,
         templateId: Ref.TypeConId,
         packageName: Ref.PackageName,
-        msg: TransactionOuterClass.KeyWithMaintainers,
+        msg: proto.KeyWithMaintainers,
     ): Either[DecodeError, GlobalKeyWithMaintainers] = {
       for {
         maintainers <- toPartySet(msg.getMaintainersList)
@@ -382,46 +329,38 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           if (version >= SerializationVersion.V2)
             crypto.Hash
               .fromBytes(data.Bytes.fromByteString(msg.getHash))
-              .left.map(DecodeError(_))
+              .left
+              .map(DecodeError(_))
           else
-            Either.cond(
-              msg.getHash.isEmpty,
-              (),
-              DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
-            ).flatMap(_ =>
-              // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
-              // that behavior fot the reasons state above.
-              crypto.Hash
-                .hashContractKey(templateId, packageName, keyValue)
-                .left.map(hashErr => DecodeError(hashErr.msg))
-            )
+            Either
+              .cond(
+                msg.getHash.isEmpty,
+                (),
+                DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
+              )
+              .flatMap(_ =>
+                // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
+                // that behavior fot the reasons state above.
+                crypto.Hash
+                  .hashContractKey(templateId, packageName, keyValue)
+                  .left
+                  .map(hashErr => DecodeError(hashErr.msg))
+              )
         gkey <- GlobalKey
           .build(templateId, packageName, keyValue, hash)
-          .left.map(hashErr => DecodeError(hashErr.msg))
+          .left
+          .map(hashErr => DecodeError(hashErr.msg))
       } yield GlobalKeyWithMaintainers(gkey, maintainers)
     }
 
-    private[transaction] def strictDecodeKeyWithMaintainers(
-        version: SerializationVersion,
-        templateId: Ref.TypeConId,
-        packageName: Ref.PackageName,
-        msg: TransactionOuterClass.KeyWithMaintainers,
-    ): Either[DecodeError, GlobalKeyWithMaintainers] =
-      for {
-        kwm <- decodeKeyWithMaintainers(version, templateId, packageName, msg)
-        _ <- Either.cond(kwm.maintainers.nonEmpty, (), DecodeError("key without maintainers"))
-      } yield kwm
-
-    private val RightNone = Right(None)
-
     // package private for test, do not use outside TransactionCoder
-    private[lf] def decodeValue(
+    private[this] def decodeValue(
         version: SerializationVersion,
         unversionedProto: ByteString,
     ): Either[DecodeError, Value] =
       ValueCoder.decodeValue(version, unversionedProto)
 
-    private[lf] def decodeOptionalValue(
+    private[this] def decodeOptionalValue(
         version: SerializationVersion,
         unversionedProto: ByteString,
     ): Either[DecodeError, Option[Value]] =
@@ -435,15 +374,15 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       * @param protoNode protobuf encoded node
       * @return decoded GenNode
       */
-    private[lf] def decodeVersionedNode(
+    private[this] def decodeVersionedNode(
         serializationVersion: SerializationVersion,
-        protoNode: TransactionOuterClass.Node,
+        protoNode: proto.Node,
     ): Either[DecodeError, (NodeId, Node)] =
       decodeNode(serializationVersion, protoNode)
 
-    private[lf] def decodeNode(
+    private[engine] def decodeNode(
         txVersion: SerializationVersion,
-        msg: TransactionOuterClass.Node,
+        msg: proto.Node,
     ): Either[DecodeError, (NodeId, Node)] =
       for {
         nodeId <- decodeNodeId(msg.getNodeId)
@@ -464,7 +403,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def decodeRollback(
         nodeVersionStr: String,
-        msg: TransactionOuterClass.Node.Rollback,
+        msg: proto.Node.Rollback,
     ) =
       for {
         _ <- Either.cond(
@@ -478,12 +417,12 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeCreate(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: TransactionOuterClass.FatContractInstance,
+        msg: proto.FatContractInstance,
     ): Either[DecodeError, Node.Create] =
       for {
         // call to decodeFatContractInstance checks for unknown fields
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
-        contract <- decodeFatContractInstance(nodeVersion, msg)
+        contract <- ContractCoder.decodeFatContractInstance(nodeVersion, msg)
         _ <- Either.cond(
           contract.createdAt == CreationTime.CreatedAt(Time.Timestamp.Epoch),
           (),
@@ -499,7 +438,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeFetch(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: TransactionOuterClass.Node.Fetch,
+        msg: proto.Node.Fetch,
     ): Either[DecodeError, Node.Fetch] = {
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
@@ -554,7 +493,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeExercise(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: TransactionOuterClass.Node.Exercise,
+        msg: proto.Node.Exercise,
     ): Either[DecodeError, Node.Exercise] = {
       for {
         fetch <- decodeFetch(txVersion, nodeVersionStr, msg.getFetch)
@@ -608,7 +547,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeQueryByKey(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: TransactionOuterClass.Node.QueryByKey,
+        msg: proto.Node.QueryByKey,
     ) =
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
@@ -620,7 +559,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         _ <- Either.cond(
           msg.getExaustive || msg.getContractIdCount > 0,
           (),
-          DecodeError("non exhaustive query by key node must have at least one contract id")
+          DecodeError("non exhaustive query by key node must have at least one contract id"),
         )
         pkgName <- decodePackageName(msg.getPackageName)
         templateId <- ValueCoder.decodeIdentifier(msg.getTemplateId)
@@ -652,16 +591,16 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         .map(_.toImmArray)
     }
 
-    private[transaction] def encodeTransaction(
+    private[TransactionCoder] def encodeTransaction(
         transaction: VersionedTransaction
-    ): Either[EncodeError, TransactionOuterClass.Transaction] = {
-      val builder = TransactionOuterClass.Transaction
+    ): Either[EncodeError, proto.Transaction] = {
+      val builder = proto.Transaction
         .newBuilder()
         .setVersion(SerializationVersion.toProtoValue(transaction.version))
       transaction.roots.foreach(nid => discard(builder.addRoots(encodeNodeId(nid))))
 
       transaction
-        .fold[Either[EncodeError, TransactionOuterClass.Transaction.Builder]](
+        .fold[Either[EncodeError, proto.Transaction.Builder]](
           Right(builder)
         ) { case (builderOrError, (nid, _)) =>
           for {
@@ -676,7 +615,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         .map(_.build)
     }
 
-    def decodeActionNodeVersion(
+    private[this] def decodeActionNodeVersion(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
     ): Either[DecodeError, SerializationVersion] =
@@ -691,11 +630,11 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         )
       } yield nodeVersion
 
-    def decodeVersion(vs: String): Either[DecodeError, SerializationVersion] =
+    private[this] def decodeVersion(vs: String): Either[DecodeError, SerializationVersion] =
       SerializationVersion.fromString(vs).left.map(DecodeError)
 
-    def decodeTransaction(
-        protoTx: TransactionOuterClass.Transaction
+    private[TransactionCoder] def decodeTransaction(
+        protoTx: proto.Transaction
     ): Either[DecodeError, VersionedTransaction] =
       for {
         version <- decodeVersion(protoTx.getVersion)
@@ -704,7 +643,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def decodeTransaction(
         txVersion: SerializationVersion,
-        msg: TransactionOuterClass.Transaction,
+        msg: proto.Transaction,
     ): Either[DecodeError, VersionedTransaction] = for {
       roots <- msg.getRootsList.asScala
         .foldLeft[Either[DecodeError, BackStack[NodeId]]](Right(BackStack.empty[NodeId])) {
@@ -720,7 +659,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         }
     } yield VersionedTransaction(txVersion, nodes, roots)
 
-    def toPartySet(strList: ProtocolStringList): Either[DecodeError, Set[Party]] = {
+    private[this] def toPartySet(strList: ProtocolStringList): Either[DecodeError, Set[Party]] = {
       val parties = strList
         .asByteStringList()
         .asScala
@@ -732,178 +671,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       }
     }
 
-    // Similar to toPartySet but
-    // - requires strList to be strictly ordered, fails otherwise
-    // - produces a TreeSet instead of a Set
-    // Note this function has a linear complexity, See data.TreeSet.fromStrictlyOrderedEntries
-    def toPartyTreeSet(strList: ProtocolStringList): Either[DecodeError, TreeSet[Party]] =
-      if (strList.isEmpty)
-        Right(TreeSet.empty)
-      else {
-        val parties = strList
-          .asByteStringList()
-          .asScala
-          .map(bs => Party.fromString(bs.toStringUtf8))
-
-        sequence(parties) match {
-          case Left(err) =>
-            Left(DecodeError(s"Cannot decode party: $err"))
-          case Right(ps) =>
-            scala.util
-              .Try(data.TreeSet.fromStrictlyOrderedEntries(ps))
-              .toEither
-              .left
-              .map(e => DecodeError(e.getMessage))
-        }
-      }
-
-    private def toIdentifier(s: String): Either[DecodeError, Name] =
+    private[this] def toIdentifier(s: String): Either[DecodeError, Name] =
       Name.fromString(s).left.map(DecodeError)
-
-    private[transaction] def encodeVersioned(
-        version: SerializationVersion,
-        payload: ByteString,
-    ): ByteString = {
-      val builder = TransactionOuterClass.Versioned.newBuilder()
-      discard(builder.setVersion(SerializationVersion.toProtoValue(version)))
-      discard(builder.setPayload(payload))
-      builder.build().toByteString
-    }
-
-    private[TransactionCoder] def parseVersioned(bytes: ByteString) =
-      try {
-        val msg = TransactionOuterClass.Versioned.parseFrom(bytes)
-        ensuresNoUnknownFields(msg).map(_ => msg)
-      } catch {
-        case scala.util.control.NonFatal(e) =>
-          Left(DecodeError(s"exception $e while decoding the versioned object"))
-      }
-
-    private[TransactionCoder] def decodeVersioned(
-        bytes: ByteString
-    ): Either[DecodeError, Versioned[ByteString]] =
-      for {
-        proto <- parseVersioned(bytes)
-        version <- SerializationVersion.fromString(proto.getVersion).left.map(DecodeError)
-        payload = proto.getPayload
-      } yield Versioned(version, payload)
-
-    def encodeFatContractInstanceInternal(
-        contractInstance: FatContractInstance
-    ): Either[EncodeError, TransactionOuterClass.FatContractInstance] = {
-      import contractInstance._
-      for {
-        encodedArg <- ValueCoder.encodeValue(version, createArg)
-        encodedKeyOpt <- contractKeyWithMaintainers match {
-          case None =>
-            Right(None)
-          case Some(key) =>
-            encodeKeyWithMaintainers(version, key).map(Some(_))
-        }
-      } yield {
-        val builder = TransactionOuterClass.FatContractInstance.newBuilder()
-        discard(builder.setContractId(contractId.toBytes.toByteString))
-        discard(builder.setPackageName(packageName))
-        discard(builder.setTemplateId(ValueCoder.encodeIdentifier(templateId)))
-        discard(builder.setCreateArg(encodedArg))
-        encodedKeyOpt.foreach(builder.setContractKeyWithMaintainers)
-        nonMaintainerSignatories.foreach(builder.addNonMaintainerSignatories)
-        nonSignatoryStakeholders.foreach(builder.addNonSignatoryStakeholders)
-        discard(builder.setCreatedAt(CreationTime.encode(createdAt)))
-        discard(builder.setAuthenticationData(authenticationData.toByteString))
-        builder.build()
-      }
-    }
-
-    def encodeFatContractInstance(
-        contractInstance: FatContractInstance
-    ): Either[EncodeError, ByteString] =
-      for {
-        unversioned <- encodeFatContractInstanceInternal(contractInstance)
-      } yield encodeVersioned(contractInstance.version, unversioned.toByteString)
-
-    private[lf] def assertEncodeFatContractInstance(
-        contractInstance: FatContractInstance
-    ): data.Bytes =
-      encodeFatContractInstance(contractInstance).fold(
-        e => throw new IllegalArgumentException(e.errorMessage),
-        data.Bytes.fromByteString,
-      )
-
-    private[lf] def decodeFatContractInstance(
-        txVersion: SerializationVersion,
-        msg: TransactionOuterClass.FatContractInstance,
-    ): Either[DecodeError, FatContractInstance] =
-      for {
-        contractId <- ValueCoder.decodeCoid(msg.getContractId)
-        pkgName <- decodePackageName(msg.getPackageName)
-        templateId <- ValueCoder.decodeIdentifier(msg.getTemplateId)
-        createArg <- ValueCoder.decodeValue(version = txVersion, bytes = msg.getCreateArg)
-        keyWithMaintainers <-
-          if (msg.hasContractKeyWithMaintainers)
-            strictDecodeKeyWithMaintainers(
-              txVersion,
-              templateId,
-              pkgName,
-              msg.getContractKeyWithMaintainers,
-            )
-              .map(Some(_))
-          else
-            RightNone
-        maintainers = keyWithMaintainers.fold(TreeSet.empty[Party])(k =>
-          TreeSet.from(k.maintainers)
-        )
-        nonMaintainerSignatories <- toPartyTreeSet(msg.getNonMaintainerSignatoriesList)
-        _ <- Either.cond(
-          maintainers.nonEmpty || nonMaintainerSignatories.nonEmpty,
-          (),
-          DecodeError("maintainers or non_maintainer_signatories should be non empty"),
-        )
-        nonSignatoryStakeholders <- toPartyTreeSet(msg.getNonSignatoryStakeholdersList)
-        signatories <- maintainers.find(nonMaintainerSignatories) match {
-          case Some(p) =>
-            Left(DecodeError(s"party $p is declared as maintainer and nonMaintainerSignatory"))
-          case None => Right(maintainers | nonMaintainerSignatories)
-        }
-        stakeholders <- nonSignatoryStakeholders.find(signatories) match {
-          case Some(p) =>
-            Left(DecodeError(s"party $p is declared as signatory and nonSignatoryStakeholder"))
-          case None => Right(signatories | nonSignatoryStakeholders)
-        }
-        createdAt <- CreationTime.decode(msg.getCreatedAt).left.map(DecodeError)
-        authenticationData = msg.getAuthenticationData
-      } yield FatContractInstanceImpl(
-        version = txVersion,
-        contractId = contractId,
-        packageName = pkgName,
-        templateId = templateId,
-        createArg = createArg,
-        signatories = signatories,
-        stakeholders = stakeholders,
-        createdAt = createdAt,
-        contractKeyWithMaintainers = keyWithMaintainers,
-        authenticationData = data.Bytes.fromByteString(authenticationData),
-      )
-
-    private def parseFatContractInstance(bytes: ByteString) =
-      try {
-        val msg = TransactionOuterClass.FatContractInstance.parseFrom(bytes)
-        ensuresNoUnknownFields(msg).map(_ => msg)
-      } catch {
-        case scala.util.control.NonFatal(e) =>
-          Left(DecodeError(s"exception $e while decoding the object"))
-      }
-
-    @nowarn(
-      "cat=unused-pat-vars"
-    ) // suppress wrong warnings that version and unversioned are unused
-    def decodeFatContractInstance(bytes: ByteString): Either[DecodeError, FatContractInstance] =
-      for {
-        versionedBlob <- decodeVersioned(bytes)
-        Versioned(version, unversioned) = versionedBlob
-        proto <- parseFatContractInstance(unversioned)
-        fatContractInstance <- decodeFatContractInstance(version, proto)
-      } yield fatContractInstance
-
   }
 }

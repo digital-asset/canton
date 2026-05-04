@@ -120,6 +120,7 @@ import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.nowarn
 import scala.compat.java8.DurationConverters.FiniteDurationops
 import scala.concurrent.*
 import scala.concurrent.duration.*
@@ -216,6 +217,12 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   /** For participant nodes, the predecessor synchronizer if any.
     */
   protected def synchronizerPredecessor: Option[SynchronizerPredecessor]
+
+  /** The timestamp for a subsription. If none, uses the previous upgrade time if defined or
+    * fallback to MinValue.
+    */
+  protected def subscriptionTimestamp(ts: Option[CantonTimestamp]): CantonTimestamp =
+    ts.orElse(synchronizerPredecessor.map(_.upgradeTime)).getOrElse(CantonTimestamp.MinValue)
 }
 
 trait RichSequencerClient extends SequencerClient {
@@ -275,7 +282,7 @@ abstract class SequencerClientImpl(
   override def logout()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, Unit] =
-    connectionPool.getAllConnections().parTraverse_(_.logout())
+    connectionPool.getAllConnections.parTraverse_(_.logout())
 
   protected val sequencersTransportState: SequencersTransportState =
     new SequencersTransportState(sequencerTransports)
@@ -312,8 +319,7 @@ abstract class SequencerClientImpl(
   ): Either[SendAsyncClientError, Unit] = {
     // We're ignoring the size of the SignedContent wrapper here.
     // TODO(#12320) Look into what we really want to do here
-    val serializedRequestSize = request.toProtoV30.serializedSize
-
+    val serializedRequestSize = request.toProtoVersioned.serializedSize
     Either.cond(
       serializedRequestSize <= maxRequestSize.unwrap,
       (),
@@ -322,7 +328,7 @@ abstract class SequencerClientImpl(
       ),
     )
   }
-
+  @nowarn("cat=deprecation")
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
       timestamps: SendRequestTimestamps,
@@ -465,15 +471,7 @@ abstract class SequencerClientImpl(
           )
           _ <- SubmissionRequestValidations
             .checkSenderAndRecipientsAreRegistered(request, snapshot)
-            .leftMap {
-              case SubmissionRequestValidations.MemberCheckError(
-                    unregisteredRecipients,
-                    unregisteredSenders,
-                  ) =>
-                SendAsyncClientError.RequestInvalid(
-                  s"Unregistered recipients: $unregisteredRecipients, unregistered senders: $unregisteredSenders"
-                )
-            }
+            .leftMap(_.toSendAsyncClientError)
           latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
           _ = recorderO.foreach(_.recordSubmission(request))
           res <- performSend(
@@ -557,8 +555,7 @@ abstract class SequencerClientImpl(
       // Do not add an aggregation rule for amplifiable requests if amplification has not been configured
       val amplifiableRequest =
         if (amplify && request.aggregationRule.isEmpty && patienceO.isDefined) {
-          val aggregationRule =
-            AggregationRule(NonEmpty(Seq, member), PositiveInt.one, protocolVersion)
+          val aggregationRule = AggregationRule.senderDedup(member, protocolVersion)
           logger.debug(
             s"Adding aggregation rule $aggregationRule to submission request with message ID $messageId"
           )
@@ -915,9 +912,9 @@ abstract class SequencerClientImpl(
       onCleanHandler: Traced[SequencerCounterCursorPrehead] => Unit = _ => (),
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     sequencerCounterTrackerStore.preheadSequencerCounter.flatMap { cleanPrehead =>
-      val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(
-        _.timestamp
-      ) // Sequencer client will feed events right after this ts to the handler.
+      // Sequencer client will feed events right after this ts to the handler.
+      val priorTimestamp = subscriptionTimestamp(cleanPrehead.map(_.timestamp))
+
       val cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         sequencerCounterTrackerStore,
         onCleanHandler,
@@ -1343,9 +1340,9 @@ class RichSequencerClientImpl(
         }
 
         // bulk-feed the event handler with everything that we already have in the SequencedEventStore
-        replayStartTimeInclusive = initialPriorEventO
-          .fold(CantonTimestamp.MinValue)(_.timestamp)
-          .immediateSuccessor
+        replayStartTimeInclusive = subscriptionTimestamp(
+          initialPriorEventO.map(_.timestamp)
+        ).immediateSuccessor
         _ = logger.info(
           s"Processing events from the SequencedEventStore from $replayStartTimeInclusive on"
         )
@@ -1373,7 +1370,7 @@ class RichSequencerClientImpl(
         _ = replayEvents.lastOption
           .orElse(initialPriorEventO)
           .foreach(event => timeTracker.subscriptionResumesAfter(event.timestamp))
-        _ <- throttledEventHandler.subscriptionStartsAt(subscriptionStartsAt, timeTracker)
+        _ <- throttledEventHandler.subscriptionStartsAt(subscriptionStartsAt)
 
         eventBatches = replayEvents.grouped(config.eventInboxSize.unwrap)
         _ <-
@@ -1895,9 +1892,9 @@ class SequencerClientImplPekko[E: Pretty](
         }
 
         // bulk-feed the event handler with everything that we already have in the SequencedEventStore
-        replayStartTimeInclusive = initialPriorEventO
-          .fold(CantonTimestamp.MinValue)(_.timestamp)
-          .immediateSuccessor
+        replayStartTimeInclusive = subscriptionTimestamp(
+          initialPriorEventO.map(_.timestamp)
+        ).immediateSuccessor
         _ = logger.info(
           s"Processing events from the SequencedEventStore from $replayStartTimeInclusive on"
         )
@@ -1926,7 +1923,7 @@ class SequencerClientImplPekko[E: Pretty](
         _ = replayEvents.lastOption
           .orElse(initialPriorEventO)
           .foreach(event => timeTracker.subscriptionResumesAfter(event.timestamp))
-        _ <- throttledEventHandler.subscriptionStartsAt(subscriptionStartsAt, timeTracker)
+        _ <- throttledEventHandler.subscriptionStartsAt(subscriptionStartsAt)
       } yield {
         val preSubscriptionEvent = replayEvents.lastOption
           .map { event =>

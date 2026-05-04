@@ -24,10 +24,10 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.daml.lf.engine.Enricher
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   FatContractInstance,
   GlobalKey,
   SubmittedTransaction,
-  TransactionCoder,
 }
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.{Value, ValueCoder}
@@ -62,7 +62,7 @@ object EnrichedTransactionData {
     /** Return the created event blob for this contract. This does not contain any enrichment.
       */
     def toCreateEventBlob: Either[ValueCoder.EncodeError, ByteString] =
-      TransactionCoder.encodeFatContractInstance(originalContract)
+      ContractInstanceCoder.encodeFatContractInstance(originalContract)
   }
 }
 

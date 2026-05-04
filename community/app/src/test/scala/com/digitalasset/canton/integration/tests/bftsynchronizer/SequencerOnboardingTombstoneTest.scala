@@ -29,6 +29,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import monocle.macros.syntax.lens.*
 
@@ -61,7 +62,7 @@ trait SequencerOnboardingTombstoneTest
         )
       }
 
-  "Basic participants startup, connect to synchronizer via sequencer1, and ping" in {
+  "Basic participants startup, connect to synchronizer via sequencer1, and ping" onlyRunWith (ProtocolVersion.v34) in {
     implicit env =>
       import env.*
 
@@ -82,51 +83,55 @@ trait SequencerOnboardingTombstoneTest
       participant1.health.ping(participant1.id)
   }
 
-  "Take mediator down and thus produce long-running transaction" in { implicit env =>
-    import env.*
+  "Take mediator down and thus produce long-running transaction" onlyRunWith (ProtocolVersion.v34) in {
+    implicit env =>
+      import env.*
 
-    mediator1.stop()
-    participant1.dars.upload(CantonExamplesPath)
+      mediator1.stop()
+      participant1.dars.upload(CantonExamplesPath)
 
-    // Submit a long-running transaction that mediator1 can only accept or reject after
-    // participant1 disconnects from sequencer1.
-    val cycle =
-      new com.digitalasset.canton.examples.java.cycle.Cycle(
-        "My-Cycle",
-        participant1.id.adminParty.toProtoPrimitive,
-      ).create.commands.asScala.toSeq
-    participant1.ledger_api.javaapi.commands.submit_async(
-      Seq(participant1.id.adminParty),
-      cycle,
-      commandId = "long-running-tx-id",
-    )
+      // Submit a long-running transaction that mediator1 can only accept or reject after
+      // participant1 disconnects from sequencer1.
+      val cycle =
+        new com.digitalasset.canton.examples.java.cycle.Cycle(
+          "My-Cycle",
+          participant1.id.adminParty.toProtoPrimitive,
+        ).create.commands.asScala.toSeq
+      participant1.ledger_api.javaapi.commands.submit_async(
+        Seq(participant1.id.adminParty),
+        cycle,
+        commandId = "long-running-tx-id",
+      )
 
-    // Make sure that the participant's request has reached the sequencer
-    Threading.sleep(200)
+      // Make sure that the participant's request has reached the sequencer
+      Threading.sleep(200)
   }
 
-  "Onboard sequencer2 using snapshot from sequencer1" in { implicit env =>
-    import env.*
+  "Onboard sequencer2 using snapshot from sequencer1" onlyRunWith (ProtocolVersion.v34) in {
+    implicit env =>
+      import env.*
 
-    onboardNewSequencer(
-      // synchronizerId,
-      initializedSynchronizers(daName).physicalSynchronizerId,
-      newSequencer = sequencer2,
-      existingSequencer = sequencer1,
-      synchronizerOwners = initializedSynchronizers(daName).synchronizerOwners,
-    )
+      onboardNewSequencer(
+        // synchronizerId,
+        initializedSynchronizers(daName).physicalSynchronizerId,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
+        synchronizerOwners = initializedSynchronizers(daName).synchronizerOwners,
+      )
 
-    // Wait until participant1 has become aware of sequencer2.
-    eventually() {
-      val sequencerIds = participant1.topology.sequencers
-        .list(store = initializedSynchronizers(daName).synchronizerId)
-        .flatMap(_.item.active)
-      sequencerIds should contain(sequencer2.id)
-    }
+      // Wait until participant1 has become aware of sequencer2.
+      eventually() {
+        val sequencerIds = participant1.topology.sequencers
+          .list(store = initializedSynchronizers(daName).synchronizerId)
+          .flatMap(_.item.active)
+        sequencerIds should contain(sequencer2.id)
+      }
   }
 
   // TODO(#31863): remove this and related tests along with the sequencer tombstones logic once we discontinue protocol version 34
-  "Switch participant1 to sequencer2 and observe synchronizer disconnect due to tombstone" in {
+  //   The test no longer works with pv35+ because we don't use topologyTimestamp for verdicts anymore, so the
+  //   Sequencer doesn't fail anymore
+  "Switch participant1 to sequencer2 and observe synchronizer disconnect due to tombstone" onlyRunWith (ProtocolVersion.v34) in {
     implicit env =>
       import env.*
 
@@ -241,7 +246,7 @@ trait SequencerOnboardingTombstoneTest
       )
   }
 
-  "Switch participant1 back to sequencer1 to consume event tombstoned on sequencer2" in {
+  "Switch participant1 back to sequencer1 to consume event tombstoned on sequencer2" onlyRunWith (ProtocolVersion.v34) in {
     implicit env =>
       import env.*
 
@@ -268,7 +273,7 @@ trait SequencerOnboardingTombstoneTest
       )
   }
 
-  "Finally switch participant1 back to sequencer2 to consume events past tombstone" in {
+  "Finally switch participant1 back to sequencer2 to consume events past tombstone" onlyRunWith (ProtocolVersion.v34) in {
     implicit env =>
       import env.*
 

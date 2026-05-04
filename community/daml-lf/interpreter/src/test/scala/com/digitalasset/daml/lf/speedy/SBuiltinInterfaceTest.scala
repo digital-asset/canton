@@ -37,13 +37,15 @@ class SBuiltinInterfaceTestDevLf
       Compiler.Config.Dev,
     )
 
-class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
+class SBuiltinInterfaceUpgradeImplementationTest
+    extends AnyFreeSpec
+    with Matchers
+    with Inside
+    with SuppressingLogging {
 
-  import EvalHelpers._
+  import EvalHelpers.*
 
-  // TODO: revert to the default version and compiler config once they support upgrades
-  // TODO https://github.com/digital-asset/daml/issues/22365 further adopt feature ranges
-  val languageVersion = LanguageVersion.featurePackageUpgrades.versionRange.min
+  val languageVersion = LanguageVersion.defaultLfVersion
   val compilerConfig = Compiler.Config.Dev
 
   val alice = Ref.Party.assertFromString("Alice")
@@ -86,7 +88,7 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
   // of version 2 of the package returns 2, etc.
   val implemPkgName = Ref.PackageName.assertFromString("-implem-pkg-")
   def implemPkgVersion(pkgVersion: Int) =
-    Ref.PackageVersion.assertFromString(s"${pkgVersion}.0.0")
+    Ref.PackageVersion.assertFromString(s"$pkgVersion.0.0")
   def implemPkgId(pkgVersion: Int) =
     Ref.PackageId.assertFromString(s"-implem-pkg-id-$pkgVersion-")
   def implemParserParams(pkgVersion: Int) = ParserParameters(
@@ -176,7 +178,7 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
         case Success(
               Left(SErrorDamlException(IE.ContractDoesNotImplementInterface(iface, _, tid)))
             ) =>
-          iface shouldBe Ref.TypeConId.assertFromString(s"${ifacePkgId}:Mod:IfaceB")
+          iface shouldBe Ref.TypeConId.assertFromString(s"$ifacePkgId:Mod:IfaceB")
           tid shouldBe Ref.TypeConId.assertFromString(s"${implemPkgId(1)}:Mod:T")
       }
     }
@@ -185,7 +187,7 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
       inside(
         exerciseNewInstance(2, 2)
       ) { case Success(result) =>
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
 
@@ -193,7 +195,7 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
       inside(
         exerciseNewInstance(1, 2)
       ) { case Success(result) =>
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
 
@@ -204,21 +206,23 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
         case Success(
               Left(SErrorDamlException(IE.ContractDoesNotImplementInterface(iface, _, tid)))
             ) =>
-          iface shouldBe Ref.TypeConId.assertFromString(s"${ifacePkgId}:Mod:IfaceB")
+          iface shouldBe Ref.TypeConId.assertFromString(s"$ifacePkgId:Mod:IfaceB")
           tid shouldBe Ref.TypeConId.assertFromString(s"${implemPkgId(1)}:Mod:T")
       }
     }
   }
 }
 
-class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
+class SBuiltinInterfaceUpgradeViewTest
+    extends AnyFreeSpec
+    with Matchers
+    with Inside
+    with SuppressingLogging {
 
-  import EvalHelpers._
+  import EvalHelpers.*
   import org.scalatest.Inspectors.forEvery
 
-  // TODO: revert to the default version and compiler config once they support upgrades
-  // TODO https://github.com/digital-asset/daml/issues/22365 further adopt feature ranges
-  val languageVersion = LanguageVersion.featurePackageUpgrades.versionRange.min
+  val languageVersion = LanguageVersion.defaultLfVersion
   val compilerConfig = Compiler.Config.Dev
 
   val alice = Ref.Party.assertFromString("Alice")
@@ -257,7 +261,7 @@ class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with In
   val implemPkgName = Ref.PackageName.assertFromString("-implem-pkg-")
 
   def implemPkgVersion(pkgVersion: Int) =
-    Ref.PackageVersion.assertFromString(s"${pkgVersion}.0.0")
+    Ref.PackageVersion.assertFromString(s"$pkgVersion.0.0")
 
   def implemParserParams(pkgVersion: Int) = ParserParameters(
     defaultPackageId = Ref.PackageId.assertFromString(s"-implem-pkg-id-$pkgVersion-"),
@@ -349,7 +353,7 @@ class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with In
           committers = Set(alice),
         )
       ) { case Success(result) =>
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
   }
@@ -369,7 +373,7 @@ class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with In
           committers = Set(alice),
         )
       ) { case Success(result) =>
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
   }
@@ -378,7 +382,7 @@ class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with In
   "view_interface" - {
 
     def toSNat(n: Int): SValue = {
-      implicit val parserParameters: ParserParameters[_] = ifaceParserParams
+      implicit val parserParameters: ParserParameters[?] = ifaceParserParams
       if (n == 0)
         SVariant(i"Mod:Nat", n"Zero", 1, SUnit)
       else
@@ -439,13 +443,13 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
     with Inside
     with SuppressingLogging {
 
-  import EvalHelpers._
+  import EvalHelpers.*
   val helpers = new SBuiltinInterfaceTestHelpers(languageVersion, compilerConfig)
-  import helpers._
+  import helpers.*
 
   "Interface operations" - {
     val iouTypeRep =
-      Ref.TypeConId.assertFromString(s"${basePkgId}:Mod:Iou")
+      Ref.TypeConId.assertFromString(s"$basePkgId:Mod:Iou")
     implicit val parserParameters: ParserParameters[helpers.type] = basePkgParserParams
 
     val testCases = Table[String, SValue](
@@ -557,7 +561,7 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
             committers = Set(alice),
           )
         ) { case Success(result) =>
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         }
 
         inside(
@@ -587,7 +591,7 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
             committers = Set(alice),
           )
         ) { case Success(result) =>
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         }
       }
 
@@ -754,8 +758,7 @@ object EvalHelpers {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       getPkg: PartialFunction[Ref.PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
-        PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
   )(implicit loggingContext: NamedLoggingContext): Try[Either[SError, SValue]] =

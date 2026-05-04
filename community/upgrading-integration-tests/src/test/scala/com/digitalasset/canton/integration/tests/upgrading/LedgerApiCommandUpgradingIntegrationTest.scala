@@ -25,7 +25,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
@@ -212,11 +212,11 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
               .commands(),
             mutateDisclosedContract = (disclosedContract: DisclosedContract) =>
               new DisclosedContract(
-                TransactionCoder
+                ContractInstanceCoder
                   .decodeFatContractInstance(disclosedContract.createdEventBlob)
                   .valueOrFail("unexpected decode failure")
                   .setAuthenticationData(Bytes.assertFromString("abcdef"))
-                  .pipe(TransactionCoder.encodeFatContractInstance)
+                  .pipe(ContractInstanceCoder.encodeFatContractInstance)
                   .valueOrFail("encode failed"),
                 disclosedContract.synchronizerId.get(),
                 disclosedContract.templateId,

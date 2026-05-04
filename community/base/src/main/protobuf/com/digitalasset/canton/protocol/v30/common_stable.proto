@@ -34,7 +34,16 @@ message AggregationRule {
   // Members who are allowed to send a request for the underlying aggregation.
   // Must contain SubmissionRequest.sender, otherwise the request is rejected.
   // Must have at least threshold many elements.
+  // Starting with pv35, the list of eligible members uses "Recipients" instead of UIDs, but
+  // Disallows mixing different types of recipients (so mediator group cannot be mixed with a member recipient).
+  // The options are:
+  //   - mediator group
+  //   - all sequencers of synchronizer
+  //   - actual list of members
+  //   - empty list (which means "sender only" and is used to for deduplication)
   repeated string eligible_members = 1;
+  // The minimum number of signatures required for the underlying aggregation.
+  // Used in pv34 or for p35 and later, if eligible_members contains UIDs.
   int32 threshold = 2;
 }
 

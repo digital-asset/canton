@@ -60,11 +60,11 @@ object Error {
     final case class AllowedLanguageVersion(
         packageId: Ref.PackageId,
         languageVersion: language.LanguageVersion,
-        allowedLanguageVersions: VersionRange[language.LanguageVersion],
+        allowedLanguageVersions: Seq[language.LanguageVersion],
     ) extends Error {
       def message: String =
         s"Disallowed language version in package $packageId: " +
-          s"Expected version range is ${allowedLanguageVersions.pretty} but got ${languageVersion.pretty}"
+          s"Expected version range is ${allowedLanguageVersions.map(_.pretty)} but got ${languageVersion.pretty}"
     }
 
     final case class DarSelfConsistency(

@@ -131,15 +131,15 @@ class TrafficPurchasedSubmissionHandler(
         )
       activeSequencers <- EitherT.fromOption[FutureUnlessShutdown](
         NonEmpty
-          .from(sequencerGroup.active.map(_.member)),
+          .from(sequencerGroup.active),
         ErrorUtil.invalidState(
           "No active sequencers found on the synchronizer. There should at least be one sequencer."
         ),
       )
-      aggregationRule = AggregationRule(
-        eligibleSenders = activeSequencers,
+      aggregationRule = AggregationRule.activeSequencers(
+        sequencers = activeSequencers,
         threshold = sequencerGroup.threshold,
-        protocolVersion,
+        protocolVersion = protocolVersion,
       )
       setTrafficPurchasedMessage = SetTrafficPurchasedMessage.apply(
         member,

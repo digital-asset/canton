@@ -113,6 +113,12 @@ final case class IssueBucket(number: Int) extends Bucket {
   override val withinClassPosition = number
 }
 
+final case class OssIssueBucket(number: Int) extends Bucket {
+  override val name = "OSS Issue " + number.toString
+  override val classPosition = 6 // after TagBucket(1), MilestoneBucket(2), IssueBucket(3), UnknownBucket(4), UnassignedBucket(5)
+  override val withinClassPosition = number
+}
+
 object UnknownBucket extends Bucket {
   override val name = "Unknown category"
   override val classPosition = 4
@@ -141,10 +147,16 @@ final case class Tag(tags: List[String]) extends RegexCategory {
   override def getBucket(name: String) = TagBucket(tags.head)
 }
 
+def extractIssueNumber(str: String): Int =
+  "[0-9]+".r.findFirstMatchIn(str) match {
+    case None => throw new RuntimeException("The given string isn't an issue")
+    case Some(m) => m.matched.toInt
+  }
+
 object Issue extends RegexCategory {
   override val regex = "[i#][0-9]+".r
 
-  override def getBucket(str: String) = numsToIssue(str)
+  override def getBucket(str: String) = IssueBucket(extractIssueNumber(str))
 }
 
 object Milestone extends RegexCategory {
@@ -157,14 +169,13 @@ object Milestone extends RegexCategory {
 object GithubIssueLink extends RegexCategory {
   override val regex: Regex = "canton/issues/[0-9]+".r
 
-  override def getBucket(str: String): Bucket = numsToIssue(str)
+  override def getBucket(str: String): Bucket = IssueBucket(extractIssueNumber(str))
 }
 
-def numsToIssue(str: String): IssueBucket = {
-  "[0-9]+".r.findFirstMatchIn(str) match {
-    case None => throw new RuntimeException("The given string isn't an issue")
-    case Some(m) => IssueBucket(m.matched.toInt)
-  }
+object OssGithubIssueLink extends RegexCategory {
+  override val regex: Regex = "digital-asset/canton/issues/[0-9]+".r
+
+  override def getBucket(str: String): Bucket = OssIssueBucket(extractIssueNumber(str))
 }
 
 val tags: List[RegexCategory] = List(
@@ -172,7 +183,7 @@ val tags: List[RegexCategory] = List(
   Tag(List("GA", "1.0.0", "1.0")),
 )
 
-val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone)
+val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone, OssGithubIssueLink)
 
 val todoPatterns = Seq("TODO", "XXX", "FIXME")
 val todoPatternRegexpStr = todoPatterns.map(str => s"($str)").mkString("|")
@@ -257,10 +268,15 @@ val openIssues: Set[Int] = "gh issue list --limit 2500 --json number --jq '.[].n
   .map(_.toInt)
   .toSet
 
+val openOssIssues: Set[Int] = "gh issue list --repo digital-asset/canton --limit 2500 --json number --jq '.[].number'".!!.split("\n")
+  .map(_.toInt)
+  .toSet
+
 // Issues that have dangling TODOs (e.g., in sql files)
 val ignoredIssues: Set[Int] = Set(282923)
 
 println(s"Found ${openIssues.size} open issues: ${openIssues.mkString(", ")}")
+println(s"Found ${openOssIssues.size} open OSS issues: ${openOssIssues.mkString(", ")}")
 
 val projectRoot = "." // CI scripts are called from the project root
 
@@ -354,6 +370,9 @@ val table = pairsToMap(scalaStyleIssuesTable ++ rstStyleIssuesTable)
 
 val issuesNotOpen = table.filter {
   case (IssueBucket(i), _) => ((!openIssues.contains(i)) || fixedIssuesCurrentPR.contains(i)) && !ignoredIssues.contains(i)
+  // fixedIssuesCurrentPR is not checked for OSS issues: it parses "fixes #<n>" from the internal PR body,
+  // which never references OSS issue numbers.
+  case (OssIssueBucket(i), _) => !openOssIssues.contains(i)
   case _ => false
 }
 

@@ -35,6 +35,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import java.io.BufferedInputStream
@@ -46,11 +47,11 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Download sequencer snapshot at given point in time to bootstrap another sequencer"
   )
-  @Help.Description("""It is recommended to use onboarding_state_for_sequencer for onboarding
-      |a new sequencer.""")
-  def snapshot(timestamp: CantonTimestamp): SequencerSnapshot =
+  @Help.Description("""This method is only used for testing.
+      |It is recommended to use onboarding_state_for_sequencer for onboarding a new sequencer.""")
+  def snapshot(timestamp: CantonTimestamp, protocolVersion: ProtocolVersion): SequencerSnapshot =
     consoleEnvironment.run {
-      runner.adminCommand(SequencerAdminCommands.Snapshot(timestamp))
+      runner.adminCommand(SequencerAdminCommands.Snapshot(timestamp, protocolVersion))
     }
 
   @Help.Summary(

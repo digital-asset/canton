@@ -67,7 +67,6 @@ class IssSegmentModule[E <: Env[E]](
     parent: ModuleRef[Consensus.Message[E]],
     availability: ModuleRef[Availability.Message[E]],
     p2pNetworkOut: ModuleRef[P2PNetworkOut.Message],
-    blockCompletionTimeout: FiniteDuration,
     emptyBlockCreationTimeout: FiniteDuration,
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
@@ -84,7 +83,7 @@ class IssSegmentModule[E <: Env[E]](
   private val viewChangeTimeoutManager =
     new TimeoutManager[E, ConsensusSegment.Message, BlockNumber](
       loggerFactory,
-      blockCompletionTimeout,
+      segmentState.epoch.currentMembership.orderingTopology.sequencingParameters.pbftViewChangeTimeout.toScala,
       segmentState.segment.firstBlockNumber,
     )
 

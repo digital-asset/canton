@@ -50,15 +50,15 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   protected val ledgerApiTestToolPlugins: Map[ReleaseVersion, UseLedgerApiTestTool] =
     testedReleases
-      .filter { release =>
+      .filter { tested =>
         // This is initial filtering of versions -> done to prevent downloading of too many historic versions
-        versionShouldBeChecked(release.releaseVersion)
+        versionShouldBeChecked(tested.releaseVersion)
       }
-      .map { release =>
-        release.releaseVersion -> new UseLedgerApiTestTool(
+      .map { tested =>
+        tested.releaseVersion -> new UseLedgerApiTestTool(
           loggerFactory = loggerFactory,
           connectedSynchronizersCount = connectedSynchronizersCount,
-          version = LAPITTVersion.Explicit(release.ledgerApiTestTool),
+          version = LAPITTVersion.Explicit(tested.releaseVersion),
         )
       }
       .toMap
@@ -76,11 +76,27 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       .runShardedSuites(
         shard,
         numShards,
-        exclude = excludedTests() ++ jsonExclusions,
+        exclude = excludedTests(version) ++ jsonExclusions,
         useJson = useJsonApi,
       )(env)
   }
-  def excludedTests(): Seq[String] = LedgerApiConformanceBase.excludedTests
+  def excludedTests(version: ReleaseVersion): Seq[String] = {
+    val perReleaseExclusions =
+      if (version.majorMinor == (3, 4))
+        Seq(
+          // 3.4 returns "UNKNOWN_INFORMEES" while the test tool expects "Party not known on ledger".
+          "ClosedWorldIT:ClosedWorldObserver",
+          // 3.5 changed the invalid synchronizer-id error message; the 3.4 test tool still expects
+          // the old "Invalid unique identifier ... with missing namespace" wording.
+          "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionInvalidSynchronizerId",
+          "InteractiveSubmissionServiceIT:ISSExecuteAndWaitInvalidSynchronizerId",
+          // 3.5 accepts duplicate disclosed contracts with the same payload (idempotence);
+          // the 3.4 test tool still expects them to be rejected.
+          "ExplicitDisclosureIT:EDDuplicates",
+        )
+      else Seq.empty
+    LedgerApiConformanceBase.excludedTests ++ perReleaseExclusions
+  }
 
 }
 
@@ -127,7 +143,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
 
   registerPlugin(externalSynchronizer)
 
-  testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
+  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
       .retrieve(release)
       .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
@@ -143,8 +159,16 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
         externalSynchronizer.start(remoteSequencer1.name, cantonReleaseVersion)
         participants.local.start()
 
-        remoteSequencer1.health.wait_for_ready_for_initialization()
-        remoteMediator1.health.wait_for_ready_for_initialization()
+        clue(
+          "Waiting for remote sequencer1 to be ready for initialization. If this fails check the logs of the external process for any errors"
+        ) {
+          remoteSequencer1.health.wait_for_ready_for_initialization()
+        }
+        clue(
+          "Waiting for remote mediator1 to be ready for initialization. If this fails check the logs of the external process for any errors"
+        ) {
+          remoteMediator1.health.wait_for_ready_for_initialization()
+        }
 
         val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
         NetworkBootstrapper(
@@ -203,7 +227,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
 
   registerPlugin(external)
 
-  testedReleases.foreach { case TestedRelease(_, release, protocolVersions) =>
+  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
       .retrieve(release)
       .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
@@ -278,11 +302,10 @@ private[continuity] object ProtocolContinuityConformanceTest {
         }
 
     val previousSupportedReleases = for {
-      testToolRelease <- UseLedgerApiTestTool.latestReleases(logger)
-      releaseVersion = ReleaseVersion.tryCreate(testToolRelease.version)
-      if releaseVersion < current
-      pvs <- eligibleMinors.get(releaseVersion.majorMinor).toList
-    } yield TestedRelease(testToolRelease, releaseVersion, pvs)
+      release <- UseLedgerApiTestTool.latestReleases(logger)
+      if release < current
+      pvs <- eligibleMinors.get(release.majorMinor).toList
+    } yield TestedRelease(release, pvs)
     // Keep only the latest patch per (major, minor)
     val latestPatchPerMinor = previousSupportedReleases
       .groupBy(_.releaseVersion.majorMinor)
@@ -305,16 +328,72 @@ private[continuity] object ProtocolContinuityConformanceTest {
   ): TestedRelease =
     previousSupportedReleases(logger).last1
 
-  private[continuity] val removeConfigPaths: Set[(String, Option[(String, Any)])] =
-    (1 to 3)
-      .flatMap(p =>
-        Seq(
-          s"participants.participant$p.parameters.ledger-api-server.indexer.achs-config.buffer-size",
-          s"participants.participant$p.ledger-api.index-service.contract-pruning-delay-before-retry",
-          s"participants.participant$p.ledger-api.index-service.contract-pruning-max-retries",
-        )
+  private[continuity] val removeConfigPaths: Set[(String, Option[(String, Any)])] = {
+    val topLevel = Seq(
+      "monitoring.logging.api.debug-in-process-requests",
+      "monitoring.logging.api.prefix-grpc-addresses",
+      "monitoring.sanitize-public-error-messages",
+    )
+    val perParticipant = (1 to 3).flatMap { p =>
+      val base = s"participants.participant$p"
+      Seq(
+        s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.crypto.parallelism",
+        s"$base.crypto.session-signing-keys",
+        s"$base.ledger-api.index-service.contract-pruning-delay-before-retry",
+        s"$base.ledger-api.index-service.contract-pruning-max-retries",
+        s"$base.ledger-api.index-service.max-lookup-limit",
+        s"$base.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party",
+        s"$base.ledger-api.max-concurrent-calls-per-connection",
+        s"$base.ledger-api.postgres-data-source.client-connection-check-interval",
+        s"$base.ledger-api.postgres-data-source.network-timeout",
+        s"$base.ledger-api.state-service",
+        s"$base.ledger-api.update-service",
+        s"$base.parameters.alpha-multi-synchronizer-support",
+        s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.parameters.commit-after-failed-activeness-check",
+        s"$base.parameters.ledger-api-server.indexer.achs-config",
+        s"$base.parameters.ledger-api-server.indexer.postgres-data-source",
+        s"$base.parameters.ledger-api-server.indexer.submission-batch-insertion-size",
+        s"$base.parameters.ledger-api-server.indexer.use-weighted-batching",
+        s"$base.parameters.lsu",
+        s"$base.sequencer-client.channel-flow-control-window",
+        s"$base.sequencer-client.channel-max-inbound-message-size",
       )
+    }
+    val perMediator = {
+      val base = "mediators.mediator1"
+      Seq(
+        s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.caching.bft-ordering-batch-cache",
+        s"$base.crypto.parallelism",
+        s"$base.crypto.session-signing-keys",
+        s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.sequencer-client.channel-flow-control-window",
+        s"$base.sequencer-client.channel-max-inbound-message-size",
+      )
+    }
+    val perSequencer = {
+      val base = "sequencers.sequencer1"
+      Seq(
+        s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.crypto.parallelism",
+        s"$base.crypto.session-signing-keys",
+        s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.parameters.delay-requests-before-lsu-traffic-init",
+        s"$base.parameters.lsu-repair",
+        s"$base.parameters.produce-post-ordering-topology-ticks",
+        s"$base.parameters.unsafe-sequencer-channel-support",
+        s"$base.parameters.disable-submission-checks-for-testing",
+        s"$base.public-api.max-concurrent-calls-per-connection",
+        s"$base.sequencer-client.channel-flow-control-window",
+        s"$base.sequencer-client.channel-max-inbound-message-size",
+        s"$base.sequencer.block.circuit-breaker.messages.lsu-sequencing-test",
+      )
+    }
+    (topLevel ++ perParticipant ++ perMediator ++ perSequencer)
       .map(_ -> Option.empty[(String, Any)])
       .toSet
+  }
 
 }

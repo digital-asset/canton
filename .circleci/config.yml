@@ -4,7 +4,7 @@ _canton_docker_executor:
     auth:
         password: $DOCKERHUB_PASSWORD
         username: $DOCKERHUB_USERNAME
-    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
 _postgres_docker_executor:
     command: |-
         postgres
@@ -718,7 +718,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1234,7 +1234,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 3200M
@@ -1246,7 +1246,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1276,7 +1276,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 12000M
@@ -1288,7 +1288,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1318,7 +1318,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1330,7 +1330,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1341,7 +1341,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1371,7 +1371,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 2500M
             EXECUTOR_JVM_METASPACE_SIZE: 400M
@@ -1383,7 +1383,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 1200M
             EXECUTOR_JVM_METASPACE_SIZE: 200M
@@ -1395,7 +1395,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 6500M
             EXECUTOR_JVM_METASPACE_SIZE: 3100M
@@ -1407,7 +1407,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1437,7 +1437,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1468,7 +1468,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1493,7 +1493,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1518,7 +1518,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1543,7 +1543,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1568,7 +1568,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-7f0156c1dd7f
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -2300,6 +2300,7 @@ jobs:
             - check_number_of_successes:
                 job_name: stability_crash_recovery_test
                 min_successes: 32
+            - checkout
             - slack_red_main_with_volunteer
     stability_sequential_test:
         executor: canton-xlarge-docker-with-postgres
@@ -2481,6 +2482,7 @@ jobs:
                 destination: log
                 name: Store test logs as artifacts (if any)
                 path: log
+            - checkout
             - slack_red_main_with_volunteer
     test_ping_windows:
         executor: medium-windows-machine

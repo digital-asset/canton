@@ -235,7 +235,8 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
       {
         if (racyTopologyStateCrashRecovery) {
           (1 to 3).foreach { idx =>
-            val threshold = if (idx % 2 == 0) 2 else 4
+            val threshold = 2 + idx % 3
+            logger.info("Testing with threshold " + threshold)
             adjustMediatorThreshold(PositiveInt.tryCreate(threshold))
             val p1Runner = runners.headOption.value
             p1Runner.setActive(false)
@@ -253,10 +254,24 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
                 trs.item.threshold.value shouldBe threshold
               }
             }
+
             Threading.sleep(2000) // let it progress a bit
 
           }
         }
+
+        // we cycle through all sequencers to increase the chance of triggering crash recovery
+        // and bft issues (we use threshold = 2 in the test).
+        logger.debug("Starting to cycle sequencers")
+        Seq(sequencer1, sequencer2, sequencer3, sequencer1, sequencer2, sequencer3).foreach { seq =>
+          clue(s"cycling ${seq.name}") {
+            seq.stop()
+            seq.start()
+          }
+        }
+
+        logger.debug("Completed cycling sequencers")
+
         val res = waitTimeout
           .await("waiting for per runners to complete")(
             runnerF
@@ -274,7 +289,11 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
       },
       forEvery(_)(
         acceptableLogMessageExt(
-          Seq("SUBMISSION_SYNCHRONIZER_NOT_READY", "No connection available"),
+          Seq(
+            "SUBMISSION_SYNCHRONIZER_NOT_READY",
+            "No connection available",
+            "Is the server running",
+          ),
           Seq(),
         )
       ),

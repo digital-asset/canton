@@ -133,7 +133,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     implicit val c: BftBlockOrdererConfig = config
     val leaderSelectionPolicyFactory = LeaderSelectionInitializer.create[E](
       node,
-      config,
       synchronizerProtocolVersion,
       stores.outputStore,
       timeouts,
@@ -275,7 +274,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
               storePbftMessages = true,
               stores.epochStore,
               dependencies,
-              config.consensusBlockCompletionTimeout,
               config.consensusEmptyBlockCreationTimeout,
               loggerFactory,
               timeouts,

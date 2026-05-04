@@ -113,7 +113,7 @@ sealed abstract class TransactionVersionIntegrationTest
           .andThen(Focus[SerializableContract].apply(_.rawContractInstance))
           .modify { c =>
             val tocBuilder = TransactionOuterClass.ThinContractInstance
-              .newBuilder(TransactionCoder.encodeContractInstance(c.contractInstance).value)
+              .newBuilder(ContractInstanceCoder.encodeContractInstance(c.contractInstance).value)
             val vv = ValueOuterClass.VersionedValue
               .newBuilder(tocBuilder.getArgVersioned)
               .setVersion("3.99")
