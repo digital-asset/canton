@@ -140,6 +140,7 @@ object DamlLfFeature {
 
   val featureExternalCall = DamlLfFeature(
     name = "External Call",
+    cppFlag = "DAML_ExternalCall",
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
