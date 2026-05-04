@@ -1929,10 +1929,9 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
 
   }
 
-  private[this] def mkEnv(languageVersion: LV) = {
-    val pkg = parsePackage(
-      languageVersion,
-      """
+  private[this] val env = {
+    val pkg =
+      p"""
        metadata ( 'pkg' : '1.0.0' )
 
        module Mod {
@@ -1998,19 +1997,12 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
          exception E = { message \(e: Mod:E) -> Mod:E {message} e };
 
        }
-     """,
-    )
+     """
     Typing.Env(
-      languageVersion,
+      LV.defaultLfVersion,
       PackageInterface(Map(defaultPackageId -> pkg)),
       Context.None,
     )
   }
-
-  private[this] def parsePackage(languageVersion: LV, source: String): Package =
-    new SyntaxHelper(StringContext(source))
-      .p[this.type]()(parserParameters.copy(languageVersion = languageVersion))
-
-  private[this] val env = mkEnv(LV.defaultLfVersion)
 
 }
