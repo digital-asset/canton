@@ -4687,11 +4687,17 @@ External call functions
 
 * ``EXTERNAL_CALL : 'Text' → 'Text' → 'Text' → 'Text' → 'Update' 'Text'``
 
-  Represents an external call request in LF. The first argument is the extension
-  identifier, the second argument is the function identifier, the third argument
-  is the hexadecimal-encoded configuration hash, and the fourth argument is the
-  hexadecimal-encoded input payload. The update result carries the
-  hexadecimal-encoded output payload.
+  Requests an external call. The first argument is the extension identifier, the
+  second argument is the function identifier, the third argument is the
+  canonical lowercase hexadecimal-encoded configuration hash, and the fourth
+  argument is the canonical lowercase hexadecimal-encoded input payload. The
+  result is the canonical lowercase hexadecimal-encoded output payload.
+  Successful evaluation requires an enclosing exercise context, and records the
+  external call result on the nearest enclosing exercise node.
+  Evaluation fails with a runtime error if no enclosing exercise context
+  exists, if the configuration hash, input payload, or output payload is
+  malformed or non-canonical hexadecimal, or if the external call cannot be
+  completed successfully.
 
   [*Available in version >= 2.dev*]
 

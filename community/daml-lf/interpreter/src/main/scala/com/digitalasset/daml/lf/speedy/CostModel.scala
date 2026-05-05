@@ -58,6 +58,7 @@ abstract class CostModel {
   val BSHA256Text: CostFunction1[Text]
   val BSHA256Hex: CostFunction1[Text]
   val BKECCAK256Text: CostFunction1[Text]
+  val BExternalCall: CostFunction1[Text]
   val BSECP256K1Bool: CostFunction3[Text, Text, Text]
   val BSECP256K1WithEcdsaBool: CostFunction3[Text, Text, Text]
   val BSECP256K1ValidateKey: CostFunction1[Text]
@@ -271,6 +272,7 @@ object CostModel {
     override val BSHA256Text: CostFunction1[Text] = CostFunction1.Null
     override val BSHA256Hex: CostFunction1[Text] = CostFunction1.Null
     override val BKECCAK256Text: CostFunction1[Text] = CostFunction1.Null
+    override val BExternalCall: CostFunction1[Text] = CostFunction1.Null
     override val BSECP256K1Bool: CostFunction3[Text, Text, Text] = CostFunction3.Null
     override val BSECP256K1WithEcdsaBool: CostFunction3[Text, Text, Text] = CostFunction3.Null
     override val BSECP256K1ValidateKey: CostFunction1[Text] = CostFunction1.Null
@@ -853,6 +855,9 @@ object CostModel {
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(64))
     override val BKECCAK256Text: CostFunction1[Text] =
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(64))
+    // TODO(https://github.com/digital-asset/canton/issues/513): Replace this placeholder when external-call cost policy is wired.
+    override val BExternalCall: CostFunction1[Text] =
+      CostFunction1.Null
     override val BSECP256K1Bool: CostFunction3[Text, Text, Text] =
       CostFunction3.Constant(SBoolSize)
     override val BSECP256K1WithEcdsaBool: CostFunction3[Text, Text, Text] =
