@@ -1896,7 +1896,7 @@ class UpgradesMatrixCases(
 
   val engineConfig: EngineConfig =
     EngineConfig(
-      allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion)
+      allowedLanguageVersions = language.LanguageVersion.allLfVersions.filter(_ <= langVersion)
     )
 
   val contractIdVersion: ContractIdVersion = ContractIdVersion.V1

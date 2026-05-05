@@ -52,31 +52,31 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
 
     val c1 = createContract(party)
     val c2 = createContract(party)
-    val cn1 = c1.inst.toCreateNode
+    val cn1 = c1
     val reassignmentAccepted1 =
       mkReassignmentAccepted(
         party,
         "UpdateId1",
-        createNodes = Seq(cn1),
+        contracts = Seq(cn1),
         withAcsChange = false,
       )
-    val cn2 = c2.inst.toCreateNode
+    val cn2 = c2
     val reassignmentAccepted2 =
       mkReassignmentAccepted(
         party,
         "UpdateId2",
-        createNodes = Seq(cn2),
+        contracts = Seq(cn2),
         withAcsChange = true,
       )
     ingestUpdates(reassignmentAccepted1 -> Vector(c1), reassignmentAccepted2 -> Vector(c2))
 
     (for {
-      activeContractO1 <- index.lookupActiveContract(Set(party), cn1.coid)
-      activeContractO2 <- index.lookupActiveContract(Set(party), cn2.coid)
+      activeContractO1 <- index.lookupActiveContract(Set(party), cn1.contractId)
+      activeContractO2 <- index.lookupActiveContract(Set(party), cn2.contractId)
     } yield {
       Seq(cn1 -> activeContractO1, cn2 -> activeContractO2).foreach { case (cn, activeContractO) =>
-        activeContractO.map(_.createArg) shouldBe Some(cn.versionedCoinst.unversioned.arg)
-        activeContractO.map(_.templateId) shouldBe Some(cn.versionedCoinst.unversioned.template)
+        activeContractO.map(_.createArg) shouldBe Some(cn.inst.createArg)
+        activeContractO.map(_.templateId) shouldBe Some(cn.templateId)
       }
     }).futureValue
 
@@ -98,14 +98,14 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       mkReassignmentWithUnassign(party, "incompleteUnassignC1", contracts1.map(_.contractId))
     val (_, contracts3) = mkTransaction(createContract(party))
     val incompleteAssignC3 =
-      mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts3.map(_.inst.toCreateNode))
+      mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts3)
     val (createC4, contracts4) = mkTransaction(createContract(party))
     val (createC5, contracts5) = mkTransaction(createContract(party))
     val incompleteUnassignC4 =
       mkReassignmentWithUnassign(party, "incompleteUnassignC4", contracts4.map(_.contractId))
     val (_, contracts6) = mkTransaction(createContract(party))
     val incompleteAssignC6 =
-      mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts6.map(_.inst.toCreateNode))
+      mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts6)
     // last round with multiple events for each offset
     val (createC7, contracts7) =
       mkTransaction(createContract(party), createContract(party), createContract(party))
@@ -116,7 +116,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     val (_, contracts9) =
       mkTransaction(createContract(party), createContract(party), createContract(party))
     val incompleteAssignC9 =
-      mkReassignmentAccepted(party, "incompleteAssignC9", true, contracts9.map(_.inst.toCreateNode))
+      mkReassignmentAccepted(party, "incompleteAssignC9", true, contracts9)
 
     setupLedgerWithIncompleteOffsets(
       createC1 -> contracts1, // temporary activation for unassign
@@ -186,6 +186,21 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     pagesWithSize100 should contain theSameElementsInOrderAs createSlices(100, allContracts)
   }
 
+  it should "successfully re-insert contracts if not found" in {
+    val party = Ref.Party.assertFromString("party9")
+    val (tx, _) = mkTransaction(createContract(party))
+    ingestUpdateSync(tx)
+    getAcsF(
+      eventFormat = EventFormat(
+        filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
+        filtersForAnyParty = None,
+        verbose = false,
+      ),
+      continuationToken = None,
+      limit = None,
+    ).futureValue.size shouldBe 1
+  }
+
   it should "return full pages if some reassignment events are filtered out" in {
     val party4 = Ref.Party.assertFromString("party4")
     val party5 = Ref.Party.assertFromString("party5")
@@ -197,34 +212,19 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
         mkReassignmentWithUnassign(party4, "incompleteUnassignC1", contracts1.map(_.contractId))
       val (_, contracts2) = mkTransaction(createContract(party4))
       val incompleteAssignC2 =
-        mkReassignmentAccepted(
-          party4,
-          "incompleteAssignC2",
-          true,
-          contracts2.map(_.inst.toCreateNode),
-        )
+        mkReassignmentAccepted(party4, "incompleteAssignC2", true, contracts2)
       val (createC3, contracts3) = mkTransaction(createContract(party5))
       val incompleteUnassignC3 =
         mkReassignmentWithUnassign(party5, "incompleteUnassignC3", contracts3.map(_.contractId))
       val (_, contracts4) = mkTransaction(createContract(party5))
       val incompleteAssignC4 =
-        mkReassignmentAccepted(
-          party5,
-          "incompleteAssignC4",
-          true,
-          contracts4.map(_.inst.toCreateNode),
-        )
+        mkReassignmentAccepted(party5, "incompleteAssignC4", true, contracts4)
       val (createC5, contracts5) = mkTransaction(createContract(party6))
       val incompleteUnassignC5 =
         mkReassignmentWithUnassign(party6, "incompleteUnassignC5", contracts5.map(_.contractId))
       val (_, contracts6) = mkTransaction(createContract(party6))
       val incompleteAssignC6 =
-        mkReassignmentAccepted(
-          party6,
-          "incompleteAssignC6",
-          true,
-          contracts6.map(_.inst.toCreateNode),
-        )
+        mkReassignmentAccepted(party6, "incompleteAssignC6", true, contracts6)
       Seq(
         createC1 -> contracts1,
         incompleteUnassignC1 -> contracts1,
@@ -314,7 +314,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     val txBuilder = TxBuilder()
     contracts.foreach(c => txBuilder.add(c.inst.toCreateNode))
     val txn =
-      transaction(synchronizer1, recordTime())(txBuilder.buildCommitted())
+      transaction(synchronizer1, recordTime())(txBuilder.buildCommitted(), contracts)
     (txn, contracts.toVector)
   }
 

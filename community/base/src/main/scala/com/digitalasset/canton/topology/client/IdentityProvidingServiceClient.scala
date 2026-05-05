@@ -730,8 +730,8 @@ trait SynchronizerTopologyClientWithInit
     with HasFutureSupervision
     with NamedLogging {
 
-  /** Initializes the topology client with the topology store state and optionally with externally
-    * provided timestamps.
+  /** Updates the topology client with the topology store state and optionally with externally
+    * provided timestamps during startup.
     *
     * For `latestTopologyChangeTimestamp` uses:
     *   - latest accepted (non-proposal & non-rejected) topology change from the store
@@ -746,8 +746,8 @@ trait SynchronizerTopologyClientWithInit
     * @param synchronizerUpgradeTime
     *   upgradeTime from the predecessor synchronizer
     */
-  def initialize(
-      sequencerSnapshotTimestamp: Option[EffectiveTime] = None,
+  def updateKnownTimestampsDuringStartup(
+      sequencerSnapshotTimestamp: Option[SequencedTime] = None,
       synchronizerUpgradeTime: Option[SequencedTime] = None,
   )(implicit
       traceContext: TraceContext

@@ -1479,6 +1479,9 @@ class CantonSyncService(
       _ <- resourceManagementService.refreshCache()
     } yield ()
 
+  def clearCaches()(implicit traceContext: TraceContext): Unit =
+    synchronizerConnectionConfigStore.clearCache()
+
   override def onClosed(): Unit = {
     val instances = Seq(
       migrationService,

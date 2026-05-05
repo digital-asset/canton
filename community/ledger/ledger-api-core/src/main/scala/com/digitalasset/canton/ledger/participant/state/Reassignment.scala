@@ -4,6 +4,7 @@
 package com.digitalasset.canton.ledger.participant.state
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -65,30 +66,25 @@ object Reassignment {
 
   /** Represents the update of assigning a contract to a synchronizer.
     *
-    * @param ledgerEffectiveTime
-    *   The ledger time of the creation of the underlying contract.
-    * @param createNode
-    *   The details of the creation of the underlying contract.
-    * @param contractAuthenticationData
-    *   The authentication data provided at creation of the underlying contract.
     * @param reassignmentCounter
     *   The reassignment counter of the underlying contract.
     * @param nodeId
     *   The node ID of the create node.
-    * @param internalContractId
-    *   The internal contract id of the contract
+    * @param persistedContractInstance
+    *   The persisted contract
     */
   final case class Assign(
-      ledgerEffectiveTime: Timestamp,
-      createNode: Node.Create,
-      contractAuthenticationData: Bytes,
       reassignmentCounter: Long,
       nodeId: Int,
-      internalContractId: Long,
+      persistedContractInstance: PersistedContractInstance,
   ) extends Reassignment {
-    def templateId: Ref.Identifier = createNode.templateId
-    def packageName: Ref.PackageName = createNode.packageName
-    def stakeholders: Set[Ref.Party] = createNode.stakeholders
+    def createNode: Node.Create = persistedContractInstance.inst.toCreateNode
+    def ledgerEffectiveTime: Timestamp = persistedContractInstance.inst.createdAt.time
+    def contractAuthenticationData: Bytes = persistedContractInstance.inst.authenticationData
+    def templateId: Ref.Identifier = persistedContractInstance.inst.templateId
+    def packageName: Ref.PackageName = persistedContractInstance.inst.packageName
+    def stakeholders: Set[Ref.Party] = persistedContractInstance.inst.stakeholders
+    def internalContractId: Long = persistedContractInstance.internalContractId
   }
 }
 

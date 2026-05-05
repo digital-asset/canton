@@ -427,9 +427,9 @@ object TestSubmissionService {
       EngineConfig(
         allowedLanguageVersions =
           if (enableLfDev)
-            LanguageVersion.allLfVersionsRange
+            LanguageVersion.allLfVersions
           else
-            LanguageVersion.stableLfVersionsRange,
+            LanguageVersion.stableLfVersions,
         checkAuthorization = checkAuthorization,
       ),
       loggerFactory,

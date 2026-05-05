@@ -9,7 +9,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.participant.store.{ContractStore, PersistedContractInstance}
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -32,6 +32,12 @@ trait LedgerApiContractStore {
   def lookupBatchedContractIdsNonReadThrough(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, LfContractId]]
+
+  def storeContracts(contracts: Seq[ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, Long]]
+
+  def contractsPruned(internalContractIds: Iterable[Long]): Unit
 }
 
 final case class LedgerApiContractStoreImpl(
@@ -88,9 +94,23 @@ final case class LedgerApiContractStoreImpl(
         ),
       )
 
+  def storeContracts(contracts: Seq[ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, Long]] =
+    Timed
+      .future(
+        metrics.contractStore.reInsertContracts,
+        failOnShutdown(
+          participantContractStore
+            .storeContracts(contracts)
+        ),
+      )
+
+  override def contractsPruned(internalContractIds: Iterable[Long]): Unit =
+    participantContractStore.contractsPruned(internalContractIds)
+
   private def failOnShutdown[T](f: FutureUnlessShutdown[T])(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Future[T] =
     f.failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
-
 }

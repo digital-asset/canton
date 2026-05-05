@@ -36,10 +36,9 @@ import scala.collection.concurrent.TrieMap
   * max-sequencing-time of the request, the tracker then observes sequenced events and will notify
   * the provided handler whether the send times out. For aggregatable submission requests, the send
   * tracker notifies the handler of successful sequencing of the submission request, not of
-  * successful delivery of the envelopes when the
-  * [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]] has been reached. In
-  * fact, there is no notification of whether the threshold was reached before the max sequencing
-  * time.
+  * successful delivery of the envelopes when the threshold encoded in the
+  * [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] has been reached. In fact, there
+  * is no notification of whether the threshold was reached before the max sequencing time.
   */
 class SendTracker(
     initialPendingSends: Map[MessageId, CantonTimestamp],

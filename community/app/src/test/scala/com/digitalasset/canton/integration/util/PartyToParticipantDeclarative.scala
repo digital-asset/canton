@@ -614,7 +614,11 @@ class PartiesAllocator(
 
 object PartiesAllocator {
   def apply(
-      participants: Set[ParticipantReference]
+      participants: Set[ParticipantReference],
+      // TODO(i26554): Remove this
+      // Some tests use PartiesAllocator in a way that can't yet work with external parties
+      // So we enable it explicitly for now
+      enableExternalParties: Boolean = false,
   )(
       newParties: Seq[(String, ParticipantId)],
       targetTopology: Map[
@@ -633,9 +637,7 @@ object PartiesAllocator {
           _.view
             .mapValues { case (threshold, hosting) =>
               partyKind match {
-                case PartyKind.Local =>
-                  (threshold, hosting, Option.empty[SigningKeysWithThreshold])
-                case _: PartyKind.External =>
+                case _: PartyKind.External if enableExternalParties =>
                   val signinKey = Await
                     .result(
                       env.tryGlobalCrypto
@@ -658,6 +660,8 @@ object PartiesAllocator {
                     hosting,
                     Some(SigningKeysWithThreshold(NonEmpty.mk(Set, signinKey), PositiveInt.one)),
                   )
+                case _ =>
+                  (threshold, hosting, Option.empty[SigningKeysWithThreshold])
               }
             }
             .mapValues((PartyHostingState.apply _).tupled)

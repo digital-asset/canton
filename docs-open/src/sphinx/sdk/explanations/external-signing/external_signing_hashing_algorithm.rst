@@ -26,6 +26,8 @@ and provide the required cryptographic guarantees. See `<https://protobuf.dev/pr
 Versioning
 ==========
 
+.. _hashing_scheme_version:
+
 Hashing Scheme Version
 ----------------------
 
@@ -44,7 +46,7 @@ Implementations must use a hashing scheme version supported on the synchronizer 
 ==================  =========================
 Protocol Version    Supported Hashing Schemes
 ==================  =========================
-v33                 V2
+v34                 V2
 v35                 V2, V3
 ==================  =========================
 
@@ -62,8 +64,8 @@ versioned to accommodate those future changes. In practice, every new Daml langu
     :caption: Versioned Daml Transaction Node
     :dedent: 4
 
-V3
-==
+Specification
+=============
 
 General approach
 ----------------
@@ -84,19 +86,26 @@ In particular:
 
 Additionally, this is the java library used under the hood in Canton to serialize and deserialize protobuf: `<https://github.com/protocolbuffers/protobuf/tree/v3.25.5/java>`_
 
-Changes from V2
----------------
+.. _external_signing_hashing_v2_vs_v3:
 
-- Addition of an ``max_record_time`` field in :ref:`metadata <metadata_encoding>` to make maximum record time explicit in the signed metadata.
+Summary of differences between V2 and V3
+-----------------------------------------
 
-Changes from V1
----------------
+The following is a summary of the differences between V2 and V3. The full specification for each version is provided in the sections below,
+where version-specific details are shown using tabs.
 
-- Addition of an ``interface_id`` field in :ref:`Fetch nodes <fetch_node_encoding>` for support of Daml interfaces.
-- Addition of the hashing scheme version in the :ref:`final hash <final_hash_encoding>` to make the hash more robust to cross version collisions.
-- Replace ``ledger_effective_time`` in the :ref:`metadata <metadata_encoding>` with ``min_ledger_effective_time`` and ``max_ledger_effective_time``.
+- **Removed prefixes**: V3 removes the ``0x01`` "Node encoding version" byte prefix from all node encodings, and the ``0x01`` "Metadata encoding version" prefix from the metadata encoding.
+- **New fields**: ``key_opt`` (optional, composite) is added to Create, Exercise, and Fetch nodes. ``by_key`` (boolean) is added to Exercise and Fetch nodes.
+- **New node type**: ``QueryByKey`` is introduced in V3.
+- **Metadata**: ``max_record_time`` is added to the metadata encoding.
+- **Final hash**: The hashing scheme version byte changes from ``0x02`` (V2) to ``0x03`` (V3).
 
-    * These effectively replace a fixed ledger time with time bounds, allowing Daml Models to make assertions based on time without restricting the signing window as was required with a fixed set ledger time.
+.. important::
+
+    V3 introduces support for contract keys. Usage of contract keys in externally signed transactions
+    requires usage of V3. Contract keys will not work on V2.
+    Also note that V3 is only :ref:`supported <hashing_scheme_version>` on protocol version 35.
+
 
 Notation and Utility Functions
 ------------------------------
@@ -168,6 +177,17 @@ e.g:
     encode(some(5)) = 0x01 || encode(5)
 
 See encoding of optional values below for details.
+
+- ``encode_key_with_maintainers`` *(V3 only)*: Function encoding a ``GlobalKeyWithMaintainers`` composite value. This is used for the ``key`` field in Create, Exercise, Fetch, and QueryByKey nodes.
+
+.. code-block::
+
+    fn encode_key_with_maintainers(key_with_maintainers):
+        encode(key_with_maintainers.key.package_name) ||
+        encode(key_with_maintainers.key.template_id) ||
+        encode(key_with_maintainers.key.key) ||
+        encode(key_with_maintainers.key.hash) ||
+        encode(key_with_maintainers.maintainers)
 
 Primitive Types
 ---------------
@@ -602,43 +622,91 @@ The following ``find_seed: NodeId => optional bytes`` function is used in the en
 Create
 ^^^^^^
 
-.. code-block::
+.. tabs::
 
-    fn encode_node(create):
-        0x01 || # Node encoding version
-        encode(create.lf_version) || # Node LF version
-        0x00 || # Create node tag
-        encode_optional_seed(find_seed(node.node_id)) ||
-        encode(create.contract_id) ||
-        encode(create.package_name) ||
-        encode(create.template_id) ||
-        encode(create.argument) ||
-        encode(create.signatories) ||
-        encode(create.stakeholders)
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(create):
+              encode(create.lf_version) || # Node LF version
+              0x00 || # Create node tag
+              encode_optional_seed(find_seed(node.node_id)) ||
+              encode(create.contract_id) ||
+              encode(create.package_name) ||
+              encode(create.template_id) ||
+              encode(create.argument) ||
+              encode(create.signatories) ||
+              encode(create.stakeholders) ||
+              encode_key_with_maintainers(create.key) # new in V3
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode_node(create):
+              0x01 || # Node encoding version
+              encode(create.lf_version) || # Node LF version
+              0x00 || # Create node tag
+              encode_optional_seed(find_seed(node.node_id)) ||
+              encode(create.contract_id) ||
+              encode(create.package_name) ||
+              encode(create.template_id) ||
+              encode(create.argument) ||
+              encode(create.signatories) ||
+              encode(create.stakeholders)
 
 Exercise
 ^^^^^^^^
 
-.. code-block::
+.. tabs::
 
-    fn encode_node(exercise):
-        0x01 || # Node encoding version
-        encode(exercise.lf_version) || # Node LF version
-        0x01 || # Exercise node tag
-        encode_seed(find_seed(node.node_id).get) ||
-        encode(exercise.contract_id) ||
-        encode(exercise.package_name) ||
-        encode(exercise.template_id) ||
-        encode(exercise.signatories) ||
-        encode(exercise.stakeholders) ||
-        encode(exercise.acting_parties) ||
-        encode(exercise.interface_id) ||
-        encode(exercise.choice_id) ||
-        encode(exercise.chosen_value) ||
-        encode(exercise.consuming) ||
-        encode(exercise.exercise_result) ||
-        encode(exercise.choice_observers) ||
-        encode(exercise.children)
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.by_key)  || # new in V3
+              encode_key_with_maintainers(exercise.key) || # new in V3
+              encode(exercise.children)
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              0x01 || # Node encoding version
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.children)
 
 .. important::
 
@@ -655,29 +723,80 @@ Exercise
 Fetch
 ^^^^^
 
-.. code-block::
+.. tabs::
 
-    fn encode_node(fetch):
-        0x01 || # Node encoding version
-        encode(fetch.lf_version) || # Node LF version
-        0x02 || # Fetch node tag
-        encode(fetch.contract_id) ||
-        encode(fetch.package_name) ||
-        encode(fetch.template_id) ||
-        encode(fetch.signatories) ||
-        encode(fetch.stakeholders) ||
-        encode(fetch.interface_id) ||
-        encode(fetch.acting_parties)
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(fetch):
+              encode(fetch.lf_version) || # Node LF version
+              0x02 || # Fetch node tag
+              encode(fetch.contract_id) ||
+              encode(fetch.package_name) ||
+              encode(fetch.template_id) ||
+              encode(fetch.signatories) ||
+              encode(fetch.stakeholders) ||
+              encode(fetch.interface_id) ||
+              encode(fetch.acting_parties) ||
+              encode(fetch.by_key) || # new in V3
+              encode_key_with_maintainers(fetch.key) # new in V3
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode_node(fetch):
+              0x01 || # Node encoding version
+              encode(fetch.lf_version) || # Node LF version
+              0x02 || # Fetch node tag
+              encode(fetch.contract_id) ||
+              encode(fetch.package_name) ||
+              encode(fetch.template_id) ||
+              encode(fetch.signatories) ||
+              encode(fetch.stakeholders) ||
+              encode(fetch.interface_id) ||
+              encode(fetch.acting_parties)
 
 Rollback
 ^^^^^^^^
 
+.. tabs::
+
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(rollback):
+              0x03 || # Rollback node tag
+              encode(rollback.children)
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode_node(rollback):
+              0x01 || # Node encoding version
+              0x03 || # Rollback node tag
+              encode(rollback.children)
+
+.. _query_by_key_node_encoding:
+
+QueryByKey (V3 only)
+^^^^^^^^^^^^^^^^^^^^
+
+This node type is only present in hashing scheme V3.
+
 .. code-block::
 
-    fn encode_node(rollback):
-       0x01 || # Node encoding version
-       0x03 || # Rollback node tag
-       encode(rollback.children)
+    fn encode_node(query_by_key):
+        encode(query_by_key.lf_version) || # Node LF version
+        0x04 || # QueryByKey node tag
+        encode(query_by_key.package_name) ||
+        encode(query_by_key.template_id) ||
+        encode(query_by_key.exhaustive) ||
+        encode_key_with_maintainers(query_by_key.key) ||
+        encode(query_by_key.result)
 
 .. note::
 
@@ -706,20 +825,39 @@ Note that all fields of the metadata need to be signed. Only some fields contrib
 The rest of the fields are required by the Canton protocol but either have no impact on the ledger change,
 or have already been signed indirectly by signing the transaction itself.
 
-.. code-block::
+.. tabs::
 
-    fn encode(metadata, prepare_submission_request):
-        0x01 || # Metadata Encoding Version
-        encode(metadata.submitter_info.act_as) ||
-        encode(metadata.submitter_info.command_id) ||
-        encode(metadata.transaction_uuid) ||
-        encode(metadata.mediator_group) ||
-        encode(metadata.synchronizer_id) ||
-        encode(metadata.min_ledger_effective_time) ||
-        encode(metadata.max_ledger_effective_time) ||
-        encode(metadata.submission_time) ||
-        encode(metadata.disclosed_events) ||
-        encode(metadata.max_record_time)
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode(metadata, prepare_submission_request):
+              encode(metadata.submitter_info.act_as) ||
+              encode(metadata.submitter_info.command_id) ||
+              encode(metadata.transaction_uuid) ||
+              encode(metadata.mediator_group) ||
+              encode(metadata.synchronizer_id) ||
+              encode(metadata.min_ledger_effective_time) ||
+              encode(metadata.max_ledger_effective_time) ||
+              encode(metadata.submission_time) ||
+              encode(metadata.disclosed_events) ||
+              encode(metadata.max_record_time) # new in V3
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode(metadata, prepare_submission_request):
+              0x01 || # Metadata Encoding Version
+              encode(metadata.submitter_info.act_as) ||
+              encode(metadata.submitter_info.command_id) ||
+              encode(metadata.transaction_uuid) ||
+              encode(metadata.mediator_group) ||
+              encode(metadata.synchronizer_id) ||
+              encode(metadata.min_ledger_effective_time) ||
+              encode(metadata.max_ledger_effective_time) ||
+              encode(metadata.submission_time) ||
+              encode(metadata.disclosed_events)
 
 ProcessedDisclosedContract
 --------------------------
@@ -750,13 +888,27 @@ Final Hash
 
 Finally, compute the hash that needs to be signed to commit to the ledger changes.
 
-.. code-block::
+.. tabs::
 
-    fn encode(prepared_transaction):
-        0x00000030 || # Hash purpose
-        0x03 || # Hashing Scheme Version
-        hash(transaction) ||
-        hash(metadata)
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode(prepared_transaction):
+              0x00000030 || # Hash purpose
+              0x03 || # Hashing Scheme Version
+              hash(transaction) ||
+              hash(metadata)
+
+   .. tab:: V2
+
+      .. code-block::
+
+          fn encode(prepared_transaction):
+              0x00000030 || # Hash purpose
+              0x02 || # Hashing Scheme Version
+              hash(transaction) ||
+              hash(metadata)
 
 .. code-block::
 
@@ -769,8 +921,23 @@ Both the signature along with the ``PreparedTransaction`` must be sent to the AP
 Example
 =======
 
+Example V3 implementation in Python
+
+.. toggle::
+
+    .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_v3.py
+
+
 Example V2 implementation in Python
 
 .. toggle::
 
     .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_v2.py
+
+
+Both versions make use of the following common code:
+
+.. toggle::
+
+    .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_common.py
+

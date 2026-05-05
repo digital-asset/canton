@@ -205,7 +205,6 @@ sealed trait MetricRegistryIntegrationTest
       loggerFactory.assertLogs(
         participant1.health.ping(participant1)
       )
-
     }
 
   }

@@ -4,7 +4,9 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -18,45 +20,44 @@ object SubmissionRequestValidations {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, MemberCheckError, Unit] =
-    EitherT {
-      val senders =
-        submission.aggregationRule.fold(Set.empty[Member])(
-          _.eligibleSenders.toSet
-        ) incl submission.sender
-      val allRecipients = submission.batch.allMembers
+  ): EitherT[FutureUnlessShutdown, MemberCheckError, Unit] = {
 
+    val sendersET: EitherT[FutureUnlessShutdown, MemberCheckError, NonEmpty[Set[Member]]] =
+      submission.aggregationRule
+        .map(
+          _.input
+            .resolveToMembers(submission.sender, snapshot)
+            .map(_.eligibleSenders.toSet incl submission.sender)
+            // This is backwards compatible with pv34 as this can only fail with the aggregation
+            // rules introduced into pv35.
+            .leftMap(
+              MemberCheckError.InvalidAggregationRule(_): MemberCheckError
+            )
+        )
+        .getOrElse(
+          EitherT.rightT[FutureUnlessShutdown, MemberCheckError](
+            NonEmpty.mk(Set, submission.sender)
+          )
+        )
+    val allRecipients = submission.batch.allMembers
+    sendersET.flatMap { senders =>
       // TODO(#19476): Why we don't check group recipients here?
       val allMembers = allRecipients ++ senders
-
-      for {
-        registeredMembers <- snapshot.areMembersKnown(allMembers)
-      } yield {
-        Either.cond(
-          registeredMembers.sizeCompare(allMembers) == 0,
-          (), {
-            val unregisteredRecipients = allRecipients.diff(registeredMembers)
-            val unregisteredSenders = senders.diff(registeredMembers)
-            MemberCheckError(unregisteredRecipients, unregisteredSenders)
-          },
-        )
+      EitherT {
+        for {
+          registeredMembers <- snapshot.areMembersKnown(allMembers)
+        } yield {
+          Either.cond(
+            registeredMembers.sizeCompare(allMembers) == 0,
+            (), {
+              val unregisteredRecipients = allRecipients.diff(registeredMembers)
+              val unregisteredSenders = senders.diff(registeredMembers)
+              MemberCheckError.UnknownMembers(unregisteredRecipients, unregisteredSenders)
+            },
+          )
+        }
       }
     }
-
-  def wellformedAggregationRule(sender: Member, rule: AggregationRule): Either[String, Unit] = {
-    val AggregationRule(eligibleSenders, threshold) = rule
-    for {
-      _ <- Either.cond(
-        eligibleSenders.distinct.sizeIs >= threshold.unwrap,
-        (),
-        s"Threshold $threshold cannot be reached",
-      )
-      _ <- Either.cond(
-        eligibleSenders.contains(sender),
-        (),
-        s"Sender [$sender] is not eligible according to the aggregation rule",
-      )
-    } yield ()
   }
 
   /** A utility function to reject requests that try to send something to multiple mediators
@@ -66,13 +67,32 @@ object SubmissionRequestValidations {
   def checkToAtMostOneMediator(submissionRequest: SubmissionRequest): Boolean =
     submissionRequest.batch.allMediatorRecipients.sizeIs <= 1
 
-  final case class MemberCheckError(
-      unregisteredRecipients: Set[Member],
-      unregisteredSenders: Set[Member],
-  ) {
-    def toSequencerDeliverError: SequencerDeliverError =
-      if (unregisteredRecipients.nonEmpty)
-        SequencerErrors.UnknownRecipients(unregisteredRecipients.toSeq)
-      else SequencerErrors.SenderUnknown(unregisteredSenders.toSeq)
+  sealed trait MemberCheckError {
+    def toSequencerDeliverError: SequencerDeliverError
+    def toSendAsyncClientError: SendAsyncClientError
+  }
+  object MemberCheckError {
+
+    final case class InvalidAggregationRule(str: String) extends MemberCheckError {
+      override def toSequencerDeliverError: SequencerDeliverError =
+        SequencerErrors.AggregateSubmissionInvalidRule(str)
+      override def toSendAsyncClientError: SendAsyncClientError =
+        SendAsyncClientError.RequestInvalid(s"Invalid aggregation rule $str")
+    }
+
+    final case class UnknownMembers(
+        unregisteredRecipients: Set[Member],
+        unregisteredSenders: Set[Member],
+    ) extends MemberCheckError {
+      override def toSequencerDeliverError: SequencerDeliverError =
+        if (unregisteredRecipients.nonEmpty)
+          SequencerErrors.UnknownRecipients(unregisteredRecipients.toSeq)
+        else SequencerErrors.SenderUnknown(unregisteredSenders.toSeq)
+
+      override def toSendAsyncClientError: SendAsyncClientError =
+        SendAsyncClientError.RequestInvalid(
+          s"Unregistered recipients: $unregisteredRecipients, unregistered senders: $unregisteredSenders"
+        )
+    }
   }
 }

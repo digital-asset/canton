@@ -22,11 +22,10 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.DefaultSegmentLength
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -131,10 +130,8 @@ class CantonOrderingTopologyProviderTest
                   )
                 )
           }
-          val epochLength = EpochLength(1337) // good random number
           new CantonOrderingTopologyProvider(
             cryptoApiMock,
-            epochLength,
             loggerFactory,
             SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
           )
@@ -168,7 +165,9 @@ class CantonOrderingTopologyProviderTest
                     keyIds = Set(FingerprintKeyId.toBftKeyId(pk.id))
                   )
                 )
-              orderingTopology.epochLength shouldBe epochLength
+              orderingTopology.epochLength shouldBe DefaultSegmentLength.epochLength(
+                someSequencerIds.size.toLong
+              )
               orderingTopology.maxBytesToDecompress shouldBe defaultMaxBytesToDecompress
             }
       }
@@ -202,7 +201,6 @@ class CantonOrderingTopologyProviderTest
         .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
       new CantonOrderingTopologyProvider(
         cryptoApiMock,
-        DefaultEpochLength,
         loggerFactory,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       ).getFirstKnownAt(TopologyActivationTime(aTimestamp))

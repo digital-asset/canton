@@ -46,7 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer,
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{HasExecutionContext, LfTimestamp}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
@@ -392,6 +392,75 @@ final class InteractiveSubmissionConfirmationIntegrationTest
           )
         ),
       )
+    }
+
+    "fail if providing more signatures than registered keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      implicit env =>
+        import env.*
+
+        val maliciousCpn = MaliciousParticipantNode(
+          cpn,
+          daId,
+          testedProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
+
+        val cycle =
+          new M.Cycle(
+            UUID.randomUUID().toString,
+            aliceE.toProtoPrimitive,
+          ).create.commands.loneElement
+
+        val prepared = cpn.ledger_api.javaapi.interactive_submission.prepare(
+          Seq(aliceE.partyId),
+          Seq(cycle),
+        )
+
+        val signatures =
+          global_secret.sign(prepared.preparedTransactionHash, aliceE, useAllKeys = true) ++ Seq(
+            // Add one more
+            global_secret.sign(
+              prepared.preparedTransactionHash,
+              aliceE.fingerprint,
+              SigningKeyUsage.ProtocolOnly,
+            )
+          )
+
+        val cmd = CommandsWithMetadata(
+          Seq(cycle).map(c => Command.fromJavaProto(c.toProtoCommand)),
+          Seq(aliceE),
+          ledgerTime = environment.now.toLf,
+        )
+
+        loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
+          maliciousCpn
+            .submitCommand(
+              cmd,
+              submitterInfoInterceptor = _.copy(
+                externallySignedSubmission = Some(
+                  ExternallySignedSubmission(
+                    version = testedHashingSchemeVersion,
+                    signatures = Map(aliceE.partyId -> signatures),
+                    transactionUUID = cmd.transactionUuid,
+                    mediatorGroup = NonNegativeInt.zero,
+                    maxRecordTime = None,
+                  )
+                )
+              ),
+            )
+            .futureValueUS,
+          LogEntry.assertLogSeq(
+            malformedRequestLogAssertion ++ Seq(
+              (
+                _.warningMessage should include(
+                  "5 external signatures were provided, which is more than the number of registered signing keys (4)"
+                ),
+                "expected too many signatures error",
+              )
+            )
+          ),
+        )
     }
 
     "fail with missing input contracts" in { implicit env =>

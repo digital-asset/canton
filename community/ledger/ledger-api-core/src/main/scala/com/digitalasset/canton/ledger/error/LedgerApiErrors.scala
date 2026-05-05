@@ -19,6 +19,8 @@ import com.digitalasset.daml.lf.engine.Error as LfError
 import com.digitalasset.daml.lf.engine.Error.Validation.ReplayMismatch
 import org.slf4j.event.Level
 
+import scala.concurrent.duration.FiniteDuration
+
 @Explanation(
   "Errors raised by or forwarded by the Ledger API."
 )
@@ -217,6 +219,35 @@ object LedgerApiErrors extends LedgerApiErrorGroup {
     final case class Reject(reason: String)(implicit errorLoggingContext: ErrorLoggingContext)
         extends DamlErrorWithDefiniteAnswer(
           cause = s"Failed to compute package preferences. Reason: $reason"
+        )
+  }
+
+  @Explanation(
+    """Participant pruning of contracts is blocked, giving up. Please try again later.
+      |Safe contract pruning is implemented using database locks and with optimistic locking and retries.
+      |This error happens if all the retry attempts are exhausted."""
+  )
+  @Resolution(
+    """As the root cause of this type of lock contention should be automatically resolved in-between retries, please
+      |retry the operation again.
+      |If this kind of error emerges more often, please try to increase the number of retries defined by the
+      |`contract-pruning-max-retries` configuration parameter and/or increase the delay duration defined by the
+      |`contract-pruning-delay-before-retry` configuration parameter.
+      |In case this problem persists, please contact technical support."""
+  )
+  object ParticipantContractPruningBlocked
+      extends ErrorCode(
+        id = "PARTICIPANT_CONTRACT_PRUNING_BLOCKED",
+        category = ErrorCategory.ContentionOnSharedResources,
+      ) {
+    final case class Reject(
+        retries: Int,
+        delay: FiniteDuration,
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"Participant pruning of contracts is blocked, giving up retries. Please try again later. (retires: $retries, delay: $delay)"
         )
   }
 

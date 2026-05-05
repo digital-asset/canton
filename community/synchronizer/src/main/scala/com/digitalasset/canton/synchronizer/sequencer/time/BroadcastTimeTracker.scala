@@ -15,7 +15,6 @@ import com.digitalasset.canton.sequencing.{
   UnsignedEnvelopeBox,
   UnsignedProtocolEventHandler,
 }
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
@@ -39,10 +38,7 @@ class BroadcastTimeTrackerImpl(override protected val loggerFactory: NamedLogger
 
   override val name: String = this.getClass.getSimpleName
 
-  override def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit
+  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     start match {

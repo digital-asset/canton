@@ -24,7 +24,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.InternalContractIds
 import com.digitalasset.canton.participant.protocol.conflictdetection.{ActivenessResult, CommitSet}
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationError
-import com.digitalasset.canton.protocol.{LfNodeCreate, ReassignmentId, RootHash, UpdateId}
+import com.digitalasset.canton.participant.store.PersistedContractInstance
+import com.digitalasset.canton.protocol.{ReassignmentId, RootHash, UpdateId}
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -94,33 +95,21 @@ final case class AssignmentValidationResult private[reassignment] (
     (acsChangeFactory: AcsChangeFactory) =>
       (internalContractIds: InternalContractIds) =>
         val reassignment = contracts.contracts.zipWithIndex.map { case (reassign, idx) =>
-          val contract = reassign.contract
-          val contractInst = contract.inst
-          val createNode = LfNodeCreate(
-            coid = contract.contractId,
-            templateId = contractInst.templateId,
-            packageName = contractInst.packageName,
-            arg = contractInst.createArg,
-            signatories = contract.metadata.signatories,
-            stakeholders = contract.metadata.stakeholders,
-            keyOpt = contract.metadata.maybeKeyWithMaintainers,
-            version = contractInst.version,
-          )
           Reassignment.Assign(
-            ledgerEffectiveTime = contract.inst.createdAt.time,
-            createNode = createNode,
-            contractAuthenticationData = contract.inst.authenticationData,
             reassignmentCounter = reassign.counter.unwrap,
             nodeId = idx,
-            internalContractId = checked {
-              // the internal contract id must exist since we persisted all the contracts before
-              internalContractIds.getOrElse(
-                contract.contractId,
-                ErrorUtil.invalidState(
-                  s"The internal contract id for the assigned contract ${contract.contractId} was not found"
-                ),
-              )
-            },
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId = checked {
+                // the internal contract id must exist since we persisted all the contracts before
+                internalContractIds.getOrElse(
+                  reassign.contract.contractId,
+                  ErrorUtil.invalidState(
+                    s"The internal contract id for the assigned contract ${reassign.contract.contractId} was not found"
+                  ),
+                )
+              },
+              inst = reassign.contract.inst,
+            ),
           )
         }
         Update.SequencedReassignmentAccepted(

@@ -17,7 +17,7 @@ import com.digitalasset.canton.protocol.{LfContractId, LfHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PartyId, Synchronizer}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, NodeId, VersionedTransaction}
@@ -146,6 +146,8 @@ object InteractiveSubmission {
     *   topology snapshot to use to validate signatures
     * @param actAs
     *   actAs parties that should be covered by the signatures
+    * @param protocolVersion
+    *   protocol version on which the transaction is being processed
     */
   def verifySignatures(
       hash: Hash,
@@ -154,6 +156,7 @@ object InteractiveSubmission {
       topologySnapshot: TopologySnapshot,
       actAs: Set[LfPartyId],
       logger: TracedLogger,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -190,6 +193,7 @@ object InteractiveSubmission {
         cryptoPureApi,
         topologySnapshot,
         logger,
+        protocolVersion,
       )
     }
   }
@@ -203,6 +207,7 @@ object InteractiveSubmission {
       cryptoPureApi: CryptoPureApi,
       topologySnapshot: TopologySnapshot,
       logger: TracedLogger,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -217,6 +222,16 @@ object InteractiveSubmission {
             .map(
               _.toRight(s"Could not find party signing keys for $party.")
             )
+        )
+
+        numberOfProtocolSigningKeys = signingKeysWithThreshold.keys.count(
+          _.usage.contains(SigningKeyUsage.Protocol)
+        )
+
+        _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+          // From PV 35, one cannot submit more signatures than the number of keys registered with protocol usage
+          signatures.sizeIs <= numberOfProtocolSigningKeys || protocolVersion <= ProtocolVersion.v34,
+          s"${signatures.size} external signatures were provided, which is more than the number of registered signing keys ($numberOfProtocolSigningKeys) with protocol usage for $party",
         )
 
         (invalidSignatures, validSignatures) = signatures.map { signature =>

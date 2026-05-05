@@ -46,6 +46,14 @@ class IndexerHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Debug,
   )
 
+  private[metrics] val ingestionBlockeByPruningDuration: Item = Item(
+    prefix :+ "ingestion_blocked_by_pruning" :+ "duration",
+    summary = "The duration of ingestions DB execution is blocked by pruning.",
+    description =
+      "The time that a batch of updates spends in blocked waiting for the pruning DB operation to finish.",
+    qualification = MetricQualification.Debug,
+  )
+
   private[metrics] val deactivationDistances: Item = Item(
     prefix :+ "deactivation_distances",
     summary = "Event sequence id distances between activations and deactivations.",
@@ -96,6 +104,22 @@ class IndexerMetrics(
         qualification = MetricQualification.Debug,
       )
     )
+
+  // Number of times the Indexer needed to restart due to missing referenced contracts (likely because of pruning)
+  val indexerRestartDueToMissingReferencedContracts: Counter = factory.counter(
+    MetricInfo(
+      prefix :+ "indexer_restart_due_to_missing_contract",
+      summary =
+        "Number of times the Indexer needed to restart due to missing referenced contracts.",
+      description = """Under seldom circumstances the indexer could be forced to restart if pruning removed
+                      |referenced contracts. If this happens the missing contracts will be re-inserted to the DB
+                      |and indexing continues. This is part for the normal operation and should happen very rarely.""",
+      qualification = MetricQualification.Traffic,
+    )
+  )
+
+  val ingestionBlockeByPruningDuration: Timer =
+    factory.timer(histograms.ingestionBlockeByPruningDuration.info)
 
   // Input mapping stage
   // Translating state updates to data objects corresponding to individual SQL insert statements

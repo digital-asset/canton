@@ -26,9 +26,13 @@ object InputContractPackages {
       case (acc, (_, Node.Fetch(coid, _, templateId, _, _, _, _, _, _, _)))
           if !tx.localContractIds.contains(coid) =>
         Relation.update(acc, coid, templateId.packageId)
-      case (acc, (_, Node.LookupByKey(_, templateId, _, Some(coid), _)))
-          if !tx.localContractIds.contains(coid) =>
-        Relation.update(acc, coid, templateId.packageId)
+      case (acc, (_, Node.QueryByKey(_, templateId, _, _, result, _))) =>
+        Relation.union(
+          acc,
+          data.Relation.from(
+            result.filterNot(tx.localContractIds).map(c => c -> templateId.packageId)
+          ),
+        )
       case (acc, _) => acc
     }
 

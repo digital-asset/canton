@@ -31,11 +31,7 @@ trait SignatureVerifier {
       signedSubmissionRequest: SignedContent[SubmissionRequest],
       hashPurpose: HashPurpose,
       estimatedSequencingTimestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[
-    FutureUnlessShutdown,
-    String,
-    SignedContent[SubmissionRequest],
-  ]
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
 
   /** Verifies the signature on an
     * [[com.digitalasset.canton.sequencing.protocol.AcknowledgeRequest]]. Uses the acknowledged
@@ -50,11 +46,7 @@ trait SignatureVerifier {
       hashPurpose: HashPurpose,
       timestampToVerify: Option[CantonTimestamp],
       protocolVersion: ProtocolVersion,
-  )(implicit traceContext: TraceContext): EitherT[
-    FutureUnlessShutdown,
-    String,
-    SignedContent[AcknowledgeRequest],
-  ]
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
 }
 
 object SignatureVerifier {
@@ -70,7 +62,7 @@ object SignatureVerifier {
         useSnapshotApproximation: Boolean,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, SignedContent[A]] = {
+    ): EitherT[FutureUnlessShutdown, String, Unit] = {
       val headSnapshotTs = cryptoApi.headSnapshot.ipsSnapshot.timestamp
       for {
         // If the current time is later than the head snapshot, create a hypothetical snapshot
@@ -108,7 +100,7 @@ object SignatureVerifier {
             else
               errMsg + s"current snapshot at $timestampToVerify. Error: $error"
           }
-      } yield signedContent
+      } yield ()
     }
 
     override def verifySubmissionRequestSignature(
@@ -117,7 +109,7 @@ object SignatureVerifier {
         estimatedSequencingTimestamp: CantonTimestamp,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, SignedContent[SubmissionRequest]] =
+    ): EitherT[FutureUnlessShutdown, String, Unit] =
       verifySignatureInternal(
         signedSubmissionRequest,
         hashPurpose,
@@ -135,7 +127,7 @@ object SignatureVerifier {
         protocolVersion: ProtocolVersion,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, SignedContent[AcknowledgeRequest]] = {
+    ): EitherT[FutureUnlessShutdown, String, Unit] = {
       val (timestamp, useSnapshotApproximation) = timestampToVerify match {
         // we set `isSubmissionRequest` to true to ensure the same behavior as PV34 and earlier.
         case Some(timestamp) if protocolVersion < ProtocolVersion.v35 => (timestamp, true)

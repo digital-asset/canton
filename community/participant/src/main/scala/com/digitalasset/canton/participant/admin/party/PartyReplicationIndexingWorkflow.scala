@@ -22,7 +22,11 @@ import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordOrderP
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
 import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.ContractActivationChangeBatch
-import com.digitalasset.canton.participant.store.{ContractStore, PartyReplicationIndexingStore}
+import com.digitalasset.canton.participant.store.{
+  ContractStore,
+  PartyReplicationIndexingStore,
+  PersistedContractInstance,
+}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, UpdateId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -279,12 +283,12 @@ class PartyReplicationIndexingWorkflow(
                   idx,
                 ) =>
               Reassignment.Assign(
-                ledgerEffectiveTime = contract.inst.createdAt.time,
-                createNode = contract.toLf,
-                contractAuthenticationData = contract.inst.authenticationData,
                 reassignmentCounter = reassignmentCounter.v,
                 nodeId = idx,
-                internalContractId = internalContractId,
+                persistedContractInstance = PersistedContractInstance(
+                  internalContractId = internalContractId,
+                  inst = contract.inst,
+                ),
               )
           }
         ),

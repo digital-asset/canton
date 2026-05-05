@@ -8,7 +8,6 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
@@ -133,12 +132,11 @@ final class TimeAdvancingTopologySubscriberV1(
         maybeSequencerGroup <- topologySnapshot.sequencerGroup()
         maybeAggregationRule = maybeSequencerGroup.flatMap { sequencerGroup =>
           NonEmpty.from(sequencerGroup.active).map { sequencerGroup =>
-            AggregationRule(
+            // We merely deduplicate here, so members eventually receive only one event; this means
+            //  that the mechanism is not BFT, and we still rely on sequencer client-triggered time proofs
+            //  for resilience against non-compliant sequencers.
+            AggregationRule.sequencerTimeAdvancingRequest(
               sequencerGroup,
-              // We merely deduplicate here, so members eventually receive only one event; this means
-              //  that the mechanism is not BFT, and we still rely on sequencer client-triggered time proofs
-              //  for resilience against non-compliant sequencers.
-              threshold = PositiveInt.one,
               protocolVersion,
             )
           }
@@ -332,12 +330,12 @@ final class TimeAdvancingTopologySubscriberV2(
             TopologyTransactionsBroadcast(psid, Seq.empty) -> Recipients
               .cc(AllMembersOfSynchronizer),
           )
-          val aggregationRule = AggregationRule(
+
+          // We merely deduplicate here, so members eventually receive only one event; this means
+          //  that the mechanism is not BFT, and we still rely on sequencer client-triggered time proofs
+          //  for resilience against non-compliant sequencers.
+          val aggregationRule = AggregationRule.sequencerTimeAdvancingRequest(
             activeSequencers,
-            // We merely deduplicate here, so members eventually receive only one event; this means
-            //  that the mechanism is not BFT, and we still rely on sequencer client-triggered time proofs
-            //  for resilience against non-compliant sequencers.
-            threshold = PositiveInt.one,
             protocolVersion,
           )
           val maxSequencingTime =

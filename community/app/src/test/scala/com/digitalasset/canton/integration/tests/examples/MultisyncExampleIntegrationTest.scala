@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.examples
 
 import better.files.*
+import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
@@ -97,7 +98,7 @@ class MultisyncExampleIntegrationTest
         val v2Port = participant2.config.httpLedgerApi.port.unwrap.toString
         val v3Port = participant3.config.httpLedgerApi.port.unwrap.toString
 
-        val darPath = ModelTestsPath
+        val darPath = TestDars.v2_2.ModelTestDar.file.toString
 
         val processLogger: BufferedProcessLogger = mkProcessLogger()
 

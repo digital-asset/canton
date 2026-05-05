@@ -390,6 +390,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       contractStore = participantContractStore,
       ledgerEndCache = MutableLedgerEndCache(),
       loggerFactory = loggerFactory,
+      maxLookupLimit = 10,
     )(ec)
   }
 

@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.{
   OptionalMany,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerRequest
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
@@ -174,7 +175,10 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
                 bank,
                 _ should (
                   include(TimeRejects.LocalTimeout.id) or
-                    include(SubmissionErrors.TimeoutError.id)
+                    include(SubmissionErrors.TimeoutError.id) or
+                    // the command gets rejected with this error, when the synthetic LSU tombstone gets sequenced and processed
+                    // before the command gets submitted, and therefore it gets rejected right at the start
+                    include(SequencerRequest.id)
                 ),
               )
             },

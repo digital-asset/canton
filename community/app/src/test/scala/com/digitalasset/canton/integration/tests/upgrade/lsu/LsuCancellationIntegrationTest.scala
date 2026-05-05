@@ -247,12 +247,10 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
       // Time offset is applied on the old sequencer
-      sequencer1.underlying.value.sequencer.timeTracker
-        .fetchTimeProof()
-        .futureValueUS
-        .timestamp should be >= upgradeTime2.plus(
-        dynamicSynchronizerParameters.decisionTimeout.asJava
-      )
+      eventually() {
+        sequencer1.underlying.value.sequencer.syncCrypto.approximateTimestamp should be >= upgradeTime2
+          .plus(dynamicSynchronizerParameters.decisionTimeout.asJava)
+      }
 
       // Bob is known
       participant1.topology.party_to_participant_mappings

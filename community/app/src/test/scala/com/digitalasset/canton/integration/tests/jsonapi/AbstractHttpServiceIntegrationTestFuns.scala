@@ -3,21 +3,18 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
+import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
-import com.digitalasset.canton.testing.utils.TestModels.{
-  com_daml_ledger_test_ModelTestDar_path,
-  com_daml_ledger_test_SemanticTestDar_path,
-}
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.http.scaladsl.model.*
 
 object AbstractHttpServiceIntegrationTestFuns {
-  val dar1 = JarResourceUtils.resourceFile(com_daml_ledger_test_ModelTestDar_path)
+  val dar1 = TestDars.v2_2.ModelTestDar.file
 
   val dar2 = JarResourceUtils.resourceFile("Account-1.0.0.dar")
 
-  val dar3 = JarResourceUtils.resourceFile(com_daml_ledger_test_SemanticTestDar_path)
+  val dar3 = TestDars.v2_2.SemanticTestDar.file
 
   val userDar = JarResourceUtils.resourceFile("User-1.0.0.dar")
 

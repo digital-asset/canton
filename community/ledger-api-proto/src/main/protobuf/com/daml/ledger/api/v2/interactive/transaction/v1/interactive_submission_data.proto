@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.daml.ledger.api.v2.interactive.transaction.v1;
 
+import "com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto";
 import "com/daml/ledger/api/v2/value.proto";
 
 option csharp_namespace = "Com.Daml.Ledger.Api.V2.Interactive.Transaction.V1";
@@ -17,7 +18,7 @@ option java_package = "com.daml.ledger.api.v2.interactive.transaction.v1";
 
 // Fetch node
 message Fetch {
-  // Specific LF version of the node
+  // Specific LF serialization version of the node
   //
   // Required
   string lf_version = 1;
@@ -37,11 +38,19 @@ message Fetch {
   repeated string acting_parties = 7;
   // Optional
   Identifier interface_id = 8;
+  // Can only be populated from lf_version >= 2
+  //
+  // Optional
+  optional GlobalKeyWithMaintainers key = 9;
+  // Can only be true from lf_version >= 2
+  //
+  // Required
+  bool by_key = 10;
 }
 
 // Exercise node
 message Exercise {
-  // Specific LF version of the node
+  // Specific LF serialization version of the node
   //
   // Required
   string lf_version = 1;
@@ -75,11 +84,19 @@ message Exercise {
   Value exercise_result = 13;
   // Optional: can be empty
   repeated string choice_observers = 14;
+  // Can only be populated from lf_version >= 2
+  //
+  // Optional
+  optional GlobalKeyWithMaintainers key = 15;
+  // Can only be true from lf_version >= 2
+  //
+  // Required
+  bool by_key = 16;
 }
 
 // Create Node
 message Create {
-  // Specific LF version of the node
+  // Specific LF serialization version of the node
   //
   // Required
   string lf_version = 1;
@@ -97,12 +114,39 @@ message Create {
   repeated string signatories = 6;
   // Required: must be non-empty
   repeated string stakeholders = 7;
+  // Only populated from lf_version >= 2
+  //
+  // Optional
+  optional GlobalKeyWithMaintainers key = 8;
 }
 
 // Rollback Node
 message Rollback {
   // Required: must be non-empty
   repeated string children = 1;
+}
+
+message QueryByKey {
+  // Specific LF serialization version of the node
+  //
+  // Required
+  string lf_version = 1;
+  // Required
+  string package_name = 2;
+  // The identifier uses the package-id reference format.
+  //
+  // Required
+  Identifier template_id = 3;
+  // Required
+  bool exhaustive = 4;
+  // key to query for
+  //
+  // Required
+  GlobalKeyWithMaintainers key = 5;
+  // Result of the query: list of contract Ids matching the query
+  //
+  // Optional: can be empty
+  repeated string result = 6;
 }
 
 message Node {
@@ -112,5 +156,7 @@ message Node {
     Fetch fetch = 2;
     Exercise exercise = 3;
     Rollback rollback = 4;
+    // Only from PV 35
+    QueryByKey query_by_key = 5;
   }
 }

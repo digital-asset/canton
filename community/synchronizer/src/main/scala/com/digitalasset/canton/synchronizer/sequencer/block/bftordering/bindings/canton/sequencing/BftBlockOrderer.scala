@@ -78,7 +78,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
-  EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
@@ -419,14 +418,12 @@ final class BftBlockOrderer(
       config.standalone.fold[OrderingTopologyProvider[PekkoEnv]](
         new CantonOrderingTopologyProvider(
           cryptoApi,
-          EpochLength(config.epochLength), // TODO(#24184) make this dynamic sequencing parameter
           loggerFactory,
           metrics,
         )
       ) { standaloneConfig =>
         new FixedFileBasedOrderingTopologyProvider(
           standaloneConfig,
-          EpochLength(config.epochLength),
           cryptoApi.pureCrypto,
           metrics,
         )

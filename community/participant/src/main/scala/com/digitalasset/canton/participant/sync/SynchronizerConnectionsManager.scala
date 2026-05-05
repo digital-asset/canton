@@ -1614,12 +1614,6 @@ private[sync] class SynchronizerConnectionsManager(
     resourceManagementService.checkOverloaded(load)
   }
 
-  def refreshCaches()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    for {
-      _ <- synchronizerConnectionConfigStore.refreshCache()
-      _ <- resourceManagementService.refreshCache()
-    } yield ()
-
   override def onClosed(): Unit = {
     val instances = (connectQueue +: connectedSynchronizers.snapshot.values.toSeq) ++ Seq(
       connectedSynchronizerHealth,

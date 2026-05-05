@@ -41,31 +41,38 @@ class PreparedTransactionCodecV1Spec
   private lazy val generatorsTopology = new GeneratorsTopology(testedProtocolVersion)
   private lazy val generatorsLf = new GeneratorsLf(generatorsTopology)
   private lazy val generatorsInteractiveSubmission =
-    new GeneratorsInteractiveSubmission(generatorsLf, generatorsTopology)
+    new GeneratorsInteractiveSubmission(
+      generatorsLf,
+      generatorsTopology,
+      exclusiveMaxSerializationVersion = LfSerializationVersion.VDev,
+    )
 
   "Prepared transaction" should {
     import generatorsInteractiveSubmission.*
 
     "round trip encode and decode any LF transaction" in {
-      forAll { (transaction: VersionedTransaction, nodeSeeds: Option[ImmArray[(NodeId, Hash)]]) =>
-        val result = for {
-          encoded <- encoder.serializeTransaction(transaction, nodeSeeds)
-          decoded <- decoder.transactionTransformer
-            .transform(encoded)
-            .toFutureWithLoggedFailuresDecode("Failed to decode transaction", logger)
-        } yield {
-          decoded shouldEqual transaction
-        }
+      forAll(minSuccessful(1000)) {
+        (transaction: VersionedTransaction, nodeSeeds: Option[ImmArray[(NodeId, Hash)]]) =>
+          val result = for {
+            encoded <- encoder.serializeTransaction(transaction, nodeSeeds)
+            decoded <- decoder.transactionTransformer
+              .transform(encoded)
+              .toFutureWithLoggedFailuresDecode("Failed to decode transaction", logger)
+          } yield {
+            decoded shouldEqual transaction
+          }
 
-        timeouts.default.await_("Round trip")(result)
+          timeouts.default.await_("Round trip")(result)
       }
     }
 
     "support interfaceId on exercise node" in {
       implicit val nodeGen: Arbitrary[Node.Exercise] = Arbitrary(
         for {
-          exerciseNode <- ValueGenerators.danglingRefExerciseNodeGen
-          normalized = normalizeNodeForV1(exerciseNode).copy(
+          exerciseNode <- ValueGenerators.danglingRefExerciseNodeGenWithVersion(
+            LfSerializationVersion.V1
+          )
+          normalized = normalizeNode(exerciseNode).copy(
             interfaceId = Some(ValueGenerators.idGen.sample.value)
           )
         } yield normalized
@@ -81,8 +88,8 @@ class PreparedTransactionCodecV1Spec
     "support interfaceId on fetch node" in {
       implicit val nodeGen: Arbitrary[Node.Fetch] = Arbitrary(
         for {
-          fetchNode <- ValueGenerators.fetchNodeGen
-          normalized = normalizeNodeForV1(fetchNode).copy(
+          fetchNode <- ValueGenerators.fetchNodeGenWithVersion(LfSerializationVersion.V1)
+          normalized = normalizeNode(fetchNode).copy(
             interfaceId = Some(ValueGenerators.idGen.sample.value)
           )
         } yield normalized
@@ -114,6 +121,7 @@ class PreparedTransactionCodecV1Spec
                   value.choiceObservers,
                 )
               case NodeType.Rollback(_) => Seq.empty
+              case NodeType.QueryByKey(_) => Seq.empty
             }
           }
           partiesLists.foreach { partiesList =>

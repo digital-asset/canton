@@ -67,7 +67,7 @@ class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
           .left
           .value
 
-        status.getDescription shouldBe "The version required by the synchronizer (34) is lower than the minimum version configured by the participant (42).  "
+        status.getDescription shouldBe s"The version required by the synchronizer ($testedProtocolVersion) is lower than the minimum version configured by the participant (42).  "
         status.getCode shouldBe Code.INVALID_ARGUMENT
         status.getCause shouldBe null
       } else succeed

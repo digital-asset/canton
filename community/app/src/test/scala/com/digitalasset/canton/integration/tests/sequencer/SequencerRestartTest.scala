@@ -164,11 +164,11 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
       val ts = env.environment.clock.now
       val maxTs = ts.plusSeconds(300)
       val timestamps = SendRequestTimestamps(
-        topologyTimestamp = Some(ts.minusSeconds(5)),
+        topologyTimestamp = None,
         approximateTimestampForSigning = ts,
         maxSequencingTime = maxTs,
       )
-      val aggregationRule = AggregationRule(
+      val aggregationRule = AggregationRule.testing(
         NonEmpty(Seq, participant1.id, participant2.id),
         PositiveInt.tryCreate(2),
         testedProtocolVersion,

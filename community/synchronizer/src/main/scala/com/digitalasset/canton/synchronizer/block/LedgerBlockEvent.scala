@@ -114,7 +114,9 @@ object LedgerBlockEvent extends HasLoggerName {
       )
 }
 
-/** @param tickTopologyAtLeastAt
+/** @param baseBlockSequencingTime
+  *   See [[RawLedgerBlock.baseSequencingTimeMicrosFromEpoch]]
+  * @param tickTopologyAtLeastAt
   *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
   */
 final case class BlockEvents(

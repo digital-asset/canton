@@ -414,12 +414,13 @@ private[index] class IndexServiceImpl(
       loggingContext: LoggingContextWithTrace
   ): Future[Unit] = {
     pruneBuffers(pruneUpToInclusive)
-    ledgerDao.prune(
-      previousPruneUpToInclusive = previousPruneUpToInclusive,
-      previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
-      pruneUpToInclusive = pruneUpToInclusive,
-      incompleteReassignmentOffsets = incompleteReassignmentOffsets,
-    )
+    ledgerDao
+      .prune(
+        previousPruneUpToInclusive = previousPruneUpToInclusive,
+        previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
+        pruneUpToInclusive = pruneUpToInclusive,
+        incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+      )
   }
 
   override def indexDbPrunedUpto(implicit

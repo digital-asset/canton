@@ -213,6 +213,7 @@ final case class ExecuteTransactionData(
           topologySnapshot,
           submitterInfo.actAs.toSet,
           logger,
+          protocolVersion,
         )
     } yield ()
 }

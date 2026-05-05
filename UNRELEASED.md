@@ -15,6 +15,10 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### Change from grpcurl to grpc-health-probe in all Docker images
+We're changing the tool used for healthcheck probes from grpcurl to grpc-health-probe.
+This change is motivated by insufficient maintenance efforts on grpcurl's team side.
+
 ### Mediator Crash Fault Tolerance
 The mediator is now crash fault-tolerant in the sense that it guarantees that all verdicts will eventually be persisted
 and available on the inspection API. One remaining limitation is that a crash between the persistence of the verdict and
@@ -59,6 +63,14 @@ if the client does not support the sequencer's protocol version.
 ### Protocol Changes
 
 #### Protocol Version 35
+
+##### [BREAKING CHANGE] Action Required: Maximum number of external signatures
+
+From Protocol Version 35, the number of signatures that can be provided for externally signed transactions
+can be **at most** the number of registered protocol signing keys (signing keys with `Protocol` usage) for the submitting party.
+
+Please ensure that submitting applications respect this limit. Submissions that do not respect this limit will fail from
+Protocol Version 35.
 
 ##### Session signing keys
 
@@ -165,6 +177,8 @@ Three gauge metrics are available under `daml.participant.api.indexer` to monito
 
 
 ### Minor Improvements
+- Added a new configuration parameter `canton.participants.<participant_name>.ledger-api.index-service.max-lookup-limit` that caps the maximum number of contracts returned by a contract key lookup per request.
+  The default value is 1000.
 - The Ledger API now enforces a maximum number of signatures per party that can be provided for external submissions.
 This value defaults to 50 and can be changed at the following config path: `canton.participants.<participant_name>.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party`
 - *BREAKING* The expert `keep-alive-client` configuration parameter for various client services moved to `channel.keep-alive-client`.
@@ -304,9 +318,15 @@ the value for sequencers is  configured to be 500 for the public API and 100 for
   See https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/ for details.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
   of an onboarding party.
+- New metric to track the number of active stakeholder groups of a participant: `daml.participant.sync.commitments.active-stakeholder-groups`
+- *BREAKING*: ACS commitment metrics distinguish the synchronizer alias and distinguished counterparticipants via a label instead of including it in the metric name. Affected are the following metrics:
+    - `daml.participant.sync.commitments.<synchronizer-alias>.counter-participant-latency.<participant>` -> `daml.participant.sync.commitments.counter-participant-latency`
+    - `daml.participant.sync.commitments.<synchronizer-alias>.largest-counter-participant-latency` -> `daml.participant.sync.commitments.largest-counter-participant-latency`
+    - `daml.participant.sync.commitments.<synchronizer-alias>.largest-distinguished-counter-participant-latency` -> `daml.participant.sync.commitments.largest-distinguished-counter-participant-latency`
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- Reduced memory consumption on participants by removing application handler time limit triggers once they are no longer needed, rather than keeping them in the queue until expiration (up to 24 hours).
 
 ### Enhanced Reliability for `GetHighestOffsetByTimestamp`
 

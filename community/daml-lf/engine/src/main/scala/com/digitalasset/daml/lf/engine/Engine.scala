@@ -527,7 +527,7 @@ class Engine(
         case ContractStateMachine.Mode.NUCK =>
           config.allowedLanguageVersions
         case ContractStateMachine.Mode.NoKey =>
-          VersionRange(config.allowedLanguageVersions.min, LanguageVersion.v2_2)
+          config.allowedLanguageVersions.filter(_ < LanguageVersion.featureContractKeys.versionRange.min)
       }
 
       val disallowedPackages =
@@ -535,8 +535,7 @@ class Engine(
           .map(pkgId => (pkgId, compiledPackages.signatures(pkgId).languageVersion))
           .filterNot { case (pkgId, langVer) =>
             (
-              (allowedLangVersions.min <= langVer || stablePackageIds(pkgId)) &&
-              langVer <= allowedLangVersions.max
+              (allowedLangVersions.contains(langVer) || stablePackageIds(pkgId))
             )
           }
 
@@ -1104,7 +1103,7 @@ object Engine {
   }
 
   def DevConfig: EngineConfig =
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange)
+    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersions)
   def DevEngine(loggerFactory: NamedLoggerFactory): Engine = new Engine(DevConfig, loggerFactory)
 
   private def mkInterpretationError(error: IError) =

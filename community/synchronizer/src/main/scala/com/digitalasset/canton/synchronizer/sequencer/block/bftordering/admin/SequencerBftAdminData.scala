@@ -5,9 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin
 
 import cats.implicits.*
 import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
+import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.config.{PemFile, PemString}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyNameOnlyCase, PrettyPrinting}
+import com.digitalasset.canton.sequencer.admin.v30.GetOrderingTopologyResponse.DynamicSequencingParameters
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security.Empty
 import com.digitalasset.canton.sequencer.admin.v30.{
@@ -25,7 +27,6 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   TlsClientCertificate as ProtoTlsClientCertificate,
   TlsPeerEndpoint as ProtoTlsPeerEndpoint,
 }
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
@@ -370,7 +371,8 @@ object SequencerBftAdminData {
       GetOrderingTopologyResponse(
         currentEpoch,
         sequencerIds.map(SequencerNodeId.toBftNodeId),
-        Option(sequencingParameters.toProto),
+        GetOrderingTopologyResponse.DynamicSequencingParameters
+          .DynamicSequencingParametersPayload31(sequencingParameters.toProto31),
       )
   }
 
@@ -384,10 +386,15 @@ object SequencerBftAdminData {
             .leftMap(_.toString)
         } yield sequencerId
       }.sequence
-      parameters <- ProtoConverter
-        .required("dynamicSequencingParametersPayload", response.dynamicSequencingParametersPayload)
-        .flatMap(SequencingParameters.fromProto)
-        .leftMap(_.toString)
+      parsedParameters = response.dynamicSequencingParameters match {
+        case DynamicSequencingParameters.Empty =>
+          Left(FieldNotSet("dynamicSequencingParameters"))
+        case DynamicSequencingParameters.DynamicSequencingParametersPayload(value) =>
+          SequencingParameters.fromProto30(value)
+        case DynamicSequencingParameters.DynamicSequencingParametersPayload31(value) =>
+          SequencingParameters.fromProto31(value)
+      }
+      parameters <- parsedParameters.leftMap(_.toString)
     } yield OrderingTopology(response.currentEpoch, sequencers, parameters)
   }
 }

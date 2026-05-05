@@ -3,82 +3,40 @@
 
 package com.digitalasset.canton.protocol.hash
 
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing
-import com.digitalasset.canton.crypto.{Hash, HashPurpose}
-import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.transaction.CreationTime
+
+/** Interface to hash transaction metadata
+  */
+abstract class TransactionMetadataHasher {
+
+  /** Hashes Transaction Metadata */
+  @throws[NodeHashingError]
+  def tryHashMetadata(
+      metadata: TransactionMetadataForHashing,
+      hashTracer: HashTracer = HashTracer.NoOp,
+  ): Hash =
+    tryHashMetadataBuilder(metadata, hashTracer).finish()
+
+  /** Hashes Transaction Metadata */
+  @throws[NodeHashingError]
+  protected[hash] def tryHashMetadataBuilder(
+      metadata: TransactionMetadataForHashing,
+      hashTracer: HashTracer,
+  ): NodeHashBuilder
+}
 
 object TransactionMetadataHasher {
 
-  /** Hashes Transaction Metadata in accordance with the provided hash version */
-  @throws[NodeHashingError]
-  def tryHashMetadata(
-      hashVersion: HashingSchemeVersion,
-      metadata: TransactionMetadataForHashing,
-      hashTracer: HashTracer = HashTracer.NoOp,
-  ): Hash = {
-    val common = NodeHashBuilder(
-      HashPurpose.PreparedSubmission,
-      hashTracer,
-      // Do not enforce node seed for create nodes here as we hash disclosed events which do not have a seed
-      enforceNodeSeedForCreateNodes = false,
-      hashVersion,
-    )
-      .addPurpose()
-      .addMetadataEncodingVersion(1)
-      .withContext("Act As Parties")(
-        _.addIterator(metadata.actAs.iterator, metadata.actAs.size)(_ addString _)
-      )
-      .withContext("Command Id")(_.addString(metadata.commandId))
-      .withContext("Transaction UUID")(_.addString(metadata.transactionUUID.toString))
-      .withContext("Mediator Group")(_.addInt(metadata.mediatorGroup))
-      .withContext("Synchronizer Id")(_.addString(metadata.synchronizer.toProtoPrimitive))
-      .withContext("Min Time Boundary")(
-        _.addOptional(
-          metadata.timeBoundaries.minConstraint,
-          b => (v: Time.Timestamp) => b.addLong(v.micros),
-        )
-      )
-      .withContext("Max Time Boundary")(
-        _.addOptional(
-          metadata.timeBoundaries.maxConstraint,
-          b => (v: Time.Timestamp) => b.addLong(v.micros),
-        )
-      )
-      .withContext("Preparation Time")(_.addLong(metadata.preparationTime.micros))
-      .withContext("Disclosed Contracts")(
-        _.addIterator(metadata.disclosedContracts.valuesIterator, metadata.disclosedContracts.size)(
-          (builder, fatInstance) =>
-            builder
-              .withContext("Created At")(_.addLong(CreationTime.encode(fatInstance.createdAt)))
-              .withContext("Create Contract")(builder =>
-                builder.addHash(
-                  builder.hashNode(
-                    node = fatInstance.toCreateNode,
-                    nodeSeed = Option.empty[LfHash],
-                    nodes = Map.empty,
-                    nodeSeeds = Map.empty,
-                    hashTracer = hashTracer.subNodeTracer,
-                  ),
-                  "Disclosed Contract",
-                )
-              )
-        )
-      )
-    val versionSpecific = hashVersion match {
+  private[hash] def apply(
+      hashingSchemeVersion: HashingSchemeVersion
+  ): TransactionMetadataHasher =
+    hashingSchemeVersion match {
       case HashingSchemeVersion.V2 =>
-        common
+        new v2.TransactionMetadataHasher()
       case HashingSchemeVersion.V3 =>
-        common.withContext("Max Record Time")(
-          _.addOptional(
-            metadata.maxRecordTime,
-            b => (v: Time.Timestamp) => b.addLong(v.micros),
-          )
-        )
+        new v3.TransactionMetadataHasher()
     }
-    versionSpecific.finish()
-  }
 }

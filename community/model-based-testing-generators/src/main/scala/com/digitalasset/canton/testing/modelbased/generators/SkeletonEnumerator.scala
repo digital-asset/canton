@@ -15,6 +15,7 @@ class SkeletonEnumerator(
     languageVersion: LanguageVersion,
     readOnlyRollbacks: Boolean,
     generateQueryByKey: Boolean = false,
+    singleCommand: Boolean = false,
 ) {
 
   // Commands := Commands Parties [TopLevelAction]
@@ -120,7 +121,8 @@ class SkeletonEnumerator(
     AS.map2(bools, topLevelActions)(Command.apply)
 
   lazy val commands: Space[Commands] =
-    AS.map(nonEmptyListOf(command))(Commands.apply)
+    if (singleCommand) AS.map(command)(c => Commands(List(c)))
+    else AS.map(nonEmptyListOf(command))(Commands.apply)
 
   lazy val ledgers: Space[Ledger] =
     listsOf(commands)

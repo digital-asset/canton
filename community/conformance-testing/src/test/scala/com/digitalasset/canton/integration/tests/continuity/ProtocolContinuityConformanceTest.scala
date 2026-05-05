@@ -67,8 +67,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       useJsonApi: Boolean,
   )(shard: Int, numShards: Int)(
       env: TestConsoleEnvironment
-  ): String = {
-
+  ): Unit = {
     val jsonExclusions = ExcludedTests.findExcludedTests(useJsonApi)
     ledgerApiTestToolPlugins(version)
       .runShardedSuites(

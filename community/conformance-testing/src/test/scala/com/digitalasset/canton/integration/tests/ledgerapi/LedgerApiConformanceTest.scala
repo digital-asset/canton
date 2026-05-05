@@ -23,13 +23,14 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event
 
 trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
-  protected def lfVersion: UseLedgerApiTestTool.LfVersion = UseLedgerApiTestTool.LfVersion.Stable
+  protected def lfVersion: LanguageVersion = LanguageVersion.v2_2
 
-  protected def lapittVersion: LAPITTVersion = LAPITTVersion.LocalJar
+  protected def lapittVersion: LAPITTVersion = LAPITTVersion.Local
 
   protected val ledgerApiTestToolPlugin =
     new UseLedgerApiTestTool(
@@ -42,7 +43,7 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   def runShardedTests(shard: Int, numShards: Int)(
       env: TestConsoleEnvironment
-  ): String =
+  ): Unit =
     ledgerApiTestToolPlugin.runShardedSuites(
       shard,
       numShards,
@@ -122,8 +123,8 @@ class LedgerApiConformanceMultiSynchronizerTest
     new UseLedgerApiTestTool(
       loggerFactory,
       connectedSynchronizersCount = connectedSynchronizersCount,
-      lfVersion = UseLedgerApiTestTool.LfVersion.Stable,
-      version = LAPITTVersion.LocalJar,
+      lfVersion = LanguageVersion.v2_2,
+      version = LAPITTVersion.Local,
     )
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(ledgerApiTestToolPlugin)
@@ -282,7 +283,7 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
 }
 
 trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase {
-  override def lfVersion = UseLedgerApiTestTool.LfVersion.V23
+  override def lfVersion = LanguageVersion.v2_3
 
   override def connectedSynchronizersCount = 1
 
@@ -330,7 +331,7 @@ class LedgerApiKeysConformanceTest_Postgres extends LedgerApiKeysConformanceTest
 
 trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConformanceBase {
 
-  override def lfVersion = UseLedgerApiTestTool.LfVersion.Dev
+  override def lfVersion = LanguageVersion.devLfVersion
 
   override def connectedSynchronizersCount = 1
 

@@ -558,7 +558,6 @@ class QueueBasedSynchronizerOutboxTest
       }
     }
 
-    // TODO(#30401) re-enable when fixed
     "handle being closed while transactions are pending" in {
       // This test executes the following scenario:
       // 1. submit TB1 (topology broadcast 1) and keep it from being fully flushed to the topology store.

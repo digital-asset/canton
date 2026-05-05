@@ -9,7 +9,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
 import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStateStatus}
-import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.logging.{
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  SuppressionRule,
+}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.*
@@ -33,6 +37,7 @@ import com.digitalasset.daml.lf.value.Value.{ContractId, ValueText}
 import org.mockito.MockitoSugar
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
@@ -55,6 +60,7 @@ class MutableCacheBackedContractStoreSpec
         loggerFactory = loggerFactory,
         contractStore = mock[LedgerApiContractStore],
         ledgerEndCache = MutableLedgerEndCache(),
+        maxLookupLimit = 10,
       )
 
       val event1 = ContractStateEvent.Archived(
@@ -69,6 +75,70 @@ class MutableCacheBackedContractStoreSpec
 
       succeed
     }
+  }
+
+  "lookupNonUniqueContractKey" should {
+    "cap the limit and log when the requested limit exceeds the configured max" in {
+      val maxLimit = 5
+      val requestedLimit = 20
+      val contractsReader = mock[LedgerDaoContractsReader]
+      val mockContractStore = mock[LedgerApiContractStore]
+      val ledgerEndCache = MutableLedgerEndCache()
+
+      when(
+        contractsReader.lookupNonUniqueKey(any[Key], any[Long], any[Option[Long]], any[Int])(
+          any[LoggingContextWithTrace]
+        )
+      ).thenReturn(
+        Future.successful(
+          ContractStorageBackend.KeysPageResult(
+            internalContractIds = Vector.empty,
+            nextPageToken = None,
+          )
+        )
+      )
+
+      when(
+        mockContractStore.lookupBatchedContractIdsNonReadThrough(any[Vector[Long]])(
+          any[TraceContext]
+        )
+      )
+        .thenReturn(Future.successful(Map.empty[Long, ContractId]))
+
+      val store = new MutableCacheBackedContractStore(
+        contractsReader = contractsReader,
+        contractStateCaches = mock[ContractStateCaches],
+        loggerFactory = loggerFactory,
+        contractStore = mockContractStore,
+        ledgerEndCache = ledgerEndCache,
+        maxLookupLimit = maxLimit,
+      )
+
+      loggerFactory.assertLogs(SuppressionRule.Level(Level.INFO))(
+        store
+          .lookupNonUniqueContractKey(
+            readers = Set(party("alice")),
+            key = globalKey("some-key"),
+            pageToken = None,
+            limit = requestedLimit,
+          )
+          .futureValue,
+        _.infoMessage should include(
+          s"Lookup limit $requestedLimit exceeds configured cap of $maxLimit"
+        ),
+      )
+
+      // Verify the capped limit was passed to the reader
+      verify(contractsReader).lookupNonUniqueKey(
+        any[Key],
+        any[Long],
+        eqTo(None),
+        eqTo(maxLimit),
+      )(any[LoggingContextWithTrace])
+
+      succeed
+    }
+
   }
 
   "lookupActiveContract" should {
@@ -313,6 +383,7 @@ object MutableCacheBackedContractStoreSpec {
       loggerFactory = loggerFactory,
       contractStore = inMemoryContractStore(loggerFactory),
       ledgerEndCache = MutableLedgerEndCache(),
+      maxLookupLimit = 10,
     )
 
     Resource.successful(contractStore)

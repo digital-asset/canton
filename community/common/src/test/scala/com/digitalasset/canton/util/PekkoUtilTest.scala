@@ -1006,6 +1006,7 @@ class PekkoUtilTest
               firstFailed.trySuccess(())
               throw new Exception("boom")
             },
+        initializationKillSwitch = None,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
       firstFail.trySuccess(())
@@ -1040,6 +1041,7 @@ class PekkoUtilTest
         uncommittedWarnTreshold = 100,
         recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
         consumerFactory = _ => consumerPromise.future,
+        initializationKillSwitch = None,
       )
       Threading.sleep(10)
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
@@ -1084,6 +1086,7 @@ class PekkoUtilTest
               fromExclusive = 0,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1127,6 +1130,7 @@ class PekkoUtilTest
         uncommittedWarnTreshold = 100,
         recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
         consumerFactory = _ => consumerPromise.future,
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1188,6 +1192,7 @@ class PekkoUtilTest
               fromExclusive = 0,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.futureValue
       shutdownPromise.isCompleted shouldBe false
@@ -1233,6 +1238,7 @@ class PekkoUtilTest
               fromExclusive = 0,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
       shutdownPromise.isCompleted shouldBe false
@@ -1303,6 +1309,7 @@ class PekkoUtilTest
           firstConsumerInitializationFailedPromise.trySuccess(())
           Future.failed(new Exception("boom"))
         },
+        initializationKillSwitch = None,
       )
       firstConsumerInitializationFailedPromise.future.futureValue
       Threading.sleep(10)
@@ -1367,6 +1374,7 @@ class PekkoUtilTest
           initializationStartedPromise.get().trySuccess(())
           f
         },
+        initializationKillSwitch = None,
       )
       // info 1
       initializationStartedPromise.get().future.futureValue
@@ -1504,6 +1512,7 @@ class PekkoUtilTest
               fromExclusive = recoveryIndex,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1581,6 +1590,7 @@ class PekkoUtilTest
               fromExclusive = recoveryIndex,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1660,6 +1670,7 @@ class PekkoUtilTest
               fromExclusive = recoveryIndex,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1735,6 +1746,7 @@ class PekkoUtilTest
               fromExclusive = recoveryIndex,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1811,6 +1823,7 @@ class PekkoUtilTest
               fromExclusive = recoveryIndex,
             )
           },
+        initializationKillSwitch = None,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1880,6 +1893,7 @@ class PekkoUtilTest
                 fromExclusive = sink.get().headOption.map(_._1).getOrElse(0),
               )
             },
+          initializationKillSwitch = None,
         )
         val testF = Future {
           val inputFixture = Iterator.iterate(1)(_ + 1).take(inputSize).toList
@@ -1979,6 +1993,7 @@ class PekkoUtilTest
               fromExclusive = 0,
             )
           },
+        initializationKillSwitch = None,
       )
       val start = System.nanoTime()
       Iterator

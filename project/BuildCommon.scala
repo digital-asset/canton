@@ -14,6 +14,7 @@ import sbt.Keys.{update, *}
 import sbt.Tests.{Group, SubProcess}
 import sbt.{File, *}
 import sbt.internal.util.ManagedLogger
+import sbt.io.NothingFilter
 import sbt.nio.Keys.*
 import sbtassembly.AssemblyPlugin.autoImport.*
 import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
@@ -432,6 +433,7 @@ object BuildCommon {
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     case PathList("LICENSE") => MergeStrategy.last
+    case PathList("logback.xml") => MergeStrategy.last
     case PathList("buf.yaml") => MergeStrategy.discard
     case PathList("scala", "tools", "nsc", "doc", "html", _*) => MergeStrategy.discard
     case PathList("scala", "reflect", "Selectable.class" | "Selectable$.class") =>
@@ -686,9 +688,6 @@ object BuildCommon {
       `aws-kms-driver`,
       `mock-kms-driver`,
       `ledger-common-dars`,
-      `ledger-common-dars-lf-v2-1`,
-      `ledger-common-dars-lf-v2-3`,
-      `ledger-common-dars-lf-v2-dev`,
       `transcode-schema`,
       `transcode-daml-lf`,
       `transcode-codec-json`,
@@ -704,12 +703,7 @@ object BuildCommon {
       `ledger-api-string-interning-benchmark`,
       `conformance-testing`,
       `ledger-api-bench-tool`,
-      `ledger-test-tool-suites-2-1`,
-      `ledger-test-tool-suites-2-3`,
-      `ledger-test-tool-suites-2-dev`,
-      `ledger-test-tool-2-1`,
-      `ledger-test-tool-2-3`,
-      `ledger-test-tool-2-dev`,
+      `ledger-test-tool`,
       `upgrading-integration-tests`,
       `model-based-testing-generators`,
       `model-based-testing-drivers`,
@@ -803,7 +797,7 @@ object BuildCommon {
         `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
-        `ledger-common-dars-lf-v2-1` % Test,
+        `ledger-common-dars` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -835,6 +829,8 @@ object BuildCommon {
           monocle_macro,
           scala_logging,
           sttp,
+          gcp_storage % Test,
+          zstd % Test,
         ),
         excludeTranscodeConflictingDependencies,
         // core packaging commands
@@ -932,12 +928,15 @@ object BuildCommon {
             "com.digitalasset.canton.tests.vettingmain.v1",
           ),
         ),
-        Test / damlTsCodegen := Seq(
-          (
-            (`ledger-common-dars-lf-v2-1` / Compile / damlSourceDirectory).value / "main" / "daml" / "model",
-            (`ledger-common-dars-lf-v2-1` / Compile / damlDarOutput).value / "model-tests-1.0.0.dar",
+        Test / damlTsCodegen := {
+          (`ledger-common-dars` / Compile / damlBuild).value
+          Seq(
+            (
+              (`ledger-common-dars` / Compile / damlSourceDirectory).value / "model",
+              (`ledger-common-dars` / Compile / damlDarOutput).value / "model-tests-1.0.0-v22.dar",
+            )
           )
-        ),
+        },
         Test / fullClasspath := (Test / fullClasspath).dependsOn(Test / damlGenerateTs).value,
         Test / useVersionedDarName := true,
         Test / PB.targets := Seq(
@@ -1036,7 +1035,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("34")),
+          BuildInfoKey("stableProtocolVersions" -> List("34", "35")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1324,6 +1323,7 @@ object BuildCommon {
       .dependsOn(
         `community-app-base`,
         `community-testing`,
+        `ledger-test-tool`,
         DamlProjects.`testing-utils`,
       )
       .settings(
@@ -1754,124 +1754,102 @@ object BuildCommon {
     lazy val `ledger-common-dars` =
       project
         .in(file("community/ledger/ledger-common-dars"))
-        .settings(
-          sharedCommunitySettings,
-          addFilesToHeaderCheck("*.daml", "daml", Compile),
-        )
-
-    def createLedgerCommonDarsProject(lfVersion: String) =
-      Project(
-        s"ledger-common-dars-lf-v$lfVersion".replace('.', '-').replace("-staging", ""),
-        file(s"community/ledger/ledger-common-dars/lf-v$lfVersion".replace("-staging", "")),
-      )
         .dependsOn(
-          DamlProjects.`bindings-java`
+          DamlProjects.`bindings-java`,
+          DamlProjects.`daml-lf-archive`,
+          DamlProjects.`daml-lf-language`,
+          `util-external`,
         )
         .enablePlugins(DamlPlugin)
         .settings(
           sharedCommunitySettings,
-          Compile / damlDarLfVersions := Seq(lfVersion),
-          ledgerCommonDarsSharedSettings(lfVersion),
+          addFilesToHeaderCheck("*.daml", "daml", Compile),
+          damlDarLfVersions := Seq("2.2", "2.3", "2.dev"),
+          useVersionedDarName := true,
+          Compile / damlBuildOrder := Seq(
+            "model_iface",
+            "model",
+            "carbonv1",
+            "carbonv2",
+            "upgrade_iface",
+            "upgrade",
+          ),
+          Compile / damlJavaCodegen := {
+            def codegenTarget(name: String, lfVersionSuffix: String) =
+              (
+                (Compile / damlSourceDirectory).value / s"$name",
+                (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests-1.0.0-$lfVersionSuffix.dar",
+                s"com.daml.ledger.test.java.$name",
+              )
+            Seq(
+              "model",
+              "semantic",
+              "ongoing_stream_package_upload",
+              "package_management",
+              "carbonv1",
+              "carbonv2",
+              "upgrade_iface",
+            ).map(codegenTarget(_, "v22")) ++
+              Seq(codegenTarget("keys", "v23"), codegenTarget("experimental", "v2dev")) ++
+              Seq(
+                (
+                  (Compile / damlSourceDirectory).value / "upgrade" / "1.0.0",
+                  (Compile / damlDarOutput).value / "upgrade-tests-1.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.upgrade_1_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "upgrade" / "2.0.0",
+                  (Compile / damlDarOutput).value / "upgrade-tests-2.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.upgrade_2_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "upgrade" / "3.0.0",
+                  (Compile / damlDarOutput).value / "upgrade-tests-3.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.upgrade_3_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "upgrade_fetch" / "1.0.0",
+                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-1.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.upgrade_fetch_1_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "upgrade_fetch" / "2.0.0",
+                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.upgrade_fetch_2_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_dep",
+                  (Compile / damlDarOutput).value / "vetting-dep-1.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_dep",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_main" / "1.0.0",
+                  (Compile / damlDarOutput).value / "vetting-main-1.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_main_1_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_main" / "2.0.0",
+                  (Compile / damlDarOutput).value / "vetting-main-2.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_main_2_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_main" / "split-lineage-2.0.0",
+                  (Compile / damlDarOutput).value / "vetting-main-split-lineage-2.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_main" / "upgrade-incompatible-3.0.0",
+                  (Compile / damlDarOutput).value / "vetting-main-3.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_main_3_0_0",
+                ),
+                (
+                  (Compile / damlSourceDirectory).value / "vetting_alt",
+                  (Compile / damlDarOutput).value / "vetting-alt-1.0.0-v22.dar",
+                  s"com.daml.ledger.test.java.vetting_alt",
+                ),
+              )
+          },
         )
-
-    private def lfSpecificModels(lfVersion: String): Seq[String] =
-      lfVersion match {
-        case "2.1" => Seq.empty
-        case "2.3" => Seq("keys")
-        case _ => Seq("keys", "experimental")
-      }
-
-    def ledgerCommonDarsSharedSettings(lfVersion: String) = Seq(
-      Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
-      Compile / useVersionedDarName := true,
-      Compile / damlJavaCodegen := (for (
-        name <- Seq(
-          "model",
-          "model_iface",
-          "semantic",
-          "ongoing_stream_package_upload",
-          "package_management",
-          "carbonv1",
-          "carbonv2",
-          "upgrade_iface",
-        ) ++ lfSpecificModels(lfVersion)
-      )
-        yield (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
-          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests-1.0.0.dar",
-          s"com.daml.ledger.test.java.$name",
-        )) ++ Seq(
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "1.0.0",
-          (Compile / damlDarOutput).value / "upgrade-tests-1.0.0.dar",
-          s"com.daml.ledger.test.java.upgrade_1_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "2.0.0",
-          (Compile / damlDarOutput).value / "upgrade-tests-2.0.0.dar",
-          s"com.daml.ledger.test.java.upgrade_2_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "3.0.0",
-          (Compile / damlDarOutput).value / "upgrade-tests-3.0.0.dar",
-          s"com.daml.ledger.test.java.upgrade_3_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade_fetch" / "1.0.0",
-          (Compile / damlDarOutput).value / "upgrade-fetch-tests-1.0.0.dar",
-          s"com.daml.ledger.test.java.upgrade_fetch_1_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade_fetch" / "2.0.0",
-          (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0.dar",
-          s"com.daml.ledger.test.java.upgrade_fetch_2_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_dep",
-          (Compile / damlDarOutput).value / "vetting-dep-1.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_dep",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "1.0.0",
-          (Compile / damlDarOutput).value / "vetting-main-1.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_main_1_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "2.0.0",
-          (Compile / damlDarOutput).value / "vetting-main-2.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_main_2_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "split-lineage-2.0.0",
-          (Compile / damlDarOutput).value / "vetting-main-split-lineage-2.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "upgrade-incompatible-3.0.0",
-          (Compile / damlDarOutput).value / "vetting-main-3.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_main_3_0_0",
-        ),
-        (
-          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_alt",
-          (Compile / damlDarOutput).value / "vetting-alt-1.0.0.dar",
-          s"com.daml.ledger.test.java.vetting_alt",
-        ),
-      ),
-      Compile / damlBuildOrder := Seq(
-        // define the packages that have a dependency in the right order
-        // packages that are omitted will be compiled after those listed below
-        "model_iface",
-        "model",
-        "carbonv1",
-        "carbonv2",
-        "upgrade_iface",
-        "vetting_dep",
-      ),
-    )
-
-    lazy val `ledger-common-dars-lf-v2-1` = createLedgerCommonDarsProject(lfVersion = "2.1")
-    lazy val `ledger-common-dars-lf-v2-3` = createLedgerCommonDarsProject(lfVersion = "2.3-staging")
-    lazy val `ledger-common-dars-lf-v2-dev` = createLedgerCommonDarsProject(lfVersion = "2.dev")
 
     // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
     // function properly. However, if another test (e.g. TlsSpec) modifies this variable, the change will not be
@@ -2008,7 +1986,7 @@ object BuildCommon {
         `daml-tls` % "test->test",
         `community-common` % "compile->compile;test->test",
         `daml-adjustable-clock` % "test->test",
-        `ledger-common-dars-lf-v2-1` % "test",
+        `ledger-common-dars` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -2228,7 +2206,7 @@ object BuildCommon {
         sharedCantonCommunitySettings,
         coverageEnabled := false,
         HouseRules.damlRepoHeaderSettings,
-        Compile / damlDarLfVersions := Seq("2.3-staging"),
+        Compile / damlDarLfVersions := Seq("2.3"),
         Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "benchtool",
@@ -2238,148 +2216,61 @@ object BuildCommon {
         ),
       )
 
-    def ledgerTestToolSuitesProject(
-        lfVersion: String,
-        darsProject: Project,
-        additionalSetting: Def.SettingsDefinition*
-    ): Project =
-      Project(
-        s"ledger-test-tool-suites-$lfVersion".replace('.', '-'),
-        file(s"community/ledger-test-tool/suites/lf-v$lfVersion"),
+    lazy val `ledger-test-tool` = project
+      .in(file("community/ledger-test-tool"))
+      .dependsOn(
+        DamlProjects.`bindings-java`,
+        `community-participant`,
+        `community-testing`,
+        `community-base`,
+        `base-errors`,
+        `ledger-api-core`,
+        `ledger-common-dars`,
+        `ledger-json-api`,
+        DamlProjects.`testing-utils`,
+        DamlProjects.`test-evidence-tag`,
       )
-        .dependsOn(
-          DamlProjects.`bindings-java`,
-          `community-participant`,
-          `community-testing`,
-          `community-base`,
-          `base-errors`,
-          `ledger-api-core`,
-          `ledger-json-api`,
-          darsProject,
-          DamlProjects.`testing-utils`,
-          DamlProjects.`test-evidence-tag`,
-        )
-        .settings(
-          sharedCantonCommunitySettings,
-          libraryDependencies ++= Seq(
-            munit,
-            sttp_pekko_backend,
-            pekko_stream,
-            tapir_sttp_client,
-          ),
-          excludeTranscodeConflictingDependencies,
-          scalacOptions += "-Ytasty-reader",
-          compileOrder := CompileOrder.JavaThenScala,
-          Def.settings(additionalSetting.toSeq*),
-          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
-          Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
-          scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
-          // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
-          if (lfVersion == "2.1")
-            Seq(
-              Compile / unmanagedSources / excludeFilter := "*NamesSpec.scala" || ((_: File).getAbsolutePath
-                .contains("v2_dev")) || ((_: File).getAbsolutePath
-                .contains("v2_3"))
-            )
-          else Seq.empty,
-        )
-
-    lazy val `ledger-test-tool-suites-2-1` =
-      ledgerTestToolSuitesProject("2.1", `ledger-common-dars-lf-v2-1`)
-    lazy val `ledger-test-tool-suites-2-3` =
-      ledgerTestToolSuitesProject(
-        "2.3",
-        `ledger-common-dars-lf-v2-3`,
-        // Suites sources are identical between test tool versions
-        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
-        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
-        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
-      )
-    lazy val `ledger-test-tool-suites-2-dev` =
-      ledgerTestToolSuitesProject(
-        "2.dev",
-        `ledger-common-dars-lf-v2-dev`,
-        // Suites sources are identical between test tool versions
-        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
-        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories ++= Seq(
-          baseDirectory.value / ".." / "lf-v2.1" / "src" / "main",
-          baseDirectory.value / ".." / "lf-v2.3" / "src" / "main",
+      .settings(
+        sharedCantonCommunitySettings,
+        libraryDependencies ++= Seq(
+          munit,
+          sttp_pekko_backend,
+          pekko_stream,
+          tapir_sttp_client,
         ),
-        Test / unmanagedSourceDirectories ++= Seq(
-          baseDirectory.value / ".." / "lf-v2.1" / "src" / "test",
-          baseDirectory.value / ".." / "lf-v2.3" / "src" / "test",
-        ),
+        excludeTranscodeConflictingDependencies,
+        scalacOptions += "-Ytasty-reader",
+        scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
+        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src" / "main" / "scala",
+        Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
+        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src" / "test" / "scala",
+        // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
+        assembly / logLevel := Level.Info,
+        assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
+        assembly / assemblyJarName := s"ledger-api-test-tool-2.2-${version.value}.jar",
+        assembly / assemblyMergeStrategy := {
+          case PathList("logback.xml") => MergeStrategy.last
+          case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last
+          // complains about okio.kotlin_module clash
+          case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
+          case x =>
+            val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
+            mergeStrategy(oldStrategy)(x)
+        },
       )
-
-    def ledgerTestToolProject(lfVersion: String, ledgerTestToolSuites: Project): Project =
-      Project(
-        s"ledger-test-tool-$lfVersion".replace('.', '-'),
-        file(s"community/ledger-test-tool/tool/lf-v$lfVersion"),
-      ).dependsOn(ledgerTestToolSuites)
-        .enablePlugins(DamlPlugin)
-        .settings(
-          compileOrder := CompileOrder.JavaThenScala,
-          sharedCantonCommunitySettings,
-          excludeTranscodeConflictingDependencies,
-          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
-          Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
-          // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
-          assembly / logLevel := Level.Info,
-          assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
-          assembly / assemblyJarName := s"ledger-api-test-tool-$lfVersion-${version.value}.jar",
-          assembly / assemblyMergeStrategy := {
-            case PathList("logback.xml") => MergeStrategy.last
-            case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last
-            // complains about okio.kotlin_module clash
-            case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
-            case x =>
-              val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
-              mergeStrategy(oldStrategy)(x)
-          },
-        )
-
-    lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-test-tool-suites-2-1`)
-    lazy val `ledger-test-tool-2-3` = ledgerTestToolProject("2.3", `ledger-test-tool-suites-2-3`)
-    lazy val `ledger-test-tool-2-dev` =
-      ledgerTestToolProject("2.dev", `ledger-test-tool-suites-2-dev`)
 
     lazy val `conformance-testing` = project
       .in(file("community/conformance-testing"))
       .dependsOn(
         `community-app` % "compile->compile;test->test",
-        `ledger-test-tool-2-1` % Test,
-        `ledger-test-tool-2-3` % Test,
-        `ledger-test-tool-2-dev` % Test,
+        `ledger-test-tool`,
       )
       .settings(
         sharedCantonCommunitySettings,
         excludeTranscodeConflictingDependencies,
         // Allow to exit the systematic testing generator app
         (Test / run / trapExit) := false,
-        Test / run := (Test / run)
-          .dependsOn(
-            `ledger-test-tool-2-1` / assembly,
-            `ledger-test-tool-2-3` / assembly,
-            `ledger-test-tool-2-dev` / assembly,
-          )
-          .evaluated,
-        Test / test := (Test / test)
-          .dependsOn(
-            `ledger-test-tool-2-1` / assembly,
-            `ledger-test-tool-2-3` / assembly,
-            `ledger-test-tool-2-dev` / assembly,
-          )
-          .value,
-        Test / testOnly := (Test / testOnly)
-          .dependsOn(
-            `ledger-test-tool-2-1` / assembly,
-            `ledger-test-tool-2-3` / assembly,
-            `ledger-test-tool-2-dev` / assembly,
-          )
-          .evaluated,
-        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
+        Test / unmanagedResourceDirectories += (`ledger-common-dars` / Compile / resourceManaged).value,
       )
 
     // TODO(#25385): Consider extracting this integration test setup into its own sbt file due to its size
@@ -3890,7 +3781,7 @@ object BuildCommon {
       .enablePlugins(JmhPlugin)
       .settings(
         sharedCommunitySettings,
-        Compile / unmanagedResourceDirectories += (CommunityProjects.`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
+        Compile / unmanagedResourceDirectories += (CommunityProjects.`ledger-common-dars` / Compile / resourceManaged).value,
       )
       .dependsOn(
         `contextualized-logging`,

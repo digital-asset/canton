@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.integration.tests
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.console.CommandFailure
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -19,8 +19,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.sequencing.protocol.SequencerErrors.TopologyTimestampAfterSequencingTimestamp
+import com.digitalasset.canton.sequencing.protocol.AggregationRule
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ShowUtil.*
 import monocle.macros.syntax.lens.*
 
@@ -36,6 +38,11 @@ trait DeliverErrorIntegrationTest
     EnvironmentDefinition.P2_S1M1
       // Use a sim clock so that we don't have to worry about reaction timeouts
       .addConfigTransform(ConfigTransforms.useStaticTime)
+      .addConfigTransform(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.parameters.disableSubmissionChecksForTesting).replace(true)
+        )
+      )
 
   override val defaultParticipant: String = "participant1"
 
@@ -60,16 +67,24 @@ trait DeliverErrorIntegrationTest
 
     val syncCrypto = participant1.underlying.value.sync.syncCrypto
 
-    sequencer.setPolicy_("set a bad topology timestamp") { submissionRequest =>
+    sequencer.setPolicy_("add an invalid ") { submissionRequest =>
       submissionRequest.sender match {
         case `participant1Id` if submissionRequest.isConfirmationRequest =>
-          val modifiedRequest = submissionRequest
-            .focus(_.topologyTimestamp)
-            .replace(Some(CantonTimestamp.MaxValue))
+          val modifiedSubmission = submissionRequest
+            .focus(_.aggregationRule)
+            .replace(
+              Some(
+                AggregationRule.testing(
+                  NonEmpty.mk(Seq, participant1Id, DefaultTestIdentities.participant2),
+                  threshold = 1,
+                  protocolVersion = testedProtocolVersion,
+                )
+              )
+            )
           // We now must recreate a correct signature of the sender
           val signedModifiedRequest =
             signModifiedSubmissionRequest(
-              modifiedRequest,
+              modifiedSubmission,
               syncCrypto.tryForSynchronizer(daId, staticSynchronizerParameters1),
               Some(environment.now),
             )
@@ -85,13 +100,13 @@ trait DeliverErrorIntegrationTest
       new Amount(1.toBigDecimal, "snack"),
       List.empty.asJava,
     ).create.commands.asScala.toSeq
-    val expectedErrorCode = TopologyTimestampAfterSequencingTimestamp.id
+    val expectedErrorCode = SubmissionRequestRefused.id
 
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       participant1.ledger_api.javaapi.commands.submit(Seq(alice), iouCommand),
       _.warningMessage should include("Submission was rejected by the sequencer at"),
       _.errorMessage should (include("Request failed for participant1") and include(
-        show"The topology timestamp must be before or at"
+        show"Aggregation rule contains unregistered eligible members"
       ) and include(expectedErrorCode)),
     )
 

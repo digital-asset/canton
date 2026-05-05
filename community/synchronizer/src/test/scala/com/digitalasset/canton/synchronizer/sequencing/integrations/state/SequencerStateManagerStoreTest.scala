@@ -13,7 +13,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
@@ -124,7 +123,7 @@ trait SequencerStateManagerStoreTest
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
         val aggregationId3 = AggregationId(TestHash.digest(3))
-        val rule = AggregationRule(
+        val rule = AggregationRule.testing(
           NonEmpty(Seq, alice, bob),
           threshold = PositiveInt.tryCreate(2),
           testedProtocolVersion,
@@ -233,7 +232,7 @@ trait SequencerStateManagerStoreTest
 
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
-        val rule = AggregationRule(
+        val rule = AggregationRule.testing(
           NonEmpty(Seq, alice, bob, carlos),
           threshold = PositiveInt.tryCreate(2),
           testedProtocolVersion,

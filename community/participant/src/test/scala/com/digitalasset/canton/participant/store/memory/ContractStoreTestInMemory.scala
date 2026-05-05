@@ -37,13 +37,16 @@ class ContractStoreTestInMemory extends AsyncWordSpec with BaseTest with Contrac
     val store = new InMemoryContractStore(timeouts, loggerFactory)
     store.lookupPersistedIfCached(contractId) shouldBe Some(None)
     for {
-      _ <- List(contract, contract2, contract4, contract5)
-        .parTraverse(store.storeContract)
+      storedContracts <- store
+        .storeContracts(
+          List(contract, contract2, contract4, contract5)
+        )
         .failOnShutdown
       _ = store.lookupPersistedIfCached(contractId).value.nonEmpty shouldBe true
-      _ <- store
-        .deleteIgnoringUnknown(Seq(contractId, contractId2, contractId3, contractId4))
-        .failOnShutdown
+      _ = store.contractsPruned(
+        Seq(contractId, contractId2, contractId3, contractId4)
+          .flatMap(storedContracts.get)
+      )
       _ = store.lookupPersistedIfCached(contractId) shouldBe Some(None)
       notFounds <- List(contractId, contractId2, contractId3, contractId4).parTraverse(
         store.lookupE(_).value

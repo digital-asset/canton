@@ -5,16 +5,12 @@ package com.digitalasset.canton.integration.tests.infra
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.integration.plugins.LAPITTRelease
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   findAllCoreVersions,
   findMatchingVersions,
   latestRelease,
   latestReleases,
-}
-import com.digitalasset.canton.integration.plugins.{
-  LAPITTArtifactoryResolver,
-  LAPITTRelease,
-  LAPITTS3Resolver,
 }
 import com.digitalasset.canton.version.{ReleaseVersion, ReleaseVersionToProtocolVersions}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -32,7 +28,7 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     "3.4.0-snapshot.20250429.15866.0.vc8f10812",
     "3.4.0-snapshot.20251003.17075.0.v69d92264",
     "dev",
-  ).map(LAPITTRelease.Artifactory(_))
+  ).map(LAPITTRelease(_))
 
   "findAllCoreVersions" should "find the major.minor.patch releases correctly" in {
     findAllCoreVersions(versions) shouldBe Seq("3.3.0", "3.3.1", "3.3.10", "3.4.0")
@@ -78,17 +74,8 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
       case None => allReleases.last
     }
 
-  "latestRelease" should "be able to fetch the latest version from artifactory" in {
-    val latestTool = latestRelease(logger, Seq(LAPITTArtifactoryResolver))
-
-    inside(latestTool.baseVersion.map(ReleaseVersion.tryCreate)) { case Some(baseVersion) =>
-      baseVersion.major shouldBe 3
-      baseVersion.majorMinor shouldBe >=(previous(extractVersion(BuildInfo.version)))
-    }
-  }
-
   "latestRelease" should "be able to fetch the latest version from S3" in {
-    val latestTool = latestRelease(logger, Seq(LAPITTS3Resolver))
+    val latestTool = latestRelease(logger)
 
     inside(latestTool.baseVersion.map(ReleaseVersion.tryCreate)) { case Some(baseVersion) =>
       baseVersion.major shouldBe 3
@@ -96,8 +83,8 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     }
   }
 
-  "latestReleases" should "be able to fetch the lapitt for each release from artifactory" in {
-    val releasedTools = latestReleases(logger, Seq(LAPITTArtifactoryResolver))
+  "latestReleases" should "be able to fetch the lapitt for each release from S3" in {
+    val releasedTools = latestReleases(logger)
 
     releasedTools should not be empty
 
@@ -114,18 +101,5 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     extractedVersions
       .filter(_ <= currentMajorMinor)
       .map(_.majorMinor) should contain allElementsOf releases33andLater.dropRight(1)
-  }
-
-  "latestReleases" should "be able to fetch the lapitt for each release from S3" in {
-    val releasedTools = latestReleases(logger, Seq(LAPITTS3Resolver))
-
-    releasedTools should not be empty
-
-    val extractedVersions = releasedTools.flatMap(_.baseVersion).map(ReleaseVersion.tryCreate)
-
-    // At the moment, S3 only has snapshots for the current version (3.5.0).
-    extractedVersions.map(_.majorMinorPatch) should contain allElementsOf Seq(
-      ReleaseVersion.current.majorMinorPatch
-    )
   }
 }

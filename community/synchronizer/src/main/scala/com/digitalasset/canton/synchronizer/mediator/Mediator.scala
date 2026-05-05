@@ -318,10 +318,9 @@ private[mediator] class Mediator(
       override def name: String = s"mediator-$mediatorId"
 
       override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          synchronizerTimeTracker: SynchronizerTimeTracker,
+          start: SubscriptionStart
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        topologyTransactionProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)
+        topologyTransactionProcessor.subscriptionStartsAt(start)
 
       private def sendMalformedRejection(
           rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],

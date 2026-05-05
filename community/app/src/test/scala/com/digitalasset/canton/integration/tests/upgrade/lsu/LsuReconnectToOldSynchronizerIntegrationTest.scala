@@ -3,27 +3,23 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
-import com.digitalasset.canton.sequencing.protocol.{
-  Batch,
-  MessageId,
-  SignedContent,
-  SubmissionRequest,
-}
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.synchronizer.block.update.BlockChunkProcessor
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import monocle.macros.syntax.lens.*
+import org.slf4j.event.Level
 
-/** This test validates that participants can receive multiple time proofs on the old synchronizer
-  * and disconnect from and reconnect to the old synchronizer as well.
+/** This test validates that participants can disconnect from and reconnect to the old synchronizer
+  * after the upgrade time.
   *
   * This test doesn't actually perform an LSU.
   */
@@ -45,16 +41,6 @@ final class LsuReconnectToOldSynchronizerIntegrationTest
   "reconnect to the old synchronizer" in { implicit env =>
     import env.*
 
-    sequencer1.topology.synchronizer_parameters.propose_update(
-      synchronizerId = daId,
-      // reduce the decision timeout to 20 seconds to lower time to run the test
-      _.update(
-        confirmationResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(10).toConfig,
-        mediatorReactionTimeout = NonNegativeFiniteDuration.tryOfSeconds(10).toConfig,
-      ),
-      mustFullyAuthorize = true,
-    )
-
     participant1.synchronizers.connect_local(sequencer1, daName)
     participant1.health.ping(participant1)
 
@@ -74,90 +60,46 @@ final class LsuReconnectToOldSynchronizerIntegrationTest
     }
 
     clue(s"waiting for time to pass until after $upgradeTime") {
-      eventually() {
-        val timestamp = participant1.testing.fetch_synchronizer_time(daId)
-        timestamp should be > upgradeTime
-      }
+      participant1.testing.await_synchronizer_time(daId, upgradeTime)
     }
-
-    // Create a bunch of time proofs beyond the decision timeout
-
-    val startOfTest = environment.clock.now
-    List.tabulate(7) { i =>
-      val offset = NonNegativeFiniteDuration.tryOfSeconds(5L * i.toLong)
-      val targetTimestamp = startOfTest + offset
-      clue(s"trying to provoke a tick with target time $targetTimestamp (offset of $offset)") {
-        eventually() {
-          val timestamp = participant1.testing.fetch_synchronizer_time(daId)
-          timestamp should be > targetTimestamp
-        }
-      }
-    }
-
-    /*
-    Creating a time proof request that is sent manually so that the participant does not process it before the restart.
-    Has to be done here before the participant disconnects so that we can access crypto.
-     */
-    val request = signedRequestForP1()
 
     clue("disconnecting from synchronizer") {
       participant1.synchronizers.disconnect_all()
     }
-
-    // trigger a time proof for the participant, that the participant doesn't actually process
-    sequencer1.underlying.value.sequencer.sequencer.sendAsyncSigned(request).futureValueUS
 
     // reconnecting should work
     clue("reconnecting from synchronizer") {
       participant1.synchronizers.reconnect_all()
     }
 
-    // triggering more timeproofs should work as well
-    clue("trying to provoke a tick after reconnect") {
-      eventually() {
-        val timestamp = participant1.testing.fetch_synchronizer_time(daId)
-        timestamp should be > upgradeTime
-      }
-    }
-
-  }
-
-  private def signedRequestForP1()(implicit
-      env: TestConsoleEnvironment
-  ): SignedContent[SubmissionRequest] = {
-    import env.*
-
-    val request = SubmissionRequest.tryCreate(
-      sender = participant1.member,
-      messageId = MessageId.randomMessageId(),
-      batch = Batch(Nil, testedProtocolVersion),
-      maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
-      aggregationRule = None,
-      submissionCost = None,
-      protocolVersion = testedProtocolVersion,
+    // attempt to trigger a time proof, but verify that the event is dropped in BlockChunkProcessor
+    loggerFactory.assertEventuallyLogsSeq(
+      SuppressionRule.Level(Level.ERROR) || (
+        SuppressionRule.forLogger[BlockChunkProcessor] && SuppressionRule.Level(Level.INFO)
+      )
+    )(
+      the[CommandFailure] thrownBy participant1.testing.fetch_synchronizer_time(
+        daId,
+        timeout = NonNegativeDuration.ofSeconds(10),
+      ) shouldBe a[CommandFailure],
+      LogEntry.assertLogSeq(
+        mustContainWithClue = Seq(
+          (
+            _.infoMessage should include(
+              "Dropping Send event after upgrade time"
+            ),
+            "skip event log",
+          ),
+          (
+            _.errorMessage should include("DEADLINE_EXCEEDED"),
+            "command times out",
+          ),
+        ),
+        // catch all for other INFO logs from BlockChunkProcessor
+        mayContain = Seq(_.loggerName should include(classOf[BlockChunkProcessor].getSimpleName)),
+      ),
     )
 
-    sequencer1.underlying.value.sequencer
-
-    val cryptoSnapshot: SyncCryptoApi =
-      participant1.underlying.value.sync.syncCrypto
-        .forSynchronizer(daId, staticSynchronizerParameters1)
-        .value
-        .currentSnapshotApproximation
-        .futureValueUS
-    SignedContent
-      .create(
-        cryptoApi = cryptoSnapshot.pureCrypto,
-        cryptoPrivateApi = cryptoSnapshot,
-        content = request,
-        timestampOfSigningKey = Some(cryptoSnapshot.ipsSnapshot.timestamp),
-        signingTimestampOverrides = None,
-        purpose = HashPurpose.SubmissionRequestSignature,
-        protocolVersion = testedProtocolVersion,
-      )
-      .futureValueUS
-      .value
   }
 
 }

@@ -577,13 +577,14 @@ class SequencerNodeBootstrap(
 
           sequencerSnapshotTimestamp = topologyAndSequencerSnapshot
             .flatMap(_._2)
-            .map(sequencerSnapshot => EffectiveTime(sequencerSnapshot.lastTs))
+            .map(sequencerSnapshot => SequencedTime(sequencerSnapshot.lastTs))
           processorAndClient <- EitherT
             .right(
               TopologyTransactionProcessor
                 .createProcessorAndClientForSynchronizer(
                   synchronizerTopologyStore,
                   upgradeTimeFromPredecessor = lsuSequencingBounds.map(_.upgradeTime),
+                  sequencerSnapshotTimestamp = sequencerSnapshotTimestamp,
                   crypto.pureCrypto,
                   parameters,
                   arguments.config.topology,
@@ -592,7 +593,7 @@ class SequencerNodeBootstrap(
                   arguments.metrics.topologyCache,
                   futureSupervisor,
                   synchronizerLoggerFactory,
-                )(sequencerSnapshotTimestamp)
+                )
             )
           (topologyProcessor, topologyClient) = processorAndClient
           _ = addCloseable(topologyProcessor)
@@ -700,15 +701,6 @@ class SequencerNodeBootstrap(
               synchronizerLoggerFactory,
             )
 
-          sequencerSynchronizerParamsLookup: DynamicSynchronizerParametersLookup[
-            SequencerSynchronizerParameters
-          ] =
-            SynchronizerParametersLookup.forSequencerSynchronizerParameters(
-              config.publicApi.overrideMaxRequestSize,
-              topologyClient,
-              loggerFactory,
-            )
-
           sequencerChannelServiceO = Option.when(
             parameters.unsafeSequencerChannelSupport
           )(
@@ -790,7 +782,8 @@ class SequencerNodeBootstrap(
               authenticationServices.memberAuthenticationService.isMemberCurrentlyActive(member)(
                 tc
               ),
-            sequencerSynchronizerParamsLookup,
+            topologyClient,
+            config.publicApi.overrideMaxRequestSize,
             parameters,
             staticSynchronizerParameters.protocolVersion,
             topologyStateForInitializationService,

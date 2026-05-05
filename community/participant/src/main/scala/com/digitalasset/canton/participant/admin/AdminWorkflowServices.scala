@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.TopologyManagerError.{
+  MappingAlreadyExists,
   NoAppropriateSigningKeyInStore,
   SecretKeyNotInStore,
 }
@@ -418,6 +419,13 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
           AdminWorkflowServices.CanNotAutomaticallyVetAdminWorkflowPackage
             .Error(adminWorkflow)
             .discard
+          Either.unit
+        case CantonPackageServiceError.IdentityManagerParentError(
+              ParticipantTopologyManagerError.IdentityManagerParentError(
+                MappingAlreadyExists.Failure(_, _)
+              )
+            ) =>
+          // Ignore this error, which comes from racily vetting admin packages, since the desired target state has already been achieved.
           Either.unit
         case err =>
           Left(new IllegalStateException(CantonError.stringFromContext(err)))

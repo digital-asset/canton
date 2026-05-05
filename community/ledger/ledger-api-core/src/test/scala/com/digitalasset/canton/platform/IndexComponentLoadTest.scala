@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
@@ -28,7 +29,7 @@ import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
-import com.digitalasset.daml.lf.data.{Bytes, Time}
+import com.digitalasset.daml.lf.data.Time
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.flatspec.AnyFlatSpec
@@ -546,14 +547,15 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
       argumentPayload = argumentPayload,
       template = templates(0),
       signatories = Set(dsoParty),
+      ledgerEffectiveTime = ledgerEffectiveTime,
     )
     Reassignment.Assign(
-      ledgerEffectiveTime = ledgerEffectiveTime,
-      createNode = contract.inst.toCreateNode,
-      contractAuthenticationData = Bytes.Empty,
       reassignmentCounter = 10L,
       nodeId = nodeId,
-      internalContractId = -1, // will be filled later
+      persistedContractInstance = PersistedContractInstance(
+        internalContractId = -1, // will be filled later
+        inst = contract.inst,
+      ),
     ) -> contract
   }
 

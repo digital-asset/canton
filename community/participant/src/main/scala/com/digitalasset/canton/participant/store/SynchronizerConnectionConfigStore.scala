@@ -240,6 +240,10 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     */
   def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
+  /** Clears the config cache. Used when a participant replica becomes passive.
+    */
+  def clearCache()(implicit traceContext: TraceContext): Unit
+
   /** Set the synchronizer configuration status */
   def setStatus(
       alias: SynchronizerAlias,

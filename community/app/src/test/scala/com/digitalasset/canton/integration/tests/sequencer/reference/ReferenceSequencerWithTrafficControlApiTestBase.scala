@@ -233,6 +233,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       currentTopologySnapshotTimestamp: CantonTimestamp = CantonTimestamp.Epoch,
       availableUpToInclusive: CantonTimestamp = CantonTimestamp.MaxValue,
       sequencerTrafficConfig: SequencerTrafficConfig = SequencerTrafficConfig(),
+      disableSubmissionChecksForTesting: Boolean = false,
   )(
       f: (Sequencer, RateLimitManagerImplTest) => FutureUnlessShutdown[Unit]
   )(implicit mat: Materializer, env: Env): FutureUnlessShutdown[Assertion] = {
@@ -243,6 +244,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       currentTopologySnapshotTimestamp,
       availableUpToInclusive,
       sequencerTrafficConfig,
+      disableSubmissionChecksForTesting,
     )
     f(sequencer, rlm).transformWith {
       case Failure(exception) =>
@@ -263,6 +265,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       currentTopologySnapshotTimestamp: CantonTimestamp = CantonTimestamp.Epoch,
       availableUpToInclusive: CantonTimestamp = CantonTimestamp.MaxValue,
       sequencerTrafficConfig: SequencerTrafficConfig = SequencerTrafficConfig(),
+      disableSubmissionChecksForTesting: Boolean,
   )(implicit
       mat: Materializer,
       env: Env,
@@ -309,6 +312,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      disableSubmissionChecksForTesting = disableSubmissionChecksForTesting,
     )
     // Important to create the histograms before the factory, because creating the factory will
     // register them once and for all and we can't add more afterwards
@@ -982,102 +986,106 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       // clock.now. This ensures that any timestamp more recent requested by the sequencer along with a "last sequencer event timestamp" would
       // need to wait for that timestamp to be observed, which is what we want to assert does NOT happen in this test,
       // precisely because "last sequencer event timestamp" should not be updated if the event is not delivered to the sequencer
-      withSequencerAndRLM(config, clock, availableUpToInclusive = clock.now) {
-        case (sequencer, rlm) =>
-          val messageContent = "hello"
-          val sender: MediatorId = mediatorId
-          // All members of synchronizer to simulate topology event
-          val recipients = Recipients.cc(AllMembersOfSynchronizer)
+      withSequencerAndRLM(
+        config,
+        clock,
+        availableUpToInclusive = clock.now,
+        disableSubmissionChecksForTesting = true,
+      ) { case (sequencer, rlm) =>
+        val messageContent = "hello"
+        val sender: MediatorId = mediatorId
+        // All members of synchronizer to simulate topology event
+        val recipients = Recipients.cc(AllMembersOfSynchronizer)
 
-          val request = createSendRequest(
-            sender,
-            messageContent,
-            recipients,
-            sequencingSubmissionCost = eventCostFunction(recipients, config),
-          )
-          env.currentBalances.put(sender, Right(NonNegativeLong.tryCreate(100))).discard
+        val request = createSendRequest(
+          sender,
+          messageContent,
+          recipients,
+          sequencingSubmissionCost = eventCostFunction(recipients, config),
+        )
+        env.currentBalances.put(sender, Right(NonNegativeLong.tryCreate(100))).discard
 
-          // Disable write side enforcement and fail on the read side
-          rlm.disableWriteSideEnforcement()
-          rlm.overrideReadValidationResponse(
-            EitherT.leftT(
-              SequencerRateLimitError.OutdatedEventCost(
-                // The error content is irrelevant here we just to see how the sequencer handles this type of error
-                sender,
-                None,
-                clock.now,
-                NonNegativeLong.zero,
-                clock.now,
-                Some(
-                  TrafficReceipt(NonNegativeLong.zero, NonNegativeLong.zero, NonNegativeLong.zero)
-                ),
-              )
+        // Disable write side enforcement and fail on the read side
+        rlm.disableWriteSideEnforcement()
+        rlm.overrideReadValidationResponse(
+          EitherT.leftT(
+            SequencerRateLimitError.OutdatedEventCost(
+              // The error content is irrelevant here we just to see how the sequencer handles this type of error
+              sender,
+              None,
+              clock.now,
+              NonNegativeLong.zero,
+              clock.now,
+              Some(
+                TrafficReceipt(NonNegativeLong.zero, NonNegativeLong.zero, NonNegativeLong.zero)
+              ),
             )
           )
+        )
 
-          loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            for {
-              _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
-              messages <- readForMembers(Seq(sender), sequencer)
-              // Reset to normal behavior and send another message
-              _ = rlm.resetReadValidationResponse()
-              _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
-              messages2 <- readForMembers(
-                Seq(sender),
-                sequencer,
-                startTimestamp = firstEventTimestamp(sender)(messages).map(_.immediateSuccessor),
-              )
-            } yield {
-              // First message should be rejected with and OutdatedEventCost error
-              checkRejection(
-                messages,
-                sender,
-                request.messageId,
-                Some(
-                  TrafficReceipt(
-                    NonNegativeLong.zero,
-                    NonNegativeLong.zero,
-                    NonNegativeLong.zero,
-                  )
-                ),
-              )(_.message should include("OUTDATED_TRAFFIC_COST"))
-              // Make sure the second message makes it through and is received
-              checkMessages(
-                Seq(
-                  EventDetails(
-                    previousTimestamp = messages.headOption.map(_._2.timestamp),
-                    to = sender,
-                    messageId = Some(request.messageId),
-                    trafficReceipt = Some(
-                      TrafficReceipt(
-                        consumedCost = NonNegativeLong.tryCreate(messageContent.length.toLong),
-                        extraTrafficConsumed =
-                          NonNegativeLong.tryCreate(messageContent.length.toLong),
-                        baseTrafficRemainder = NonNegativeLong.zero,
-                      )
-                    ),
-                    EnvelopeDetails(
-                      content = messageContent,
-                      recipients = recipients,
-                      signatures = Seq.empty,
-                    ),
-                  )
-                ),
-                messages2,
-              )
-            },
-            LogEntry.assertLogSeq(
-              Seq.empty,
-              Seq(
-                // This message is logged at info level when processing the sequencer counter genesis
-                // (because there's no "last sequencer event" to use). However in case, the second event is not
-                // the sequencer counter genesis, but we still do not have a "last sequencer event", precisely because
-                // of what this test is exercising, which is asserting that we do not update "last sequencer event" if
-                // the corresponding event was not delivered to the sequencer. Therefore this is logged at warning level here.
-                _.warningMessage should include("Using approximate topology snapshot")
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          for {
+            _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
+            messages <- readForMembers(Seq(sender), sequencer)
+            // Reset to normal behavior and send another message
+            _ = rlm.resetReadValidationResponse()
+            _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
+            messages2 <- readForMembers(
+              Seq(sender),
+              sequencer,
+              startTimestamp = firstEventTimestamp(sender)(messages).map(_.immediateSuccessor),
+            )
+          } yield {
+            // First message should be rejected with and OutdatedEventCost error
+            checkRejection(
+              messages,
+              sender,
+              request.messageId,
+              Some(
+                TrafficReceipt(
+                  NonNegativeLong.zero,
+                  NonNegativeLong.zero,
+                  NonNegativeLong.zero,
+                )
               ),
+            )(_.message should include("OUTDATED_TRAFFIC_COST"))
+            // Make sure the second message makes it through and is received
+            checkMessages(
+              Seq(
+                EventDetails(
+                  previousTimestamp = messages.headOption.map(_._2.timestamp),
+                  to = sender,
+                  messageId = Some(request.messageId),
+                  trafficReceipt = Some(
+                    TrafficReceipt(
+                      consumedCost = NonNegativeLong.tryCreate(messageContent.length.toLong),
+                      extraTrafficConsumed =
+                        NonNegativeLong.tryCreate(messageContent.length.toLong),
+                      baseTrafficRemainder = NonNegativeLong.zero,
+                    )
+                  ),
+                  EnvelopeDetails(
+                    content = messageContent,
+                    recipients = recipients,
+                    signatures = Seq.empty,
+                  ),
+                )
+              ),
+              messages2,
+            )
+          },
+          LogEntry.assertLogSeq(
+            Seq.empty,
+            Seq(
+              // This message is logged at info level when processing the sequencer counter genesis
+              // (because there's no "last sequencer event" to use). However in case, the second event is not
+              // the sequencer counter genesis, but we still do not have a "last sequencer event", precisely because
+              // of what this test is exercising, which is asserting that we do not update "last sequencer event" if
+              // the corresponding event was not delivered to the sequencer. Therefore this is logged at warning level here.
+              _.warningMessage should include("Using approximate topology snapshot")
             ),
-          )
+          ),
+        )
       }
     }
 
@@ -1110,50 +1118,57 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       }
     }
 
-    "deduct traffic if message is not delivered because of failed validation" in { implicit env =>
-      import env.*
+    "deduct traffic if message is not delivered because of failed validation (invalid recipient)" in {
+      implicit env =>
+        import env.*
 
-      withSequencerAndRLM(config, clock) { case (sequencer, rlm) =>
-        val messageContent = "hello"
-        val sender: MediatorId = mediatorId
-        val recipients = Recipients.cc(p11)
+        withSequencerAndRLM(config, clock, disableSubmissionChecksForTesting = true) {
+          case (sequencer, rlm) =>
+            val messageContent = "hello"
+            val sender: MediatorId = mediatorId
+            val recipients =
+              Recipients.cc(p11, DefaultTestIdentities.participant1) // invalid recipient
 
-        val request = createSendRequest(
-          sender,
-          messageContent,
-          recipients,
-          sequencingSubmissionCost = eventCostFunction(recipients, config),
-          topologyTimestamp = Some(CantonTimestamp.MaxValue), // Invalid timestamp
-        )
-        val purchaseAmount = 1000L
-        env.currentBalances.put(sender, Right(NonNegativeLong.tryCreate(purchaseAmount))).discard
-        for {
-          _ <- sequencer.sendAsyncSigned(sign(request)).value
-          messages <- readForMembers(Seq(sender), sequencer)
-          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
-        } yield {
-          eventually() {
-            assertLongValue("daml.sequencer.traffic-control.wasted-traffic", 5L) // Cost of "hello"
-          }
-          assertMemberIsInContext("daml.sequencer.traffic-control.wasted-traffic", sender)
-          checkRejection(
-            messages,
-            sender,
-            request.messageId,
-            Some(
-              TrafficReceipt(
-                consumedCost = NonNegativeLong.tryCreate(messageContent.length.toLong),
-                extraTrafficConsumed = NonNegativeLong.tryCreate(messageContent.length.toLong),
-                baseTrafficRemainder = NonNegativeLong.zero,
-              )
-            ),
-          ) { case _ =>
-            succeed
-          }
-          senderTraffic.value.extraTrafficConsumed.value shouldBe messageContent.length.toLong
-          senderTraffic.value.extraTrafficRemainder shouldBe purchaseAmount - messageContent.length.toLong
+            val request = createSendRequest(
+              sender,
+              messageContent,
+              recipients,
+              sequencingSubmissionCost = eventCostFunction(recipients, config),
+            )
+            val purchaseAmount = 1000L
+            env.currentBalances
+              .put(sender, Right(NonNegativeLong.tryCreate(purchaseAmount)))
+              .discard
+            for {
+              _ <- sequencer.sendAsyncSigned(sign(request)).value
+              messages <- readForMembers(Seq(sender), sequencer)
+              senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
+            } yield {
+              eventually() {
+                assertLongValue(
+                  "daml.sequencer.traffic-control.wasted-traffic",
+                  5L,
+                ) // Cost of "hello"
+              }
+              assertMemberIsInContext("daml.sequencer.traffic-control.wasted-traffic", sender)
+              checkRejection(
+                messages,
+                sender,
+                request.messageId,
+                Some(
+                  TrafficReceipt(
+                    consumedCost = NonNegativeLong.tryCreate(messageContent.length.toLong),
+                    extraTrafficConsumed = NonNegativeLong.tryCreate(messageContent.length.toLong),
+                    baseTrafficRemainder = NonNegativeLong.zero,
+                  )
+                ),
+              ) { case _ =>
+                succeed
+              }
+              senderTraffic.value.extraTrafficConsumed.value shouldBe messageContent.length.toLong
+              senderTraffic.value.extraTrafficRemainder shouldBe purchaseAmount - messageContent.length.toLong
+            }
         }
-      }
     }
 
     "not deduct traffic for sequencers" in { implicit env =>

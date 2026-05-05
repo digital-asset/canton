@@ -284,6 +284,7 @@ class LedgerApiServer(
           PruningOffsetServiceImpl(participantPruningStore.value, loggerFactory),
         materializer = implicitly[Materializer],
         updateServiceConfig = updateServiceConfig,
+        scheduler = actorSystem.scheduler,
       )
       _ = timedSyncService.registerInternalIndexService(new InternalIndexService {
         override def activeContracts(

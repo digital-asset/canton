@@ -106,7 +106,11 @@ class SequencerStateManagerTest
   private val ts101 = ts0.plusSeconds(101)
 
   private lazy val aggregationRule1 =
-    AggregationRule(NonEmpty(Seq, alice, bob), PositiveInt.tryCreate(2), testedProtocolVersion)
+    AggregationRule.testing(
+      NonEmpty(Seq, alice, bob),
+      PositiveInt.tryCreate(2),
+      testedProtocolVersion,
+    )
 
   private def aggregationRequestFor(
       sender: Member,
@@ -129,7 +133,7 @@ class SequencerStateManagerTest
       .value
 
   private lazy val aggregationRule2 =
-    AggregationRule(NonEmpty(Seq, alice), PositiveInt.one, testedProtocolVersion)
+    AggregationRule.testing(NonEmpty(Seq, alice), PositiveInt.one, testedProtocolVersion)
   private lazy val aggregationRequest2 = aggregationRequestFor(alice, aggregationRule2).futureValue
   @unused
   private lazy val aggregationId2 =

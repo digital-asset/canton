@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.modelbased
 
-import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.NuckSupport
 import com.digitalasset.canton.integration.util.PartiesAllocator
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -55,7 +54,12 @@ abstract class ModelBasedCantonIntegrationTest
       }
 
   private val numParticipants = environmentDefinition.baseConfig.participants.size
-  private val numParties = 3
+  private val externalPartyTesting = partiesKind match {
+    case PartyKind.External(_) => true
+    case PartyKind.Local => false
+  }
+  // TODO(i27461): Remove when multi-party submissions are supported
+  private val numParties = if (externalPartyTesting) 1 else 3
   private val numPackages = 1
 
   private val generators =
@@ -64,44 +68,52 @@ abstract class ModelBasedCantonIntegrationTest
       readOnlyRollbacks = true,
       keyMode = KeyMode.NonUniqueContractKeys,
       generateQueryByKey = true,
+      singleCommand = externalPartyTesting,
     )
 
   "The canton interpreter" should {
-    "produce projections consistent with the reference interpreter" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
-      NuckSupport
-    ) in { implicit env =>
-      import env.*
+    "produce projections consistent with the reference interpreter" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      implicit env =>
+        import env.*
 
-      val cantonInterpreter = CantonInterpreter.initializeAndUpload(
-        participants = participants.all.toIndexedSeq,
-        synchronizerId = daId,
-        allocateParties =
-          (ps, newParties, targetTopology) => PartiesAllocator(ps)(newParties, targetTopology),
-      )
-
-      val generator =
-        generators.validScenarioGenerator(numParties, numPackages, numParticipants)
-
-      val result = PropertyChecker
-        .checkProperty(
-          generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
-          shrink = Shrinker.shrinkScenario,
-          property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
-            runAndCompare(cantonInterpreter, scenario, cancelled),
-          // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
-          // be on the safe side.
-          timeout = 20.minutes,
-          // We evaluate as many samples as possible within the allotted time.
-          maxSamples = Int.MaxValue,
-          // scenarios of size 50 take long to generate so we generate them in parallel
-          // but only use two cores as we want to leave some CPU to the property evaluation.
-          sampleBufferSize = 100,
-          generatorParallelism = 3,
-          evaluatorParallelism = 5,
-          cacheSuccesses = true,
+        val cantonInterpreter = CantonInterpreter.initializeAndUpload(
+          participants = participants.all.toIndexedSeq,
+          synchronizerId = daId,
+          allocateParties = (ps, newParties, targetTopology) =>
+            PartiesAllocator(ps, enableExternalParties = true)(newParties, targetTopology),
         )
-      logger.info(result.summary)
-      result.assertPassed(Pretty.prettyScenario)
+
+        // TODO(i29530): Remove when multi-node submissions are supported
+        val numCommands = Option.when(externalPartyTesting)(1)
+
+        val generator =
+          generators.validScenarioGenerator(
+            numParties,
+            numPackages,
+            numParticipants,
+            numCommands = numCommands,
+          )
+
+        val result = PropertyChecker
+          .checkProperty(
+            generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
+            shrink = Shrinker.shrinkScenario,
+            property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
+              runAndCompare(cantonInterpreter, scenario, cancelled),
+            // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
+            // be on the safe side.
+            timeout = 20.minutes,
+            // We evaluate as many samples as possible within the allotted time.
+            maxSamples = Int.MaxValue,
+            // scenarios of size 50 take long to generate so we generate them in parallel
+            // but only use two cores as we want to leave some CPU to the property evaluation.
+            sampleBufferSize = 100,
+            generatorParallelism = 3,
+            evaluatorParallelism = 5,
+            cacheSuccesses = true,
+          )
+        logger.info(result.summary)
+        result.assertPassed(Pretty.prettyScenario)
     }
   }
 }

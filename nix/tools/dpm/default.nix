@@ -2,14 +2,16 @@
 
 let
   dpmPath = "europe-docker.pkg.dev/da-images/public/components/dpm";
-  dpmVersion = "1.0.10";
+  dpmVersion = "1.0.13";
   dpmRef = "${dpmPath}:${dpmVersion}";
 
+  # These are Nix recursive output hashes for the directory produced by
+  # `oras pull -o $out` for each platform-specific artifact.
   dpmHashes = {
-    "x86_64-linux" = "sha256-5f/NkVOG40lZLgQvtcclSTzqeqN2UMzSho9tSX4AhUc=";
-    "aarch64-linux" = "sha256-R66Ns/gILU12SkBy87KuhudI4kfI9EHrjeLBWRmXV90=";
-    "x86_64-darwin" = "sha256-SDdNgrw/E+jFSSoOHt5Sm2ZNo/X97BbISHhRtfNtdUw=";
-    "aarch64-darwin" = "sha256-q2DthxO0qHzwSlc7G39je5nfe2x3+yh2freSZrMmMAE=";
+    "x86_64-linux" = "sha256-8w3bGxFXoAy6d2YykgBtsMX4ZhuO/HlGf7jWc9pTJ6I=";
+    "aarch64-linux" = "sha256-djrUlN693+uV7PeeLxrtkNI2bxAsvLYmtJEkGRlwd5I=";
+    "x86_64-darwin" = "sha256-lNfLYRZnIWBu1V164PADety6ERD4g9U3fG1uT9lqNyo=";
+    "aarch64-darwin" = "sha256-ELr+LGE8i1Z7QRylqtFc7W/b8qj7jFBATneIyqlxvhs=";
   };
   dpmHash = dpmHashes.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: $pkgs.stdenv.hostPlatform.system}");
 

@@ -152,7 +152,7 @@ object LedgerApiIndexer {
           )
           .afterReleased(initializationLogger.info("Ledger API Indexer stopped."))
       healthStatusRef = new AtomicReference[HealthStatus](Unhealthy)
-      indexerCreateFunction <- new JdbcIndexer.Factory(
+      (indexerCreateFunction, initializationKillSwitch) <- new JdbcIndexer.Factory(
         ledgerApiIndexerConfig.ledgerParticipantId,
         DbSupport.ParticipantDataSourceConfig(ledgerApiStore.value.ledgerApiStorage.jdbcUrl),
         ledgerApiIndexerConfig.indexerConfig,
@@ -179,17 +179,24 @@ object LedgerApiIndexer {
         postProcessor,
         sequentialPostProcessor,
         contractStore.value,
-      ).initialized().map { indexer => (repairMode: Boolean) => (commit: Commit) =>
-        val result = indexer(repairMode)(commit)
-        result.onComplete {
-          case Success(indexer) =>
-            healthStatusRef.set(Healthy)
-            indexer.futureQueue.done.onComplete(_ => healthStatusRef.set(Unhealthy))
+        achsInitInterceptor = identity,
+      ).initialized().map { case (indexer, initializationKillSwitch) =>
+        (
+          (repairMode: Boolean) =>
+            (commit: Commit) => {
+              val result = indexer(repairMode)(commit)
+              result.onComplete {
+                case Success(indexer) =>
+                  healthStatusRef.set(Healthy)
+                  indexer.futureQueue.done.onComplete(_ => healthStatusRef.set(Unhealthy))
 
-          case _ =>
-            healthStatusRef.set(Unhealthy)
-        }
-        result
+                case _ =>
+                  healthStatusRef.set(Unhealthy)
+              }
+              result
+            },
+          initializationKillSwitch,
+        )
       }
       normalIndexerCreateFunction = indexerCreateFunction(false)
       repairIndexerCreateFunction =
@@ -217,6 +224,7 @@ object LedgerApiIndexer {
             uncommittedMeter = metrics.indexer.indexerQueueUncommitted,
           ),
           consumerFactory = normalIndexerCreateFunction,
+          initializationKillSwitch = initializationKillSwitch,
         )
       }
       _ = initializationLogger.debug("Waiting for the indexer to initialize the database.")

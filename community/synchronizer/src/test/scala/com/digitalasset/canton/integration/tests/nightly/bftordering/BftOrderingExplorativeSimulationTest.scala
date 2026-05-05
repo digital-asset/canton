@@ -4,8 +4,9 @@
 package com.digitalasset.canton.integration.tests.nightly.bftordering
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.PartitionSymmetry.{
   ASymmetric,
@@ -74,7 +75,7 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   private val shortTime: PowerDistribution = PowerDistribution(0.milliseconds, 100.milliseconds)
   private val longTime: PowerDistribution = PowerDistribution(1.second, 5.seconds)
 
-  private def generateStage(epochLength: EpochLength): SimulationTestStageSettings = {
+  private def generateStage(segmentLength: SegmentLength): SimulationTestStageSettings = {
     val numberOfNodesToOnboard = randomWeightedOneOf(
       10 -> 0,
       3 -> 1,
@@ -116,7 +117,7 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
           faulty = durationOfFirstPhaseWithFaults,
           recovery =
             if (numberOfNodesToOnboard > 0)
-              (epochLength / 2) seconds
+              (segmentLength.length.value * 2) seconds
             else {
               0 seconds
             },
@@ -137,21 +138,23 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   }
 
   override def generateSettings: SimulationTestSettings = {
-    val epochLength = EpochLength(
-      randomWeightedOneOf[Long](
-        10 -> 16L,
-        5 -> 128L,
-        1 -> 1L,
-        2 -> randomSourceToCreateSettings.between(2L, 128L),
+    val segmentLength = SegmentLength(
+      PositiveLong.tryCreate(
+        randomWeightedOneOf[Long](
+          10 -> 10L,
+          5 -> 64L,
+          2 -> 1L,
+          2 -> randomSourceToCreateSettings.between(1L, 64L),
+        )
       )
     )
     SimulationTestSettings(
       numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5),
-      epochLength = epochLength,
+      segmentLength = segmentLength,
       stages = NonEmpty(
         Seq,
-        generateStage(epochLength),
-        generateStage(epochLength),
+        generateStage(segmentLength),
+        generateStage(segmentLength),
       ),
     )
   }

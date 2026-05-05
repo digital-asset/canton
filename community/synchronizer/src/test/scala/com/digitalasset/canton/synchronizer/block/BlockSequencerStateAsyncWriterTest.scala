@@ -15,10 +15,13 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationBySender,
+  AggregationId,
+  AggregationRule,
+}
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
 import com.digitalasset.canton.synchronizer.block.data.{BlockInfo, SequencerBlockStore}
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.{
   AggregatedSender,
   FreshInFlightAggregation,
@@ -146,7 +149,7 @@ class BlockSequencerStateAsyncWriterTest
   private lazy val fresh =
     FreshInFlightAggregation(
       CantonTimestamp.Epoch,
-      AggregationRule(
+      AggregationRule.testing(
         eligibleSenders = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
         threshold = PositiveInt.one,
         protocolVersion = testedProtocolVersion,

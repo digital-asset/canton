@@ -113,7 +113,7 @@ import com.digitalasset.canton.{
 }
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.{Map, SortedMap, SortedSet}
@@ -305,6 +305,7 @@ class AcsCommitmentProcessor private (
     */
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private[this] var runningCommitments: InternalizedRunningCommitments = _
+  private[this] val activeStakeholderGroupCount: AtomicLong = new AtomicLong(0L)
 
   /** Initialized by [[initRunningCommitments()]]. Since this field is accessed only from one of the
     * queues and [[initRunningCommitments()]] runs on the [[publishQueue]] as the first task, this
@@ -438,6 +439,9 @@ class AcsCommitmentProcessor private (
   private def initRunningCommitments(): FutureUnlessShutdown[Unit] =
     runningCommitmentsAsync.map { rc =>
       runningCommitments = rc
+      val rcSize = rc.size.toLong
+      activeStakeholderGroupCount.set(rcSize)
+      metrics.activeStakeholderGroups.updateValue(rcSize)
       // The checkpointing logic and in particular `collapseAndPublishAcsChanges` relies on checkpoints happening
       // at fixed intervals anchored at epoch. However, the running snapshot watermark merely persists the last timestamp
       // when an ACS change was processed, rather than the checkpoint. Accordingly, upon initialization, we do not
@@ -1144,6 +1148,7 @@ class AcsCommitmentProcessor private (
             val checkpointTs = checkpointBefore(toc.timestamp)
             // snapshot still needs to run on the publish queue, so it needs to be taken here, not lower
             val snapshot = runningCommitments.snapshot()
+            updateActiveStakeholderGroupCount(snapshot)
             val res = checkpointQueue.executeUS(
               persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(checkpointTs)),
               s"persist running commitments for checkpointing as a result of time of change $toc checkpoint ts $checkpointTs",
@@ -1156,6 +1161,7 @@ class AcsCommitmentProcessor private (
           case Some(period) =>
             // snapshot still needs to run on the publish queue, so it needs to be taken here, not lower
             val snapshot = runningCommitments.snapshot()
+            updateActiveStakeholderGroupCount(snapshot)
             val recordTime = period.toInclusive.forgetRefinement
             val res = checkpointQueue.executeUS(
               persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(recordTime)),
@@ -1229,10 +1235,10 @@ class AcsCommitmentProcessor private (
                           // ability to compute the commitments at the reconciliation boundary t.
                           // Also, we need to ensure that we take the snapshot before we schedule the processing of the completed
                           // period, otherwise the snapshot for the period might not have all updates.
+                          val snapshot = runningCommitments.snapshot()
+                          updateActiveStakeholderGroupCount(snapshot)
                           val dbQueueRes = dbQueue.executeUS(
-                            processCompletedPeriod(runningCommitments.snapshot())(
-                              commitmentPeriod
-                            ),
+                            processCompletedPeriod(snapshot)(commitmentPeriod),
                             s"process completed period as a result of time of change $toc",
                           )
                           dbQueueRes
@@ -1312,8 +1318,8 @@ class AcsCommitmentProcessor private (
               FutureUnlessShutdown.unit
             } else {
               updateRunningCommitments(rt, AcsChange.empty)
-              val snapshot: CommitmentSnapshot[InternedPartyId] =
-                runningCommitments.snapshot()
+              val snapshot = runningCommitments.snapshot()
+              updateActiveStakeholderGroupCount(snapshot)
               for {
                 _ <- checkpointQueue.executeUS(
                   persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(rt.timestamp)),
@@ -2549,6 +2555,7 @@ class AcsCommitmentProcessor private (
               snapshot.active,
               snapshot.recordTime,
             )
+            _ = setActiveStakeholderGroupCount(snapshot.groupCountDelta)
             res <- store.runningCommitments.markReinitializationCompleted(timestamp)
             _ = if (!res) {
               logger.error(
@@ -2663,7 +2670,7 @@ class AcsCommitmentProcessor private (
       rt: RecordTime,
   )(implicit namedLoggingContext: NamedLoggingContext) = {
     val runningCommitments =
-      new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, stringInterning)
+      new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, stringInterning)
     runningCommitments.update(rt, acsChange)
     runningCommitments
   }
@@ -2730,6 +2737,33 @@ class AcsCommitmentProcessor private (
       lastIntervalActivations.clear()
       lastIntervalDeactivations.clear()
       result
+    }
+  }
+
+  private def setActiveStakeholderGroupCount(newValue: Long)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    activeStakeholderGroupCount.set(newValue)
+    updateActiveStakeholderGroupMetric(newValue)
+  }
+
+  private def updateActiveStakeholderGroupCount(
+      snapshot: CommitmentSnapshot[?]
+  )(implicit traceContext: TraceContext): Unit = {
+    val newValue = activeStakeholderGroupCount.addAndGet(snapshot.groupCountDelta)
+    updateActiveStakeholderGroupMetric(newValue)
+  }
+
+  private def updateActiveStakeholderGroupMetric(
+      newValue: Long
+  )(implicit traceContext: TraceContext): Unit = {
+    metrics.activeStakeholderGroups.updateValue(newValue)
+    if (enableAdditionalConsistencyChecks) {
+      val rcSize = runningCommitments.size.toLong
+      ErrorUtil.requireState(
+        rcSize == newValue,
+        s"The number of active stakeholder groups in the running commitments ($rcSize) differs from the maintained count of active stakeholder groups ($newValue)",
+      )
     }
   }
 }
@@ -2944,9 +2978,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
     store.runningCommitments.get()(TraceContext.empty).map { case (rt, snapshot) =>
       new InternalizedRunningCommitments(
         rt,
-        TrieMap(snapshot.toSeq.map { case (parties, bytes) =>
+        snapshot.view.map { case (parties, bytes) =>
           parties -> LtHash16.tryCreate(bytes)
-        }*),
+        },
         stringInterning,
       )
     }
@@ -2968,6 +3002,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       active: Map[SortedSet[T], AcsCommitment.CommitmentType],
       delta: Map[SortedSet[T], AcsCommitment.CommitmentType],
       deleted: Set[SortedSet[T]],
+      groupCountDelta: Long,
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[CommitmentSnapshot[T]] = prettyOfClass(
       param("record time", _.recordTime),
@@ -3415,7 +3450,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       acsChange: AcsChange,
       rt: RecordTime,
   )(implicit namedLoggingContext: NamedLoggingContext): RunningCommitments = {
-    val runningCommitments = new RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+    val runningCommitments = new RunningCommitments(RecordTime.MinValue, Seq.empty)
     runningCommitments.update(rt, acsChange)
     runningCommitments
   }

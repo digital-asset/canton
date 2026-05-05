@@ -243,9 +243,21 @@ nightly_integration_test:
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
-                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
+
+nightly_cn_topology_snapshot_test_only:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 4 # One node per environment (cilr, dev, test, main)
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
+        num_test_buckets: "4"
+        num_parallel_tasks: "1"
+        timeout: "120m" # Very large timeout on purpose, because topology validation can take a long time
 
 nightly_integration_test_sequencer_only:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -280,6 +292,20 @@ nightly_test_upgrades_matrix:
         report_to_datadog: false
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U03HCPABC9M" # Dylan
+
+model_based_external_parties_test:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - set_external_parties
+    - run_tests:
+        command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        timeout: "120m"
+        report_to_datadog: false
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: "U03NCGBFCDP" # Thibault
 
 model_based_test:
   executor: canton-xlarge-docker-with-postgres

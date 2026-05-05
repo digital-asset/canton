@@ -10,7 +10,7 @@ override-components:
     version: $DAML_VERSION
 name: upgrade-tests
 data-dependencies:
-- ../../../../../scala-2.13/resource_managed/main/upgrade-iface-tests-1.0.0.dar
+- ../../../scala-2.13/resource_managed/main/upgrade-iface-tests-1.0.0${LF_VERSION_SUFFIX}.dar
 source: .
 version: 3.0.0
 dependencies:

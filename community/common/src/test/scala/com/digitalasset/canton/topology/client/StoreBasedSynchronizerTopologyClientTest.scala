@@ -9,7 +9,6 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TopologyConfig
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -29,7 +28,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
-import org.slf4j.event.Level
 
 object EffectiveTimeTestHelpers {
 
@@ -80,7 +78,7 @@ trait StoreBasedTopologySnapshotTest
       )
     )
 
-    class Fixture(val useTimeProofsToObserveEffectiveTime: Boolean = true) {
+    class Fixture(val useTimeProofsToObserveEffectiveTime: Boolean = false) {
 
       val store: TopologyStore[TopologyStoreId.SynchronizerStore] = mk()
       def mkClient() =
@@ -103,7 +101,9 @@ trait StoreBasedTopologySnapshotTest
           effectiveTimestamp: Option[CantonTimestamp] = None,
           rejectionReason: Option[TopologyTransactionRejection] = None,
       ): FutureUnlessShutdown[Unit] = {
-        val et = effectiveTimestamp.getOrElse(sequencedTimestamp)
+        val et = effectiveTimestamp.getOrElse(
+          sequencedTimestamp + defaultStaticSynchronizerParameters.topologyChangeDelay
+        )
         for {
           _ <- store.update(
             SequencedTime(sequencedTimestamp),
@@ -135,34 +135,52 @@ trait StoreBasedTopologySnapshotTest
         import fixture.*
         val ts1 = CantonTimestamp.Epoch.plusSeconds(60)
         val ts2 = ts1.plusSeconds(60)
+        val ts2_100 = ts2.plusMillis(100)
+        val ts2_200 = ts2.plusMillis(200)
         val ts3 = ts2.plusSeconds(60)
         val ts4 = ts3.plusSeconds(60)
         val ts5 = ts4.plusSeconds(60)
         val ts6 = ts5.plusSeconds(60)
+        val ts7 = ts6.plusSeconds(60)
+        val topologyChangeDelay = defaultStaticSynchronizerParameters.topologyChangeDelay
         for {
           // Populate the store
           _ <- add(sequencedTimestamp = ts1, Seq(dpc1, p1_otk, p1_dtc, party1participant1))
           _ <- add(sequencedTimestamp = ts2, Seq(p2_otk, p2_dtc, party2participant1_2))
           // we expect the rejections and proposals to not affect the latestTopologyChangeTimestamp
           _ <- add(
-            sequencedTimestamp = ts2.plusMillis(100),
+            sequencedTimestamp = ts2_100,
             Seq(p3_otk.copy(isProposal = true), p3_dtc.copy(isProposal = true)),
           )
           _ <- add(
-            sequencedTimestamp = ts2.plusMillis(200),
+            sequencedTimestamp = ts2_200,
             Seq(p2_pdp_confirmation),
             rejectionReason = Some(NoSignatureProvided),
           )
           // Get a new client and initialize it
           newClient = mkClient()
-          _ <- newClient.initialize()
+          _ <- newClient.updateKnownTimestampsDuringStartup()
           // Check that it initialized correctly
-          _ = newClient.topologyKnownUntilTimestamp shouldBe ts2.plusMillis(200).immediateSuccessor
-          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor
+          _ = newClient.topologyKnownUntilTimestamp shouldBe ts2_200
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient.approximateTimestamp shouldBe ts2_200.immediateSuccessor
+          _ = newClient.latestSequencedTimestamp shouldBe ts2_200
+
           // Check that initialization works idempotently
-          _ <- newClient.initialize()
-          _ = newClient.topologyKnownUntilTimestamp shouldBe ts2.plusMillis(200).immediateSuccessor
-          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor
+          _ <- newClient.updateKnownTimestampsDuringStartup()
+          _ = newClient.topologyKnownUntilTimestamp shouldBe ts2_200
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient.approximateTimestamp shouldBe ts2_200.immediateSuccessor
+          _ = newClient.latestSequencedTimestamp shouldBe ts2_200
+
           // Check that subsequent updates work correctly
           _ = newClient.updateHead(
             SequencedTime(ts3),
@@ -170,58 +188,125 @@ trait StoreBasedTopologySnapshotTest
             ApproximateTime(ts3),
           )
           _ = newClient.topologyKnownUntilTimestamp shouldBe ts3.immediateSuccessor
-          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor
+          _ = newClient.latestTopologyChangeTimestamp shouldBe ts2
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient.approximateTimestamp shouldBe ts3.immediateSuccessor
+          _ = newClient.latestSequencedTimestamp shouldBe ts3
+
           _ <- newClient.observed(
             SequencedTime(ts4),
             EffectiveTime(ts4),
             SequencerCounter(0),
             List(p1_nsk2),
           )
-          // Check that late initialization does not change the state
-          _ <- newClient.initialize()
           _ = newClient.topologyKnownUntilTimestamp shouldBe ts4.immediateSuccessor
           _ = newClient.latestTopologyChangeTimestamp shouldBe ts4.immediateSuccessor
+          _ = newClient.approximateTimestamp shouldBe ts4.immediateSuccessor
+          _ = newClient.latestSequencedTimestamp shouldBe ts4
+
+          // Check that late initialization does not change the state
+          _ <- newClient.updateKnownTimestampsDuringStartup()
+          _ = newClient.topologyKnownUntilTimestamp shouldBe ts4.immediateSuccessor
+          _ = newClient.latestTopologyChangeTimestamp shouldBe ts4.immediateSuccessor
+          _ = newClient.approximateTimestamp shouldBe ts4.immediateSuccessor
+          _ = newClient.latestSequencedTimestamp shouldBe ts4
 
           // Check that synchronizer upgrade is taken into account
           newClient2 = mkClient()
-          _ <- newClient2.initialize(
-            sequencerSnapshotTimestamp = Some(ts5),
+          _ <- newClient2.updateKnownTimestampsDuringStartup(
+            sequencerSnapshotTimestamp = None,
             synchronizerUpgradeTime = Some(ts5),
           )
           _ =
-            newClient2.topologyKnownUntilTimestamp shouldBe (ts5 + defaultStaticSynchronizerParameters.topologyChangeDelay).immediateSuccessor
-          _ =
-            newClient2.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor // from the store
+            newClient2.topologyKnownUntilTimestamp shouldBe ts5
+              .plus(topologyChangeDelay.unwrap)
+              .immediateSuccessor
+          _ = newClient2.latestTopologyChangeTimestamp shouldBe ts2
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor // from the store
+          _ = newClient2.approximateTimestamp shouldBe ts5.immediateSuccessor
+          _ = newClient2.latestSequencedTimestamp shouldBe ts5
 
           // Check that sequencer snapshot is taken into account
           newClient3 = mkClient()
-          _ <- newClient3.initialize(
+          _ <- newClient3.updateKnownTimestampsDuringStartup(
             sequencerSnapshotTimestamp = Some(ts6),
             synchronizerUpgradeTime = Some(ts5),
           )
-          _ = newClient3.topologyKnownUntilTimestamp shouldBe ts6.immediateSuccessor
-          _ =
-            newClient3.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor // from the store
+          _ = newClient3.topologyKnownUntilTimestamp shouldBe ts6
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient3.latestTopologyChangeTimestamp shouldBe ts2
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient3.approximateTimestamp shouldBe ts6.immediateSuccessor
+          _ = newClient3.latestSequencedTimestamp shouldBe ts6
 
           // Check that sequencer snapshot is taken into account for sequencing time even if there
           //  are topology transactions with greater effective time
-          f = loggerFactory.assertLogs(SuppressionRule.Level(Level.WARN))(
-            add(
-              sequencedTimestamp = ts6,
-              effectiveTimestamp = Some(ts6.plusMillis(100)),
-              transactions = Seq(p2_pdp_submission),
-            ).unwrap,
-            _.message should include(
-              "Not advancing approximate time to effective time using the time tracker as it's unavailable"
+          _ <- add(
+            sequencedTimestamp = ts6,
+            effectiveTimestamp = Some(ts6.plusMillis(100)),
+            transactions = Seq(p2_pdp_submission),
+          )
+          sequencerSnapshotTimestamp = ts6.plusMillis(50)
+          newClient4 = mkClient()
+          _ <- newClient4.updateKnownTimestampsDuringStartup(
+            sequencerSnapshotTimestamp = Some(sequencerSnapshotTimestamp)
+          )
+          _ = newClient4.topologyKnownUntilTimestamp shouldBe sequencerSnapshotTimestamp
+            .plus(topologyChangeDelay.unwrap)
+            .immediateSuccessor
+          _ = newClient4.latestTopologyChangeTimestamp shouldBe ts6
+            .plusMillis(100)
+            .immediateSuccessor
+          _ = newClient4.approximateTimestamp shouldBe sequencerSnapshotTimestamp.immediateSuccessor
+          _ = newClient4.latestSequencedTimestamp shouldBe sequencerSnapshotTimestamp
+
+          _ <- add(
+            sequencedTimestamp = ts7,
+            effectiveTimestamp = Some(ts7),
+            transactions = Seq(p2_pdp_submission),
+            rejectionReason = Some(NoSignatureProvided),
+          )
+
+          newClient5 = mkClient()
+          // initializing with invalid sequencer snapshot and synchronizer upgrade time parameters
+          error <- loggerFactory.assertLogs(
+            newClient5
+              .updateKnownTimestampsDuringStartup(
+                sequencerSnapshotTimestamp = Some(ts5),
+                synchronizerUpgradeTime = Some(ts6),
+              )
+              .failed,
+            _.throwable.value.getMessage should include(
+              s"Onboarding snapshot timestamp ${SequencedTime(ts5)} was less than the upgrade time of the predecessor ${Some(SequencedTime(ts6))}"
             ),
           )
-          _ <- FutureUnlessShutdown.outcomeF(f)
-          newClient4 = mkClient()
-          _ <- newClient4.initialize(
-            sequencerSnapshotTimestamp = Some(ts6.plusMillis(50))
+          // initializing with an invalid sequencer snapshot timestamp
+          _ <- loggerFactory.assertLogs(
+            newClient5
+              .updateKnownTimestampsDuringStartup(
+                sequencerSnapshotTimestamp = Some(ts4)
+              )
+              .failed,
+            _.throwable.value.getMessage should include(
+              s"Onboarding snapshot timestamp ${SequencedTime(ts4)} was less than the latest topology change timestamp ${Some(SequencedTime(ts6))}"
+            ),
           )
-          _ = newClient4.latestSequencedTimestamp shouldBe ts6.plusMillis(50)
-          _ = newClient4.approximateTimestamp shouldBe ts6.plusMillis(50).immediateSuccessor
+
+          error <- loggerFactory.assertLogs(
+            newClient5
+              .updateKnownTimestampsDuringStartup(
+                sequencerSnapshotTimestamp = Some(ts6)
+              )
+              .failed,
+            _.throwable.value.getMessage should include(
+              s"Onboarding snapshot timestamp ${SequencedTime(ts6)} was less than the max topology timestamp ${Some(SequencedTime(ts7))}"
+            ),
+          )
+
         } yield succeed
       }
     }
@@ -367,7 +452,8 @@ trait StoreBasedTopologySnapshotTest
       for {
         _ <- fixture.add(
           sequencedTimestamp = ts,
-          Seq(
+          effectiveTimestamp = Some(ts),
+          transactions = Seq(
             dpc1,
             p1_nsk2,
             p1_otk,
@@ -405,7 +491,8 @@ trait StoreBasedTopologySnapshotTest
       for {
         _ <- fixture.add(
           sequencedTimestamp = ts,
-          Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation),
+          effectiveTimestamp = Some(ts),
+          transactions = Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation),
         )
         _ = fixture.client.observed(
           ts.immediateSuccessor,
@@ -426,7 +513,8 @@ trait StoreBasedTopologySnapshotTest
       for {
         _ <- fixture.add(
           sequencedTimestamp = ts,
-          Seq(
+          effectiveTimestamp = Some(ts),
+          transactions = Seq(
             seq_okm_k2,
             dpc1,
             p1_otk,
@@ -437,7 +525,8 @@ trait StoreBasedTopologySnapshotTest
         )
         _ <- fixture.add(
           sequencedTimestamp = ts1,
-          Seq(
+          effectiveTimestamp = Some(ts1),
+          transactions = Seq(
             mkRemoveTx(seq_okm_k2),
             med_okm_k3,
             p2_otk,
@@ -448,7 +537,8 @@ trait StoreBasedTopologySnapshotTest
         )
         _ <- fixture.add(
           sequencedTimestamp = ts2,
-          Seq(mkRemoveTx(p1_pdp_observation), mkRemoveTx(p1_dtc)),
+          effectiveTimestamp = Some(ts2),
+          transactions = Seq(mkRemoveTx(p1_pdp_observation), mkRemoveTx(p1_dtc)),
         )
         _ = fixture.client.observed(
           ts2.immediateSuccessor,
