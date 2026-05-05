@@ -22,6 +22,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   TransactionMeta,
   Update,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -139,10 +140,9 @@ final class RepairService(
     *   ID of the synchronizer to add contracts to. The synchronizer needs to be configured, but
     *   disconnected to prevent race conditions.
     * @param contracts
-    *   Contracts to add. Relevant pieces of each contract: create-arguments (LfThinContractInst),
-    *   template-id (LfThinContractInst), contractId, ledgerCreateTime, salt (to be added to
-    *   SerializableContract), and witnesses, SerializableContract.metadata is only validated, but
-    *   otherwise ignored as stakeholder and signatories can be recomputed from contracts.
+    *   Contracts to add. Relevant pieces of each contract: create-arguments, template-id,
+    *   contractId, ledgerCreateTime, salt, and witnesses, metadata is only validated, but otherwise
+    *   ignored as stakeholder and signatories can be recomputed from contracts.
     * @param contractImportMode
     *   Whether contract IDs should be validated.
     * @param packageMetadataSnapshot
@@ -217,17 +217,10 @@ final class RepairService(
                 contractStore.value.lookupManyUncached(contractIds),
                 "Unable to lookup contracts in contract store",
               )
-              .map(_.flatten)
 
-          storedContracts <- EitherT.fromEither[FutureUnlessShutdown](
-            contractInstances
-              .traverse { contract =>
-                SerializableContract
-                  .fromLfFatContractInst(contract.inst)
-                  .map(c => c.contractId -> c)
-              }
-              .map(_.toMap)
-          )
+          storedContracts = contractInstances.flatten.map { contract =>
+            contract.contractId -> contract
+          }.toMap
 
           toc = repair.tryExactlyOneTimeOfRepair.toToc
 
@@ -288,7 +281,7 @@ final class RepairService(
                         storedContract,
                       )
                         .map { case PurgeOperations(missingPurge, missingAssignment, upstream) =>
-                          // Extract only the SerializableContract from upstream, discard the reassignment counter
+                          // Extract only the contract from upstream, discard the reassignment counter
                           val contracts = upstream.map(_._1).toList
                           (contracts, missingPurge.toList, missingAssignment.toList)
                         }
@@ -553,7 +546,7 @@ final class RepairService(
   private def computePurgeOperations(toc: TimeOfChange, ignoreAlreadyPurged: Boolean)(
       cid: LfContractId,
       acsStatus: Option[ActiveContractStore.Status],
-      storedContractO: Option[SerializableContract],
+      storedContractO: Option[GenContractInstance],
   )(implicit
       traceContext: TraceContext
   ): Either[String, PurgeOperations] = {
@@ -570,7 +563,7 @@ final class RepairService(
       case None => ignoreOrError("unknown contract")
       case Some(ActiveContractStore.Active(reassignmentCounter)) =>
         for {
-          _contract <- Either
+          _ <- Either
             .fromOption(
               storedContractO,
               show"Active contract $cid not found in contract store",
@@ -607,15 +600,15 @@ final class RepairService(
     }
   }
 
-  private def toArchive(c: SerializableContract): LfNodeExercises = LfNodeExercises(
+  private def toArchive(c: GenContractInstance): LfNodeExercises = LfNodeExercises(
     targetCoid = c.contractId,
-    templateId = c.rawContractInstance.contractInstance.unversioned.template,
-    packageName = c.rawContractInstance.contractInstance.unversioned.packageName,
+    templateId = c.templateId,
+    packageName = c.inst.packageName,
     interfaceId = None,
     choiceId = LfChoiceName.assertFromString("Archive"),
     consuming = true,
     actingParties = c.metadata.signatories,
-    chosenValue = c.rawContractInstance.contractInstance.unversioned.arg,
+    chosenValue = c.inst.createArg,
     stakeholders = c.metadata.stakeholders,
     signatories = c.metadata.signatories,
     choiceObservers = Set.empty[LfPartyId], // default archive choice has no choice observers
@@ -625,11 +618,11 @@ final class RepairService(
     keyOpt = c.metadata.maybeKeyWithMaintainers,
     byKey = false,
     externalCallResults = ImmArray.empty,
-    version = c.rawContractInstance.contractInstance.version,
+    version = c.inst.version,
   )
 
   private def writeContractsPurgedEvent(
-      contracts: Seq[SerializableContract],
+      contracts: Seq[GenContractInstance],
       updateId: UpdateId,
       repair: RepairRequest,
       repairIndexer: FutureQueue[RepairUpdate],
@@ -667,7 +660,7 @@ final class RepairService(
   }
 
   private def publishUnassignedEvent(
-      contracts: Seq[(SerializableContract, ReassignmentCounter)],
+      contracts: Seq[(GenContractInstance, ReassignmentCounter)],
       repair: RepairRequest,
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -687,8 +680,8 @@ final class RepairService(
       .map { case ((c, reassignmentCounter), nodeId) =>
         Reassignment.Unassign(
           contractId = c.contractId,
-          templateId = c.rawContractInstance.contractInstance.unversioned.template,
-          packageName = c.rawContractInstance.contractInstance.unversioned.packageName,
+          templateId = c.templateId,
+          packageName = c.inst.packageName,
           stakeholders = c.metadata.stakeholders,
           assignmentExclusivity = None,
           reassignmentCounter = reassignmentCounter.unwrap,
@@ -774,7 +767,7 @@ private object RepairService {
   final case class PurgeOperations(
       purge: Option[MissingPurge],
       assign: Option[MissingAssignment],
-      upstream: Option[(SerializableContract, ReassignmentCounter)],
+      upstream: Option[(GenContractInstance, ReassignmentCounter)],
   )
 
   private object PurgeOperations {

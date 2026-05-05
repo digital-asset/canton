@@ -22,6 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.TimestampedSend
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   OrderingRequestBatch,
@@ -48,6 +49,7 @@ import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
@@ -174,7 +176,7 @@ class AvailabilityModuleConsensusProposalRequestTest
           disseminationProtocolState.disseminationProgress.addOne(
             ABatchDisseminationProgressNode0To6WithNonQuorumVotes._1 ->
               ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2
-                .copy(batchSentTo = Node1To6)
+                .copy(sentToLast = Node1To6.map(TimestampedSend(_, Instant.now)))
           )
 
           availability.receive(
@@ -215,7 +217,7 @@ class AvailabilityModuleConsensusProposalRequestTest
           disseminationProtocolState.disseminationProgress.addOne(
             ABatchDisseminationProgressNode0To6WithNonQuorumVotes._1 ->
               ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2
-                .copy(batchSentTo = Node4To6)
+                .copy(sentToLast = Node4To6.map(TimestampedSend(_, Instant.now)))
           )
 
           val cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider
@@ -1017,8 +1019,8 @@ class AvailabilityModuleConsensusProposalRequestTest
           // This ready batch will become stale in the new topology
           disseminationProtocolState.disseminationProgress.addOne(
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._1 ->
-              AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.copy(batchSentTo =
-                Set(Node1)
+              AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.copy(sentToLast =
+                Set(Node1).map(TimestampedSend(_, Instant.now))
               )
           )
 
@@ -1065,13 +1067,17 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
           )
 
-          disseminationProtocolState.disseminationInProgressView should contain only (AnotherBatchId ->
+          val t = Instant.now
+          withFixedTimestamp(
+            t,
+            disseminationProtocolState.disseminationProgress,
+          ) should contain only (AnotherBatchId ->
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
               .changeMembership(newMembership)
               .toEither
               .leftOrFail("Progress was not regressed")
               .copy(
-                batchSentTo = Set(Node1),
+                sentToLast = Set(TimestampedSend(Node1, t)),
                 acks = AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.acks
                   .filterNot(a => a.from == "node0" || a.from == "node5" || a.from == "node6"),
                 // Regressions are reset by metrics emission
@@ -1100,13 +1106,22 @@ class AvailabilityModuleConsensusProposalRequestTest
             eqTo("availability-sign-local-batchId"),
           )(anyTraceContext, any[MetricsContext])
 
-          disseminationProtocolState.disseminationInProgressView should contain only (AnotherBatchId ->
+          withFixedTimestamp(
+            t,
+            disseminationProtocolState.disseminationProgress,
+          ) should contain only (AnotherBatchId ->
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
               .changeMembership(newMembership)
               .toEither
               .leftOrFail("Progress was not regressed")
               .copy(
-                batchSentTo = Set(Node1, Node2, Node3, node(5), node(6)),
+                sentToLast = Set(
+                  TimestampedSend(Node1, t),
+                  TimestampedSend(Node2, t),
+                  TimestampedSend(Node3, t),
+                  TimestampedSend(node(5), t),
+                  TimestampedSend(node(6), t),
+                ),
                 acks = AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.acks
                   .filterNot(a => a.from == "node5" || a.from == "node6"),
                 // Regressions are reset by metrics emission

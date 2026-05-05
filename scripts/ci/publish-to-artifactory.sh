@@ -166,13 +166,14 @@ if [[ "$nightly_release" == "false" || $(date +"%u") -eq 2 ]]; then
   #        "${artifactory_url}/assembly/canton/${current_version}/canton-reliability-tests-${current_version}.csv" \
   #        "${current_version}"
 
-  echo "Publishing protos to artifactory/assembly/canton/${current_version}/..."
-  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-protobuf.tar.gz" \
-          "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-protobuf.tar.gz" \
-          "${current_version}"
-  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-protobuf.zip" \
-            "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-protobuf.zip" \
-            "${current_version}"
+# Publishing to artifactory is phased out - added as comment to show intent
+#  echo "Publishing API definitions to artifactory/assembly/canton/${current_version}/..."
+#  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-api.tar.gz" \
+#          "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-api.tar.gz" \
+#          "${current_version}"
+#  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-api.zip" \
+#            "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-api.zip" \
+#            "${current_version}"
 
   echo "Publishing canton versions to info.json"
   jo -p canton_version=$current_version $(cat /tmp/workspace/info.properties) | tee /tmp/workspace/info.json

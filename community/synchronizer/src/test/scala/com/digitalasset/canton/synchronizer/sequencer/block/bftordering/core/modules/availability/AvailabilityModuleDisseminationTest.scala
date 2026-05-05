@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.TimestampedSend
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   OrderingRequest,
   OrderingRequestBatch,
@@ -45,6 +46,7 @@ import com.digitalasset.canton.tracing.Traced
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 
@@ -185,9 +187,12 @@ class AvailabilityModuleDisseminationTest
           operationId = "availability-sign-local-batchId",
         )
 
-        disseminationProtocolState.disseminationProgress should
-          contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> ABatchDisseminationProgressNode0To3WithNode0Vote._2
-            .copy(batchSentTo = Node1To3)
+        val t = Instant.now
+        withFixedTimestamp(
+          t,
+          disseminationProtocolState.disseminationProgress,
+        ) should contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> ABatchDisseminationProgressNode0To3WithNode0Vote._2
+          .copy(sentToLast = Node1To3.map(TimestampedSend(_, t)))
         disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
       }
     }
@@ -354,9 +359,10 @@ class AvailabilityModuleDisseminationTest
           )
 
           val updated = ABatchDisseminationProgressNode0To3WithNode0Vote._2
-          disseminationProtocolState.disseminationInProgressView should
+          val t = Instant.now
+          withFixedTimestamp(t, disseminationProtocolState.disseminationProgress) should
             contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> updated
-              .copy(batchSentTo = Node1To3)
+              .copy(sentToLast = Node1To3.map(TimestampedSend(_, t)))
           disseminationProtocolState.disseminationCompleteView should be(empty)
           disseminationProtocolState.nextToBeProvidedToConsensus shouldBe ANextToBeProvidedToConsensus
           p2pNetworkOutCell.get() shouldBe None

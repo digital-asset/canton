@@ -134,7 +134,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.addNetworkRefIfMissing(addressId) { () =>
           raiseAlreadyPresent()
         } { () =>
-          val ref = createNewNetworkRef()
+          val ref = newNetworkRef()
           maybeRef1 = Some(ref)
           ref
         }
@@ -146,7 +146,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.addNetworkRefIfMissing(addressId) { () =>
           raiseAlreadyPresent()
         } { () =>
-          val ref = createNewNetworkRef()
+          val ref = newNetworkRef()
           maybeRef2 = Some(ref)
           ref
         }
@@ -157,33 +157,157 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
-    "consolidate network refs" in {
-      val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+    "consolidate network refs correctly" when {
 
-      val ref1 = createNewNetworkRef()
-      state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref1)
+      "only an incoming connection exists" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
 
-      state.connections should contain only None -> Some(APeerBftNodeId)
+        // Incoming connection
+        val ref1 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref1)
 
-      val ref2 = createNewNetworkRef()
-      state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref2)
-      val ref3 = createNewNetworkRef()
-      state.addNetworkRefIfMissing(AnotherPeerP2PEndpointAddressId)(() => fail())(() => ref3)
+        state.connections should contain only None -> Some(APeerBftNodeId)
 
-      state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        // Unrelated connection
+        val ref3 = newNetworkRef()
+        state.addNetworkRefIfMissing(AnotherPeerP2PEndpointAddressId)(() => fail())(() => ref3)
 
-      verifyZeroInteractions(ref1)
-      verify(ref2, times(1)).close()
-      verifyZeroInteractions(ref3)
+        // Outgoing connection authenticates and associates with the same node ID as the incoming connection
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
-      state.connections should contain theSameElementsAs Seq(
-        Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
-        Some(AnotherPeerP2PEndpoint.id) -> None,
-      )
-      state.isDefined(APeerP2PEndpoint.id) shouldBe true
-      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
-      state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
-      state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+        verifyZeroInteractions(ref1)
+
+        verifyZeroInteractions(ref3)
+
+        state.connections should contain theSameElementsAs Seq(
+          Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
+          Some(AnotherPeerP2PEndpoint.id) -> None,
+        )
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
+        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+
+        // Unrelated connection is unaffected
+        state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
+        state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+      }
+
+      "only an outgoing connection exists" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // Outgoing connection to unknown node ID
+        val ref1 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref1)
+
+        state.connections should contain only Some(APeerP2PEndpoint.id) -> None
+
+        // Unrelated connection
+        val ref3 = newNetworkRef()
+        state.addNetworkRefIfMissing(AnotherPeerP2PEndpointAddressId)(() => fail())(() => ref3)
+
+        // Outgoing connection authenticates and associates with the same node ID as the incoming connection
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+
+        verifyZeroInteractions(ref1)
+
+        verifyZeroInteractions(ref3)
+
+        state.connections should contain theSameElementsAs Seq(
+          Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
+          Some(AnotherPeerP2PEndpoint.id) -> None,
+        )
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
+        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+
+        // Unrelated connection is unaffected
+        state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
+        state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+      }
+
+      "an incoming connection exists first" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // Incoming connection
+        val ref1 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref1)
+
+        state.connections should contain only None -> Some(APeerBftNodeId)
+
+        // Outgoing connection to unknown node ID
+        val ref2 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref2)
+
+        // Unrelated connection
+        val ref3 = newNetworkRef()
+        state.addNetworkRefIfMissing(AnotherPeerP2PEndpointAddressId)(() => fail())(() => ref3)
+
+        // Outgoing connection authenticates and associates with the same node ID as the incoming connection
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+
+        verifyZeroInteractions(ref1)
+        verify(ref2, times(1)).close()
+
+        verifyZeroInteractions(ref3)
+
+        state.connections should contain theSameElementsAs Seq(
+          Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
+          Some(AnotherPeerP2PEndpoint.id) -> None,
+        )
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
+        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+
+        // Unrelated connection is unaffected
+        state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
+        state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+      }
+
+      "an outgoing connection exists first" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // Outgoing connection to unknown node ID
+        val ref1 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref1)
+
+        state.connections should contain only Some(APeerP2PEndpoint.id) -> None
+
+        // Incoming connection
+        val ref2 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref2)
+
+        // Unrelated connection
+        val ref3 = newNetworkRef()
+        state.addNetworkRefIfMissing(AnotherPeerP2PEndpointAddressId)(() => fail())(() => ref3)
+
+        // Outgoing connection authenticates and associates with the same node ID as the incoming connection
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+
+        verifyZeroInteractions(ref2)
+        verify(ref1, times(1)).close()
+
+        verifyZeroInteractions(ref3)
+
+        state.connections should contain theSameElementsAs Seq(
+          Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
+          Some(AnotherPeerP2PEndpoint.id) -> None,
+        )
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref2)
+        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+
+        // Unrelated connection is unaffected
+        state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
+        state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+      }
     }
 
     "shutting down a connection" should {
@@ -234,7 +358,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
           associations.foreach { case (endpointId, bftNodeId) =>
             state.associateP2PEndpointIdToBftNodeId(endpointId, bftNodeId)
           }
-          val ref = createNewNetworkRef()
+          val ref = newNetworkRef()
           state.addNetworkRefIfMissing(addressId)(() => fail())(() => ref)
           addressId match {
             case Right(nodeId) =>
@@ -307,5 +431,5 @@ object P2PGrpcConnectionStateTest {
   private val ASender = mock[PeerSender]
   private val AnotherSender = mock[PeerSender]
 
-  private def createNewNetworkRef() = mock[P2PNetworkRef[BftOrderingMessage]]
+  private def newNetworkRef() = mock[P2PNetworkRef[BftOrderingMessage]]
 }

@@ -260,6 +260,11 @@ class ParticipantTopologyTerminateProcessing(
 
     metrics.setLsuStatus(ParticipantMetrics.LsuStatus.LsuAnnounced, successor.psid)
 
+    // Note: We do not need to explicitly delete the old PendingLsuOperation
+    // on receiving multiple Replaces. PendingLsuOperation uses an empty string ("")
+    // for its operationKey, so the store will safely overwrite the
+    // existing operation for this synchronizer.
+
     EitherTUtil.doNotAwaitUS(
       retrieveAndStoreMissingSequencerIds(traceContext),
       s"retrieve and store missing sequencer ids for $psid",

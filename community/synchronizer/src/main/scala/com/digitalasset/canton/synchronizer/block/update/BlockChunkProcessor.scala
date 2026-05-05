@@ -94,11 +94,13 @@ final class BlockChunkProcessor(
       height: Long,
       index: Int,
       chunkEvents: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
+      announcedLsu: Option[AnnouncedLsu],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[(BlockUpdateGeneratorImpl.State, ChunkUpdate)] = {
-    val (lastTsBeforeValidation, fixedTsChanges) = fixTimestamps(state, chunkEvents)
+    val (lastTsBeforeValidation, fixedTsChanges) =
+      fixTimestampsAndDropSendsAfterUpgradeTime(state, chunkEvents, announcedLsu)
 
     logChunkDetails(state, height, index, fixedTsChanges)
 
@@ -333,9 +335,12 @@ final class BlockChunkProcessor(
     }
   }
 
-  private def fixTimestamps(
+  private def fixTimestampsAndDropSendsAfterUpgradeTime(
       state: State,
       chunk: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
+      announcedLsu: Option[AnnouncedLsu],
+  )(implicit
+      traceContext: TraceContext
   ): (CantonTimestamp, Seq[(CantonTimestamp, Traced[LedgerBlockEvent])]) = {
     val (lastTsBeforeValidation, revFixedTsChanges) =
       // With this logic, we assign to the initial non-Send events the same timestamp as for the last
@@ -349,8 +354,20 @@ final class BlockChunkProcessor(
       ]((state.lastChunkTs, Seq.empty)) { case ((lastTs, events), event) =>
         event.value match {
           case send: Send =>
-            val ts = ensureStrictlyIncreasingTimestamp(lastTs, send.timestamp)
-            (ts, (ts, event) +: events)
+            val timestampO = ensureStrictlyIncreasingTimestampBeforeUpgradeTime(
+              lastTs,
+              send.timestamp,
+              announcedLsu,
+            )
+            timestampO match {
+              case Some(ts) => (ts, (ts, event) +: events)
+              case None =>
+                logger.info(
+                  s"Dropping Send event after upgrade time ${announcedLsu
+                      .map(_.successor.upgradeTime)}: $send"
+                )(event.traceContext)
+                (lastTs, events)
+            }
           case _ =>
             (lastTs, (lastTs, event) +: events)
         }
@@ -359,29 +376,43 @@ final class BlockChunkProcessor(
     (lastTsBeforeValidation, fixedTsChanges)
   }
 
-  // only accept the provided timestamp if it's strictly greater than the last timestamp
-  // otherwise just offset the last valid timestamp by 1
-  private def ensureStrictlyIncreasingTimestamp(
+  /**   - in [[OrderingTimeFixMode.ValidateOnly]], accept the provided timestamp, if
+    *     1. it's before the upgrade time (in case an LSU was announced)
+    *     1. it's strictly greater than the last timestamp
+    *
+    *   - in [[OrderingTimeFixMode.MakeStrictlyIncreasing]], accept the max of the
+    *     `providedTimestamp` and `lastTs.immediateSuccessor`, if it's before the ugprade time (in
+    *     case an LSU was announced)
+    */
+  private def ensureStrictlyIncreasingTimestampBeforeUpgradeTime(
       lastTs: CantonTimestamp,
       providedTimestamp: CantonTimestamp,
-  ): CantonTimestamp = {
+      announcedLsu: Option[AnnouncedLsu],
+  )(implicit traceContext: TraceContext): Option[CantonTimestamp] = {
     val invariant = providedTimestamp > lastTs
     orderingTimeFixMode match {
 
       case OrderingTimeFixMode.ValidateOnly =>
-        if (!invariant)
-          sys.error(
+        // only check the invariant, if the provided timestamp is before the upgrade time
+        Option.when(announcedLsu.forall(lsu => providedTimestamp < lsu.successor.upgradeTime)) {
+          ErrorUtil.requireState(
+            invariant,
             "BUG: sequencing timestamps are not strictly monotonically increasing," +
-              s" last timestamp $lastTs, provided timestamp: $providedTimestamp"
+              s" last timestamp $lastTs, provided timestamp: $providedTimestamp",
           )
-        providedTimestamp
+          providedTimestamp
+        }
 
+      // When MakeStrictlyIncreasing is removed (because we only run with DABFT), the dropping of events can be done much in
+      // com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl.chunkBlock, because then the dropping doesn't rely
+      // on the state anymore and can be purely done base on the timestamp provided by the ordering layer.
       case OrderingTimeFixMode.MakeStrictlyIncreasing =>
-        if (invariant) {
+        val tsForEvent = if (invariant) {
           providedTimestamp
         } else {
           lastTs.immediateSuccessor
         }
+        Option.when(announcedLsu.forall(lsu => tsForEvent < lsu.successor.upgradeTime))(tsForEvent)
     }
   }
 

@@ -287,7 +287,9 @@ private[continuity] object ProtocolContinuityConformanceTest {
     * protocol version with the stable protocol versions supported by the current release.
     *
     * @return
-    *   the latest patch of each previous supported `(major, minor)`, sorted ascending
+    *   for each previous supported `(major, minor)` the latest stable patch (if any) and the latest
+    *   non-stable patch (snapshot/RC, if any), sorted ascending. At least one of the two exists per
+    *   minor.
     */
   def previousSupportedReleases(logger: TracedLogger)(implicit
       tc: TraceContext
@@ -301,38 +303,38 @@ private[continuity] object ProtocolContinuityConformanceTest {
           NonEmpty.from(pvs.intersect(protocolVersions)).map(minor -> _)
         }
 
-    val previousSupportedReleases = for {
-      release <- UseLedgerApiTestTool.latestReleases(logger)
-      if release < current
+    val latestStableAndNonStablePerMinor = ReleaseUtils
+      .listAllReleases()
+      .filter(_ < current)
+      .groupBy(_.majorMinor)
+      .toSeq
+      .flatMap { case (_, versions) =>
+        val (stables, nonStables) = versions.partition(_.isStable)
+        stables.maxOption.toList ++ nonStables.maxOption.toList
+      }
+
+    val tested = for {
+      release <- latestStableAndNonStablePerMinor
       pvs <- eligibleMinors.get(release.majorMinor).toList
     } yield TestedRelease(release, pvs)
-    // Keep only the latest patch per (major, minor)
-    val latestPatchPerMinor = previousSupportedReleases
-      .groupBy(_.releaseVersion.majorMinor)
-      .values
-      .map(_.maxBy(_.releaseVersion))
-      .toList
-      .sortBy(_.releaseVersion)
+
+    val sorted = tested.toList.sortBy(_.releaseVersion)
     logger.info(
-      s"Previous supported releases: ${latestPatchPerMinor.map(_.releaseVersion).mkString(", ")}"
+      s"Previous supported releases: ${sorted.map(_.releaseVersion).mkString(", ")}"
     )
-    NonEmpty.from(latestPatchPerMinor).getOrElse {
+    NonEmpty.from(sorted).getOrElse {
       throw new IllegalStateException(
         s"No previous supported releases found for current release ${current.toProtoPrimitive}."
       )
     }
   }
 
-  def latestSupportedRelease(logger: TracedLogger)(implicit
-      tc: TraceContext
-  ): TestedRelease =
-    previousSupportedReleases(logger).last1
-
   private[continuity] val removeConfigPaths: Set[(String, Option[(String, Any)])] = {
     val topLevel = Seq(
       "monitoring.logging.api.debug-in-process-requests",
       "monitoring.logging.api.prefix-grpc-addresses",
       "monitoring.sanitize-public-error-messages",
+      "parameters.threading",
     )
     val perParticipant = (1 to 3).flatMap { p =>
       val base = s"participants.participant$p"
@@ -348,17 +350,24 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.ledger-api.postgres-data-source.client-connection-check-interval",
         s"$base.ledger-api.postgres-data-source.network-timeout",
         s"$base.ledger-api.state-service",
+        s"$base.ledger-api.topology-aware-package-selection.max-passes-default",
+        s"$base.ledger-api.topology-aware-package-selection.max-passes-limit",
         s"$base.ledger-api.update-service",
         s"$base.parameters.alpha-multi-synchronizer-support",
         s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.parameters.caching.sequencer-catchup-payload-cache",
         s"$base.parameters.commit-after-failed-activeness-check",
+        s"$base.parameters.commitment-use-db-snapshot-for-participant-lookup",
         s"$base.parameters.ledger-api-server.indexer.achs-config",
         s"$base.parameters.ledger-api-server.indexer.postgres-data-source",
         s"$base.parameters.ledger-api-server.indexer.submission-batch-insertion-size",
         s"$base.parameters.ledger-api-server.indexer.use-weighted-batching",
         s"$base.parameters.lsu",
+        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
         s"$base.sequencer-client.channel-max-inbound-message-size",
+        s"$base.sequencer-client.keep-alive-client.idle-timeout",
+        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
       )
     }
     val perMediator = {
@@ -366,11 +375,16 @@ private[continuity] object ProtocolContinuityConformanceTest {
       Seq(
         s"$base.admin-api.max-concurrent-calls-per-connection",
         s"$base.caching.bft-ordering-batch-cache",
+        s"$base.caching.sequencer-catchup-payload-cache",
         s"$base.crypto.parallelism",
         s"$base.crypto.session-signing-keys",
         s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.parameters.caching.sequencer-catchup-payload-cache",
+        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
         s"$base.sequencer-client.channel-max-inbound-message-size",
+        s"$base.sequencer-client.keep-alive-client.idle-timeout",
+        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
       )
     }
     val perSequencer = {
@@ -379,16 +393,24 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.admin-api.max-concurrent-calls-per-connection",
         s"$base.crypto.parallelism",
         s"$base.crypto.session-signing-keys",
+        s"$base.declarative",
         s"$base.parameters.caching.bft-ordering-batch-cache",
+        s"$base.parameters.caching.sequencer-catchup-payload-cache",
         s"$base.parameters.delay-requests-before-lsu-traffic-init",
         s"$base.parameters.lsu-repair",
         s"$base.parameters.produce-post-ordering-topology-ticks",
         s"$base.parameters.unsafe-sequencer-channel-support",
         s"$base.parameters.disable-submission-checks-for-testing",
         s"$base.public-api.max-concurrent-calls-per-connection",
+        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
         s"$base.sequencer-client.channel-max-inbound-message-size",
+        s"$base.sequencer-client.keep-alive-client.idle-timeout",
+        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
         s"$base.sequencer.block.circuit-breaker.messages.lsu-sequencing-test",
+        s"$base.sequencer.block.throughput-cap.strict",
+        s"$base.sequencer.block.throughput-cap.thresholds",
+        s"$base.sequencer.block.throughput-cap.update-every-ms",
       )
     }
     (topLevel ++ perParticipant ++ perMediator ++ perSequencer)

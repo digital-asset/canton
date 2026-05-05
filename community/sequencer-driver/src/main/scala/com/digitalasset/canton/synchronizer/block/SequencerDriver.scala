@@ -215,6 +215,12 @@ object SequencerDriver {
   *
   * @param blockHeight
   *   The height of the block. Block heights must be consecutive.
+  * @param baseSequencingTimeMicrosFromEpoch
+  *   - if the block is not empty, it will be the sequencing timestamp of the first event in the
+  *     block
+  *   - if the block is empty, it will be the sequencing timestamp of the block itself. It is
+  *     guaranteed that future blocks won't move this time back. Also guaranteed that this time will
+  *     move forward.
   * @param events
   *   The events in the given block, which may be reordered in the post-processing stage.
   * @param tickTopologyAtMicrosFromEpoch

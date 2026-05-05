@@ -57,7 +57,7 @@ final case class AnnouncedLsu(
       }
     }
 
-  def maybeOffsetTime(
+  def addOffsetAfterUpgradeTime(
       timestamp: CantonTimestamp
   )(implicit elc: ErrorLoggingContext): CantonTimestamp =
     if (LogicalUpgradeTime.canProcessKnowingSuccessor(Some(successor), timestamp)) {
@@ -71,9 +71,4 @@ final case class AnnouncedLsu(
           )
         )
     }
-
-  def maybeOffsetTime(timestamp: Option[CantonTimestamp])(implicit
-      elc: ErrorLoggingContext
-  ): Option[CantonTimestamp] =
-    timestamp.map(maybeOffsetTime)
 }

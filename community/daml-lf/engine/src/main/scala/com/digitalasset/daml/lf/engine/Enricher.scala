@@ -455,28 +455,24 @@ final class Enricher(
         )
         .fold(ResultError(_), ResultDone(_))
 
-    create.keyOpt match {
-      case Some(_) =>
-        ResultDone(Left("enrichCreateWithPackages does not support contract keys"))
-      case None =>
-        val packageIdList = packageIds.toNonEmptyList
-        val targetPkgId = packageIdList.iterator.min
-        for {
-          result <- translateWithPackage(targetPkgId)
-          (_, resultSValue) = result
-          others <- packageIdList.filter(_ != targetPkgId).traverse(translateWithPackage)
-          resultHash <- hashSValue(targetPkgId, resultSValue)
-          otherHashes <- others.traverse { case (pkgId, sval) => hashSValue(pkgId, sval) }
-        } yield {
-          otherHashes.find(_ != resultHash) match {
-            case Some(otherPkgId) =>
-              Left(
-                s"Contract ${create.coid} enriches to different values for packages ${targetPkgId} and ${otherPkgId}"
-              )
-            case None =>
-              Right(create.copy(arg = toValue(resultSValue)))
-          }
-        }
+    val packageIdList = packageIds.toNonEmptyList
+    val targetPkgId = packageIdList.iterator.min
+    for {
+      result <- translateWithPackage(targetPkgId)
+      (_, resultSValue) = result
+      others <- packageIdList.filter(_ != targetPkgId).traverse(translateWithPackage)
+      resultHash <- hashSValue(targetPkgId, resultSValue)
+      otherHashes <- others.traverse { case (pkgId, sval) => hashSValue(pkgId, sval) }
+      enrichedKey <- enrichContractKey(create.keyOpt)
+    } yield {
+      otherHashes.find(_ != resultHash) match {
+        case Some(otherPkgId) =>
+          Left(
+            s"Contract ${create.coid} enriches to different values for packages ${targetPkgId} and ${otherPkgId}"
+          )
+        case None =>
+          Right(create.copy(arg = toValue(resultSValue), keyOpt = enrichedKey))
+      }
     }
   }
 

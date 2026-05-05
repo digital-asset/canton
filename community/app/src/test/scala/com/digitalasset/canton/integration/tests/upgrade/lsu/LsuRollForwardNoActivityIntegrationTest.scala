@@ -185,7 +185,9 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
         participants.all.forall(_.synchronizers.is_connected(fixture1.currentPsid)) shouldBe false
       }
 
-      waitForTargetTimeOnSequencer(sequencer1, environment.clock.now, logger)
+      eventually() {
+        sequencer1.underlying.value.sequencer.syncCrypto.approximateTimestamp should be > environment.clock.now
+      }
     }
 
     "prepare nodes of the recovery synchronizer (S3)" in { implicit env =>

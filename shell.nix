@@ -45,6 +45,7 @@ pkgs.mkShell {
     unzip
     (sbt.override { inherit jre; })
     xxd
+    yamllint
     zip
     tinyproxy
 

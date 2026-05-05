@@ -1133,8 +1133,11 @@ class CantonSyncService(
     *   - Connection to psid2 is marked as LsuTarget
     *
     * Such unfinished LSUs need to be finished "manually" because the normal flow is triggered by a
-    * connection to the synchronizer. However, `LsuSource` state is marks the connection as
-    * inactive, thus preventing further connections.
+    * connection to the synchronizer. However, `LsuSource` state marks the connection as inactive,
+    * thus preventing further connections.
+    *
+    * Other interrupted states (e.g., missing targets or active sources) are not covered here, as
+    * they are resolved automatically during node startup or via manual admin retries.
     */
   def finishLSUs()(implicit
       traceContext: TraceContext

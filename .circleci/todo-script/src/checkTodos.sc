@@ -119,6 +119,12 @@ final case class OssIssueBucket(number: Int) extends Bucket {
   override val withinClassPosition = number
 }
 
+final case class DamlIssueBucket(number: Int) extends Bucket {
+  override val name = "Daml Issue " + number.toString
+  override val classPosition = 7 // after TagBucket(1), MilestoneBucket(2), IssueBucket(3), UnknownBucket(4), UnassignedBucket(5), OssIssueBucket(6)
+  override val withinClassPosition = number
+}
+
 object UnknownBucket extends Bucket {
   override val name = "Unknown category"
   override val classPosition = 4
@@ -178,12 +184,18 @@ object OssGithubIssueLink extends RegexCategory {
   override def getBucket(str: String): Bucket = OssIssueBucket(extractIssueNumber(str))
 }
 
+object DamlGithubIssueLink extends RegexCategory {
+  override val regex: Regex = "digital-asset/daml/issues/[0-9]+".r
+
+  override def getBucket(str: String): Bucket = DamlIssueBucket(extractIssueNumber(str))
+}
+
 val tags: List[RegexCategory] = List(
   Tag(List("test-coverage")),
   Tag(List("GA", "1.0.0", "1.0")),
 )
 
-val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone, OssGithubIssueLink)
+val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone, OssGithubIssueLink, DamlGithubIssueLink)
 
 val todoPatterns = Seq("TODO", "XXX", "FIXME")
 val todoPatternRegexpStr = todoPatterns.map(str => s"($str)").mkString("|")
@@ -272,17 +284,22 @@ val openOssIssues: Set[Int] = "gh issue list --repo digital-asset/canton --limit
   .map(_.toInt)
   .toSet
 
+val openDamlIssues: Set[Int] = "gh issue list --repo digital-asset/daml --limit 2500 --json number --jq '.[].number'".!!.split("\n")
+  .map(_.toInt)
+  .toSet
+
 // Issues that have dangling TODOs (e.g., in sql files)
 val ignoredIssues: Set[Int] = Set(282923)
 
 println(s"Found ${openIssues.size} open issues: ${openIssues.mkString(", ")}")
 println(s"Found ${openOssIssues.size} open OSS issues: ${openOssIssues.mkString(", ")}")
+println(s"Found ${openDamlIssues.size} open Daml issues: ${openDamlIssues.mkString(", ")}")
 
 val projectRoot = "." // CI scripts are called from the project root
 
 val scalaStyleExcludeDirectories =
   Seq(
-    "TODO-script",
+    "todo-script",
     "lib",
     "log",
     "todo-out",
@@ -370,9 +387,10 @@ val table = pairsToMap(scalaStyleIssuesTable ++ rstStyleIssuesTable)
 
 val issuesNotOpen = table.filter {
   case (IssueBucket(i), _) => ((!openIssues.contains(i)) || fixedIssuesCurrentPR.contains(i)) && !ignoredIssues.contains(i)
-  // fixedIssuesCurrentPR is not checked for OSS issues: it parses "fixes #<n>" from the internal PR body,
-  // which never references OSS issue numbers.
+  // fixedIssuesCurrentPR is not checked for OSS/Daml issues: it parses "fixes #<n>" from the internal PR body,
+  // which never references OSS or Daml issue numbers.
   case (OssIssueBucket(i), _) => !openOssIssues.contains(i)
+  case (DamlIssueBucket(i), _) => !openDamlIssues.contains(i)
   case _ => false
 }
 

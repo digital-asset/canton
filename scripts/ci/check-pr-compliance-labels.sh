@@ -2,7 +2,16 @@
 
 set -euo pipefail
 
-REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  REPO="${GITHUB_REPOSITORY}"
+  CIRCLE_PROJECT_USERNAME="${GITHUB_REPOSITORY_OWNER}"
+  CIRCLE_PROJECT_REPONAME="${GITHUB_REPOSITORY##*/}"
+  CIRCLE_PULL_REQUEST="${GITHUB_EVENT_NUMBER:-}"
+else
+  REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+  CIRCLE_PULL_REQUEST="${CIRCLE_PULL_REQUEST:-}"
+fi
+
 LABELS=( "Standard-Change" )
 COMPLIANCE_PATH_PREFIXES=( ".ci" ".github" "release" "deployment" "scripts/ci" "nix" "shell.nix" "project" "build.sbt" "shared_dependencies.json" ) # See <root>/CODEOWNERS
 PULL_NUMBER=$((echo "${CIRCLE_PULL_REQUEST-}" | grep -o -E '[0-9]+$') || true)

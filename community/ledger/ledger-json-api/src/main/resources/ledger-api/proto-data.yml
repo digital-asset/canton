@@ -314,12 +314,6 @@ fileComments:
               Modifiable
 
               Optional: can be empty
-      annotations_entry:
-        message:
-          comments: null
-          fieldComments:
-            key: ''
-            value: ''
     oneOfs:
       ObjectMeta: {}
     services: {}
@@ -4687,12 +4681,6 @@ fileComments:
               for submitting it as a disclosed contract with future commands.
 
               Optional
-      filters_by_party_entry:
-        message:
-          comments: null
-          fieldComments:
-            key: ''
-            value: ''
     oneOfs:
       CumulativeFilter:
         identifier_filter:

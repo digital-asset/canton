@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ViewNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.TimestampedSend
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
@@ -58,8 +59,10 @@ import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext,
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
+import scala.collection.mutable
 import scala.util.{Random, Try}
 
 private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBaseTest =>
@@ -449,6 +452,21 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
     availability.receive(Availability.Start)
     availability
   }
+
+  protected def withFixedTimestamp(
+      t: Instant,
+      disseminationProgress: mutable.Map[BatchId, DisseminationStatus],
+  ): Map[BatchId, DisseminationStatus] =
+    disseminationProgress.view.mapValues { status =>
+      val batchSentToWithFixedTimestamps =
+        status.sentToLast.map { case TimestampedSend(n, _) => TimestampedSend(n, t) }
+      status match {
+        case ip: DisseminationStatus.InProgress =>
+          ip.copy(sentToLast = batchSentToWithFixedTimestamps)
+        case c: DisseminationStatus.Complete =>
+          c.copy(sentToLast = batchSentToWithFixedTimestamps)
+      }
+    }.toMap
 
   protected def remoteBatchAcknowledged(idx: Int): RemoteDissemination.RemoteBatchAcknowledged =
     RemoteDissemination.RemoteBatchAcknowledged.create(

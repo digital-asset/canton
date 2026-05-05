@@ -621,7 +621,9 @@ private[sync] class SynchronizerConnectionsManager(
   }
 
   /** Get the synchronizer connection corresponding to the alias. Fail if no connection can be
-    * found. If more than one connections are found, takes the highest one.
+    * found. If `onlyActive` is true, enforces that exactly one active connection exists, otherwise
+    * throws an invalid state exception. If `onlyActive` is false and multiple connections exist,
+    * takes the one with the highest PSID.
     *
     * @param synchronizerAlias
     *   Synchronizer alias
@@ -639,18 +641,26 @@ private[sync] class SynchronizerConnectionsManager(
         SyncServiceError.SyncServiceUnknownSynchronizer.Error(synchronizerAlias).asLeft
 
       case Right(configs) =>
-        val filteredConfigs = if (onlyActive) {
+        if (onlyActive) {
           val (active, inactive) = configs.partition(_.status.isActive)
 
-          NonEmpty
-            .from(active)
-            .toRight(
-              SyncServiceError.SyncServiceSynchronizerIsNotActive
-                .Error(synchronizerAlias, inactive.map(c => (c.configuredPsid, c.status)))
-            )
-        } else configs.asRight
-
-        filteredConfigs.map(_.maxBy1(_.configuredPsid))
+          active.toList match {
+            case Nil =>
+              Left(
+                SyncServiceError.SyncServiceSynchronizerIsNotActive
+                  .Error(synchronizerAlias, inactive.map(c => (c.configuredPsid, c.status)))
+              )
+            case single :: Nil =>
+              Right(single)
+            case multiple =>
+              ErrorUtil.invalidState(
+                s"Store invariant violated: Multiple physical synchronizers marked as Active for alias $synchronizerAlias: ${multiple
+                    .map(_.configuredPsid)}"
+              )
+          }
+        } else {
+          Right(configs.maxBy1(_.configuredPsid))
+        }
     }
 
   /** Sets the sequencer ids in the synchronizer connection config store.
@@ -783,10 +793,12 @@ private[sync] class SynchronizerConnectionsManager(
     connectQueue.executeEUS(
       connectedSynchronizers.get(psid) match {
         case Some(sync) =>
-          logger.debug(s"Already connected to $psid, no need to register $psid")
+          logger.debug(
+            s"Already connected to $psid, skipping pure handshake and returning cached static parameters."
+          )
           EitherT.rightT[FutureUnlessShutdown, SyncServiceError](sync.staticSynchronizerParameters)
         case None =>
-          logger.debug(s"About to perform handshake with synchronizer: $psid")
+          logger.debug(s"About to perform pure handshake with synchronizer: $psid")
 
           for {
             synchronizerConnectionConfig <- EitherT.fromEither[FutureUnlessShutdown](

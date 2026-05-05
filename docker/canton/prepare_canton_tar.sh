@@ -32,7 +32,7 @@ matches=()
 for root in "${unique_roots[@]}"; do
   for pat in "${patterns[@]}"; do
     while IFS= read -r -d '' f; do matches+=("$f"); done \
-      < <(find "$root" -type f -name "$pat" ! -name '*-protobuf.tar.gz' -print0 2>/dev/null)
+      < <(find "$root" -type f -name "$pat" ! -name '*-api.tar.gz' -print0 2>/dev/null)
   done
 done
 

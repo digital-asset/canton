@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
@@ -20,8 +19,15 @@ final class P2PGrpcServerManager(
 
   def startServer(): Unit =
     if (!isClosing) {
-      maybeServerUS.foreach(_.foreach(_.server.start().discard)).discard
-      logger.info("Started P2P gRPC server")
+      maybeServerUS.fold {
+        logger.info("Not starting P2P gRPC server due to none configured")
+      } {
+        case UnlessShutdown.Outcome(closeableServer) =>
+          val server = closeableServer.server.start()
+          logger.info(s"Started P2P gRPC server on port ${server.getPort}")
+        case UnlessShutdown.AbortedDueToShutdown =>
+          logger.info("Not starting P2P gRPC server due to shutdown")
+      }
     } else {
       logger.info("Not starting P2P gRPC server due to shutdown")
     }

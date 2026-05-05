@@ -128,25 +128,28 @@ trait RequestJournalStore { this: NamedLogging =>
 
   /** Returns an upper bound for the timestamps up to which pruning may remove data from the store
     * (inclusive) so that crash recovery will still work.
+    *
+    * Crash recovery cleans up the store before replay starts, however we may have used some of the
+    * deleted information to determine the starting points for the replay. So if a crash occurs
+    * during crash recovery, we may start again and come up with an earlier processing starting
+    * point. We want to make sure that crash recovery access only data whose timestamps comes after
+    * what pruning is allowed to delete. This method returns a timestamp that is before the data
+    * that crash recovery accesses after any number of iterating the computation of starting points
+    * and crash recovery clean-ups.
+    *
+    * The earliest possible starting point is the earlier of the following:
+    *   - The first request whose commit time is after the clean synchronizer index timestamp
+    *   - The clean sequencer counter prehead timestamp
     */
   final def crashRecoveryPruningBoundInclusive(cleanSynchronizerIndexO: Option[SynchronizerIndex])(
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Option[CantonTimestamp]] =
-    // Crash recovery cleans up the store before replay starts,
-    // however we may have used some of the deleted information to determine the starting points for the replay.
-    // So if a crash occurs during crash recovery, we may start again and come up with an earlier processing starting point.
-    // We want to make sure that crash recovery access only data whose timestamps comes after what pruning is allowed to delete.
-    // This method returns a timestamp that is before the data that crash recovery accesses after any number of iterating
-    // the computation of starting points and crash recovery clean-ups.
-    //
-    // The earliest possible starting point is the earlier of the following:
-    // * The first request whose commit time is after the clean synchronizer index timestamp
-    // * The clean sequencer counter prehead timestamp
     for {
       cleanRequestTimestamp <- cleanSynchronizerIndexO
         .fold[FutureUnlessShutdown[Option[CantonTimestamp]]](FutureUnlessShutdown.pure(None))(
           synchronizerIndex => lastRequestTimestampBeforeOrAt(synchronizerIndex.recordTime)
         )
+
       requestReplayTs <- cleanRequestTimestamp match {
         case None =>
           // No request is known to be clean, nothing can be pruned
@@ -160,6 +163,7 @@ trait RequestJournalStore { this: NamedLogging =>
             }
           }
       }
+
       // TODO(i21246): Note for unifying crashRecoveryPruningBoundInclusive and startingPoints: This minimum building is not needed anymore, as the request timestamp is also smaller than the sequencer timestamp.
       cleanSequencerIndexTs = cleanSynchronizerIndexO
         .flatMap(_.sequencerIndex)

@@ -63,8 +63,9 @@ object ParticipantPurgeObsoleteTopologyScheduler {
       FutureUnlessShutdown.pure {
         synchronizerConnectionConfigStore
           .getAll()
-          .filterNot(_.status == LsuSource)
+          .filter(_.status == LsuSource)
           .flatMap(_.configuredPsid.toOption)
+          .filter(psid => synchronizerConnectionConfigStore.getActive(psid.logical).isRight)
           .flatMap(syncPersistentStateManager.get)
           .map(_.topologyStore)
       }

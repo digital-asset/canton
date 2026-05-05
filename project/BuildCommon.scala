@@ -294,6 +294,24 @@ object BuildCommon {
       }
   }
 
+  /** Packs openapi.yaml and asyncapi.yaml with versioned names into the json-api directory so they
+    * are included in the API archives (`*-api.zip` / `*-api.tar.gz`).
+    */
+  private def packVersionedApiSpecFiles(
+      BaseFile: BetterFile,
+      ver: String,
+  ): Seq[(File, String)] = {
+    val path = BaseFile / "src" / "test" / "resources" / "json-api-docs"
+    val pathJ = path.toJava
+    Seq("openapi.yaml", "asyncapi.yaml").flatMap { fileName =>
+      val f = new java.io.File(pathJ, fileName)
+      if (f.exists()) {
+        val versionedName = fileName.replace(".yaml", s"-$ver.yaml")
+        Seq((f, s"json-api${Path.sep}ledger-api${Path.sep}$versionedName"))
+      } else Seq.empty
+    }
+  }
+
   // Originally https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
   lazy val printTestTask = {
     val destination = "test-full-class-names.log"
@@ -380,6 +398,11 @@ object BuildCommon {
         "json-ledger-api",
       )
 
+      val versionedApiSpecs: Seq[(File, String)] = packVersionedApiSpecFiles(
+        "community" / "ledger" / "ledger-json-api",
+        version.value,
+      )
+
       val commonGoogleProtosRoot =
         (DamlProjects.`google-common-protos-scala` / target).value / "protobuf_external"
       val scalapbProto: Seq[(File, String)] = packProtobufDependencyFiles(
@@ -414,7 +437,7 @@ object BuildCommon {
       val apiFiles =
         ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
           scalapbProto ++ googleRpcProtos ++ damlLfLedgerApiValueProto ++ communityJsonApiOpenapi ++ damlLfSnapshotProto ++
-          damlLfArchiveProto ++ damlLfTransactionProto
+          damlLfArchiveProto ++ damlLfTransactionProto ++ versionedApiSpecs
 
       log.info("Invoking bundle generator")
       // add license to package

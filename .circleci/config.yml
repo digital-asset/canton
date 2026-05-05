@@ -122,7 +122,7 @@ commands:
     check_pr_compliance_labels:
         steps:
             - run:
-                command: .circleci/check-pr-compliance-labels.sh
+                command: scripts/ci/check-pr-compliance-labels.sh
                 name: Compliance labels check for PR
     check_pr_skip_ci:
         steps:
@@ -499,6 +499,23 @@ commands:
                     fi
                 name: << parameters.label >>
                 when: << parameters.when >>
+    publish_api_to_gar:
+        parameters:
+            gar_maven_repo_url:
+                type: string
+        steps:
+            - setup_gcp_gar
+            - run:
+                command: |
+                    GAR_MAVEN_REPO_URL=<< parameters.gar_maven_repo_url >> ./scripts/ci/publish-api-to-gar.sh
+                name: Publish API artifacts to Google Artifact Registry
+    publish_api_to_maven_central:
+        steps:
+            - setup_gpg
+            - run:
+                command: |
+                    ./scripts/ci/publish-api-to-maven-central.sh
+                name: Publish API artifacts to Maven Central
     publish_libs_to_google_artifact_registry:
         steps:
             - setup_gcp_gar
@@ -718,7 +735,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-2efa3ed3690e \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1932,7 +1949,7 @@ jobs:
             - enable_session_signing_keys
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
-                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
     nightly_reporting:
@@ -2184,6 +2201,23 @@ jobs:
                 nightly_release: << parameters.is_nightly_workflow >>
             - publish_release_on_oci_registry:
                 nightly_release: << parameters.is_nightly_workflow >>
+            - when:
+                condition:
+                    or:
+                        - << parameters.is_nightly_workflow >>
+                        - << parameters.is_manual >>
+                steps:
+                    - publish_api_to_gar:
+                        gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
+            - unless:
+                condition:
+                    or:
+                        - << parameters.is_nightly_workflow >>
+                        - << parameters.is_manual >>
+                steps:
+                    - publish_api_to_gar:
+                        gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven
+                    - publish_api_to_maven_central
             - run:
                 command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"
                 name: Publish to GitHub releases
@@ -2297,10 +2331,10 @@ jobs:
     stability_crash_recovery_test_alerting:
         executor: canton-small-docker
         steps:
+            - checkout
             - check_number_of_successes:
                 job_name: stability_crash_recovery_test
                 min_successes: 32
-            - checkout
             - slack_red_main_with_volunteer
     stability_sequential_test:
         executor: canton-xlarge-docker-with-postgres
@@ -2472,6 +2506,7 @@ jobs:
     test_ping_arm:
         executor: medium-arm-machine
         steps:
+            - checkout
             - attach_workspace:
                 at: workspace
             - run:
@@ -2482,7 +2517,6 @@ jobs:
                 destination: log
                 name: Store test logs as artifacts (if any)
                 path: log
-            - checkout
             - slack_red_main_with_volunteer
     test_ping_windows:
         executor: medium-windows-machine
@@ -3768,6 +3802,20 @@ workflows:
                     - da-images
                 requires:
                     - compile
+            - release_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+                    - package_kms_driver
             - publish_libraries:
                 context:
                     - datadog
@@ -3796,6 +3844,7 @@ workflows:
                     - package_sequencer_driver_api
                     - assembly_ledger_api_test_tool
                     - package_kms_driver
+                    - release_test
                     - build_scaladoc
             - build_and_publish_docker:
                 context:

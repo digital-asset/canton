@@ -109,18 +109,32 @@ sealed trait LogicalSynchronizerUpgrade[Req <: LsuRequest] extends NamedLogging 
     operationName = "lsu",
   )
 
-  /** Run the operation using the specified retry strategy. The reason we have a more complicated
-    * logic is that we schedule many operations on a `executionQueue` (that is also used for
-    * synchronizer connections) and any failed task switches the queue to `failure` mode which
-    * prevents other operations to be scheduled. Hence, we avoid signalling failed operations as a
-    * failed future.
+  /** Runs the operation using the specified retry strategy while safely propagating domain errors.
     *
-    * Behavior depending on the result of `operation`:
-    *   - Failed future: the failed future bubbles up. Note that if the task is scheduled on the
-    *     `executionQueue`, the queue will be on failure mode.
-    *   - Left: will lead to a retry if the NegativeResult is retryable. If not, the error will be
-    *     returned.
-    *   - Right: result is returned.
+    * The method's complex logic exists to satisfy two architectural constraints:
+    *
+    *   - Use of Either to protect the queue: We schedule many operations on a shared
+    *     `executionQueue` (that is also used for synchronizer connections). If an operation results
+    *     in a Failed Future (an exception), the queue switches to `failure` mode, which prevents
+    *     other operations from being scheduled. Hence, we translate expected domain failures into a
+    *     `Left(NegativeResult)` wrapped inside a *successful* Future.
+    *
+    *   - Double-wrapping of Either to shape retry behaviour: The underlying `retryPolicy` is
+    *     instructed (via implicit `Success.either`) to retry any `Left` and stop on any `Right`.
+    *     The operation returns errors wrapped in a `NegativeResult` object. If we pass a fatal
+    *     error (`Left(NegativeResult)` where `isRetryable = false`) to the engine, it will ignore
+    *     the flag and get stuck in an infinite retry loop. To bypass this, we disguise fatal errors
+    *     as successes: `Left(fatal)` -> `Right(Left(fatal))`. The engine sees the outer `Right`,
+    *     immediately halts the retry loop, and returns the result, which we then `.flatten` to
+    *     restore the true `Left` error to the caller.
+    *
+    * Final behavior bubbling up to the caller, depending on the result of `operation`:
+    *
+    *   - Failed future: A true irrecoverable error. Bubbles up and breaks the `executionQueue`,
+    *     putting it on failure mode.
+    *   - Left(String): A domain error. It was either fatal, or it was retryable and exhausted all
+    *     attempts.
+    *   - Right(T): The operation succeeded.
     */
   protected def runWithRetries[T](operation: => FutureUnlessShutdown[Either[NegativeResult, T]])(
       implicit
@@ -615,7 +629,6 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     logger.info(s"Marking synchronizer connection $currentPsid as inactive")
 
     for {
-      // Should have been checked before but this is cheap
       _ <- synchronizerConnectionConfigStore
         .setStatus(
           alias,

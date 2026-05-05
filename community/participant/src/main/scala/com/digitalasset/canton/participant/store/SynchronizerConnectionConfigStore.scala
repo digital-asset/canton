@@ -155,8 +155,8 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
 
   /** Retrieves the active connection for `alias`. Return an
     * [[SynchronizerConnectionConfigStore.Error]] if the alias is unknown or if no connection is
-    * active. If several active configs are found, return the one with the highest
-    * [[com.digitalasset.canton.topology.PhysicalSynchronizerId]].
+    * active. If several active configs are found, returns an
+    * [[SynchronizerConnectionConfigStore.AtMostOnePhysicalActive]] error.
     */
   def getActive(
       alias: SynchronizerAlias
@@ -172,8 +172,8 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
 
   /** Retrieves the active connection for `id`. Return an
     * [[SynchronizerConnectionConfigStore.Error]] if the id is unknown or if no connection is
-    * active. If several active configs are found, return the one with the highest
-    * [[com.digitalasset.canton.topology.PhysicalSynchronizerId]].
+    * active. If several active configs are found, returns an
+    * [[SynchronizerConnectionConfigStore.AtMostOnePhysicalActive]] error.
     */
   def getActive(
       id: SynchronizerId
@@ -327,7 +327,7 @@ object SynchronizerConnectionConfigStore {
     val canMigrateTo: Boolean = true
     val canMigrateFrom: Boolean = false
 
-    // inactive so that we connect yet connect to the synchronizer
+    // inactive so that we cannot yet connect to the synchronizer
     val isActive: Boolean = false
 
     override protected def pretty: Pretty[LsuTarget.type] =
@@ -398,7 +398,7 @@ object SynchronizerConnectionConfigStore {
       predecessorPsid: PhysicalSynchronizerId,
   ) extends Error {
     val message =
-      s"Synchronizer with id $predecessorPsid cannot be the predecessor of $predecessorPsid because their logical IDs are incompatible"
+      s"Synchronizer with id $predecessorPsid cannot be the predecessor of $currentPsid because their logical IDs are incompatible"
   }
 
   final case class InconsistentSequencerIds(
@@ -414,7 +414,7 @@ object SynchronizerConnectionConfigStore {
       id: String
   ) extends Error {
     override def message: String =
-      s"Synchronizer with $id. Has the synchronizer been registered?"
+      s"Synchronizer with $id is missing. Has the synchronizer been registered?"
   }
 
   object MissingConfigForSynchronizer {
