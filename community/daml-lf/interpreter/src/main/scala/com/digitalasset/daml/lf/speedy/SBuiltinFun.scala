@@ -910,6 +910,79 @@ private[lf] object SBuiltinFun {
     }
   }
 
+  final case object SBExternalCall extends UpdateBuiltin(5) {
+    override protected def executeUpdate(
+        args: ArraySeq[SValue],
+        machine: UpdateMachine,
+    ): Control[Question.Update] = {
+      val extensionId = getSText(args, 0)
+      val functionId = getSText(args, 1)
+      val configHex = getSText(args, 2)
+      val inputHex = getSText(args, 3)
+      checkToken(args, 4)
+
+      machine.updateGasBudget(_.BExternalCall.cost(functionId))
+
+      // Validate hex encoding before making the external call
+      (Bytes.fromString(configHex), Bytes.fromString(inputHex)) match {
+        case (Right(config), Right(input)) =>
+          if (!machine.ptx.canRecordExternalCallResult) {
+            Control.Error(IE.UserError(
+              s"External calls are only supported within exercise context. " +
+                s"extensionId=$extensionId, functionId=$functionId"
+            ))
+          } else {
+            // Ask the host for the external-call result.
+            machine.needExternalCall(
+              extensionId = extensionId,
+              functionId = functionId,
+              configHash = configHex,
+              input = inputHex,
+            ) {
+              case Right(responseBodyRaw) =>
+                Bytes.fromString(responseBodyRaw) match {
+                  case Right(output) =>
+                    // The external-call question is only issued after confirming that the
+                    // current partial transaction can record a result, so resuming here must
+                    // still be inside an enclosing exercise context.
+                    val updatedPtx = machine.ptx.recordExternalCallResult(
+                      extensionId = extensionId,
+                      functionId = functionId,
+                      config = config,
+                      input = input,
+                      output = output,
+                    ).getOrElse(
+                      InternalError.runtimeException(
+                        NameOf.qualifiedNameOfCurrentFunc,
+                        s"lost enclosing exercise context while resuming external call " +
+                          s"(extensionId=$extensionId, functionId=$functionId)",
+                      )
+                    )
+                    machine.ptx = updatedPtx
+                    Control.Value(SText(responseBodyRaw))
+                  case Left(_) =>
+                    Control.Error(
+                      IE.UserError(
+                        "Invalid external call output: expected canonical lowercase hex"
+                      )
+                    )
+                }
+              case Left(error) =>
+                val errorMsg = s"External call failed: ${error.message}" +
+                  s" (extensionId=$extensionId, functionId=$functionId)"
+                Control.Error(IE.UserError(errorMsg))
+            }
+          }
+        case _ =>
+          Control.Error(
+            IE.UserError(
+              "Invalid external call config or input: expected canonical lowercase hex"
+            )
+          )
+      }
+    }
+  }
+
   final case object SBFoldl extends SBuiltinFun(3) {
     override private[speedy] def execute[Q](
         args: ArraySeq[SValue],

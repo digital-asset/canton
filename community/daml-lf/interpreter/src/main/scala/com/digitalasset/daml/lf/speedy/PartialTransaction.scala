@@ -5,12 +5,13 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, PackageName, Party, TypeConId}
-import com.digitalasset.daml.lf.data.{BackStack, ImmArray, Time}
+import com.digitalasset.daml.lf.data.{BackStack, Bytes, ImmArray, Time}
 import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.interpretation.{Error => IErr}
 import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
 import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine => ContractStateMachine,
+  ExternalCallResult,
   GlobalKeyWithMaintainers,
   KeyMapping,
   Node,
@@ -197,6 +198,7 @@ private[lf] object PartialTransaction {
     contractState = ContractStateMachine.empty(csmMode),
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
+    externalCallResults = HashMap.empty,
   )
 
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
@@ -222,6 +224,7 @@ private[speedy] case class PartialTransaction(
     contractState: CSMState,
     actionNodeLocations: BackStack[Option[Location]],
     authorizationChecker: AuthorizationChecker,
+    externalCallResults: HashMap[NodeId, BackStack[ExternalCallResult]],
 ) {
 
   import PartialTransaction._
@@ -606,6 +609,12 @@ private[speedy] case class PartialTransaction(
     }
 
   private[this] def makeExNode(ec: ExercisesContextInfo): Node.Exercise = {
+    val recordedExternalCallResults =
+      externalCallResults.getOrElse(ec.nodeId, BackStack.empty).toImmArray
+    val version =
+      if (recordedExternalCallResults.isEmpty) ec.version
+      else ec.version max SerializationVersion.minExternalCallResults
+
     Node.Exercise(
       targetCoid = ec.targetId,
       packageName = ec.packageName,
@@ -622,10 +631,53 @@ private[speedy] case class PartialTransaction(
       children = ImmArray.Empty,
       exerciseResult = None,
       keyOpt = ec.contractKey,
-      byKey = normByKey(ec.version, ec.byKey),
-      externalCallResults = ImmArray.empty,
-      version = ec.version,
+      byKey = normByKey(version, ec.byKey),
+      externalCallResults = recordedExternalCallResults,
+      version = version,
     )
+  }
+
+  /** Record an external call result in the nearest enclosing exercise context.
+    * Walks up through try/catch scopes and returns None only when not inside any
+    * exercise context.
+    */
+  def canRecordExternalCallResult: Boolean =
+    findEnclosingExercise(context.info).nonEmpty
+
+  def recordExternalCallResult(
+      extensionId: String,
+      functionId: String,
+      config: Bytes,
+      input: Bytes,
+      output: Bytes,
+  ): Option[PartialTransaction] = {
+    findEnclosingExercise(context.info) match {
+      case Some(ec) =>
+        val nodeId = ec.nodeId
+        val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
+        val result = ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = config,
+          input = input,
+          output = output,
+        )
+        val updated = existing :+ result
+        Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
+      case _ =>
+        // External calls outside of exercise context are not stored
+        // (they would be at the root level, which is not supported)
+        None
+    }
+  }
+
+  @scala.annotation.tailrec
+  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] = {
+    info match {
+      case ec: ExercisesContextInfo => Some(ec)
+      case tc: TryContextInfo => findEnclosingExercise(tc.parent.info)
+      case _: RootContextInfo => None
+    }
   }
 
   /** Open a Try context.
