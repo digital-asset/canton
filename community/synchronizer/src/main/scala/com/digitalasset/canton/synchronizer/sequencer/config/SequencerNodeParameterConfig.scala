@@ -49,6 +49,10 @@ final case class AsyncWriterConfig(
   *   Configures behavior of sendAsync requests until the traffic is initialized during LSU: If
   *   true, the sequencer will delay processing of the requests. If false, the sequencer will
   *   synchronously reject the requests with an error.
+  * @param disableSubmissionChecksForTesting
+  *   If true, disable checks on the write path of the sequencer in order to allow testing the same
+  *   checks on the post-processing path (malicious sequencer node tests). Only to be used for
+  *   testing purposes.
   */
 final case class SequencerNodeParameterConfig(
     override val alphaVersionSupport: Boolean = false,
@@ -65,6 +69,7 @@ final case class SequencerNodeParameterConfig(
     producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
     delayRequestsBeforeLsuTrafficInit: Boolean = false,
+    disableSubmissionChecksForTesting: Boolean = false,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 

@@ -254,14 +254,12 @@ final class RepairServiceContractsImporter(
             // Publish events to the indexer
             .mapAsync(1) { contractsToAddWithInternalContractIds =>
               if (nodeParameters.alphaMultiSynchronizerSupport) {
-                toFuture(
-                  publishAssignedEvents(
-                    synchronizerId,
-                    synchronizer.currentRecordTime,
-                    contractsToAddWithInternalContractIds,
-                    workflowProvider,
-                    repairIndexer,
-                  )
+                publishAssignedEvents(
+                  synchronizerId,
+                  synchronizer.currentRecordTime,
+                  contractsToAddWithInternalContractIds,
+                  workflowProvider,
+                  repairIndexer,
                 )
               } else {
                 writeContractsAddedEvents(
@@ -510,8 +508,10 @@ final class RepairServiceContractsImporter(
     val contractInfos = contractsAdded.view.map { case (c, internalContractId) =>
       val cid = c.contract.contractId
       cid -> ContractInfo(
-        internalContractId = internalContractId,
-        contractAuthenticationData = c.authenticationData,
+        persistedContractInstance = PersistedContractInstance(
+          internalContractId = internalContractId,
+          inst = c.contract.inst,
+        ),
         representativePackageId = DedicatedRepresentativePackageId(c.representativePackageId),
       )
     }.toMap
@@ -579,10 +579,9 @@ final class RepairServiceContractsImporter(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       repairCounter: RepairCounter,
-      ledgerCreateTime: CreationTime.CreatedAt,
       contractsAdded: Seq[(ContractToAdd, Long)],
       workflowIdProvider: () => Option[LfWorkflowId],
-  )(implicit traceContext: TraceContext): Option[Either[String, RepairReassignmentAccepted]] = {
+  )(implicit traceContext: TraceContext): Option[RepairReassignmentAccepted] = {
 
     // Assignments set the same source and target synchronizerIds since they are artificial
     // assigns without an actual target synchronizer (this is used for adding a contract)
@@ -595,22 +594,21 @@ final class RepairServiceContractsImporter(
       },
     )
 
-    val assigns = contractsAdded.zipWithIndex
-      .traverse { case ((c, internalContractId), nodeId) =>
-        c.contract.contractAuthenticationData.map { contractAuthenticationData =>
+    val assigns = NonEmpty.from[Seq[Reassignment]](
+      contractsAdded.zipWithIndex
+        .map { case ((c, internalContractId), nodeId) =>
           Reassignment.Assign(
-            ledgerEffectiveTime = ledgerCreateTime.time,
-            createNode = c.contract.toLf,
-            contractAuthenticationData = contractAuthenticationData.toLfBytes,
             reassignmentCounter = c.reassignmentCounter.unwrap,
             nodeId = nodeId,
-            internalContractId = internalContractId,
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId = internalContractId,
+              inst = c.contract.inst,
+            ),
           )
         }
-      }
-      .map(NonEmpty.from)
+    )
 
-    assigns.traverse(_.map { assignsNE =>
+    assigns.map { assignsNE =>
       RepairReassignmentAccepted(
         workflowId = workflowIdProvider(),
         updateId = randomUpdateId(syncCrypto),
@@ -626,7 +624,7 @@ final class RepairServiceContractsImporter(
         recordTime = recordTime,
         synchronizerId = synchronizerId,
       )
-    })
+    }
   }
 
   private def publishAssignedEvents(
@@ -635,24 +633,19 @@ final class RepairServiceContractsImporter(
       contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
       workflowIds: Iterator[Option[LfWorkflowId]],
       repairIndexer: FutureQueue[RepairUpdate],
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     MonadUtil
-      .sequentialTraverse_(contractsAdded) { case (timeOfChange, (timestamp, contractsToAdd)) =>
-        prepareAssignedEvent(
-          synchronizerId,
-          recordTime,
-          timeOfChange.repairCounter,
-          timestamp,
-          contractsToAdd,
-          () => workflowIds.next(),
-        ) match {
-          case Some(value) =>
-            EitherT(value.traverse(repairIndexer.offer)).map(_ => ())
-
-          case None => EitherTUtil.unit[String]
+      .sequentialTraverse_(
+        contractsAdded.flatMap { case (timeOfChange, (timestamp, contractsToAdd)) =>
+          prepareAssignedEvent(
+            synchronizerId,
+            recordTime,
+            timeOfChange.repairCounter,
+            contractsToAdd,
+            () => workflowIds.next(),
+          )
         }
-      }
-      .mapK(FutureUnlessShutdown.outcomeK)
+      )(repairIndexer.offer)
 
   private def packageKnown(
       lfPackageId: LfPackageId

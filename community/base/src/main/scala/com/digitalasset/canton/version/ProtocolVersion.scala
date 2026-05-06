@@ -17,6 +17,7 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   stable,
   supported,
 }
+import com.digitalasset.daml.lf.language.LanguageVersion
 import io.circe.Encoder
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -247,7 +248,11 @@ object ProtocolVersion {
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v34)
+    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35)
+
+  // LF versions that should only be used with alpha/beta protocol versions
+  val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
+    NonEmpty.mk(List, LanguageVersion.v2_3)
 
   // Stable protocol versions supported by this release as printed in the release version information.
   // Note: Adding a new stable PV above is not enough, it needs to be added to build info key `stableProtocolVersions` in `BuildCommon` as well.
@@ -261,7 +266,7 @@ object ProtocolVersion {
   )
 
   val alpha: NonEmpty[List[AlphaProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v35, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.dev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -298,8 +303,7 @@ object ProtocolVersion {
       .get(CANTON_PROTOCOL_VERSION)
       .orElse(sys.props.get(CANTON_PROTOCOL_VERSION))
       .map(ProtocolVersion.tryCreate)
-      // TODO(i31167): When PV35 is stable, change the following line to use `latest` instead of `v35`
-      .getOrElse(ProtocolVersion.v35)
+      .getOrElse(ProtocolVersion.latest)
 
   lazy val dev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue)
@@ -307,8 +311,8 @@ object ProtocolVersion {
   lazy val v34: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(34)
 
-  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
-    ProtocolVersion.createAlpha(35)
+  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
+    ProtocolVersion.createStable(35)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34

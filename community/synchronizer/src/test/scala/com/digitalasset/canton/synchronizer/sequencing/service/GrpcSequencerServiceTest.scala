@@ -16,13 +16,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule.Level
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
-import com.digitalasset.canton.protocol.{
-  DynamicSynchronizerParametersLookup,
-  SynchronizerParametersLookup,
-  TestSynchronizerParameters,
-  v30 as protocolV30,
-}
+import com.digitalasset.canton.protocol.{TestSynchronizerParameters, v30 as protocolV30}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
@@ -134,18 +128,12 @@ class GrpcSequencerServiceTest
         )
       )
 
-    private val synchronizerParamLookup
-        : DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters] =
-      SynchronizerParametersLookup.forSequencerSynchronizerParameters(
-        None,
-        topologyClient,
-        loggerFactory,
-      )
     private val params = new SequencerParameters {
       override def maxConfirmationRequestsBurstFactor: PositiveDouble =
         PositiveDouble.tryCreate(1e-6)
       override def processingTimeouts: ProcessingTimeout = timeouts
       override def maxSubscriptionsPerMember: PositiveInt = PositiveInt.three
+      override def disableSubmissionChecksForTesting: Boolean = false
     }
 
     val maxItemsInTopologyBatch = 5
@@ -194,7 +182,8 @@ class GrpcSequencerServiceTest
         checkMemberActive,
         subscriptionPool,
         sequencerSubscriptionFactory,
-        synchronizerParamLookup,
+        topologyClient,
+        None,
         params,
         topologyInitService,
         BaseTest.testedProtocolVersion,
@@ -577,7 +566,7 @@ class GrpcSequencerServiceTest
         .focus(_.aggregationRule)
         .replace(
           Some(
-            AggregationRule(
+            AggregationRule.testing(
               eligibleSenders = NonEmpty(Seq, participant, participant),
               threshold = PositiveInt.tryCreate(2),
               testedProtocolVersion,
@@ -599,7 +588,7 @@ class GrpcSequencerServiceTest
         .focus(_.aggregationRule)
         .replace(
           Some(
-            AggregationRule(
+            AggregationRule.testing(
               eligibleSenders = NonEmpty(Seq, DefaultTestIdentities.participant2),
               threshold = PositiveInt.tryCreate(1),
               testedProtocolVersion,

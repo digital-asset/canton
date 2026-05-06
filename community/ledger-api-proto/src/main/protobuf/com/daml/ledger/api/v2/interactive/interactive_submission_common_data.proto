@@ -23,3 +23,14 @@ message GlobalKey {
   // Required: must be non-empty
   bytes hash = 4;
 }
+
+message GlobalKeyWithMaintainers {
+  // The key
+  //
+  // Required
+  GlobalKey key = 1;
+  // Key maintainers
+  //
+  // Required: must be non-empty
+  repeated string maintainers = 2;
+}

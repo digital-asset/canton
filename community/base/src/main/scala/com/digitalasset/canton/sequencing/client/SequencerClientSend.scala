@@ -15,6 +15,7 @@ import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
 trait SequencerClientSend {
@@ -147,7 +148,13 @@ object SequencerClientSend {
     * @param maxSequencingTime
     *   The max sequencing time for the request.
     */
+  @nowarn("cat=deprecation")
   final case class SendRequestTimestamps(
+      @deprecated(
+        since = "pv35",
+        message =
+          "Do not specify a topology timestamp for send requests. This field will be removed in a future version.",
+      )
       topologyTimestamp: Option[CantonTimestamp],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,

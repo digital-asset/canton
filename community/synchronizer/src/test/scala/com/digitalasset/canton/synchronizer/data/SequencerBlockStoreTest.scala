@@ -17,7 +17,6 @@ import com.digitalasset.canton.synchronizer.block.data.{
 }
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.*
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.BlockNotFound
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
@@ -52,8 +51,12 @@ trait SequencerBlockStoreTest
     val aggregationId1 = AggregationId(TestHash.digest(1))
     val aggregationId2 = AggregationId(TestHash.digest(2))
     val aggregationRule1 =
-      AggregationRule(NonEmpty(Seq, alice, bob), PositiveInt.tryCreate(2), testedProtocolVersion)
-    val aggregationRule2 = AggregationRule(
+      AggregationRule.testing(
+        NonEmpty(Seq, alice, bob),
+        PositiveInt.tryCreate(2),
+        testedProtocolVersion,
+      )
+    val aggregationRule2 = AggregationRule.testing(
       NonEmpty(Seq, alice, bob, carlos),
       PositiveInt.tryCreate(3),
       testedProtocolVersion,
@@ -89,7 +92,7 @@ trait SequencerBlockStoreTest
           signatures = Seq.empty,
           sequencingTimestamp = t3,
         )
-        val agg2a = agg2.tryAggregate(agg2Update).value
+        val agg2a = agg2.extendWithValidButMaybeDuplicateAggregation(agg2Update)
         for {
           _ <- allMembers.parTraverse(member =>
             sequencerStore.registerMember(member, CantonTimestamp.now())
@@ -182,7 +185,7 @@ trait SequencerBlockStoreTest
           signatures = Seq.empty,
           sequencingTimestamp = t3,
         )
-        val agg2a = agg2.tryAggregate(agg2Update).value
+        val agg2a = agg2.extendWithValidButMaybeDuplicateAggregation(agg2Update)
         for {
           _ <- allMembers.parTraverse(member =>
             sequencerStore.registerMember(member, CantonTimestamp.now())

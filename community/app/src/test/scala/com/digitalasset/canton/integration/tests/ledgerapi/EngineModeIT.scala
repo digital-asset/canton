@@ -127,7 +127,11 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
 
     def accept(langVersion: LanguageVersion, version: String, mode: String) = {
       val protocolVersion =
-        if (LanguageVersion.stableLfVersions.contains(langVersion))
+        if (
+          LanguageVersion.stableLfVersions.contains(
+            langVersion
+          ) && !ProtocolVersion.alphaOnlyLfVersions.contains(langVersion)
+        )
           ProtocolVersion.latest
         else if (LanguageVersion.earlyAccessLfVersionsRange.contains(langVersion))
           ProtocolVersion.beta.lastOption.getOrElse(ProtocolVersion.dev)

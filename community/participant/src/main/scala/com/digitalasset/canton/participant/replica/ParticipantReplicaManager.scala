@@ -72,6 +72,9 @@ class ParticipantReplicaManager(
           _ <- participantServices.ledgerApiIndexerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Indexer started")
           _ <- participantServices.cantonSyncService.refreshCaches()
+          _ = logger.info(
+            "Participant replica is becoming active: CantonSyncService caches refreshed"
+          )
           // Start up the Ledger API server
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
@@ -137,6 +140,10 @@ class ParticipantReplicaManager(
           _ = logger.info("Participant replica is becoming passive: Ledger API Indexer stopped")
           _ = participantServices.persistentStateContainer.closeCurrent()
           _ = logger.info("Participant replica is becoming passive: PersistentState stopped")
+          _ = participantServices.cantonSyncService.clearCaches()
+          _ = logger.info(
+            "Participant replica is becoming passive: CantonSyncService caches cleared"
+          )
         } yield ()
 
       case None =>

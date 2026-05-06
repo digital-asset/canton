@@ -38,14 +38,15 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.{CommonMockMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiJdbcUrl
-import com.digitalasset.canton.participant.store.ContractStore
+import com.digitalasset.canton.participant.store.{ContractStore, PersistedContractInstance}
 import com.digitalasset.canton.platform.IndexComponentTest.TestServices
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
-import com.digitalasset.canton.platform.indexer.{IndexerConfig, JdbcIndexer}
+import com.digitalasset.canton.platform.indexer.{Indexer, IndexerConfig, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
@@ -78,13 +79,15 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RepairCounter, platform}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, Node}
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, CreationTime, Node}
 import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
 
@@ -127,7 +130,7 @@ trait IndexComponentTest
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
 
-  private def testServices: TestServices =
+  protected def testServices: TestServices =
     Option(testServicesRef.get())
       .getOrElse(throw new Exception("TestServices not initialized. Not accessing from a test?"))
 
@@ -207,18 +210,14 @@ trait IndexComponentTest
       contractInfo: Map[LfContractId, ContractInfo],
       internalContractIds: Map[LfContractId, Long],
   ): Map[LfContractId, ContractInfo] =
-    internalContractIds.foldLeft(contractInfo) { case (acc, (coid, internalContractId)) =>
-      acc.updated(
-        coid,
-        acc.get(coid) match {
-          case Some(contractInfo) => contractInfo.copy(internalContractId = internalContractId)
-          case None =>
-            ContractInfo(
-              internalContractId = internalContractId,
-              contractAuthenticationData = Bytes.Empty,
-              representativePackageId = SameAsContractPackageId,
-            )
-        },
+    contractInfo.map { case (coid, contractInfo) =>
+      coid -> contractInfo.copy(
+        persistedContractInstance = contractInfo.persistedContractInstance.copy(
+          internalContractId = internalContractIds.getOrElse(
+            coid,
+            throw new IllegalStateException(s"Internal contract ID is not provided for $coid"),
+          )
+        )
       )
     }
 
@@ -228,7 +227,12 @@ trait IndexComponentTest
   ): Reassignment.Batch = Reassignment.Batch(
     reassignmentBatch.reassignments.map {
       case assign: Reassignment.Assign =>
-        assign.copy(internalContractId = internalContractIds.get(assign.createNode.coid).value)
+        assign.copy(
+          persistedContractInstance = assign.persistedContractInstance.copy(
+            internalContractId = internalContractIds.get(assign.createNode.coid).value
+          )
+        )
+
       case unassign: Reassignment.Unassign => unassign: Reassignment
     }
   )
@@ -296,7 +300,7 @@ trait IndexComponentTest
   protected lazy val stringInterning = new StringInterningView(loggerFactory)
 
   private lazy val engine =
-    new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
+    new Engine(EngineConfig(LanguageVersion.stableLfVersions), loggerFactory)
   private lazy val participantId =
     Ref.ParticipantId.assertFromString("index-component-test-participant-id")
   protected lazy val pruningOffsetService = new PruningOffsetService {
@@ -307,13 +311,15 @@ trait IndexComponentTest
 
   implicit val scheduler: ScheduledExecutorService = scheduledExecutor()
 
-  private def indexResourceOwner(
+  private def jdbcIndexerResourceOwner(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
-      repairMode: Boolean,
-      incompleteOffsets: Seq[Offset],
+      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
+        AchsWorkRange,
+        NotUsed,
+      ],
   ): ResourceOwner[
-    (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+    (Indexer, Option[() => Unit], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
   ] =
     for {
       dbStorage <- ResourceOwner
@@ -375,7 +381,7 @@ trait IndexComponentTest
           ),
           loggerFactory = loggerFactory,
         )
-      indexerF <- new JdbcIndexer.Factory(
+      (indexer, killSwitch) <- new JdbcIndexer.Factory(
         participantId = participantId,
         participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
         config = config,
@@ -394,7 +400,21 @@ trait IndexComponentTest
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
+        achsInitInterceptor = achsInitInterceptor,
       ).initialized()
+    } yield (indexer, killSwitch, participantContractStore, dbSupport, inMemoryState)
+
+  private def indexResourceOwner(
+      config: IndexerConfig,
+      serviceConfig: IndexServiceConfig,
+      repairMode: Boolean,
+      incompleteOffsets: Seq[Offset],
+  ): ResourceOwner[
+    (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+  ] =
+    for {
+      (indexerF, _, participantContractStore, dbSupport, inMemoryState) <-
+        jdbcIndexerResourceOwner(config, serviceConfig, achsInitInterceptor = identity)
       indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(repairMode)(_ => ()))
       indexer <- ResourceOwner.forReleasable(() =>
         new IndexingFutureQueue(indexerFutureQueueConsumer)
@@ -445,10 +465,23 @@ trait IndexComponentTest
         pruningOffsetService = pruningOffsetService,
         materializer = materializer,
         updateServiceConfig = updateServiceConfig,
+        scheduler = system.scheduler,
       )
     } yield (indexService, indexer, participantContractStore, dbSupport, inMemoryState)
 
-  private def acquireServices(
+  protected def indexerResourceOwner(
+      config: IndexerConfig,
+      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
+        AchsWorkRange,
+        NotUsed,
+      ],
+  ): ResourceOwner[(Indexer, Option[() => Unit], DbSupport)] =
+    jdbcIndexerResourceOwner(config, indexServiceConfig, achsInitInterceptor).map {
+      case (indexer, killSwitch, _, dbSupport, _) =>
+        (indexer, killSwitch, dbSupport)
+    }
+
+  protected def acquireServices(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
       repairMode: Boolean,
@@ -581,22 +614,23 @@ trait IndexComponentTest
   protected def creates(recordTime: () => CantonTimestamp, payloadLength: Int)(
       size: Int
   ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
+    val recordTimeAndLedgerEffectiveTime = recordTime()
     val txBuilder = TxBuilder()
-    val contracts = createContracts(payloadLength, size)
+    val contracts =
+      createContracts(payloadLength, size, recordTimeAndLedgerEffectiveTime.underlying)
     contracts.map(_.inst.toCreateNode).foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
-    val contractAuthenticationData = contracts
-      .map(
-        _.contractId -> Bytes.fromByteString(ByteString.copyFromUtf8(randomString(42)))
-      )
-      .toMap
     transaction(
       synchronizerId = synchronizer1,
-      recordTime = recordTime(),
-    )(tx, contractAuthenticationData) -> contracts
+      recordTime = recordTimeAndLedgerEffectiveTime,
+    )(tx, contracts) -> contracts
   }
 
-  private def createContracts(payloadLength: Int, size: Int) =
+  private def createContracts(
+      payloadLength: Int,
+      size: Int,
+      ledgerEffectiveTime: Time.Timestamp,
+  ) =
     (1 to size)
       .map(_ =>
         genContract(
@@ -608,6 +642,7 @@ trait IndexComponentTest
             randomParty,
             randomParty,
           ),
+          ledgerEffectiveTime = ledgerEffectiveTime,
         )
       )
       .toVector
@@ -657,7 +692,7 @@ trait IndexComponentTest
     transaction(
       synchronizerId = synchronizer1,
       recordTime = recordTime(),
-    )(tx)
+    )(tx, Nil)
   }
 
   private def archiveCreatedContract(argumentLength: Int, resultLength: Int)(
@@ -678,6 +713,7 @@ trait IndexComponentTest
       argumentPayload: String,
       template: Ref.Identifier,
       signatories: Set[Party],
+      ledgerEffectiveTime: Time.Timestamp,
   ): ContractInstance =
     ExampleContractFactory
       .build(
@@ -689,6 +725,7 @@ trait IndexComponentTest
         signatories = signatories,
         stakeholders = signatories,
         packageName = packageName,
+        createdAt = CreationTime.CreatedAt(ledgerEffectiveTime),
       )
 
   private def archive(
@@ -721,7 +758,7 @@ trait IndexComponentTest
       recordTime: CantonTimestamp,
   )(
       transaction: CommittedTransaction,
-      contractAuthenticationData: Map[ContractId, Bytes] = Map.empty,
+      contracts: Seq[ContractInstance],
   ): Update.SequencedTransactionAccepted =
     Update.SequencedTransactionAccepted(
       completionInfoO = None,
@@ -741,20 +778,22 @@ trait IndexComponentTest
       recordTime = recordTime,
       acsChangeFactory = testAcsChangeFactory,
       externalTransactionHash = None,
-      contractInfos = contractAuthenticationData.map { case (cid, authData) =>
-        cid -> ContractInfo(
-          internalContractId = 0L,
-          contractAuthenticationData = authData,
+      contractInfos = contracts.view.map { contract =>
+        contract.contractId -> ContractInfo(
           representativePackageId = SameAsContractPackageId,
+          persistedContractInstance = PersistedContractInstance(
+            inst = contract.inst,
+            internalContractId = -1L, // will be filled later
+          ),
         )
-      },
+      }.toMap,
     )
 
   protected def mkReassignmentAccepted(
       party: Ref.Party,
       updateIdS: String,
       withAcsChange: Boolean,
-      createNodes: Seq[Node.Create],
+      contracts: Seq[ContractInstance],
   ): Update.ReassignmentAccepted = {
     val synchronizer1 = SynchronizerId.tryFromString("x::synchronizer1")
     val synchronizer2 = SynchronizerId.tryFromString("x::synchronizer2")
@@ -773,23 +812,23 @@ trait IndexComponentTest
         ),
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
-            ledgerEffectiveTime = Time.Timestamp.now(),
-            createNode = createNodes.head,
-            contractAuthenticationData = Bytes.Empty,
             reassignmentCounter = 15L,
             nodeId = 0,
-            internalContractId =
-              -1, // will be filled when contracts are stored in the participant contract store
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId =
+                -1, // will be filled when contracts are stored in the participant contract store
+              inst = contracts.head.inst,
+            ),
           ),
-          createNodes.tail.map(createNode =>
+          contracts.tail.map(contractInstance =>
             Reassignment.Assign(
-              ledgerEffectiveTime = Time.Timestamp.now(),
-              createNode = createNode,
-              contractAuthenticationData = Bytes.Empty,
               reassignmentCounter = 15L,
               nodeId = 0,
-              // will be filled when contracts are stored in the participant contract store
-              internalContractId = -1,
+              persistedContractInstance = PersistedContractInstance(
+                // will be filled when contracts are stored in the participant contract store
+                internalContractId = -1,
+                inst = contractInstance.inst,
+              ),
             )
           )*
         ),
@@ -811,23 +850,23 @@ trait IndexComponentTest
         ),
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
-            ledgerEffectiveTime = Time.Timestamp.now(),
-            createNode = createNodes.head,
-            contractAuthenticationData = Bytes.Empty,
             reassignmentCounter = 15L,
             nodeId = 0,
-            internalContractId =
-              -1, // will be filled when contracts are stored in the participant contract store
-          ),
-          createNodes.tail.map(createNode =>
-            Reassignment.Assign(
-              ledgerEffectiveTime = Time.Timestamp.now(),
-              createNode = createNode,
-              contractAuthenticationData = Bytes.Empty,
-              reassignmentCounter = 15L,
-              nodeId = 0,
+            persistedContractInstance = PersistedContractInstance(
               // will be filled when contracts are stored in the participant contract store
               internalContractId = -1,
+              inst = contracts.head.inst,
+            ),
+          ),
+          contracts.tail.map(contractInstance =>
+            Reassignment.Assign(
+              reassignmentCounter = 15L,
+              nodeId = 0,
+              persistedContractInstance = PersistedContractInstance(
+                // will be filled when contracts are stored in the participant contract store
+                internalContractId = -1,
+                inst = contractInstance.inst,
+              ),
             )
           )*
         ),

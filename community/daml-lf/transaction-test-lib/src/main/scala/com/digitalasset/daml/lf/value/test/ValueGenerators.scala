@@ -593,10 +593,10 @@ object ValueGenerators {
       def nodeGen(nodeId: NodeId): Gen[(NodeId, HashMap[NodeId, Node])] =
         for {
           node <- Gen.frequency(
-            exerciseFreq -> danglingRefExerciseNodeGen,
+            exerciseFreq -> danglingRefExerciseNodeGenWithVersion(version),
             rollbackFreq -> danglingRefRollbackNodeGen,
-            1 -> malformedCreateNodeGen(),
-            2 -> fetchNodeGen,
+            1 -> malformedCreateNodeGenWithVersion(version),
+            2 -> fetchNodeGenWithVersion(version),
             1 -> queryByKeyNodeGenWithVersion(version),
           )
           nodeWithChildren <- node match {

@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v31;
+
+import "google/protobuf/duration.proto";
+import "scalapb/scalapb.proto";
+
+message DynamicSequencingParametersPayload {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  google.protobuf.Duration pbft_view_change_timeout = 1;
+  int64 segment_length = 2;
+  BlacklistLeaderSelectionPolicy blacklist_leader_selection_policy = 3;
+}
+
+message BlacklistLeaderSelectionPolicy {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  oneof how_long_to_blacklist {
+    HowLongLinear how_long_linear = 1;
+    HowLongNoBlacklisting how_long_no_blacklisting = 2;
+  }
+  oneof how_many_can_we_blacklist {
+    HowManyNumFaultsTolerated how_many_num_faults_tolerated = 3;
+    HowManyNoBlacklisting how_many_no_blacklisting = 4;
+  }
+}
+
+message HowLongLinear {
+  optional int64 maximum_epoch_length_blacklisted = 1;
+}
+message HowLongNoBlacklisting {}
+
+message HowManyNumFaultsTolerated {}
+message HowManyNoBlacklisting {}

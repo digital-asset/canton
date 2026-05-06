@@ -50,8 +50,10 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
+@nowarn("cat=deprecation")
 class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
 
   import TimeAdvancingTopologySubscriberV2Test.*
@@ -169,9 +171,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         TopologyTransactionsBroadcast(aPhysicalSynchronizerId, Seq.empty) ->
           Recipients.cc(AllMembersOfSynchronizer),
       )
-      val expectedAggregationRule = AggregationRule(
+      val expectedAggregationRule = AggregationRule.sequencerTimeAdvancingRequest(
         NonEmptyUtil.fromUnsafe(sequencerGroup.active),
-        threshold = PositiveInt.one,
         testedProtocolVersion,
       )
 

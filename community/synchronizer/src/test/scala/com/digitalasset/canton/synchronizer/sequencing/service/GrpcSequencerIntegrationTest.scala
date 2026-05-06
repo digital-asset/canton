@@ -48,12 +48,9 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelParams}
-import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
-  DynamicSynchronizerParametersLookup,
-  SynchronizerParametersLookup,
   TestSynchronizerParameters,
   v30 as protocolV30,
   v31 as protocolV31,
@@ -137,10 +134,10 @@ class Env(
       .build()
       .forOwnerAndSynchronizer(participant, synchronizerId)
   val clock = new SimClock(loggerFactory = loggerFactory)
-  val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
-  def timeouts = DefaultProcessingTimeouts.testing
+  private[service] val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
+  private[service] def timeouts = DefaultProcessingTimeouts.testing
   private val futureSupervisor = FutureSupervisor.Noop
-  private val topologyClient = mock[SynchronizerTopologyClient]
+  private[service] val topologyClient = mock[SynchronizerTopologyClient]
   private val mockSynchronizerTopologyManager = mock[SynchronizerTopologyManager]
   private val mockTopologySnapshot = mock[TopologySnapshot]
   private val confirmationRequestsMaxRate =
@@ -179,14 +176,6 @@ class Env(
       )
     )
 
-  val synchronizerParamsLookup
-      : DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters] =
-    SynchronizerParametersLookup.forSequencerSynchronizerParameters(
-      None,
-      topologyClient,
-      loggerFactory,
-    )
-
   val authenticationCheck = new AuthenticationCheck {
 
     override def authenticate(
@@ -205,6 +194,7 @@ class Env(
     override def maxConfirmationRequestsBurstFactor: PositiveDouble = PositiveDouble.tryCreate(0.1)
     override def processingTimeouts: ProcessingTimeout = timeouts
     override def maxSubscriptionsPerMember: PositiveInt = PositiveInt.three
+    override def disableSubmissionChecksForTesting: Boolean = false
   }
   private val service =
     new GrpcSequencerService(
@@ -221,7 +211,8 @@ class Env(
         loggerFactory,
       ),
       sequencerSubscriptionFactory,
-      synchronizerParamsLookup,
+      topologyClient,
+      None,
       params,
       topologyStateForInitializationService,
       BaseTest.testedProtocolVersion,
@@ -542,7 +533,8 @@ class GrpcSequencerIntegrationTest
               env.loggerFactory,
             ),
             sequencerSubscriptionFactory,
-            synchronizerParamsLookup,
+            topologyClient,
+            None,
             params,
             topologyStateForInitializationService,
             BaseTest.testedProtocolVersion,

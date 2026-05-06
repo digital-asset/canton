@@ -31,9 +31,11 @@ import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   ReassignmentInfo,
   TestAcsChangeFactory,
+  TransactionMeta,
   Update,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventInt,
   participantPermissionInt,
@@ -50,21 +52,26 @@ import com.digitalasset.canton.platform.store.dao.events.{
   LfValueSerialization,
 }
 import com.digitalasset.canton.platform.{ContractId, Create, Exercise}
-import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId}
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  ExampleContractFactory,
+  ReassignmentId,
+  TestUpdateId,
+}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.emptyTraceContext
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
-import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
+import com.digitalasset.daml.lf.transaction.{CreationTime, GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
@@ -191,22 +198,27 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         val transactionMeta = someTransactionMeta
         val externalTransactionHash = someExternalTransactionHash
         val builder = TxBuilder()
-        val contractId = builder.newCid
         val contractTemplate = Ref.Identifier.assertFromString("P:M:T")
         val keyValue = Value.ValueUnit
-        val createNode = builder
-          .create(
-            id = contractId,
-            templateId = contractTemplate,
-            argument = Value.ValueUnit,
-            signatories = Set("signatory1", "signatory2", "signatory3"),
-            observers = Set("observer"),
-            key = CreateKey.KeyWithMaintainers(
-              keyValue,
-              crypto.Hash.hashPrivateKey(keyValue.toString),
-              Set("signatory2", "signatory3"),
-            ),
-          )
+        val contract = ExampleContractFactory.build(
+          stakeholders = Set("signatory1", "signatory2", "signatory3", "observer").map(
+            Ref.Party.assertFromString
+          ),
+          signatories =
+            Set("signatory1", "signatory2", "signatory3").map(Ref.Party.assertFromString),
+          templateId = contractTemplate,
+          argument = Value.ValueUnit,
+          keyOpt = Some(
+            GlobalKeyWithMaintainers.assertBuild(
+              templateId = contractTemplate,
+              value = keyValue,
+              valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
+              maintainers = Set("signatory2", "signatory3").map(Ref.Party.assertFromString),
+              packageName = ExampleContractFactory.packageName,
+            )
+          ),
+        )
+        val createNode = contract.inst.toCreateNode
         val createNodeId = builder.add(createNode)
         val transaction = builder.buildCommitted()
         val update =
@@ -218,7 +230,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               synchronizerId = someSynchronizerId1,
               recordTime = someRecordTime,
               repairCounter = RepairCounter(1337),
-              contractInfos = Map(contractId -> someContractInfos()),
+              contractInfos = Map(contract.contractId -> someContractInfos(contract)),
             )
           else
             state.Update.SequencedTransactionAccepted(
@@ -231,9 +243,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               externalTransactionHash = Some(externalTransactionHash),
               acsChangeFactory = TestAcsChangeFactory(contractActivenessChanged = isAcsDelta),
               contractInfos = Map(
-                contractId -> someContractInfos(
-                  representativePackageId = SameAsContractPackageId
-                )
+                contract.contractId -> someContractInfos(contract, SameAsContractPackageId)
               ),
             )
         val dtos = updateToDtos(update)
@@ -325,7 +335,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
                    0L,
                    templateIdWithPackageName(createNode),
                    "signatory1",
-                   first_per_sequential_id = true,
+                   first_per_sequential_id = false,
                  )
                ),
                DbDto.IdFilterActivateStakeholder(
@@ -350,7 +360,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
                      0L,
                      templateIdWithPackageName(createNode),
                      "observer",
-                     first_per_sequential_id = false,
+                     first_per_sequential_id = true,
                    )
                  ),
              )
@@ -411,22 +421,25 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val contractId = builder.newCid
       val contractTemplate = Ref.Identifier.assertFromString("P:M:T")
       val keyValue = Value.ValueUnit
-      val createNode = builder
-        .create(
-          id = contractId,
-          templateId = contractTemplate,
-          argument = Value.ValueUnit,
-          signatories = Set("signatory1", "signatory2", "signatory3"),
-          observers = Set("observer"),
-          key = CreateKey.KeyWithMaintainers(
-            keyValue,
-            crypto.Hash.hashPrivateKey(keyValue.toString),
-            Set("signatory2", "signatory3"),
-          ),
-        )
+      val contract = ExampleContractFactory.build(
+        stakeholders =
+          Set("signatory1", "signatory2", "signatory3", "observer").map(Ref.Party.assertFromString),
+        signatories = Set("signatory1", "signatory2", "signatory3").map(Ref.Party.assertFromString),
+        templateId = contractTemplate,
+        argument = Value.ValueUnit,
+        keyOpt = Some(
+          GlobalKeyWithMaintainers.assertBuild(
+            templateId = contractTemplate,
+            value = keyValue,
+            valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
+            maintainers = Set("signatory2", "signatory3").map(Ref.Party.assertFromString),
+            packageName = ExampleContractFactory.packageName,
+          )
+        ),
+      )
+      val createNode = contract.inst.toCreateNode
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update =
@@ -440,7 +453,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           externalTransactionHash = Some(externalTransactionHash),
           acsChangeFactory = TestAcsChangeFactory(false),
           contractInfos = Map(
-            contractId -> someContractInfos(representativePackageId = SameAsContractPackageId)
+            contract.contractId -> someContractInfos(contract, SameAsContractPackageId)
           ),
         )
       val dtos = updateToDtos(update)
@@ -517,7 +530,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               0L,
               templateIdWithPackageName(createNode),
               "signatory1",
-              first_per_sequential_id = true,
+              first_per_sequential_id = false,
             )
           ),
           DbDto.IdFilterVariousWitness(
@@ -541,7 +554,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               0L,
               templateIdWithPackageName(createNode),
               "observer",
-              first_per_sequential_id = false,
+              first_per_sequential_id = true,
             )
           ),
         )
@@ -554,16 +567,15 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val exerciseNode = {
-        val createNode = builder.create(
-          id = builder.newCid,
-          templateId = "M:T",
-          argument = Value.ValueUnit,
-          signatories = List("signatory"),
-          observers = List("observer"),
-        )
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = Ref.Identifier.assertFromString("P:M:T"),
+        argument = Value.ValueUnit,
+      )
+      val exerciseNode =
         builder.exercise(
-          contract = createNode,
+          contract = contract.inst.toCreateNode,
           choice = "someChoice",
           consuming = true,
           actingParties = Set("signatory"),
@@ -572,7 +584,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           choiceObservers = Set.empty,
           byKey = false,
         )
-      }
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.SequencedTransactionAccepted(
@@ -583,11 +594,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizerId = someSynchronizerId1,
         recordTime = CantonTimestamp.ofEpochMicro(120),
         externalTransactionHash = Some(externalTransactionHash),
-        acsChangeFactory = TestAcsChangeFactory(true),
+        acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map(
           exerciseNode.targetCoid -> ContractInfo(
-            internalContractId = 43L,
-            contractAuthenticationData = Bytes.Empty,
+            persistedContractInstance = PersistedContractInstance(
+              inst = contract.inst,
+              internalContractId = 43L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),
@@ -671,7 +684,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               event_sequential_id = 0,
               template_id = templateIdWithPackageName(exerciseNode),
               party_id = "signatory",
-              first_per_sequential_id = true,
+              first_per_sequential_id = false,
             )
           ),
           DbDto.IdFilterDeactivateStakeholder(
@@ -679,7 +692,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               event_sequential_id = 0,
               template_id = templateIdWithPackageName(exerciseNode),
               party_id = "observer",
-              first_per_sequential_id = false,
+              first_per_sequential_id = true,
             )
           ),
         )
@@ -940,13 +953,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val createNode = builder.create(
-        id = builder.newCid,
-        templateId = "M:T",
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = Ref.Identifier.assertFromString("P:M:T"),
         argument = Value.ValueUnit,
-        signatories = List("signatory"),
-        observers = List("observer"),
       )
+      val createNode = contract.inst.toCreateNode
       val exerciseNodeA = builder.exercise(
         contract = createNode,
         choice = "A",
@@ -967,13 +980,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         choiceObservers = Set.empty,
         byKey = false,
       )
-      val createNodeC = builder.create(
-        id = builder.newCid,
-        templateId = "M:T2",
+      val contractC = ExampleContractFactory.build(
+        stakeholders = Set("signatory2").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory2")),
+        templateId = Ref.Identifier.assertFromString("P:M:T2"),
         argument = Value.ValueUnit,
-        signatories = List("signatory2"),
-        observers = Set.empty,
       )
+      val createNodeC = contractC.inst.toCreateNode
       val exerciseNodeAId = builder.add(exerciseNodeA)
       val exerciseNodeBId = builder.add(exerciseNodeB, exerciseNodeAId)
       val createNodeCId = builder.add(createNodeC, exerciseNodeAId)
@@ -989,8 +1002,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         acsChangeFactory = TestAcsChangeFactory(false),
         contractInfos = Map(
           createNodeC.coid -> ContractInfo(
-            internalContractId = 42L,
-            contractAuthenticationData = Bytes.Empty,
+            persistedContractInstance = PersistedContractInstance(
+              inst = contractC.inst,
+              internalContractId = 42L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),
@@ -1198,18 +1213,24 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         choiceObservers = Set.empty,
         byKey = false,
       )
-      val createNodeC = builder.create(
-        id = builder.newCid,
-        templateId = "M:T2",
+      val contractC = ExampleContractFactory.build(
+        stakeholders = Set("signatory2").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory2")),
+        templateId = Ref.Identifier.assertFromString("P:M:T2"),
         argument = Value.ValueUnit,
-        signatories = List("signatory2"),
-        observers = Set.empty,
-        key = CreateKey.KeyWithMaintainers(
-          Value.ValueUnit,
-          crypto.Hash.hashPrivateKey("dummy-key-hash"),
-          Set("signatory2"),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers(
+            globalKey = GlobalKey.assertBuild(
+              templateId = Ref.Identifier.assertFromString("P:M:T2"),
+              packageName = ExampleContractFactory.packageName,
+              key = Value.ValueUnit,
+              keyHash = crypto.Hash.hashPrivateKey("dummy-key-hash"),
+            ),
+            maintainers = Set("signatory2"),
+          )
         ),
       )
+      val createNodeC = contractC.inst.toCreateNode
       val exerciseNodeAId = builder.add(exerciseNodeA)
       val exerciseNodeBId = builder.add(exerciseNodeB, exerciseNodeAId)
       val createNodeCId = builder.add(createNodeC, exerciseNodeAId)
@@ -1222,11 +1243,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
         externalTransactionHash = Some(externalTransactionHash),
-        acsChangeFactory = TestAcsChangeFactory(true),
+        acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map(
           createNodeC.coid -> ContractInfo(
-            internalContractId = 42L,
-            contractAuthenticationData = Bytes.Empty,
+            persistedContractInstance = PersistedContractInstance(
+              inst = contractC.inst,
+              internalContractId = 42L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),
@@ -1901,15 +1924,14 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val contractId = builder.newCid
       val interfaceId = toIdentifier("M:I")
-      val createNode = builder.create(
-        id = contractId,
-        templateId = "M:T",
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = Ref.Identifier.assertFromString("P:M:T"),
         argument = Value.ValueUnit,
-        signatories = List("signatory"),
-        observers = List("observer"),
       )
+      val createNode = contract.inst.toCreateNode
       val exerciseNode = builder.exercise(
         contract = createNode,
         choice = "someChoice",
@@ -1934,9 +1956,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         externalTransactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map(
-          contractId -> ContractInfo(
-            internalContractId = 42L,
-            contractAuthenticationData = someContractAuthenticationData,
+          contract.contractId -> ContractInfo(
+            persistedContractInstance = PersistedContractInstance(
+              inst = contract.inst,
+              internalContractId = 42L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),
@@ -1972,7 +1996,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "signatory",
-            first_per_sequential_id = true,
+            first_per_sequential_id = false,
           )
         ),
         DbDto.IdFilterActivateStakeholder(
@@ -1980,7 +2004,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "observer",
-            first_per_sequential_id = false,
+            first_per_sequential_id = true,
           )
         ),
       )
@@ -2023,7 +2047,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         IdFilter(
           event_sequential_id = 0,
           template_id = templateIdWithPackageName(exerciseNode),
-          party_id = "signatory",
+          party_id = "observer",
           first_per_sequential_id = true,
         )
       )
@@ -2031,7 +2055,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         IdFilter(
           event_sequential_id = 0,
           template_id = templateIdWithPackageName(exerciseNode),
-          party_id = "observer",
+          party_id = "signatory",
           first_per_sequential_id = false,
         )
       )
@@ -2159,14 +2183,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val contractId = builder.newCid
-      val createNode = builder.create(
-        id = contractId,
-        templateId = "M:T",
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = Ref.Identifier.assertFromString("P:M:T"),
         argument = Value.ValueUnit,
-        signatories = List("signatory"),
-        observers = List("observer"),
       )
+      val createNode = contract.inst.toCreateNode
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.SequencedTransactionAccepted(
@@ -2179,9 +2202,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         externalTransactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map(
-          contractId -> ContractInfo(
-            internalContractId = 42L,
-            contractAuthenticationData = someContractAuthenticationData,
+          contract.contractId -> ContractInfo(
+            persistedContractInstance = PersistedContractInstance(
+              inst = contract.inst,
+              internalContractId = 42L,
+            ),
             representativePackageId = SameAsContractPackageId,
           )
         ),
@@ -2217,7 +2242,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "signatory",
-            first_per_sequential_id = true,
+            first_per_sequential_id = false,
           )
         ),
         DbDto.IdFilterActivateStakeholder(
@@ -2225,7 +2250,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "observer",
-            first_per_sequential_id = false,
+            first_per_sequential_id = true,
           )
         ),
       )
@@ -2307,14 +2332,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val externalTransactionHash = someExternalTransactionHash
       val builder = TxBuilder()
-      val contractId = builder.newCid
-      val createNode = builder.create(
-        id = contractId,
-        templateId = "M:T",
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = Ref.Identifier.assertFromString("P:M:T"),
         argument = Value.ValueUnit,
-        signatories = List("signatory"),
-        observers = List("observer"),
       )
+      val createNode = contract.inst.toCreateNode
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
 
@@ -2336,9 +2360,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             externalTransactionHash = Some(externalTransactionHash),
             acsChangeFactory = TestAcsChangeFactory(),
             contractInfos = Map(
-              contractId -> ContractInfo(
-                internalContractId = 42L,
-                contractAuthenticationData = someContractAuthenticationData,
+              contract.contractId -> ContractInfo(
+                persistedContractInstance = PersistedContractInstance(
+                  inst = contract.inst,
+                  internalContractId = 42L,
+                ),
                 representativePackageId = SameAsContractPackageId,
               )
             ),
@@ -2374,7 +2400,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
                 0L,
                 templateIdWithPackageName(createNode),
                 "signatory",
-                first_per_sequential_id = true,
+                first_per_sequential_id = false,
               )
             ),
             DbDto.IdFilterActivateStakeholder(
@@ -2382,7 +2408,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
                 0L,
                 templateIdWithPackageName(createNode),
                 "observer",
-                first_per_sequential_id = false,
+                first_per_sequential_id = true,
               )
             ),
           )
@@ -2422,22 +2448,25 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
     "handle ReassignmentAccepted - Assign" in {
       val completionInfo = someCompletionInfo
-      val builder = TxBuilder()
-      val contractId = builder.newCid
+      val templateId = Ref.Identifier.assertFromString("P:M:T")
       val keyValue = Value.ValueUnit
-      val createNode = builder
-        .create(
-          id = contractId,
-          templateId = "M:T",
-          argument = Value.ValueUnit,
-          signatories = Set("signatory"),
-          observers = Set("observer", "observer2"),
-          key = CreateKey.KeyWithMaintainers(
-            keyValue,
-            crypto.Hash.hashPrivateKey(keyValue.toString),
-            Set("signatory"),
-          ),
-        )
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer", "observer2").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = templateId,
+        argument = Value.ValueUnit,
+        createdAt = CreationTime.CreatedAt(Time.Timestamp.assertFromLong(17000000)),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers.assertBuild(
+            templateId = templateId,
+            value = keyValue,
+            valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
+            maintainers = Set("signatory").map(Ref.Party.assertFromString),
+            packageName = ExampleContractFactory.packageName,
+          )
+        ),
+      )
+      val createNode = contract.inst.toCreateNode
 
       val targetSynchronizerId = Target(SynchronizerId.tryFromString("x::synchronizer2"))
       val update = state.Update.SequencedReassignmentAccepted(
@@ -2453,12 +2482,12 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         reassignment = Reassignment.Batch(
           Reassignment.Assign(
-            ledgerEffectiveTime = Time.Timestamp.assertFromLong(17000000),
-            createNode = createNode,
-            contractAuthenticationData = someContractAuthenticationData,
             reassignmentCounter = 1500L,
             nodeId = 0,
-            internalContractId = 42L,
+            persistedContractInstance = PersistedContractInstance(
+              internalContractId = 42L,
+              inst = contract.inst,
+            ),
           )
         ),
         recordTime = someRecordTime,
@@ -2529,7 +2558,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "signatory",
-            first_per_sequential_id = true,
+            first_per_sequential_id = false,
           )
         ),
         DbDto.IdFilterActivateStakeholder(
@@ -2537,7 +2566,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             0L,
             templateIdWithPackageName(createNode),
             "observer",
-            first_per_sequential_id = false,
+            first_per_sequential_id = true,
           )
         ),
         DbDto.IdFilterActivateStakeholder(
@@ -2913,7 +2942,7 @@ object UpdateToDbDtoSpec {
   private val someTrafficCost: Option[Long] = Some(nonNegativeTrafficCost.value)
   private val someRecordTime =
     CantonTimestamp(
-      Time.Timestamp.assertFromInstant(Instant.parse(("2000-01-01T00:00:00.000000Z")))
+      Time.Timestamp.assertFromInstant(Instant.parse("2000-01-01T00:00:00.000000Z"))
     )
   private val someUserId =
     Ref.UserId.assertFromString("UpdateToDbDtoSpecUserId")
@@ -2933,7 +2962,7 @@ object UpdateToDbDtoSpec {
     paidTrafficCost = nonNegativeTrafficCost,
   )
   private val someSynchronizerId1 = SynchronizerId.tryFromString("x::synchronizer1")
-  private val someTransactionMeta = state.TransactionMeta(
+  val someTransactionMeta: TransactionMeta = state.TransactionMeta(
     ledgerEffectiveTime = Time.Timestamp.assertFromLong(2),
     workflowId = Some(someWorkflowId),
     preparationTime = Time.Timestamp.assertFromLong(3),
@@ -2943,16 +2972,18 @@ object UpdateToDbDtoSpec {
     optNodeSeeds = None,
     optByKeyNodes = None,
   )
-  private val someContractAuthenticationData = Bytes.assertFromString("00abcd")
   private val someRepresentativePackageId = Ref.PackageId.assertFromString("rp-id")
   private def someContractInfos(
+      contract: ContractInstance,
       representativePackageId: RepresentativePackageId = DedicatedRepresentativePackageId(
         someRepresentativePackageId
-      )
+      ),
   ) =
     ContractInfo(
-      internalContractId = 42L,
-      contractAuthenticationData = someContractAuthenticationData,
+      persistedContractInstance = PersistedContractInstance(
+        internalContractId = 42L,
+        inst = contract.inst,
+      ),
       representativePackageId = representativePackageId,
     )
 

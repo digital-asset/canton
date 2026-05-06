@@ -2245,7 +2245,6 @@ class IssSegmentModuleTest
       parentModuleRef,
       availabilityModuleRef,
       p2pNetworkOutModuleRef,
-      config.consensusBlockCompletionTimeout,
       config.consensusEmptyBlockCreationTimeout,
       metrics,
       timeouts,

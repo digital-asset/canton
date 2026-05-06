@@ -22,11 +22,11 @@ final case class LanguageVersion private[lf] (
 }
 
 object LanguageVersion extends LanguageFeaturesGenerated {
-  // ranges hardcoded (for now)
+  // TODO[#22956]: get rid of hardcoded ranges
   lazy val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)
-  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_2)
+  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_3)
   lazy val earlyAccessLfVersionsRange: VersionRange.Inclusive[LanguageVersion] =
-    VersionRange(v2_1, v2_2)
+    VersionRange(v2_1, v2_3)
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 

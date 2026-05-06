@@ -192,10 +192,13 @@ class DbSynchronizerConnectionConfigStore private[store] (
       functionFullName,
     )
 
-  def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     synchronizerConfigCache.clear()
     initialize().map(_ => ())
   }
+
+  override def clearCache()(implicit traceContext: TraceContext): Unit =
+    synchronizerConfigCache.clear()
 
   override def put(
       config: SynchronizerConnectionConfig,

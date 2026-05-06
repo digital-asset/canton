@@ -363,6 +363,7 @@ private[protocol] object AuthenticationValidator {
           topology.ipsSnapshot,
           actAs.forgetNE,
           logger,
+          physicalSynchronizerId.protocolVersion,
         )
         .value
         .map {

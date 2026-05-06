@@ -151,7 +151,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
   }
 
   it should "not find non-consecutive event ids if those gaps are before the pruning offset" in {
-    val internalContractId = insertParContracts() // making sure internal_contract_id = 1L exists
+    val internalContractId = insertParContracts()
     val updates = Vector(
       dtosCreate(
         event_offset = 1,
@@ -161,7 +161,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtosCreate(
         event_offset = 3,
         event_sequential_id = 3L,
-        internal_contract_id = 1,
+        internal_contract_id = internalContractId,
       )(), // non-consecutive id but after pruning offset
       dtosCreate(
         event_offset = 4,

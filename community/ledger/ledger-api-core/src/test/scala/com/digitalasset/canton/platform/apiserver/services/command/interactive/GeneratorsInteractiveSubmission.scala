@@ -37,6 +37,7 @@ import com.digitalasset.daml.lf.transaction.{
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.test.ValueGenerators
+import com.digitalasset.daml.lf.value.test.ValueGenerators.SerializationVersionGen
 import magnolify.scalacheck.auto.genArbitrary
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Arbitrary, Gen}
@@ -47,6 +48,7 @@ import scala.util.Random
 final class GeneratorsInteractiveSubmission(
     generatorsLf: GeneratorsLf,
     generatorsTopology: GeneratorsTopology,
+    exclusiveMaxSerializationVersion: LfSerializationVersion,
 ) {
   import com.digitalasset.canton.Generators.*
   import generatorsLf.*
@@ -86,13 +88,11 @@ final class GeneratorsInteractiveSubmission(
     case atom: Value.ValueCidLessAtom => atom
   }
 
-  // Updated nodes that filter out fields not supported in LF 2.1
-  def normalizeNodeForV1[N <: Node](node: N): N = node match {
+  // Updated nodes that filter out fields not supported in the serializationVersion
+  def normalizeNode[N <: Node](node: N): N = node match {
     case node: Node.Create =>
       node
         .copy(
-          version = LfSerializationVersion.V1,
-          keyOpt = None,
           // signatories should be a subset of stakeholders for the node to be valid
           // take a random size subset of stakeholders, but 1 minimum
           signatories = node.stakeholders.take(Random.nextInt(10) + 1),
@@ -102,10 +102,6 @@ final class GeneratorsInteractiveSubmission(
     case node: Node.Exercise =>
       node
         .copy(
-          version = LfSerializationVersion.V1,
-          keyOpt = None,
-          byKey = false,
-          choiceAuthorizers = None,
           chosenValue = normalizeValue(node.chosenValue),
           exerciseResult = node.exerciseResult.map(normalizeValue),
         )
@@ -113,9 +109,25 @@ final class GeneratorsInteractiveSubmission(
     case node: Node.Fetch =>
       node
         .copy(
-          version = LfSerializationVersion.V1,
-          keyOpt = None,
-          byKey = false,
+          keyOpt = node.keyOpt.map { globalKeyWithMaintainers =>
+            globalKeyWithMaintainers.copy(
+              globalKey = GlobalKey.assertWithRenormalizedValue(
+                globalKeyWithMaintainers.globalKey,
+                normalizeValue(globalKeyWithMaintainers.globalKey.key),
+              )
+            )
+          }
+        )
+        .asInstanceOf[N]
+    case node: Node.QueryByKey =>
+      node
+        .copy(
+          key = node.key.copy(
+            globalKey = GlobalKey.assertWithRenormalizedValue(
+              node.key.globalKey,
+              normalizeValue(node.key.globalKey.key),
+            )
+          )
         )
         .asInstanceOf[N]
     case node => node
@@ -123,35 +135,13 @@ final class GeneratorsInteractiveSubmission(
 
   private val nodeIdGen = Arbitrary.arbInt.arbitrary.map(NodeId(_))
 
-  final def normalizeTxForV1(tx: Transaction) = {
-    // We remove QueryByKey nodes because they are not supported by V1.
-    val removedNodes: Set[NodeId] =
-      tx.nodes.collect { case (nid, _: Node.LookupByKey) => nid }.toSet
-
-    def filter(nodeIds: ImmArray[NodeId]): ImmArray[NodeId] =
-      nodeIds.filter(cid => !removedNodes.contains(cid))
-
-    val keptNodes: Map[NodeId, Node] = tx.nodes.view
-      .mapValues(normalizeNodeForV1)
-      .collect {
-        case (nid, exe: Node.Exercise) =>
-          nid -> exe.copy(children = filter(exe.children))
-        case (nid, rb: Node.Rollback) =>
-          nid -> rb.copy(children = filter(rb.children))
-        case (nid, node) if !removedNodes.contains(nid) =>
-          nid -> node
-      }
-      .toMap
-
-    Transaction(keptNodes, filter(tx.roots))
-  }
-
-  val noDanglingRefGenTransaction: Gen[Transaction] =
-    ValueGenerators.noDanglingRefGenTransaction.map(normalizeTxForV1(_))
+  private def normalizeTxFor(tx: Transaction) =
+    Transaction(tx.nodes.view.mapValues(normalizeNode).toMap, tx.roots)
 
   private val versionedTransactionGenerator = for {
-    transaction <- noDanglingRefGenTransaction
-  } yield VersionedTransaction(LfSerializationVersion.V1, transaction.nodes, transaction.roots)
+    version <- SerializationVersionGen(maxVersion = Some(exclusiveMaxSerializationVersion))
+    transaction <- ValueGenerators.noDanglingRefGenTransaction(version).map(normalizeTxFor)
+  } yield VersionedTransaction(version, transaction.nodes, transaction.roots)
 
   implicit val transactionArb: Arbitrary[VersionedTransaction] = Arbitrary(
     versionedTransactionGenerator
@@ -251,9 +241,12 @@ final class GeneratorsInteractiveSubmission(
     boundedMapGen[GlobalKey, Option[Value.ContractId]].map(_.transform((_, v) => v.asCidVector))
 
   private def inputContractsGen(overrideCid: Value.ContractId): Gen[LfFatContractInst] = for {
+    version <- ValueGenerators.SerializationVersionGen(maxVersion =
+      Some(exclusiveMaxSerializationVersion)
+    )
     create <- ValueGenerators
-      .malformedCreateNodeGenWithVersion(LfSerializationVersion.V1)
-      .map(normalizeNodeForV1)
+      .malformedCreateNodeGenWithVersion(version)
+      .map(normalizeNode)
     createdAt <- Arbitrary.arbitrary[Time.Timestamp]
     authenticationData <- Arbitrary.arbitrary[Array[Byte]].map(Bytes.fromByteArray)
   } yield FatContractInstance.fromCreateNode(
@@ -268,9 +261,18 @@ final class GeneratorsInteractiveSubmission(
     transaction <- versionedTransactionGenerator.map(SubmittedTransaction(_))
     transactionMeta <- transactionMetaGen(transaction)
     globalKeyMapping <- globalKeyMappingGen
-    coids <- boundedListGen(ValueGenerators.coidGen)
+    // Use the contract IDs actually referenced by the transaction (fetch/exercise nodes),
+    // because the decoder validates that input contracts match the transaction's inputs.
+    coids = transaction.inputContracts.toList
     inputContracts <- Gen.sequence(coids.map(inputContractsGen))
-    enrichedInputContracts <- Gen.sequence(coids.map(inputContractsGen))
+    // The enriched contract must share the same createdAt as the original contract,
+    // because the decoder checks that created_at (from the enriched contract) matches
+    // the createdAt encoded in the event_blob (from the original contract).
+    enrichedInputContracts <- Gen.sequence(
+      coids.zip(inputContracts.asScala).map { case (cid, originalFci) =>
+        inputContractsGen(cid).map(_.mapCreatedAt(_ => originalFci.createdAt))
+      }
+    )
     mediatorGroup <- Arbitrary.arbitrary[PositiveInt]
     transactionUUID <- Gen.uuid
     maxRecordTime <- Arbitrary.arbitrary[Option[LfTimestamp]]

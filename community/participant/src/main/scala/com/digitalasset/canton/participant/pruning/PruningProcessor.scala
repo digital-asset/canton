@@ -312,15 +312,6 @@ class PruningProcessor(
       synchronizerOffsets,
     )
 
-  private def lookUpPrunableInternalContractIds(
-      fromExclusive: Option[Offset],
-      upToInclusive: Offset,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Long]] =
-    participantNodePersistentState.value.ledgerApiStore.prunableContracts(
-      fromExclusive,
-      upToInclusive,
-    )
-
   private def ensurePruningOffsetIsSafe(
       offset: Offset,
       safeToPruneCommitmentState: Option[
@@ -359,22 +350,6 @@ class PruningProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       cutoffs <- lookUpSynchronizerAndParticipantPruningCutoffs(fromExclusive, upToInclusive)
-
-      prunableInternalContractIds <- lookUpPrunableInternalContractIds(
-        fromExclusive = fromExclusive,
-        upToInclusive = upToInclusive,
-      )
-      prunableContractIds <- participantNodePersistentState.value.contractStore
-        .lookupBatchedContractIdsNonReadThrough(prunableInternalContractIds)
-        .map(_.values)
-
-      // We must prune the contract store even if the event log is empty, because there is not necessarily an
-      // archival event reassigned-away contracts.
-      _ = logger.debug("Pruning contract store...")
-      _ <- participantNodePersistentState.value.contractStore.deleteIgnoringUnknown(
-        prunableContractIds
-      )
-
       _ <- cutoffs.synchronizerOffsets.parTraverse(pruneSynchronizer)
       _ <- cutoffs.globalOffsetO.fold(FutureUnlessShutdown.unit) {
         case (globalOffset, publicationTime) =>

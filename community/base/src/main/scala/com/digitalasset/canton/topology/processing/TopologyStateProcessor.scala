@@ -91,14 +91,7 @@ class TopologyStateProcessorImpl private[processing] (
       loggerFactory.append("role", if (outboxQueue.isEmpty) "incoming" else "outgoing"),
     )
 
-  override def close(): Unit = {
-    // TODO(i32384): remove this log when the investigation is done.
-    noTracingLogger.debug(
-      "TopologyStateProcessorImpl close initiated",
-      new Throwable("close origin stack"),
-    )
-    cache.close()
-  }
+  override def close(): Unit = cache.close()
 
   def validateAndApplyAuthorization(
       sequenced: SequencedTime,

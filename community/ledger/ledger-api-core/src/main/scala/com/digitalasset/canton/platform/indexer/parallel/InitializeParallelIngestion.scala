@@ -34,8 +34,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.Cancellable
-import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.{Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.{KillSwitches, Materializer, UniqueKillSwitch}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
@@ -54,8 +54,26 @@ private[platform] final case class InitializeParallelIngestion(
     achsConfig: Option[AchsConfig],
     metrics: LedgerApiServerMetrics,
     loggerFactory: NamedLoggerFactory,
+    achsInitInterceptor: Source[AchsWorkRange, NotUsed] => Source[AchsWorkRange, NotUsed],
 )(implicit materializer: Materializer)
     extends NamedLogging {
+
+  /** Holds a reference to the kill switch for the in-progress ACHS initialization stream. When
+    * populated, invoking the kill switch will abort the ACHS maintenance pipe.
+    */
+  private val achsKillSwitchRef: AtomicReference[Option[UniqueKillSwitch]] =
+    new AtomicReference(None)
+
+  def achsKillSwitch(implicit traceContext: TraceContext): Option[() => Unit] =
+    achsConfig.map { _ => () =>
+      achsKillSwitchRef.get() match {
+        case Some(ks) =>
+          logger.info("Shutting down ACHS initialization stream via kill switch")
+          ks.shutdown()
+        case None =>
+          logger.warn("Could not abort ACHS initialization since kill switch was not set")
+      }
+    }
 
   def apply(
       dbDispatcher: DbDispatcher,
@@ -236,10 +254,12 @@ private[platform] final case class InitializeParallelIngestion(
           (to.lastPopulated - from.lastPopulated) + (to.lastRemoved - from.lastRemoved),
       )
 
-    achsMaintenancePipeSource(
-      initialWork = initialWork,
-      dbDispatcher = dbDispatcher,
-      achsConfig = config,
+    achsInitInterceptor(
+      achsMaintenancePipeSource(
+        initialWork = initialWork,
+        dbDispatcher = dbDispatcher,
+        achsConfig = config,
+      )
     )
       .map { elem =>
         lastPointers.set(
@@ -250,21 +270,27 @@ private[platform] final case class InitializeParallelIngestion(
         )
         elem
       }
-      .runWith(Sink.ignore)
-      .map { _ =>
-        cancellable.cancel().discard
-        // After both phases, the in-memory ACHS state reflects the actual pointers
-        // advanced by the pipe (including the flushed sub-threshold remainder via fullDrain).
-        // Recalculate remaining work from the updated state to correctly account for
-        // debt (negative work that couldn't be consumed).
-        val updatedAchsState = achsStateCache.get()
-        val remainingWork =
-          AchsMaintenancePipe.initialWork(updatedAchsState, lastEventSeqId, config)
-        logger.info(
-          s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
-        )
-        updatedAchsState -> remainingWork
-      }
+      .viaMat(KillSwitches.single)(Keep.right)
+      .toMat(Sink.ignore)(Keep.both)
+      .run() match {
+      case (killSwitch, doneFuture) =>
+        achsKillSwitchRef.set(Some(killSwitch))
+        doneFuture.map { _ =>
+          achsKillSwitchRef.set(None)
+          cancellable.cancel().discard
+          // After both phases, the in-memory ACHS state reflects the actual pointers
+          // advanced by the pipe (including the flushed sub-threshold remainder via fullDrain).
+          // Recalculate remaining work from the updated state to correctly account for
+          // debt (negative work that couldn't be consumed).
+          val updatedAchsState = achsStateCache.get()
+          val remainingWork =
+            AchsMaintenancePipe.initialWork(updatedAchsState, lastEventSeqId, config)
+          logger.info(
+            s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
+          )
+          updatedAchsState -> remainingWork
+        }
+    }
   }
 
   private def logProgress[S](

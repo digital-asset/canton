@@ -22,12 +22,10 @@ import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
-import com.digitalasset.daml.lf.VersionRange
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
-import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
@@ -78,10 +76,7 @@ object DAMLe {
   ): Engine =
     new Engine(
       EngineConfig(
-        allowedLanguageVersions = VersionRange(
-          LanguageVersion.v2_1,
-          maxVersion(enableLfDev, enableLfBeta),
-        ),
+        allowedLanguageVersions = maxVersion(enableLfDev, enableLfBeta),
         // The package store contains only validated packages, so we can skip validation upon loading
         packageValidation = false,
         stackTraceMode = enableStackTraces,
@@ -97,9 +92,9 @@ object DAMLe {
     )
 
   private def maxVersion(enableLfDev: Boolean, enableLfBeta: Boolean) =
-    if (enableLfDev) v2_dev
-    else if (enableLfBeta) LanguageVersion.earlyAccessLfVersionsRange.max
-    else LanguageVersion.stableLfVersionsRange.max
+    if (enableLfDev) LanguageVersion.allLfVersions
+    else if (enableLfBeta) LanguageVersion.earlyAccessLfVersions
+    else LanguageVersion.stableLfVersions
 
   /** Resolves packages by [[com.digitalasset.daml.lf.data.Ref.PackageId]]. The returned packages
     * must have been validated so that [[com.digitalasset.daml.lf.engine.Engine]] can skip

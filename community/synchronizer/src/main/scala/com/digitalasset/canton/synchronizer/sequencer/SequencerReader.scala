@@ -148,46 +148,9 @@ class SequencerReader(
   /** @param member
     *   The subscribing member.
     * @param requestedTimestampInclusive
-    *   The timestamp of the first event to be returned on the subscription stream. This timestamp
-    *   could still include the decision time offset that is applied to events that have been
-    *   sequenced after the upgrade time. This offset is subtracted before looking up events in the
-    *   store.
+    *   The timestamp of the first event to be returned on the subscription stream.
     */
   def read(member: Member, requestedTimestampInclusive: Option[CantonTimestamp])(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] = {
-    val synchronizerUpgradeO = announcedLsu.get()
-    for {
-      _ <- EitherT.right(
-        synchronizerUpgradeO.zip(requestedTimestampInclusive).fold(FutureUnlessShutdown.unit) {
-          case (upgrade, requestedTimestamp) =>
-            upgrade.computeAndCacheTimeOffset(syncCryptoApi, requestedTimestamp)
-        }
-      )
-      requestedTimestampInclusiveWithoutLsuOffset = synchronizerUpgradeO.fold(
-        requestedTimestampInclusive
-      ) { announcedLsu =>
-        val subtracted = announcedLsu.subtractOffsetAfterUpgradeTime(requestedTimestampInclusive)
-        logger.info(
-          s"Subtracting LSU offset from subscription timestamp: original=$requestedTimestampInclusive, subtracted=$subtracted"
-        )
-        subtracted
-      }
-      eventSource <- readFromCorrectedTimestamp(member, requestedTimestampInclusiveWithoutLsuOffset)
-    } yield eventSource
-  }
-
-  /** @param member
-    *   The subscribing member.
-    * @param requestedTimestampInclusive
-    *   The timestamp of the first event to returned in the subscription stream. This timestamp MUST
-    *   NOT include the decision time offset applied to events that have been sequenced after the
-    *   upgrade time.
-    */
-  private def readFromCorrectedTimestamp(
-      member: Member,
-      requestedTimestampInclusive: Option[CantonTimestamp],
-  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] =
     synchronizeWithClosing(functionFullName)(for {
@@ -827,7 +790,7 @@ class SequencerReader(
         traceContext: TraceContext
     ): FutureUnlessShutdown[SequencedEvent[ClosedEnvelope]] = {
       val timestamp = event.timestamp
-      event.event match {
+      val sequencedEventF = event.event match {
         case DeliverStoreEvent(
               sender,
               messageId,
@@ -842,7 +805,6 @@ class SequencerReader(
           val groupRecipients = batch.allRecipients.collect { case x: GroupRecipient =>
             x
           }
-          val synchronizerUpgradeO = announcedLsu.get()
           for {
             topologySnapshot <- topologySnapshotO.fold(
               SyncCryptoClient
@@ -873,23 +835,14 @@ class SequencerReader(
 
               otherGroupsToMembers.map(_ ++ resolvedMember)
             }
-            _ <- synchronizerUpgradeO.fold(FutureUnlessShutdown.unit)(
-              _.computeAndCacheTimeOffset(syncCryptoApi, timestamp)
-            )
           } yield {
             val memberGroupRecipients = resolvedGroupAddresses.collect {
               case (groupRecipient, groupMembers) if groupMembers.contains(member) => groupRecipient
             }.toSet
-            val previousTimestampWithLsuOffset =
-              synchronizerUpgradeO.fold(previousTimestamp)(
-                _.addOffsetAfterUpgradeTime(previousTimestamp)
-              )
-            val timestampWithLsuOffset =
-              synchronizerUpgradeO.fold(timestamp)(_.addOffsetAfterUpgradeTime(timestamp))
             val filteredBatch = Batch.filterClosedEnvelopesFor(batch, member, memberGroupRecipients)
-            val deliver = Deliver.create[ClosedEnvelope](
-              previousTimestampWithLsuOffset,
-              timestampWithLsuOffset,
+            Deliver.create[ClosedEnvelope](
+              previousTimestamp,
+              timestamp,
               psid,
               messageIdO,
               filteredBatch,
@@ -897,27 +850,6 @@ class SequencerReader(
               // deliver events should only retain the traffic state for the sender's subscription
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
-            if (
-              LogicalUpgradeTime.canProcessKnowingSuccessor(
-                synchronizerUpgradeO.map(_.successor),
-                timestamp,
-              ) ||
-              TimeProof.isTimeProofDeliver(deliver)
-            ) deliver
-            else {
-              logger.info(
-                "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
-              )
-              Deliver.create[ClosedEnvelope](
-                previousTimestampWithLsuOffset,
-                timestampWithLsuOffset,
-                psid,
-                None,
-                emptyBatch,
-                None,
-                None,
-              )
-            }
           }
 
         case ReceiptStoreEvent(
@@ -953,6 +885,36 @@ class SequencerReader(
             )
           )
       }
+      sequencedEventF.map { sequencedEvent =>
+        val synchronizerUpgradeO = announcedLsu.get()
+        // after the upgrade time, subscribers only receive empty events (which basically are unsolicited time proofs).
+        if (
+          LogicalUpgradeTime.canProcessKnowingSuccessor(
+            synchronizerUpgradeO.map(_.successor),
+            timestamp,
+          )
+        ) sequencedEvent
+        else {
+          /* Realistically, there should only ever be one event emitted for each subscriber, which is the synthetic LSU
+          tombstone with the timestamp `upgradeTime+decisionTimeout`. No other event, that got sequenced at or after upgrade
+          time on the ordering layer, is actually processed by the sequencer.
+          See BlockChunkProcessor#ensureStrictlyIncreasingTimestampBeforeUpgradeTime
+           */
+          logger.info(
+            "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
+          )
+          Deliver.create[ClosedEnvelope](
+            previousTimestamp,
+            timestamp,
+            psid,
+            None,
+            emptyBatch,
+            None,
+            None,
+          )
+        }
+      }
+
     }
   }
 }

@@ -171,6 +171,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed cardinality from "map" to "optional with explicit presence".""",
       """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" moved from outside to inside a oneof.""",
       """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed type from "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessorsEntry" to "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessors".""",
+      // bft-admin endpoint. Fine because not released yet.
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" moved from outside to inside a oneof.""",
     ),
   )
 

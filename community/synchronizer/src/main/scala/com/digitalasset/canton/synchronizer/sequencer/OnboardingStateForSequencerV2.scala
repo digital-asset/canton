@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -53,21 +54,33 @@ object OnboardingStateForSequencerV2 extends VersioningCompanion[OnboardingState
   import cats.syntax.traverse.*
   private def fromProtoV30(
       value: v30.OnboardingStateForSequencerV2
-  ): ParsingResult[OnboardingStateForSequencerV2] =
+  ): ParsingResult[OnboardingStateForSequencerV2] = {
+
+    val paramsAndSnapshotEO = (value.staticSynchronizerParameters, value.sequencerSnapshot) match {
+      case (None, None) => Right(None)
+      case (Some(paramsP), Some(snapshotP)) =>
+        for {
+          params <- StaticSynchronizerParameters.fromTrustedByteString(paramsP)
+          snapshot <- SequencerSnapshot.fromProtoV30(params.protocolVersion, snapshotP)
+        } yield Some((params, snapshot))
+      case _ =>
+        Left(
+          ProtoDeserializationError.OtherError(
+            "Onboarding state must contain both static synchronizer parameters and sequencer snapshot or neither of them"
+          )
+        )
+    }
     for {
       topologySnapshot <-
         value.topologyTransaction.traverse(StoredTopologyTransaction.fromTrustedByteString)
-      staticSynchronizerParams <-
-        value.staticSynchronizerParameters.traverse(
-          StaticSynchronizerParameters.fromTrustedByteString
-        )
-
-      sequencerSnapshot <-
-        value.sequencerSnapshot.traverse(SequencerSnapshot.fromProtoV30)
+      paramsAndSnapshotP <- paramsAndSnapshotEO
+      staticSynchronizerParams = paramsAndSnapshotP.map(_._1)
+      sequencerSnapshot = paramsAndSnapshotP.map(_._2)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield OnboardingStateForSequencerV2(
       topologySnapshot,
       staticSynchronizerParams,
       sequencerSnapshot,
     )(rpv)
+  }
 }

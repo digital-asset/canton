@@ -126,6 +126,7 @@ object DatabaseSequencer {
       lsuSequencingBounds = lsuSequencingBounds,
       drSequencingTimeUpperBound = drSequencingTimeUpperBound,
       rateLimitManagerO = None,
+      disableSubmissionChecksForTesting = false,
     )
   }
 }
@@ -152,6 +153,7 @@ class DatabaseSequencer(
     lsuSequencingBounds: Option[LsuSequencingBounds],
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     rateLimitManagerO: Option[SequencerRateLimitManager],
+    disableSubmissionChecksForTesting: Boolean,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
       loggerFactory,
@@ -159,6 +161,7 @@ class DatabaseSequencer(
       clock,
       SignatureVerifier(cryptoApi),
       cryptoApi.psid.protocolVersion,
+      disableSubmissionChecksForTesting,
     )
     with FlagCloseable {
 

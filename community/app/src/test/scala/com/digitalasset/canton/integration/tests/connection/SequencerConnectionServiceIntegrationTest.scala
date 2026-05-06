@@ -28,11 +28,14 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnectionPool,
   SequencerSubscriptionPool,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
 
 import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait SequencerConnectionServiceIntegrationTest
     extends CommunityIntegrationTest
@@ -197,7 +200,14 @@ class SequencerConnectionServiceIntegrationTestDefault
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      consensusBlockCompletionTimeout = 1.second,
+      dynamicSequencingParameters = Some(
+        SequencingParameters.create(
+          pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+          segmentLength = SequencingParameters.DefaultSegmentLength,
+          blacklistLeaderSelectionPolicyConfig =
+            SequencingParameters.DefaultLeaderSelectionPolicyConfig,
+        )(testedProtocolVersion)
+      ),
     )
   )
 }

@@ -91,8 +91,8 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
               estimatedSequencingTimestamp: CantonTimestamp,
           )(implicit
               traceContext: TraceContext
-          ): EitherT[FutureUnlessShutdown, String, SignedContent[SubmissionRequest]] =
-            EitherT.rightT(signedSubmissionRequest)
+          ): EitherT[FutureUnlessShutdown, String, Unit] =
+            EitherTUtil.unitUS
 
           override def verifyAcknowledgeRequestSignature(
               signedAcknowledgeRequest: SignedContent[AcknowledgeRequest],
@@ -101,10 +101,11 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
               protocolVersion: ProtocolVersion,
           )(implicit
               traceContext: TraceContext
-          ): EitherT[FutureUnlessShutdown, String, SignedContent[AcknowledgeRequest]] =
-            EitherT.rightT(signedAcknowledgeRequest)
+          ): EitherT[FutureUnlessShutdown, String, Unit] =
+            EitherTUtil.unitUS
         },
         testedProtocolVersion,
+        disableSubmissionChecksForTesting = false,
       )
       with FlagCloseable {
 

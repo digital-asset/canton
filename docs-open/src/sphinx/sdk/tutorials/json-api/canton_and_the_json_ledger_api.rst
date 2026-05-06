@@ -32,7 +32,7 @@ Before running the project, ensure you have the following installed:
 
 - A Bash-compatible terminal (e.g., macOS Terminal, Git Bash, etc.)
 - **Dpm** — Install following :externalref:`these instructions<dpm-install>`
-- `canton` — Canton release with installation and examples, check :externalref:`Canton demo<demo>` for details
+- `canton` — Canton release with installation and examples, check :externalref:`Canton installation<install-release>` for details
 - `curl` — command-line HTTP client: https://github.com/curl/curl (installation: https://curl.se/download.html)
 - (Optional) `jq` — command-line JSON processor: https://github.com/jqlang/jq (installation: https://jqlang.org/download/)
 

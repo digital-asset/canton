@@ -105,7 +105,7 @@ class TestEngine(
 
   val engine = new Engine(
     EngineConfig(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
     ),
     loggerFactory,

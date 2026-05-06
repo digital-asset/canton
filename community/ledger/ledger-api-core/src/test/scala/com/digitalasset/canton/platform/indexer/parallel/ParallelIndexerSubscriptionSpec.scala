@@ -4,16 +4,22 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.DatabaseMetrics
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
+import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
+  ContractInfo,
   RepairTransactionAccepted,
   TopologyTransactionEffective,
   TransactionAccepted,
 }
 import com.digitalasset.canton.ledger.participant.state.{
+  Reassignment,
+  ReassignmentInfo,
   RepairIndex,
   SynchronizerIndex,
+  TestAcsChangeFactory,
   TransactionMeta,
   Update,
 }
@@ -27,6 +33,7 @@ import com.digitalasset.canton.logging.{
   TracedLogger,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.ha.TestConnection
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.{
   ActivationRef,
@@ -34,6 +41,7 @@ import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscrip
   SynCon,
   ZeroLedgerEnd,
 }
+import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -42,17 +50,28 @@ import com.digitalasset.canton.platform.store.backend.{
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  ExampleContractFactory,
+  LfContractId,
+  ReassignmentId,
+  TestUpdateId,
+}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.CommittedTransaction
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.transaction.test.{
+  NodeIdTransactionBuilder,
+  TestNodeBuilder,
+  TransactionBuilder,
+}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -309,6 +328,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Vector("1", "2"),
+      usedInternalContractIds = Set.empty,
     )
     actual.copy(batchTraceContext = TraceContext.empty) shouldBe expected
   }
@@ -333,6 +353,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
   }
 
@@ -346,6 +367,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
   }
 
@@ -478,6 +500,7 @@ class ParallelIndexerSubscriptionSpec
         missingDeactivatedActivations = Map.empty,
         eventCount = 0L,
         distinctRawStrings = Vector("1", "2"),
+        usedInternalContractIds = Set.empty,
       ),
     )
     import scala.util.chaining.*
@@ -583,6 +606,7 @@ class ParallelIndexerSubscriptionSpec
         missingDeactivatedActivations = Map.empty,
         eventCount = 0L,
         distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
       ),
     )
     result.ledgerEnd.lastEventSeqId shouldBe 15
@@ -629,6 +653,7 @@ class ParallelIndexerSubscriptionSpec
             missingDeactivatedActivations = Map.empty,
             eventCount = 0L,
             distinctRawStrings = Nil,
+            usedInternalContractIds = Set.empty,
           ),
         )
         .ledgerEnd
@@ -666,6 +691,7 @@ class ParallelIndexerSubscriptionSpec
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -719,6 +745,7 @@ class ParallelIndexerSubscriptionSpec
             missingDeactivatedActivations = Map.empty,
             eventCount = 0L,
             distinctRawStrings = Nil,
+            usedInternalContractIds = Set.empty,
           ),
         ),
       _.warningMessage should include(
@@ -781,6 +808,7 @@ class ParallelIndexerSubscriptionSpec
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         ),
       )
     activeContracts shouldBe Map.empty
@@ -862,6 +890,7 @@ class ParallelIndexerSubscriptionSpec
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -925,6 +954,7 @@ class ParallelIndexerSubscriptionSpec
           missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -1016,6 +1046,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           batchTraceContext = TraceContext.empty,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         )
       )
       .batch should contain theSameElementsInOrderAs Vector(
@@ -1071,6 +1102,7 @@ class ParallelIndexerSubscriptionSpec
             eventCount = 0L,
             batchTraceContext = TraceContext.empty,
             distinctRawStrings = Nil,
+            usedInternalContractIds = Set.empty,
           )
         )
         .batch should contain theSameElementsInOrderAs Vector(
@@ -1112,6 +1144,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           batchTraceContext = TraceContext.empty,
           distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
         )
       ),
       _.getMessage should include(
@@ -1160,6 +1193,7 @@ class ParallelIndexerSubscriptionSpec
       ),
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
 
     val outBatchF = ParallelIndexerSubscription.dbPrepare(
@@ -1185,6 +1219,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         eventCount = 0L,
         distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
       )
   }
 
@@ -1210,6 +1245,7 @@ class ParallelIndexerSubscriptionSpec
         missingDeactivatedActivations = Map.empty,
         eventCount = 0L,
         distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
       )
     )
     result shouldBe Batch(
@@ -1221,6 +1257,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
   }
 
@@ -1251,6 +1288,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
 
     val persistedTransferOffsets = new AtomicBoolean(false)
@@ -1258,6 +1296,8 @@ class ParallelIndexerSubscriptionSpec
     val outBatchF =
       ParallelIndexerSubscription.ingester(
         ingestFunction = ingestFunction,
+        lockUsedContracts = _ => _ => Set.empty,
+        evictContractsFromCache = _ => (),
         reassignmentOffsetPersistence = new ReassignmentOffsetPersistence {
           override def persist(updates: Seq[(Offset, Update)], tracedLogger: TracedLogger)(implicit
               traceContext: TraceContext
@@ -1285,6 +1325,7 @@ class ParallelIndexerSubscriptionSpec
         missingDeactivatedActivations = Map.empty,
         eventCount = 0L,
         distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
       )
     persistedTransferOffsets.get() shouldBe true
   }
@@ -1320,6 +1361,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     )
 
     val batchOfBatches = Vector(
@@ -1480,6 +1522,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     ),
     Batch(
       ledgerEnd = LedgerEnd(
@@ -1506,6 +1549,7 @@ class ParallelIndexerSubscriptionSpec
       missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
     ),
   )
 
@@ -1589,6 +1633,7 @@ class ParallelIndexerSubscriptionSpec
     missingDeactivatedActivations = Map.empty,
     eventCount = 0L,
     distinctRawStrings = Nil,
+    usedInternalContractIds = Set.empty,
   )
 
   it should "trigger storing ledger-end on CommitRepair" in {
@@ -2085,4 +2130,603 @@ class ParallelIndexerSubscriptionSpec
       synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
       effectiveTime = recordTime,
     )(TraceContext.empty)
+
+  behavior of "reInsertContracts"
+
+  it should "return empty for empty input" in {
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set.empty,
+          lookupResult = Map.empty,
+          expectedStore = Set.empty,
+          storeResult = Map.empty,
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+      )(traceContext)(List())
+      .futureValue shouldBe List()
+  }
+
+  it should "return the same if all contracts found with the same ID" in {
+    val c1 = contract
+    val c2 = contract
+    val c3 = contract
+    val c4 = contract
+    val c5 = contract
+    val updatesFixture =
+      List(
+        offset(1) -> sequencedTransaction(
+          Map(
+            1L -> c1,
+            2L -> c2,
+          )
+        ),
+        offset(2) -> repairTransaction(
+          Map(
+            2L -> c2,
+            3L -> c3,
+          )
+        ),
+        offset(3) -> sequencedReassignment(
+          Map(
+            3L -> c3,
+            4L -> c4,
+          )
+        ),
+        offset(4) -> repairReassignment(
+          Map(
+            4L -> c4,
+            5L -> c5,
+          )
+        ),
+        offset(5) -> onPrReassignment(
+          Map(
+            5L -> c5,
+            1L -> c1,
+          )
+        ),
+      )
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set(
+            c1.contractId,
+            c2.contractId,
+            c3.contractId,
+            c4.contractId,
+            c5.contractId,
+          ),
+          lookupResult = Map(
+            c1.contractId -> 1L,
+            c2.contractId -> 2L,
+            c3.contractId -> 3L,
+            c4.contractId -> 4L,
+            c5.contractId -> 5L,
+          ),
+          expectedStore = Set.empty,
+          storeResult = Map.empty,
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+      )(traceContext)(updatesFixture)
+      .futureValue shouldBe updatesFixture
+  }
+
+  it should "replace internal contract ID if changed" in {
+    val c1 = contract
+    val c2 = contract
+    val c3 = contract
+    val c4 = contract
+    val c5 = contract
+    val c6 = contract
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set(
+            c1.contractId,
+            c2.contractId,
+            c3.contractId,
+            c4.contractId,
+            c5.contractId,
+            c6.contractId,
+          ),
+          lookupResult = Map(
+            c1.contractId -> 1L,
+            c2.contractId -> 2L,
+            c3.contractId -> 3L,
+            c4.contractId -> 4L,
+            c5.contractId -> 5L,
+            c6.contractId -> 16L,
+          ),
+          expectedStore = Set.empty,
+          storeResult = Map.empty,
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+      )(traceContext)(
+        List(
+          offset(1) -> sequencedTransaction(
+            Map(
+              1L -> c1,
+              2L -> c2,
+              6L -> c6,
+            )
+          ),
+          offset(2) -> repairTransaction(
+            Map(
+              2L -> c2,
+              3L -> c3,
+              6L -> c6,
+            )
+          ),
+          offset(3) -> sequencedReassignment(
+            Map(
+              3L -> c3,
+              4L -> c4,
+              6L -> c6,
+            )
+          ),
+          offset(4) -> repairReassignment(
+            Map(
+              4L -> c4,
+              5L -> c5,
+              6L -> c6,
+            )
+          ),
+          offset(5) -> onPrReassignment(
+            Map(
+              5L -> c5,
+              1L -> c1,
+              6L -> c6,
+            )
+          ),
+        )
+      )
+      .futureValue shouldBe List(
+      offset(1) -> sequencedTransaction(
+        Map(
+          1L -> c1,
+          2L -> c2,
+          16L -> c6,
+        )
+      ),
+      offset(2) -> repairTransaction(
+        Map(
+          2L -> c2,
+          3L -> c3,
+          16L -> c6,
+        )
+      ),
+      offset(3) -> sequencedReassignment(
+        Map(
+          3L -> c3,
+          4L -> c4,
+          16L -> c6,
+        )
+      ),
+      offset(4) -> repairReassignment(
+        Map(
+          4L -> c4,
+          5L -> c5,
+          16L -> c6,
+        )
+      ),
+      offset(5) -> onPrReassignment(
+        Map(
+          5L -> c5,
+          1L -> c1,
+          16L -> c6,
+        )
+      ),
+    )
+  }
+
+  it should "store missing contract and replace internal contract ID" in {
+    val c1 = contract
+    val c2 = contract
+    val c3 = contract
+    val c4 = contract
+    val c5 = contract
+    val c6 = contract
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set(
+            c1.contractId,
+            c2.contractId,
+            c3.contractId,
+            c4.contractId,
+            c5.contractId,
+            c6.contractId,
+          ),
+          lookupResult = Map(
+            c1.contractId -> 1L,
+            c2.contractId -> 2L,
+            c3.contractId -> 3L,
+            c4.contractId -> 4L,
+            c5.contractId -> 5L,
+          ),
+          expectedStore = Set(c6.contractId),
+          storeResult = Map(c6.contractId -> 10L),
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+      )(traceContext)(
+        List(
+          offset(1) -> sequencedTransaction(
+            Map(
+              1L -> c1,
+              2L -> c2,
+              6L -> c6,
+            )
+          ),
+          offset(2) -> repairTransaction(
+            Map(
+              2L -> c2,
+              3L -> c3,
+              6L -> c6,
+            )
+          ),
+          offset(3) -> sequencedReassignment(
+            Map(
+              3L -> c3,
+              4L -> c4,
+              6L -> c6,
+            )
+          ),
+          offset(4) -> repairReassignment(
+            Map(
+              4L -> c4,
+              5L -> c5,
+              6L -> c6,
+            )
+          ),
+          offset(5) -> onPrReassignment(
+            Map(
+              5L -> c5,
+              1L -> c1,
+              6L -> c6,
+            )
+          ),
+        )
+      )
+      .futureValue shouldBe List(
+      offset(1) -> sequencedTransaction(
+        Map(
+          1L -> c1,
+          2L -> c2,
+          10L -> c6,
+        )
+      ),
+      offset(2) -> repairTransaction(
+        Map(
+          2L -> c2,
+          3L -> c3,
+          10L -> c6,
+        )
+      ),
+      offset(3) -> sequencedReassignment(
+        Map(
+          3L -> c3,
+          4L -> c4,
+          10L -> c6,
+        )
+      ),
+      offset(4) -> repairReassignment(
+        Map(
+          4L -> c4,
+          5L -> c5,
+          10L -> c6,
+        )
+      ),
+      offset(5) -> onPrReassignment(
+        Map(
+          5L -> c5,
+          1L -> c1,
+          10L -> c6,
+        )
+      ),
+    )
+  }
+
+  it should "work properly for a combined case with multiple replace / store-replace" in {
+    val c1 = contract
+    val c2 = contract
+    val c3 = contract
+    val c4 = contract
+    val c5 = contract
+    val c6 = contract
+    val c7 = contract
+    val c8 = contract
+    val c9 = contract
+    val c10 = contract
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set(
+            c1.contractId,
+            c2.contractId,
+            c3.contractId,
+            c4.contractId,
+            c5.contractId,
+            c6.contractId,
+            c7.contractId,
+            c8.contractId,
+            c9.contractId,
+            c10.contractId,
+          ),
+          lookupResult = Map(
+            c1.contractId -> 1L,
+            c2.contractId -> 2L,
+            c3.contractId -> 3L,
+            c4.contractId -> 4L,
+            c5.contractId -> 5L,
+            c7.contractId -> 17L,
+            c8.contractId -> 18L,
+          ),
+          expectedStore = Set(
+            c6.contractId,
+            c9.contractId,
+            c10.contractId,
+          ),
+          storeResult = Map(
+            c6.contractId -> 11L,
+            c9.contractId -> 19L,
+            c10.contractId -> 20L,
+          ),
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+      )(traceContext)(
+        List(
+          offset(1) -> sequencedTransaction(
+            Map(
+              1L -> c1,
+              2L -> c2,
+              6L -> c6,
+              7L -> c7,
+              8L -> c8,
+            )
+          ),
+          offset(2) -> repairTransaction(
+            Map(
+              2L -> c2,
+              3L -> c3,
+              6L -> c6,
+              9L -> c9,
+            )
+          ),
+          offset(3) -> sequencedReassignment(
+            Map(
+              3L -> c3,
+              4L -> c4,
+              6L -> c6,
+            )
+          ),
+          offset(4) -> repairReassignment(
+            Map(
+              4L -> c4,
+              5L -> c5,
+              6L -> c6,
+              7L -> c7,
+              9L -> c9,
+            )
+          ),
+          offset(5) -> onPrReassignment(
+            Map(
+              5L -> c5,
+              1L -> c1,
+              6L -> c6,
+              8L -> c8,
+              10L -> c10,
+            )
+          ),
+        )
+      )
+      .futureValue shouldBe List(
+      offset(1) -> sequencedTransaction(
+        Map(
+          1L -> c1,
+          2L -> c2,
+          11L -> c6,
+          17L -> c7,
+          18L -> c8,
+        )
+      ),
+      offset(2) -> repairTransaction(
+        Map(
+          2L -> c2,
+          3L -> c3,
+          11L -> c6,
+          19L -> c9,
+        )
+      ),
+      offset(3) -> sequencedReassignment(
+        Map(
+          3L -> c3,
+          4L -> c4,
+          11L -> c6,
+        )
+      ),
+      offset(4) -> repairReassignment(
+        Map(
+          4L -> c4,
+          5L -> c5,
+          11L -> c6,
+          17L -> c7,
+          19L -> c9,
+        )
+      ),
+      offset(5) -> onPrReassignment(
+        Map(
+          5L -> c5,
+          1L -> c1,
+          11L -> c6,
+          18L -> c8,
+          20L -> c10,
+        )
+      ),
+    )
+  }
+
+  def contract: ContractInstance = ExampleContractFactory.build()
+
+  val someTransactionMeta: TransactionMeta = state.TransactionMeta(
+    ledgerEffectiveTime = Time.Timestamp.assertFromLong(2),
+    workflowId = None,
+    preparationTime = Time.Timestamp.assertFromLong(3),
+    submissionSeed = crypto.Hash.assertFromString(
+      "01cf85cfeb36d628ca2e6f583fa2331be029b6b28e877e1008fb3f862306c086"
+    ),
+    timeBoundaries = LedgerTimeBoundaries.unconstrained,
+    optUsedPackages = None,
+    optNodeSeeds = None,
+    optByKeyNodes = None,
+  )
+
+  def contractInfos(contracts: Map[Long, ContractInstance]): Map[ContractId, ContractInfo] =
+    contracts.map { case (internalContractId, contract) =>
+      contract.contractId -> ContractInfo(
+        persistedContractInstance = PersistedContractInstance(
+          internalContractId = internalContractId,
+          inst = contract.inst,
+        ),
+        representativePackageId = SameAsContractPackageId,
+      )
+    }
+
+  val transactionInfo: Update.TransactionAccepted.TransactionInfo = {
+    val builder = new NodeIdTransactionBuilder with TestNodeBuilder
+    val createNode = contract.inst.toCreateNode
+    builder.add(createNode)
+    val transaction = builder.buildCommitted()
+    Update.TransactionAccepted.TransactionInfo(transaction)
+  }
+
+  def sequencedTransaction(contracts: Map[Long, ContractInstance]): Update.TransactionAccepted =
+    state.Update.SequencedTransactionAccepted(
+      completionInfoO = None,
+      transactionMeta = someTransactionMeta,
+      transactionInfo = transactionInfo,
+      updateId = updateId,
+      synchronizerId = someSynchronizerId,
+      recordTime = someRecordTime1,
+      externalTransactionHash = None,
+      acsChangeFactory = TestAcsChangeFactory(),
+      contractInfos = contractInfos(contracts),
+    )
+
+  def repairTransaction(contracts: Map[Long, ContractInstance]): Update.TransactionAccepted =
+    state.Update.RepairTransactionAccepted(
+      transactionMeta = someTransactionMeta,
+      transactionInfo = transactionInfo,
+      updateId = updateId,
+      synchronizerId = someSynchronizerId,
+      recordTime = someRecordTime1,
+      contractInfos = contractInfos(contracts),
+      repairCounter = RepairCounter.Genesis,
+    )
+
+  def reassignmentBatch(contracts: Map[Long, ContractInstance]): Reassignment.Batch =
+    Reassignment.Batch(
+      NonEmpty
+        .from[Seq[Reassignment]](
+          contracts.toSeq.sortBy(_._2.contractId.coid).map { case (internalContractId, contract) =>
+            Reassignment.Assign(
+              reassignmentCounter = 1500L,
+              nodeId = 0,
+              persistedContractInstance = PersistedContractInstance(
+                internalContractId = internalContractId,
+                inst = contract.inst,
+              ),
+            )
+          }
+        )
+        .getOrElse(fail("should be non empty"))
+    )
+
+  def reassignmentInfo: ReassignmentInfo = ReassignmentInfo(
+    sourceSynchronizer = ReassignmentTag.Source(someSynchronizerId),
+    targetSynchronizer = ReassignmentTag.Target(someSynchronizerId2),
+    submitter = None,
+    reassignmentId = ReassignmentId.tryCreate("001000000000"),
+    isReassigningParticipant = true,
+  )
+
+  def sequencedReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+    Update.SequencedReassignmentAccepted(
+      optCompletionInfo = None,
+      workflowId = None,
+      updateId = updateId,
+      reassignmentInfo = reassignmentInfo,
+      reassignment = reassignmentBatch(contracts),
+      recordTime = someRecordTime1,
+      synchronizerId = someSynchronizerId,
+      acsChangeFactory = TestAcsChangeFactory(),
+    )
+
+  def repairReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+    Update.RepairReassignmentAccepted(
+      workflowId = None,
+      updateId = updateId,
+      reassignmentInfo = reassignmentInfo,
+      reassignment = reassignmentBatch(contracts),
+      recordTime = someRecordTime1,
+      synchronizerId = someSynchronizerId,
+      repairCounter = RepairCounter.Genesis,
+    )
+
+  def onPrReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+    Update.OnPRReassignmentAccepted(
+      workflowId = None,
+      updateId = updateId,
+      reassignmentInfo = reassignmentInfo,
+      reassignment = reassignmentBatch(contracts),
+      recordTime = someRecordTime1,
+      synchronizerId = someSynchronizerId,
+      repairCounter = RepairCounter.Genesis,
+      acsChangeFactory = TestAcsChangeFactory(),
+    )
+
+  case class MockLedgerApiContractStore(
+      expectedLookup: Set[LfContractId],
+      lookupResult: Map[LfContractId, Long],
+      expectedStore: Set[LfContractId],
+      storeResult: Map[LfContractId, Long],
+  ) extends LedgerApiContractStore {
+    override def lookupPersisted(id: LfContractId)(implicit
+        traceContext: TraceContext
+    ): Future[Option[PersistedContractInstance]] =
+      fail("should not be used")
+
+    override def lookupBatchedNonReadThrough(internalContractIds: Iterable[Long])(implicit
+        traceContext: TraceContext
+    ): Future[Map[Long, PersistedContractInstance]] =
+      fail("should not be used")
+
+    override def lookupBatchedInternalIdsNonReadThrough(
+        contractIds: Iterable[LfContractId]
+    )(implicit traceContext: TraceContext): Future[Map[LfContractId, Long]] =
+      Future {
+        contractIds.toSet shouldBe expectedLookup
+        lookupResult
+      }
+
+    override def lookupBatchedContractIdsNonReadThrough(internalContractIds: Iterable[Long])(
+        implicit traceContext: TraceContext
+    ): Future[Map[Long, LfContractId]] =
+      fail("should not be used")
+
+    override def storeContracts(
+        contracts: Seq[ContractInstance]
+    )(implicit traceContext: TraceContext): Future[Map[LfContractId, Long]] =
+      Future {
+        contracts.map(_.contractId).toSet shouldBe expectedStore
+        storeResult
+      }
+
+    override def contractsPruned(internalContractIds: Iterable[Long]): Unit =
+      fail("should not be used")
+  }
 }

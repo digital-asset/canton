@@ -37,8 +37,6 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   configurations pertaining to the ledger api server's "active contracts service"
   * @param updatesStreams
   *   configurations pertaining to the ledger api server's streams of updates
-  * @param transactionTreeStreams
-  *   configurations pertaining to the ledger api server's streams of transaction trees
   * @param globalMaxEventIdQueries
   *   maximum number of concurrent event id queries across all stream types
   * @param globalMaxEventPayloadQueries
@@ -47,6 +45,8 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   the interval duration for OffsetCheckpoint cache updates
   * @param idleStreamOffsetCheckpointTimeout
   *   the timeout duration for checking if a new OffsetCheckpoint is created
+  * @param maxLookupLimit
+  *   the maximum limit for contract key lookups. Requests will be capped at this value.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -72,6 +72,10 @@ final case class IndexServiceConfig(
       IndexServiceConfig.OffsetCheckpointCacheUpdateInterval,
     idleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
       IndexServiceConfig.IdleStreamOffsetCheckpointTimeout,
+    contractPruningMaxRetries: Int = IndexServiceConfig.DefaultContractPruningMaxRetries,
+    contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
+      IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
+    maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
 )
 
 object IndexServiceConfig {
@@ -89,6 +93,10 @@ object IndexServiceConfig {
     NonNegativeFiniteDuration.ofSeconds(15)
   val IdleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(1)
+  val DefaultContractPruningMaxRetries: Int = 10
+  val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(2)
+  val DefaultMaxLookupLimit: Int = 1000
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value

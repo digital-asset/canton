@@ -585,15 +585,9 @@ class ConnectedSynchronizer(
       // once the first event is dispatched.
       // however, this is bad for reassignment processing as we need to be able to access the topology state
       // across synchronizers and this requires that the clients are separately initialised on the participants
+
       val resubscriptionTs = ephemeral.startingPoints.processing.lastSequencerTimestamp
       logger.debug(s"Initializing topology client at clean head=$resubscriptionTs")
-      // startup with the resubscription-ts
-      topologyClient.updateHead(
-        SequencedTime(resubscriptionTs),
-        EffectiveTime(resubscriptionTs),
-        ApproximateTime(resubscriptionTs),
-      )
-      // now, compute epsilon at resubscriptionTs and update client
       topologyClient.updateHead(
         SequencedTime(resubscriptionTs),
         EffectiveTime(
@@ -791,14 +785,11 @@ class ConnectedSynchronizer(
             override def name: String = s"connected-synchronizer-$psid"
 
             override def subscriptionStartsAt(
-                start: SubscriptionStart,
-                synchronizerTimeTracker: SynchronizerTimeTracker,
+                start: SubscriptionStart
             )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
               Seq(
-                topologyProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(
-                  traceContext
-                ),
-                trafficProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(traceContext),
+                topologyProcessor.subscriptionStartsAt(start)(traceContext),
+                trafficProcessor.subscriptionStartsAt(start)(traceContext),
               ).parSequence_
 
             override def apply(
@@ -1155,12 +1146,7 @@ class ConnectedSynchronizer(
     override def run()(implicit traceContext: TraceContext): Unit = promiseUSFactory.close()
   })(TraceContext.empty)
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    // TODO(i32384): remove this log when the investigation is done.
-    noTracingLogger.debug(
-      "ConnectedSynchronizer close initiated",
-      new Throwable("close origin stack"),
-    )
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
     // As the commitment and protocol processors use the sequencer client to send messages, close
     // them before closing the synchronizerHandle. Both of them will ignore the requests from the message dispatcher
     // after they get closed.
@@ -1182,7 +1168,6 @@ class ConnectedSynchronizer(
         )(logger),
       )
     )
-  }
 
   override def toString: String =
     s"ConnectedSynchronizer(synchronizerId=$psid, participantId=$participantId)"

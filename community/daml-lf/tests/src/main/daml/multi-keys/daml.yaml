@@ -7,7 +7,7 @@ override-components:
   daml-script:
     version: $DAML_VERSION
 build-options:
-- --target=2.3-staging
+- --target=2.3
 name: MultiKeys-v23
 parties:
 - Alice

@@ -231,9 +231,12 @@ class InMemorySynchronizerConnectionConfigStore(
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
     configuredSynchronizerMap.values.toSeq
 
-  /** We have no cache so is effectively a noop. */
+  /** We have no cache, so this is a noop. */
   override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.unit
+
+  /** We have no cache, so this is a noop. */
+  override def clearCache()(implicit traceContext: TraceContext): Unit = ()
 
   override def close(): Unit = ()
 

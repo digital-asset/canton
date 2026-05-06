@@ -100,7 +100,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
 
   val featureNUCK: Feature = Feature(
     name = "Non-unique contract keys",
-    versionRange = VersionRange.From(v2_3_1), // dev whilst developing, then 2.3(-rcn)
+    versionRange = VersionRange.From(v2_3),
   )
 
   val featureFetchBykey: Feature = Feature(
@@ -120,7 +120,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
 
   val featureContractKeys: Feature = Feature(
     name = "Contract Keys",
-    versionRange = VersionRange.From(v2_3_1),
+    versionRange = VersionRange.From(v2_3),
   )
 
   val featureFlatArchive: Feature = Feature(
@@ -160,7 +160,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
 
   val featureExtendedCryptoPrimitives: Feature = Feature(
     name = "Extended crypto primitives",
-    versionRange = VersionRange.From(v2_3_1),
+    versionRange = VersionRange.From(v2_3),
   )
 
   val allFeatures: List[Feature] = List(

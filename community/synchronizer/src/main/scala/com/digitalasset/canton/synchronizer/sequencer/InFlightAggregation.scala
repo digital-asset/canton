@@ -3,21 +3,25 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import cats.data.Chain
+import cats.data.{Chain, EitherT}
 import cats.syntax.either.*
-import com.digitalasset.canton.checked
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{
+  Signature,
+  SyncCryptoApi,
+  SyncCryptoClient,
+  SynchronizerCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.sequencing.protocol.AggregationRule
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
+import com.digitalasset.canton.sequencing.protocol.{AggregationBySender, AggregationRule}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable.SortedMap
+import scala.concurrent.ExecutionContext
 
 /** Stores the state of an in-flight aggregation of submission requests.
   *
@@ -35,22 +39,23 @@ import scala.collection.immutable.SortedMap
   *   stop being in-flight when this timestamp has elapsed
   * @param rule
   *   The aggregation rule describing the eligible members and the threshold to reach
+  * @param cachedDeliveredAt
+  *   computed delivery timestamp of the inflight aggregation, cached to avoid recomputation.
   */
-final case class InFlightAggregation private (
+final case class InFlightAggregation(
     aggregatedSenders: SortedMap[Member, AggregationBySender],
     maxSequencingTimestamp: CantonTimestamp,
     rule: AggregationRule,
+    cachedDeliveredAt: Option[Option[CantonTimestamp]] = None,
 ) extends PrettyPrinting
     with HasLoggerName {
   import InFlightAggregation.*
 
-  /** The sequencing timestamp at which this aggregatable submission was delivered, if so. */
-  lazy val deliveredAt: Option[CantonTimestamp] =
-    Option
-      .when(aggregatedSenders.sizeCompare(rule.threshold.value) >= 0)(
-        aggregatedSenders.values.map(_.sequencingTimestamp).maxOption
-      )
-      .flatten
+  def tryIsDeliveredAt: Option[CantonTimestamp] = cachedDeliveredAt.getOrElse(
+    throw new IllegalStateException(
+      "Inflight aggregation must precompute deliveredAt before using this method"
+    )
+  )
 
   /** The aggregated signatures on the closed envelopes in the aggregatable submission request, in
     * the same order as the envelopes are in the batch.
@@ -63,25 +68,128 @@ final case class InFlightAggregation private (
   def aggregatedSignatures: Seq[Seq[Signature]] =
     aggregatedSenders.values.map(_.signatures).transpose.map(_.flatten.toSeq).toSeq
 
+  /** Recompute aggregation delivery times (used after restart)
+    *
+    * @param sequencingTimestamp
+    *   the timestamp at which we are recovering the in-flight aggregation. Just used for
+    *   consistency checking as we must not have any signature with a sequencing timestamp after
+    *   this timestamp.
+    * @param latestSequencerEventTimestamp
+    *   the timestamp of the last event ticking the topology client
+    */
+  def prepareForNewAggregation(
+      sequencingTimestamp: CantonTimestamp,
+      latestSequencerEventTimestamp: Option[CantonTimestamp],
+      syncCryptoClient: SynchronizerCryptoClient,
+  )(implicit
+      loggingContext: NamedLoggingContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[InFlightAggregation] =
+    // if we haven't yet computed the delivered at, we will do it now
+    if (cachedDeliveredAt.isEmpty) {
+      val ret =
+        // we can assume here that no signature was added to the aggregation after it previously got delivered.
+        // otherwise, tryAggregate would have returned AlreadyDelivered
+        // this means that we can evaluate the valid signatures at the latest sequencing timestamp
+        aggregatedSenders.values
+          .map(_.sequencingTimestamp)
+          .maxOption
+          .map { maxSequencingTime =>
+            ErrorUtil.requireState(
+              maxSequencingTime <= sequencingTimestamp,
+              s"Cannot prepare in-flight aggregation for new aggregation at sequencing timestamp $sequencingTimestamp because it contains signatures with sequencing timestamp up to $maxSequencingTime",
+            )
+            // We need to be careful with the snapshot we are using for computing the delivered at and use the
+            // standard method for finding the right snapshot in the sequencer, respecting the events that
+            // this client has seen.
+            SyncCryptoClient
+              .getSnapshotForTimestamp(
+                syncCryptoClient,
+                maxSequencingTime,
+                latestSequencerEventTimestamp,
+              )
+              .flatMap { snapshot =>
+                rule.input.computeDeliveredAt(aggregatedSenders, snapshot)
+              }
+          }
+          .getOrElse(FutureUnlessShutdown.pure(None))
+      ret.map {
+        case Some((deliveredAt, cleanedSignatures)) =>
+          copy(cachedDeliveredAt = Some(Some(deliveredAt)), aggregatedSenders = cleanedSignatures)
+        case None => copy(cachedDeliveredAt = Some(None))
+      }
+    } else {
+      FutureUnlessShutdown.pure(this)
+    }
+
   def tryAggregate(
-      aggregatedSender: AggregatedSender
-  ): Either[InFlightAggregationError, InFlightAggregation] = {
+      aggregatedSender: AggregatedSender,
+      syncCryptoApi: SyncCryptoApi,
+  )(implicit
+      loggingContext: NamedLoggingContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, InFlightAggregationError, InFlightAggregation] = {
     val sender = aggregatedSender.sender
     val timestamp = aggregatedSender.aggregation.sequencingTimestamp
-    require(
+    ErrorUtil.requireState(
       timestamp <= maxSequencingTimestamp,
       s"Cannot aggregate submission by $sender with sequencing timestamp $timestamp after the max sequencing time at $maxSequencingTimestamp",
     )
     for {
-      _ <- deliveredAt.toLeft(()).leftMap(AlreadyDelivered.apply)
-      _ <- aggregatedSenders
-        .get(sender)
-        .toLeft(())
-        .leftMap(aggregationBySender =>
-          AggregationStuffing(sender, aggregationBySender.sequencingTimestamp)
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        tryIsDeliveredAt.toLeft(()).leftMap(AlreadyDelivered.apply)
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        aggregatedSenders
+          .get(sender)
+          .toLeft(())
+          .leftMap(aggregationBySender =>
+            AggregationStuffing(sender, aggregationBySender.sequencingTimestamp)
+          )
+      )
+      newAggregatedSenders = aggregatedSenders + (sender -> aggregatedSender.aggregation)
+      deliveredAtAndCleanedSignatures <- EitherT.right(
+        rule.input.computeDeliveredAt(newAggregatedSenders, syncCryptoApi)
+      )
+    } yield {
+      deliveredAtAndCleanedSignatures match {
+        case Some((deliveredAt, cleanedSignatures)) =>
+          copy(
+            aggregatedSenders = cleanedSignatures,
+            cachedDeliveredAt = Some(Some(deliveredAt)),
+          )
+        case None =>
+          copy(
+            aggregatedSenders = newAggregatedSenders,
+            cachedDeliveredAt = Some(None),
+          )
+      }
+
+    }
+
+  }
+
+  def extendWithValidButMaybeDuplicateAggregation(
+      validAggregateSender: AggregatedSender
+  ): InFlightAggregation = {
+    val sender = validAggregateSender.sender
+    val timestamp = validAggregateSender.aggregation.sequencingTimestamp
+    require(
+      timestamp <= maxSequencingTimestamp,
+      s"Cannot aggregate submission by $sender with sequencing timestamp $timestamp after the max sequencing time at $maxSequencingTimestamp",
+    )
+    aggregatedSenders.get(sender) match {
+      case Some(current) =>
+        require(
+          current == validAggregateSender.aggregation,
+          s"aggregation for $sender already exists but is different than the new one",
         )
-    } yield this.copy(
-      aggregatedSenders = aggregatedSenders + (sender -> aggregatedSender.aggregation)
+      case _ =>
+    }
+    InFlightAggregation.tryCreate(
+      aggregatedSenders = aggregatedSenders + (sender -> validAggregateSender.aggregation),
+      maxSequencingTimestamp = maxSequencingTimestamp,
+      rule = rule,
     )
   }
 
@@ -116,35 +224,26 @@ final case class InFlightAggregation private (
           sequencingTimestamp <= timestamp
       }
       _ <- Option.when(projectedSenders.nonEmpty)(())
-    } yield new InFlightAggregation(
-      projectedSenders,
-      maxSequencingTimestamp,
-      rule,
-    )
+    } yield {
+      new InFlightAggregation(
+        projectedSenders,
+        maxSequencingTimestamp,
+        rule,
+        cachedDeliveredAt = None,
+      )
+    }
 
   override protected def pretty: Pretty[this.type] = prettyOfClass(
     param("aggregated senders", _.aggregatedSenders),
     param("max sequencing time", _.maxSequencingTimestamp),
-    paramIfNonEmpty("sequencing timestamp", _.deliveredAt),
+    paramIfNonEmpty("sequencing timestamp", _.cachedDeliveredAt.flatten),
     param("rule", _.rule),
   )
 
-  @VisibleForTesting
-  def copy(
-      aggregatedSenders: SortedMap[Member, AggregationBySender] = this.aggregatedSenders,
-      maxSequencingTimestamp: CantonTimestamp = this.maxSequencingTimestamp,
-      rule: AggregationRule = this.rule,
-  ): InFlightAggregation =
-    InFlightAggregation.tryCreate(
-      aggregatedSenders,
-      maxSequencingTimestamp,
-      rule,
-    )
-
   /** @throws java.lang.IllegalStateException if the class invariant does not hold */
   def checkInvariant()(implicit loggingContext: NamedLoggingContext): Unit =
-    InFlightAggregation
-      .checkInvariant(aggregatedSenders, maxSequencingTimestamp, rule)
+    rule.input
+      .checkInvariant(aggregatedSenders, maxSequencingTimestamp)
       .valueOr(err => ErrorUtil.invalidState(err))
 }
 
@@ -155,13 +254,15 @@ object InFlightAggregation {
       maxSequencingTimestamp: CantonTimestamp,
       rule: AggregationRule,
   ): Either[String, InFlightAggregation] =
-    checkInvariant(aggregatedSenders, maxSequencingTimestamp, rule).map(_ =>
+    rule.input.checkInvariant(aggregatedSenders, maxSequencingTimestamp).map { _ =>
+      val sortedSenders = SortedMap.from(aggregatedSenders)
       new InFlightAggregation(
-        SortedMap.from(aggregatedSenders),
+        sortedSenders,
         maxSequencingTimestamp,
         rule,
+        cachedDeliveredAt = None,
       )
-    )
+    }
 
   def tryCreate(
       aggregatedSenders: Map[Member, AggregationBySender],
@@ -184,40 +285,12 @@ object InFlightAggregation {
     )
 
   def initial(fresh: FreshInFlightAggregation): InFlightAggregation =
-    checked(
-      tryCreate(Map.empty, fresh.maxSequencingTimestamp, fresh.rule)
+    InFlightAggregation(
+      aggregatedSenders = SortedMap.empty,
+      maxSequencingTimestamp = fresh.maxSequencingTimestamp,
+      rule = fresh.rule,
+      cachedDeliveredAt = None,
     )
-
-  private def checkInvariant(
-      aggregatedSenders: Map[Member, AggregationBySender],
-      maxSequencingTimestamp: CantonTimestamp,
-      rule: AggregationRule,
-  ): Either[String, Unit] = {
-    val uneligibleAggregated = aggregatedSenders.keys.filterNot(rule.eligibleSenders.contains)
-    for {
-      _ <- Either.cond(
-        uneligibleAggregated.isEmpty,
-        (),
-        show"non-eligible members' submission requests have been aggregated: ${uneligibleAggregated.toSeq}",
-      )
-      envelopeCounts = aggregatedSenders.values.map(_.signatures.size).toSet
-      _ <- Either.cond(
-        envelopeCounts.sizeIs <= 1,
-        (),
-        show"aggregated senders have varying numbers of envelopes: $envelopeCounts",
-      )
-      lateSenders = aggregatedSenders.collect {
-        case (sender, aggregationBySender)
-            if aggregationBySender.sequencingTimestamp > maxSequencingTimestamp =>
-          sender -> aggregationBySender.sequencingTimestamp
-      }
-      _ <- Either.cond(
-        lateSenders.isEmpty,
-        (),
-        show"aggregated senders' sequencing timestamp is after the max sequencing time at $maxSequencingTimestamp: $aggregatedSenders",
-      )
-    } yield ()
-  }
 
   sealed trait InFlightAggregationError extends Product with Serializable
 
@@ -229,15 +302,5 @@ object InFlightAggregation {
     */
   final case class AggregationStuffing(sender: Member, sequencingTimestamp: CantonTimestamp)
       extends InFlightAggregationError
-
-  final case class AggregationBySender(
-      sequencingTimestamp: CantonTimestamp,
-      signatures: Seq[Seq[Signature]],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[this.type] = prettyOfClass(
-      param("sequencing timestamp", _.sequencingTimestamp),
-      param("signatures", _.signatures),
-    )
-  }
 
 }

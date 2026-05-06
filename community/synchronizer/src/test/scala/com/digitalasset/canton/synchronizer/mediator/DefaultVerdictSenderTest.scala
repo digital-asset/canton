@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Signature, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.error.MediatorError.MalformedMessage
@@ -69,8 +69,9 @@ class DefaultVerdictSenderTest
     threshold = PositiveInt.tryCreate(2),
   )
   private val expectedMediatorGroupAggregationRule = Some(
-    AggregationRule(
+    AggregationRule.activeMediators(
       NonEmpty.mk(Seq, mediatorGroup.active(0), mediatorGroup.active.tail*),
+      NonNegativeInt.zero,
       PositiveInt.tryCreate(2),
       testedProtocolVersion,
     )

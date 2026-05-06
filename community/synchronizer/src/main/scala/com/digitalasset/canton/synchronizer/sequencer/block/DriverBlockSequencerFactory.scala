@@ -141,6 +141,7 @@ class DriverBlockSequencerFactory[C](
       metrics,
       nodeParameters.batchingConfig,
       consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
+      disableSubmissionChecksForTesting = nodeParameters.disableSubmissionChecksForTesting,
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,

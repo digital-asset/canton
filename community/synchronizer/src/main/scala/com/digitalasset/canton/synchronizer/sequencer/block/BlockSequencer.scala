@@ -138,6 +138,7 @@ class BlockSequencer(
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
     consistencyChecks: Boolean,
+    disableSubmissionChecksForTesting: Boolean,
     loggerFactory: NamedLoggerFactory,
     exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
@@ -168,6 +169,7 @@ class BlockSequencer(
       lsuSequencingBounds,
       drSequencingTimeUpperBound,
       rateLimitManagerO = Some(blockRateLimitManager),
+      disableSubmissionChecksForTesting = disableSubmissionChecksForTesting,
     )
     with DatabaseSequencerIntegration
     with NamedLogging
@@ -530,52 +532,58 @@ class BlockSequencer(
     logger.debug(
       s"Request to send submission with id ${submission.messageId} with max sequencing time $maxSequencingTime from $sender to ${batch.allRecipients}. $maybeDelayedProcessingMessage"
     )
+    val validateET: EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+      if (disableSubmissionChecksForTesting) {
+        EitherTUtil.unitUS
+      } else
+        for {
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+            !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
+            TrafficControlErrors.LsuTrafficNotInitialized.Error(),
+          )
+          _ <-
+            if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
+              EitherT.right(lsuTrafficInitialized.futureUS)
+            else EitherTUtil.unitUS
+          _ <-
+            if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
+            else EitherTUtil.unitUS
+          _ <- enforceThroughputCap(submission)
+          _ <- rejectSubmissionsIfOverloaded(submission)
+          _ <- validateMaxSequencingTime(submission)
+          // TODO(#19476): Why we don't check group recipients here?
+          approximateSnapshot <- EitherT.liftF(
+            cryptoApi.currentSnapshotApproximation
+          )
+          _ <- SubmissionRequestValidations
+            .checkSenderAndRecipientsAreRegistered(
+              submission,
+              // Using currentSnapshotApproximation due to members registration date
+              // expected to be before submission sequencing time
+              approximateSnapshot.ipsSnapshot,
+            )
+            .leftMap(_.toSequencerDeliverError)
+          _ <- {
+            if (batch.envelopes.isEmpty)
+              EitherT.right(FutureUnlessShutdown.unit) // Allow timeproofs
+            else checkBeforeUpgradeTime(approximateSnapshot)
+          }
+          _ = if (logEventDetails)
+            logger.debug(
+              s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
+                  .printAdHoc(submission.toProtoVersioned)}"
+            )
+          _ <- enforceRateLimiting(signedSubmission).leftWiden[CantonBaseError]
+        } yield ()
 
-    for {
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        !delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
-        TrafficControlErrors.LsuTrafficNotInitialized.Error(),
-      )
-      _ <-
-        if (!skipLsuChecks && delayRequestsBeforeLsuTrafficInit)
-          EitherT.right(lsuTrafficInitialized.futureUS)
-        else EitherTUtil.unitUS
-      _ <-
-        if (!skipLsuChecks) rejectSubmissionsBeforeOrAtSequencingTimeLowerBound()
-        else EitherTUtil.unitUS
-      _ <- enforceThroughputCap(submission)
-      _ <- rejectSubmissionsIfOverloaded(submission)
-      // TODO(i17584): revisit the consequences of no longer enforcing that
-      //  aggregated submissions with signed envelopes define a topology snapshot
-      _ <- validateMaxSequencingTime(submission)
-      // TODO(#19476): Why we don't check group recipients here?
-      approximateSnapshot <- EitherT.liftF(
-        cryptoApi.currentSnapshotApproximation
-      )
-      _ <- SubmissionRequestValidations
-        .checkSenderAndRecipientsAreRegistered(
-          submission,
-          // Using currentSnapshotApproximation due to members registration date
-          // expected to be before submission sequencing time
-          approximateSnapshot.ipsSnapshot,
-        )
-        .leftMap(_.toSequencerDeliverError)
-      _ <- {
-        if (batch.envelopes.isEmpty) EitherT.right(FutureUnlessShutdown.unit) // Allow timeproofs
-        else checkBeforeUpgradeTime(approximateSnapshot)
-      }
-      _ = if (logEventDetails)
-        logger.debug(
-          s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
-              .printAdHoc(submission.toProtoVersioned)}"
-        )
-      _ <- enforceRateLimiting(signedSubmission)
-      _ <- EitherT(
+    validateET.flatMap { _ =>
+      EitherT(
         futureSupervisor.supervised(
           s"Sending submission request with id ${submission.messageId} from $sender to ${batch.allRecipients}"
         )(blockOrderer.send(signedSubmission).value)
       ).mapK(FutureUnlessShutdown.outcomeK).leftWiden[CantonBaseError]
-    } yield ()
+    }
+
   }
 
   private def checkBeforeUpgradeTime(

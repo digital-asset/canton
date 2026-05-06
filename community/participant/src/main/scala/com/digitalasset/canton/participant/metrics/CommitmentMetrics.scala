@@ -13,7 +13,6 @@ import com.daml.metrics.api.{
   MetricQualification,
   MetricsContext,
 }
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.topology.ParticipantId
 
 import scala.collection.concurrent.TrieMap
@@ -38,13 +37,9 @@ class CommitmentHistograms(parent: MetricName)(implicit inventory: HistogramInve
 }
 
 class CommitmentMetrics private[metrics] (
-    synchronizerAlias: SynchronizerAlias,
     histograms: CommitmentHistograms,
     metricsFactory: LabeledMetricsFactory,
-) {
-  private implicit val metricsContext: MetricsContext = new MetricsContext(
-    Map("sync" -> synchronizerAlias.unwrap)
-  )
+)(implicit context: MetricsContext) {
   private val prefix = histograms.prefix
 
   val compute: Timer = metricsFactory.timer(histograms.compute.info)
@@ -87,15 +82,16 @@ class CommitmentMetrics private[metrics] (
     """Participant nodes compute bilateral commitments at regular intervals and send them. This metric
     |is the default indicator of a counter-participant being slow.""" + commonCounterParticipantLatencyDescription
 
-  private val distinguishedCounterParticipantLatencyDescription: String = """Participant nodes compute bilateral commitments at regular intervals and send them. This metric
-                                                                      |indicates that a distinguished counter-participant is slow, i.e., the participant cannot confirm that
-                                                                      |its state is the same with that of a counter-participant with whom the operator has an important
-                                                                      |business relation.""" + commonCounterParticipantLatencyDescription
+  private val distinguishedCounterParticipantLatencyDescription: String =
+    """Participant nodes compute bilateral commitments at regular intervals and send them. This metric
+    |indicates that a distinguished counter-participant is slow, i.e., the participant cannot confirm that
+    |its state is the same with that of a counter-participant with whom the operator has an important
+    |business relation.""" + commonCounterParticipantLatencyDescription
 
   val largestDistinguishedCounterParticipantLatency: Gauge[Long] =
     metricsFactory.gauge(
       MetricInfo(
-        prefix :+ s"${synchronizerAlias.unquoted}.largest-distinguished-counter-participant-latency",
+        prefix :+ "largest-distinguished-counter-participant-latency",
         summary =
           "The highest latency in micros for commitments outstanding from distinguished counter-participants " +
             "for more than a threshold-number of reconciliation intervals.",
@@ -108,7 +104,7 @@ class CommitmentMetrics private[metrics] (
   val largestCounterParticipantLatency: Gauge[Long] =
     metricsFactory.gauge(
       MetricInfo(
-        prefix :+ s"${synchronizerAlias.unquoted}.largest-counter-participant-latency",
+        prefix :+ "largest-counter-participant-latency",
         summary =
           "The highest latency in micros for commitments outstanding from counter-participants for more than a " +
             "threshold-number of reconciliation intervals.",
@@ -123,20 +119,23 @@ class CommitmentMetrics private[metrics] (
     TrieMap.empty[ParticipantId, Eval[Gauge[Long]]]
 
   def counterParticipantLatency(participant: ParticipantId): Gauge[Long] = {
-    def createMonitoredParticipant: Gauge[Long] = metricsFactory.gauge(
-      MetricInfo(
-        prefix :+ s"${synchronizerAlias.unquoted}.counter-participant-latency.${participant.uid.identifier}",
-        summary =
-          "The latency of commitments outstanding from the given counter-participants measured in micros.",
-        description =
-          """Participant nodes compute bilateral commitments at regular intervals and send them. This metric shows
-          |the latency of the given counter-participant, measured by subtracting the counter-participant latency from
-          |the most recent period processed by the participant. The counter-participant has to send a commitment at
-          |least once in order to appear here.""",
-        qualification = MetricQualification.Debug,
-      ),
-      0L,
-    )
+    def createMonitoredParticipant: Gauge[Long] = {
+      val mc = context.withExtraLabels("counter-participant" -> participant.uid.toProtoPrimitive)
+      metricsFactory.gauge(
+        MetricInfo(
+          prefix :+ "counter-participant-latency",
+          summary =
+            "The latency of commitments outstanding from the given counter-participants measured in micros.",
+          description =
+            """Participant nodes compute bilateral commitments at regular intervals and send them. This metric shows
+              |the latency of the given counter-participant, measured by subtracting the counter-participant latency from
+              |the most recent period processed by the participant. The counter-participant has to send a commitment at
+              |least once in order to appear here.""",
+          qualification = MetricQualification.Debug,
+        ),
+        0L,
+      )(mc)
+    }
 
     individuallyMonitoredCounterParticipantLatencies
       .getOrElseUpdate(participant, Eval.later(createMonitoredParticipant))
@@ -208,6 +207,18 @@ class CommitmentMetrics private[metrics] (
       description =
         """Timestamp of the latest checkpointed ACS commitment in microseconds. Crash recovery will start reingesting from this timestamp on or from the latest locally completed ACS commitment interval on, whichever is later.""",
       qualification = MetricQualification.Latency,
+    ),
+    0L,
+  )
+
+  val activeStakeholderGroups: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "active-stakeholder-groups",
+      summary =
+        "Record the number of stakeholder groups with active contracts on this participants",
+      description =
+        "The number of stakeholder groups for which the participant has at least one active contract in the current active contract store.",
+      qualification = MetricQualification.Saturation,
     ),
     0L,
   )

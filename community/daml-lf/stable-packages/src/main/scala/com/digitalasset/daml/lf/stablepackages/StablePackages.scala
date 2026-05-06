@@ -4,10 +4,10 @@
 package com.digitalasset.daml.lf
 package stablepackages
 
+import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.ArchiveDecoder
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, StablePackage, StablePackages}
-import com.digitalasset.daml.lf.{VersionRange, archive}
 
 final object StablePackagesV2
     extends StablePackagesImpl("compiler/damlc/stable-packages/stable-packages-manifest-v2.txt")
@@ -16,7 +16,7 @@ private[daml] object StablePackages {
   val stablePackages: StablePackages = StablePackagesV2
 
   /** The IDs of stable packages compatible with the provided version range. */
-  def ids(allowedLanguageVersions: VersionRange[LanguageVersion]): Set[Ref.PackageId] =
+  def ids(allowedLanguageVersions: Seq[LanguageVersion]): Set[Ref.PackageId] =
     StablePackages.stablePackages.allPackages.view
       .filter(p => allowedLanguageVersions.contains(p.pkg.languageVersion))
       .map(_.packageId)

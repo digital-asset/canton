@@ -100,7 +100,7 @@ final class GeneratorsProtocol(
       for {
         threshold <- Arbitrary.arbitrary[PositiveInt]
         eligibleMembers <- Generators.nonEmptyListGen[Member]
-      } yield AggregationRule(eligibleMembers, threshold, protocolVersion)
+      } yield AggregationRule.testing(eligibleMembers, threshold, protocolVersion)
     )
 
   implicit val closedUncompressedEnvelopeArb: Arbitrary[ClosedUncompressedEnvelope] = Arbitrary(

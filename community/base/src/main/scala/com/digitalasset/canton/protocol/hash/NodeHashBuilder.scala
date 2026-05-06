@@ -5,33 +5,22 @@ package com.digitalasset.canton.protocol.hash
 
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.protocol.LfHash
-import com.digitalasset.canton.protocol.hash.NodeHashBuilder.NodeEncodingV1
-import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, SerializationVersion}
 
+import scala.collection.immutable.SortedMap
+
 import TransactionHash.*
 
-/** Hash builder with additional methods to encode and hash nodes.
+/** Hash builder with additional methods to encode and hash nodes. Specific hashing version schemes
+  * must implement this class.
   */
 private abstract class NodeHashBuilder(
     purpose: HashPurpose,
     hashTracer: HashTracer,
     protected val hashingSchemeVersion: HashingSchemeVersion,
 ) extends LfValueHashBuilder(purpose, hashTracer) {
-
-  def addNodeEncodingVersion(nodeVersion: Int): this.type =
-    addByte(
-      nodeVersion.byteValue,
-      byte => s"${HexString.toHexString(byte)} (Node Encoding Version)",
-    )
-
-  def addMetadataEncodingVersion(metadataVersion: Int): this.type =
-    addByte(
-      metadataVersion.byteValue,
-      byte => s"${HexString.toHexString(byte)} (Metadata Encoding Version)",
-    )
 
   /** Adds a node to this builder, and returns it
     */
@@ -44,7 +33,7 @@ private abstract class NodeHashBuilder(
 
   /** Creates a new builder, using the provided hash tracer
     */
-  protected def newBuilder(hashTracer: HashTracer): NodeHashBuilder
+  private[hash] def newBuilder(hashTracer: HashTracer): NodeHashBuilder
 
   private[hash] final def hashNode(
       node: Node,
@@ -62,7 +51,6 @@ private abstract class NodeHashBuilder(
       )
 
     newBuilder(hashTracer)
-      .addNodeEncodingVersion(NodeEncodingV1)
       .addNode(node, nodeSeed, nodes, nodeSeeds)
       .finish()
   }
@@ -89,11 +77,9 @@ private abstract class NodeHashBuilder(
 }
 
 private object NodeHashBuilder {
-  // Version of the protobuf used to encode nodes defined in the interactive_submission_data.proto
-  private[hash] val NodeEncodingV1 = 1
   private[hash] val HashingVersionToMaxSupportedLFSerializationVersionMapping
-      : Map[HashingSchemeVersion, SerializationVersion] =
-    Map(
+      : SortedMap[HashingSchemeVersion, SerializationVersion] =
+    SortedMap(
       HashingSchemeVersion.V2 -> SerializationVersion.V1,
       HashingSchemeVersion.V3 -> SerializationVersion.V2,
     )
@@ -109,6 +95,7 @@ private object NodeHashBuilder {
     case object ExerciseTag extends NodeTag(1)
     case object FetchTag extends NodeTag(2)
     case object RollbackTag extends NodeTag(3)
+    case object QueryByKey extends NodeTag(4)
   }
 
   @throws[NodeHashingError]
@@ -143,9 +130,8 @@ private object NodeHashBuilder {
       hashingSchemeVersion: HashingSchemeVersion,
   ): NodeHashBuilder = hashingSchemeVersion match {
     case HashingSchemeVersion.V2 =>
-      new NodeHashBuilderV2(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+      new v2.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
     case HashingSchemeVersion.V3 =>
-      // TODO(i32169): Obviously use V3 here when it's implemented
-      new NodeHashBuilderV2(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+      new v3.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
   }
 }

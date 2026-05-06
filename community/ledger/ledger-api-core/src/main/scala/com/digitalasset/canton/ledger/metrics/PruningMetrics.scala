@@ -29,4 +29,20 @@ class PruningMetrics private[metrics] (prefix: MetricName, factory: LabeledMetri
         MetricQualification.Debug,
       )
     )
+  val contractPruningRetried: MetricHandle.Meter =
+    factory.meter(
+      MetricInfo(
+        prefix :+ "contract_pruning_retried",
+        """Optimistic locking with contention might result in retries. This metric tracks if the operation was retried this many times.""",
+        MetricQualification.Debug,
+      )
+    )
+  val contractPruningBlocked: MetricHandle.Counter =
+    factory.counter(
+      MetricInfo(
+        prefix :+ "contract_pruning_blocked",
+        """Optimistic locking with contention might result in retries. This metric tracks if maximum amount of configured retries reached.""",
+        MetricQualification.Debug,
+      )
+    )
 }

@@ -85,8 +85,8 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
         decisionTimeout should be > config.NonNegativeFiniteDuration.ofSeconds(10)
       }
 
-  private def fetchTime(s: LocalSequencerReference): CantonTimestamp =
-    s.underlying.value.sequencer.timeTracker.fetchTime().futureValueUS
+  private def approximateTime(s: LocalSequencerReference): CantonTimestamp =
+    s.underlying.value.sequencer.syncCrypto.approximateTimestamp
 
   "In-flight requests" should {
     "be timed out around LSU" in { implicit env =>
@@ -183,7 +183,7 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
 
           performSynchronizerNodesLsu(fixture)
 
-          fetchTime(sequencer1) should be < upgradeTime
+          approximateTime(sequencer1) should be < upgradeTime
 
           /*
            To prevent the old mediator from sending a verdict (participants should do local timeout), we stop it.
@@ -221,12 +221,12 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
           }
 
           // Check that time offsetting after upgrade works on old synchronizer
-          fetchTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
+          approximateTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
 
           // And also after a restart
           sequencer1.stop()
           sequencer1.start()
-          fetchTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
+          approximateTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
 
           // TODO(#27349) Without this ping, the fetch_time allowing to timeout request 1 is never done
           participant1.health.ping(participant1)

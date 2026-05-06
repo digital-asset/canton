@@ -28,7 +28,7 @@ Before starting, ensure you have the following installed:
 
 - **Node.js and npm** — Download from https://nodejs.org/en/download/. Recommended version: `18.20.x` or later.
 - **Dpm** — Install following :externalref:`these instructions<dpm-install>`
-- **Canton** — Includes pre-built examples. See the :externalref:`Canton demo<demo>` for details.
+- **Canton** — Includes pre-built examples. See the :externalref:`Canton installation<install-release>` for details.
 
 Example TypeScript Project with WebSockets
 ------------------------------------------

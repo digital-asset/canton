@@ -567,6 +567,7 @@ class MediatorNodeBootstrap(
               .createProcessorAndClientForSynchronizer(
                 synchronizerTopologyStore,
                 upgradeTimeFromPredecessor = None,
+                sequencerSnapshotTimestamp = None,
                 crypto.pureCrypto,
                 arguments.parameterConfig,
                 arguments.config.topology,
@@ -575,7 +576,7 @@ class MediatorNodeBootstrap(
                 arguments.metrics.topologyCache,
                 arguments.futureSupervisor,
                 synchronizerLoggerFactory,
-              )()
+              )
           )
       (topologyProcessor, topologyClient) = topologyProcessorAndClient
       _ = ips.add(topologyClient)

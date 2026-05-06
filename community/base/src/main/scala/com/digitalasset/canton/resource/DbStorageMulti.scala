@@ -182,11 +182,6 @@ final class DbStorageMulti private (
   override def isActive: Boolean = writeConnectionPool.isActive
 
   override def onClosed(): Unit = {
-    // TODO(i32384): remove this log when the investigation is done.
-    noTracingLogger.debug(
-      "DbStorageMulti close initiated",
-      new Throwable("close origin stack"),
-    )
     // Closing first the pool and then the executor, otherwise we may get rejected execution exceptions for the pool's connection health checks.
     // Slick by default closes first the executor and then the source, which does not work here.
     val clockCloseable = if (closeClock) Seq(clock) else Seq.empty

@@ -1226,14 +1226,6 @@ class TransactionProcessingSteps(
         .map(ContractInstance.assignCreationTime(_, ledgerEffectiveTime))
         .toSeq
 
-    val contractAuthenticationData =
-      // We deliberately do not forward the authentication data
-      // for retroactively divulged contracts since they are not visible on the Ledger API
-      // For immediately divulged contracts we populate this as those are visible.
-      (createdContracts ++ witnessed).view.map { case (contractId, contract) =>
-        contractId -> contract.inst.authenticationData
-      }.toMap
-
     val acceptedEvent =
       (acsChangeFactory: AcsChangeFactory) =>
         (internalContractIds: Map[LfContractId, Long]) => {
@@ -1264,9 +1256,10 @@ class TransactionProcessingSteps(
             recordTime = requestTime,
             externalTransactionHash = externalTransactionHash,
             acsChangeFactory = acsChangeFactory,
-            contractInfos =
-              contractAuthenticationData.map { case (contractId, contractAuthenticationData) =>
-                contractId -> ContractInfo(
+            contractInfos = contractsToBeStored.map { contractInstance =>
+              val contractId = contractInstance.contractId
+              contractId -> ContractInfo(
+                persistedContractInstance = PersistedContractInstance(
                   internalContractId = checked {
                     // the internal contract id must exist since we persisted the contracts before (in the ProtocolProcessor)
                     internalContractIds.getOrElse(
@@ -1276,10 +1269,11 @@ class TransactionProcessingSteps(
                       ),
                     )
                   },
-                  contractAuthenticationData = contractAuthenticationData,
-                  representativePackageId = SameAsContractPackageId,
-                )
-              },
+                  inst = contractInstance.inst,
+                ),
+                representativePackageId = SameAsContractPackageId,
+              )
+            }.toMap,
           )
         }
     CommitAndStoreContractsAndPublishEvent(

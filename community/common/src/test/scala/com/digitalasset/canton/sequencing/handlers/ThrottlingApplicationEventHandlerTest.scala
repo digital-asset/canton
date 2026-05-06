@@ -21,7 +21,6 @@ import com.digitalasset.canton.sequencing.{
   SubscriptionStart,
 }
 import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, FutureHelpers, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AnyWordSpec
@@ -99,10 +98,9 @@ class TestHandler(maximumInFlightEventBatches: PositiveInt, loggerFactory: Named
   val blockingHandler = new PossiblyIgnoredApplicationHandler[ClosedEnvelope] {
     override def name: String = "blocking-test-handler"
 
-    override def subscriptionStartsAt(
-        start: SubscriptionStart,
-        synchronizerTimeTracker: SynchronizerTimeTracker,
-    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = ???
+    override def subscriptionStartsAt(start: SubscriptionStart)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Unit] = ???
 
     override def apply(events: PossiblyIgnoredEnvelopeBox[ClosedEnvelope]): HandlerResult =
       FutureUnlessShutdown.pure(

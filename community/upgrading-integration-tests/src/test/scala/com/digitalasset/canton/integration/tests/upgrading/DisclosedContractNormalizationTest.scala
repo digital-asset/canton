@@ -43,7 +43,7 @@ class DisclosedContractNormalizationTest
   private val ec: ExecutionContext = executorService
 
   val engine = new Engine(
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange),
+    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersions),
     loggerFactory,
   )
 

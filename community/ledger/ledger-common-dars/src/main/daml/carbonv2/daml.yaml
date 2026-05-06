@@ -12,7 +12,7 @@ build-options:
 - --enable-interfaces=yes
 name: carbonv2-tests
 data-dependencies:
-- ../../../../scala-2.13/resource_managed/main/carbonv1-tests-1.0.0.dar
+- ../../scala-2.13/resource_managed/main/carbonv1-tests-1.0.0${LF_VERSION_SUFFIX}.dar
 source: .
 version: 1.0.0
 dependencies:

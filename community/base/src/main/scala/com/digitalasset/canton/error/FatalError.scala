@@ -20,6 +20,12 @@ object FatalError {
     val message =
       s"Fatal error occurred, crashing the node to recover from invalid state: $error\nStack trace:\n${formatStackTrace()}"
 
+    // async log appenders may not flush so the fatal error would be lost,
+    // so we print the message and stack trace to stderr before halting the process
+    System.err.println(s"FATAL: $message")
+    exceptionO.foreach(_.printStackTrace(System.err))
+    System.err.flush()
+
     exceptionO match {
       case Some(exception) => logger.error(message, exception)
       case None => logger.error(message)

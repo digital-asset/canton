@@ -377,9 +377,6 @@ class SequencerRateLimitManagerImpl(
     *   submission timestamp the sender claims to have used to compute the traffic cost
     * @param validationSnapshot
     *   validation snapshot to be used
-    * @param processingSequencerSignature
-    *   Optionally, signature of the sequencer that processed the request. This only is set at
-    *   sequencing time.
     * @param latestSequencerEventTimestamp
     *   Timestamp of the latest sequencer event timestamp.
     * @param warnIfApproximate

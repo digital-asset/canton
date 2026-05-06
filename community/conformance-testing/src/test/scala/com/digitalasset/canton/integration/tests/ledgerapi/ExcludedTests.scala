@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
-import com.daml.ledger.api.testtool.Tests
 import com.daml.ledger.api.testtool.infrastructure.TestConstraints
+import com.daml.ledger.api.testtool.runner.AvailableTests
 
 /** Discovers test case names that have to be excluded for a given tool x canton run of the ledger
   * API test tool suites.
@@ -21,14 +21,13 @@ object ExcludedTests {
     "UserManagementServiceIT",
   )
 
-  lazy val grpcOnlyTestNames: Seq[String] =
-    Tests
-      .default(timeoutScaleFactor = 1.0)
-      .flatMap(_.tests)
-      .collect {
-        case testCase if testCase.limitation.isInstanceOf[TestConstraints.GrpcOnly] =>
-          testCase.name
-      }
+  lazy val grpcOnlyTestNames: Seq[String] = AvailableTests.v2_2
+    .defaultTests(timeoutScaleFactor = 1.0)
+    .flatMap(_.tests)
+    .collect {
+      case testCase if testCase.limitation.isInstanceOf[TestConstraints.GrpcOnly] =>
+        testCase.name
+    }
 
   // TODO (i31440) GrpcOnlyTests.grpcOnlyTestNames is derived from local Test classes - not from actually downloaded tests tools jar
   // This is intentional - as we might want to introduce limitation such as VersionBelow(3.5.2) to mark tests that SHOULD not work on a newer version
