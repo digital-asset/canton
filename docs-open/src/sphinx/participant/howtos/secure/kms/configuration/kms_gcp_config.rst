@@ -22,6 +22,15 @@ node's configuration file. A KMS for GCP is configured in the following way:
 - ``key-ring-id`` specifies the keyring to use. Multi region keys are enabled for an entire keyring. Therefore, the KMS operator is responsible for setting the keyring correctly depending on the systems' needs.
 - ``audit-logging`` flag that enables logging of every call made to the GCP KMS
 
+.. note::
+   For each GCP cryptoKey, Canton automatically uses the latest non-destroyed cryptoKey version
+   it observes via ``listCryptoKeyVersions``. Canton-generated keys always have a single version
+   (``"1"``), but cryptoKeys whose key material was
+   `imported into GCP KMS <https://cloud.google.com/kms/docs/importing-a-key>`_ can have several
+   versions, and the version that holds the imported material is not necessarily ``"1"``. The
+   resolved version is cached once Canton sees it in the ``ENABLED`` state.
+   The ``cloudkms.cryptoKeyVersions.list`` IAM permission is required for this lookup.
+
 Configure GCP credentials and permissions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -44,6 +53,7 @@ Permissions for envelope encryption
 The following IAM permissions are required when using **envelope encryption**:
 
 - ``cloudkms.cryptoKeyVersions.create``
+- ``cloudkms.cryptoKeyVersions.list``
 - ``cloudkms.cryptoKeyVersions.useToEncrypt``
 - ``cloudkms.cryptoKeyVersions.useToDecrypt``
 - ``cloudkms.cryptoKeys.get``
@@ -58,6 +68,7 @@ Permissions for external KMS
 The following IAM permissions are required when using an **external KMS**, where keys are fully managed and used directly from GCP KMS:
 
 - ``cloudkms.cryptoKeyVersions.create``
+- ``cloudkms.cryptoKeyVersions.list``
 - ``cloudkms.cryptoKeyVersions.useToDecrypt``
 - ``cloudkms.cryptoKeyVersions.useToSign``
 - ``cloudkms.cryptoKeyVersions.get``

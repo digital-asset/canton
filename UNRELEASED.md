@@ -79,6 +79,13 @@ Three gauge metrics are available under `daml.participant.api.indexer` to monito
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- For GCP KMS, Canton now automatically targets the latest non-destroyed cryptoKey version (resolved
+  via `listCryptoKeyVersions` and cached once `ENABLED`) instead of hardcoding version `"1"`. This
+  enables using cryptoKeys whose key material was
+  [imported into GCP KMS](https://cloud.google.com/kms/docs/importing-a-key), where each import
+  creates a new cryptoKey version and the imported version is not necessarily `"1"`. Existing
+  Canton-generated keys are unaffected (they only ever have one version). The
+  `cloudkms.cryptoKeyVersions.list` IAM permission is now required.
 
 ### Preview Features
 - preview feature

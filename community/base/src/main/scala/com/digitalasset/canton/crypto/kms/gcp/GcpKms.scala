@@ -41,7 +41,9 @@ import org.bouncycastle.openssl.PEMParser
 import java.io.{IOException, StringReader}
 import java.util.UUID
 import scala.annotation.unused
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.jdk.CollectionConverters.*
 
 /** Stands for Google Cloud Platform - Key Management Service and is an internal KMS implementation
   * that wraps the necessary cryptographic functions from the GCP SDK.
@@ -63,10 +65,106 @@ class GcpKms(
 
   private lazy val loggerKms = new GcpRequestResponseLogger(config.auditLogging, loggerFactory)
 
-  /* Identifies the version for all asymmetric GCP keys. Canton always opts to generate a new keys
-   * rather than adding a new version for that key.
-   */
-  private val gcpKeyversion = "1"
+  /** Cache of cryptoKey id -> resolved cryptoKey version id, populated lazily on first
+    * successful resolution to an `ENABLED` version. This avoids issuing a
+    * `listCryptoKeyVersions` call for every KMS operation while still picking up the right
+    * version for cryptoKeys whose key material was imported into GCP KMS (where the version
+    * holding the imported material is not necessarily `"1"`).
+    */
+  private val resolvedKeyVersions: TrieMap[String, String] = TrieMap.empty
+
+  private def cryptoKeyName(keyId: KmsKeyId): gcp.CryptoKeyName =
+    // Symmetric keys: GCP picks the primary version on encrypt and recovers it from the
+    // ciphertext on decrypt, so no per-key version is needed here.
+    gcp.CryptoKeyName.of(config.projectId, config.locationId, config.keyRingId, keyId.unwrap)
+
+  private def cryptoKeyVersionName(keyId: KmsKeyId)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, KmsError, gcp.CryptoKeyVersionName] =
+    resolveLatestKeyVersion(keyId).map { version =>
+      gcp.CryptoKeyVersionName.of(
+        config.projectId,
+        config.locationId,
+        config.keyRingId,
+        keyId.unwrap,
+        version,
+      )
+    }
+
+  /** Resolves the cryptoKey version Canton should use for the given [[KmsKeyId]]. We pick the
+    * highest-numbered usable (i.e. non-destroyed) version of the cryptoKey. Once an `ENABLED`
+    * version is observed, it is cached for the lifetime of this client. Callers that need to
+    * react to state changes (e.g. `keyExistsAndIsActive`) should go through
+    * [[retrieveKeyMetadata]] which always re-issues the lookup.
+    */
+  private def resolveLatestKeyVersion(keyId: KmsKeyId)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, KmsError, String] =
+    resolvedKeyVersions.get(keyId.unwrap) match {
+      case Some(cached) =>
+        EitherT.rightT[FutureUnlessShutdown, KmsError](cached)
+      case None =>
+        listLatestCryptoKeyVersion(keyId).map { version =>
+          val versionId = parseKeyVersionId(version.getName)
+          // Only memoize ENABLED versions: while a version is in PENDING_GENERATION (or some
+          // other transient state) we want subsequent calls to re-issue the lookup so the
+          // upstream retry logic keeps making progress.
+          if (version.getState == CryptoKeyVersion.CryptoKeyVersionState.ENABLED) {
+            resolvedKeyVersions.put(keyId.unwrap, versionId).discard
+          }
+          versionId
+        }
+    }
+
+  private def parseKeyVersionId(cryptoKeyVersionName: String): String =
+    cryptoKeyVersionName.substring(cryptoKeyVersionName.lastIndexOf('/') + 1)
+
+  private def listLatestCryptoKeyVersion(keyId: KmsKeyId)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, KmsError, gcp.CryptoKeyVersion] = {
+    val parent =
+      gcp.CryptoKeyName.of(config.projectId, config.locationId, config.keyRingId, keyId.unwrap)
+    loggerKms.withLogging[gcp.CryptoKeyVersion](
+      loggerKms.retrieveKeyMetadataRequestMsg(keyId.unwrap),
+      keyMetadata =>
+        loggerKms.retrieveKeyMetadataResponseMsg(
+          keyId.unwrap,
+          keyMetadata.getAlgorithm.name,
+          keyMetadata.getState.name,
+        ),
+    )(
+      wrapKmsCall(
+        kmsErrorGen = (errStr, retryable) => KmsRetrieveKeyMetadataError(keyId, errStr, retryable),
+        functionName = functionFullName,
+      ) {
+        kmsClient.listCryptoKeyVersions(parent).iterateAll().asScala.toSeq
+      }.subflatMap { versions =>
+        val usable = versions.filter { v =>
+          val state = v.getState
+          state != CryptoKeyVersion.CryptoKeyVersionState.DESTROYED &&
+          state != CryptoKeyVersion.CryptoKeyVersionState.DESTROY_SCHEDULED
+        }
+        // Pick the highest version id (last segment of the name parses to an integer) so that
+        // both Canton-generated keys (always a single version "1") and imported keys (where
+        // each import adds a new version) work transparently. We sort numerically, not
+        // lexicographically, so version "10" comes after "9".
+        usable
+          .maxByOption(v => parseKeyVersionId(v.getName).toIntOption.getOrElse(-1))
+          .toRight[KmsError](
+            // Retryable so we don't hard-fail right after creation while the only version is
+            // still PENDING_GENERATION; the upstream retry loop will re-list and converge.
+            KmsRetrieveKeyMetadataError(
+              keyId,
+              s"no usable cryptoKey version found for ${keyId.unwrap}",
+              retryable = true,
+            )
+          )
+      }
+    )
+  }
 
   private val errorMessagesToRetry =
     Set(
@@ -259,25 +357,18 @@ class GcpKms(
   private def getPublicKeyInternal(keyId: KmsKeyId)(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, KmsError, gcp.PublicKey] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
+  ): EitherT[FutureUnlessShutdown, KmsError, gcp.PublicKey] =
+    cryptoKeyVersionName(keyId).flatMap { keyVersionName =>
+      loggerKms.withLogging[gcp.PublicKey](
+        loggerKms.getPublicKeyRequestMsg(keyId.unwrap),
+        publicKey => loggerKms.getPublicKeyResponseMsg(keyId.unwrap, publicKey.getAlgorithm.name),
+      )(
+        wrapKmsCall(
+          kmsErrorGen = (errStr, retryable) => KmsGetPublicKeyError(keyId, errStr, retryable),
+          functionName = functionFullName,
+        )(kmsClient.getPublicKey(keyVersionName))
       )
-    loggerKms.withLogging[gcp.PublicKey](
-      loggerKms.getPublicKeyRequestMsg(keyId.unwrap),
-      publicKey => loggerKms.getPublicKeyResponseMsg(keyId.unwrap, publicKey.getAlgorithm.name),
-    )(
-      wrapKmsCall(
-        kmsErrorGen = (errStr, retryable) => KmsGetPublicKeyError(keyId, errStr, retryable),
-        functionName = functionFullName,
-      )(kmsClient.getPublicKey(keyVersionName))
-    )
-  }
+    }
 
   override protected def getPublicSigningKeyInternal(
       keyId: KmsKeyId
@@ -411,13 +502,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString6144] = {
-    val keyName =
-      gcp.CryptoKeyName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-      )
+    val keyName = cryptoKeyName(keyId)
     val encryptionAlgorithm = CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION
     for {
       dataEnc <- loggerKms.withLogging[ByteString](
@@ -446,13 +531,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString4096] = {
-    val keyName =
-      gcp.CryptoKeyName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-      )
+    val keyName = cryptoKeyName(keyId)
     val encryptionAlgorithm = CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION
     for {
       dataPlain <- loggerKms.withLogging[ByteString](
@@ -482,16 +561,9 @@ class GcpKms(
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, KmsError, ByteString190] = {
-    val keyName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+  ): EitherT[FutureUnlessShutdown, KmsError, ByteString190] =
     for {
+      keyName <- cryptoKeyVersionName(keyId)
       encryptionAlgorithm <- convertToGcpAsymmetricEncryptionSpec(encryptionAlgorithmSpec)
         .leftMap(err => KmsDecryptError(keyId, err))
         .toEitherT[FutureUnlessShutdown]
@@ -513,7 +585,6 @@ class GcpKms(
           KmsError.KmsDecryptError(keyId, s"plaintext does not adhere to bound: $err)")
         )
     } yield plaintext
-  }
 
   private def signWithAlgorithm(
       keyId: KmsKeyId,
@@ -546,115 +617,84 @@ class GcpKms(
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, KmsError, ByteString] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
-    signingAlgorithmSpec match {
-      case SigningAlgorithmSpec.EcDsaSha256 =>
-        signingKeySpec match {
-          case SigningKeySpec.EcP256 =>
-            signWithAlgorithm(
-              keyId,
-              keyVersionName,
-              CryptoKeyVersionAlgorithm.EC_SIGN_P256_SHA256,
-              data.unwrap,
-            )
-          case SigningKeySpec.EcSecp256k1 =>
-            signWithAlgorithm(
-              keyId,
-              keyVersionName,
-              CryptoKeyVersionAlgorithm.EC_SIGN_SECP256K1_SHA256,
-              data.unwrap,
-            )
-          case SigningKeySpec.EcP384 | SigningKeySpec.EcCurve25519 =>
-            EitherT.leftT[FutureUnlessShutdown, ByteString](
-              KmsError.KmsSignError(
+  ): EitherT[FutureUnlessShutdown, KmsError, ByteString] =
+    cryptoKeyVersionName(keyId).flatMap { keyVersionName =>
+      signingAlgorithmSpec match {
+        case SigningAlgorithmSpec.EcDsaSha256 =>
+          signingKeySpec match {
+            case SigningKeySpec.EcP256 =>
+              signWithAlgorithm(
                 keyId,
-                s"unsupported signing key spec $signingKeySpec for algorithm $signingAlgorithmSpec",
+                keyVersionName,
+                CryptoKeyVersionAlgorithm.EC_SIGN_P256_SHA256,
+                data.unwrap,
               )
-            )
-        }
-      case SigningAlgorithmSpec.EcDsaSha384 =>
-        signWithAlgorithm(
-          keyId,
-          keyVersionName,
-          CryptoKeyVersionAlgorithm.EC_SIGN_P384_SHA384,
-          data.unwrap,
-        )
-      case SigningAlgorithmSpec.Ed25519 =>
-        signWithAlgorithm(
-          keyId,
-          keyVersionName,
-          CryptoKeyVersionAlgorithm.EC_SIGN_ED25519,
-          data.unwrap,
-        )
+            case SigningKeySpec.EcSecp256k1 =>
+              signWithAlgorithm(
+                keyId,
+                keyVersionName,
+                CryptoKeyVersionAlgorithm.EC_SIGN_SECP256K1_SHA256,
+                data.unwrap,
+              )
+            case SigningKeySpec.EcP384 | SigningKeySpec.EcCurve25519 =>
+              EitherT.leftT[FutureUnlessShutdown, ByteString](
+                KmsError.KmsSignError(
+                  keyId,
+                  s"unsupported signing key spec $signingKeySpec for algorithm $signingAlgorithmSpec",
+                )
+              )
+          }
+        case SigningAlgorithmSpec.EcDsaSha384 =>
+          signWithAlgorithm(
+            keyId,
+            keyVersionName,
+            CryptoKeyVersionAlgorithm.EC_SIGN_P384_SHA384,
+            data.unwrap,
+          )
+        case SigningAlgorithmSpec.Ed25519 =>
+          signWithAlgorithm(
+            keyId,
+            keyVersionName,
+            CryptoKeyVersionAlgorithm.EC_SIGN_ED25519,
+            data.unwrap,
+          )
+      }
     }
-  }
 
   override protected def deleteKeyInternal(
       keyId: KmsKeyId
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, KmsError, Unit] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
-    loggerKms.withLogging[Unit](
-      loggerKms.deleteKeyRequestMsg(keyId.unwrap),
-      _ => loggerKms.deleteKeyResponseMsg(keyId.unwrap),
-    )(
-      wrapKmsCall(
-        kmsErrorGen = (errStr, retryable) => KmsDeleteKeyError(keyId, errStr, retryable),
-        functionName = functionFullName,
+  ): EitherT[FutureUnlessShutdown, KmsError, Unit] =
+    cryptoKeyVersionName(keyId).flatMap { keyVersionName =>
+      // Drop the cached resolved version since after destruction the version is no longer
+      // usable; subsequent operations should re-list and pick a different one (or fail
+      // upstream).
+      resolvedKeyVersions.remove(keyId.unwrap).discard
+      loggerKms.withLogging[Unit](
+        loggerKms.deleteKeyRequestMsg(keyId.unwrap),
+        _ => loggerKms.deleteKeyResponseMsg(keyId.unwrap),
       )(
-        kmsClient.destroyCryptoKeyVersion(keyVersionName).discard
+        wrapKmsCall(
+          kmsErrorGen = (errStr, retryable) => KmsDeleteKeyError(keyId, errStr, retryable),
+          functionName = functionFullName,
+        )(
+          kmsClient.destroyCryptoKeyVersion(keyVersionName).discard
+        )
       )
-    )
-  }
+    }
 
+  /** Re-issues the list lookup (rather than going through the cached version) so that callers
+    * such as `keyExistsAndIsActive` always see the current state of the latest key version.
+    */
   private def retrieveKeyMetadata(
       keyId: KmsKeyId
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, KmsError, gcp.CryptoKeyVersion] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
-    loggerKms.withLogging[gcp.CryptoKeyVersion](
-      loggerKms.retrieveKeyMetadataRequestMsg(keyId.unwrap),
-      keyMetadata =>
-        loggerKms.retrieveKeyMetadataResponseMsg(
-          keyId.unwrap,
-          keyMetadata.getAlgorithm.name,
-          keyMetadata.getState.name,
-        ),
-    )(
-      wrapKmsCall(
-        kmsErrorGen = (errStr, retryable) => KmsRetrieveKeyMetadataError(keyId, errStr, retryable),
-        functionName = functionFullName,
-      )(
-        kmsClient.getCryptoKeyVersion(keyVersionName)
-      )
-    )
-  }
+  ): EitherT[FutureUnlessShutdown, KmsError, gcp.CryptoKeyVersion] =
+    listLatestCryptoKeyVersion(keyId)
 
   override def onClosed(): Unit = LifeCycle.close(kmsClient)(logger)
 
