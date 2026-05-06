@@ -7,6 +7,7 @@ import cats.data.OptionT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
@@ -96,6 +97,11 @@ private[bftordering] object Miscellaneous {
       logs.map { case (level, log) =>
         level -> (() => prefix + log())
       }
+  }
+
+  final case class BeforeAndAfter[T <: PrettyPrinting](before: T, after: T) extends PrettyPrinting {
+    override protected def pretty: Pretty[BeforeAndAfter[T]] =
+      prettyOfClass(param("before", _.before), param("after", _.after))
   }
 
   def toUnitFutureUS[X](optionT: OptionT[FutureUnlessShutdown, X])(implicit

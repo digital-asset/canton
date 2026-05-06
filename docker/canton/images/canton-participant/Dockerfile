@@ -18,4 +18,4 @@ EXPOSE 10013
 COPY app.conf /app/
 
 HEALTHCHECK --start-period=10m \
-  CMD grpc_health_probe -addr=:5061 || exit 1
+  CMD grpc-health-probe -addr=:5061 || exit 1

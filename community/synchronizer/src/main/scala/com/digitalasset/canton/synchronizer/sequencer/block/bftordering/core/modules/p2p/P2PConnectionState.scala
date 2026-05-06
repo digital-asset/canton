@@ -25,7 +25,7 @@ trait P2PConnectionState {
 
   def associateP2PEndpointIdToBftNodeId(
       p2pAddress: P2PAddress
-  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult
+  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit]
 
   /** Called by the P2P network output module to ensure connectivity with a peer. It must call
     * either `createNetworkRef` to create a new network reference or `actionIfPresent` if a network
@@ -50,7 +50,7 @@ trait P2PConnectionState {
 
 object P2PConnectionState {
 
-  type P2PEndpointIdAssociationResult = Either[Error, Unit]
+  type P2PEndpointIdAssociationResult[T] = Either[Error, T]
 
   sealed trait Error extends Product with Serializable
 

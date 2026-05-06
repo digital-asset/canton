@@ -116,7 +116,8 @@ final class LsuPruningIntegrationTest extends LsuBase {
         noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
       }
 
-      clue("activity after LSU") {
+      // Perform one create -> corresponding offset is unsafe
+      val unsafeToPruneOffset = clue("activity after LSU") {
         val aliceIou =
           participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
 
@@ -132,7 +133,8 @@ final class LsuPruningIntegrationTest extends LsuBase {
 
         environment.simClock.value.advance(1.hour.toJava)
         participants.local.foreach(_.testing.fetch_synchronizer_times())
-        IouSyntax.createIou(participant2)(bank, alice, 3.0)
+        val (_, tx, _) = IouSyntax.createIouComplete(participant2)(bank, alice, 3.0)
+        tx.offset
       }
 
       eventually() {
@@ -157,6 +159,17 @@ final class LsuPruningIntegrationTest extends LsuBase {
         noOutstandingCommitments(participant1, rounded) shouldBe rounded
         noOutstandingCommitments(participant2, rounded) shouldBe rounded
       }
+
+      /*
+      The safe to prune offset should be just before the last create.
+      In particular, we can prune activity predating the LSU.
+       */
+      val computedSafeOffset =
+        participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
+
+      computedSafeOffset shouldBe (unsafeToPruneOffset - 1)
+
+      participant2.pruning.prune(computedSafeOffset)
     }
   }
 }

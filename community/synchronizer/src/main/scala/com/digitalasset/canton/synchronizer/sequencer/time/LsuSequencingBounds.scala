@@ -46,7 +46,7 @@ final case class LsuSequencingBounds private (
 ) {
   require(
     lowerBoundSequencingTimeExclusive <= upgradeTime,
-    s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime",
+    s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime respectively",
   )
 }
 
@@ -110,7 +110,7 @@ object LsuSequencingBounds {
               case Some((_, latestEffectiveTime)) =>
                 /*
                 Note: the require in the LsuSequencingBounds might throw if the invariant is not respected.
-                This is fine because it means that something went terribly wrong: a topology change is effective after ugprade time.
+                This is fine because it means that something went terribly wrong: a topology change is effective after upgrade time.
                  */
                 LsuSequencingBounds(
                   upgradeTime = upgradeTime,

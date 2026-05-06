@@ -10,6 +10,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
 import com.digitalasset.canton.platform.indexer.parallel.{
   InitializeParallelIngestion,
   ParallelIndexerFactory,
@@ -30,7 +31,9 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.*
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -53,9 +56,12 @@ object JdbcIndexer {
       postProcessor: (Vector[PostPublishData], TraceContext) => Future[Unit],
       sequentialPostProcessor: Update => Unit,
       contractStore: LedgerApiContractStore,
+      achsInitInterceptor: Source[AchsWorkRange, NotUsed] => Source[AchsWorkRange, NotUsed],
   )(implicit materializer: Materializer) {
 
-    def initialized()(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
+    def initialized()(implicit
+        traceContext: TraceContext
+    ): ResourceOwner[(Indexer, Option[() => Unit])] = {
       val factory = StorageBackendFactory.of(
         DbType.jdbcType(participantDataSourceConfig.jdbcUrl),
         loggerFactory,
@@ -84,6 +90,22 @@ object JdbcIndexer {
       val (ingestionParallelism, indexerDbDispatcherOverride) =
         if (factory == H2StorageBackendFactory) 1 -> indexServiceDbDispatcher
         else config.ingestionParallelism.unwrap -> None
+      val initParallelIngestion = InitializeParallelIngestion(
+        providedParticipantId = participantId,
+        parameterStorageBackend = parameterStorageBackend,
+        ingestionStorageBackend = ingestionStorageBackend,
+        eventStorageBackend = eventStorageBackend,
+        completionStorageBackend = completionStorageBackend,
+        stringInterningStorageBackend = stringInterningStorageBackend,
+        updatingStringInterningView = inMemoryState.stringInterningView,
+        postProcessor = postProcessor,
+        achsStateCache = inMemoryState.achsStateCache,
+        achsConfig = config.achsConfig,
+        metrics = metrics,
+        loggerFactory = loggerFactory,
+        achsInitInterceptor = achsInitInterceptor,
+      )
+      val achsKillSwitch = initParallelIngestion.achsKillSwitch
       ParallelIndexerFactory(
         inputMappingParallelism = config.inputMappingParallelism.unwrap,
         batchingParallelism = config.batchingParallelism.unwrap,
@@ -92,20 +114,7 @@ object JdbcIndexer {
         metrics = metrics,
         dbLockStorageBackend = DBLockStorageBackend,
         dataSourceStorageBackend = dataSourceStorageBackend,
-        initializeParallelIngestion = InitializeParallelIngestion(
-          providedParticipantId = participantId,
-          parameterStorageBackend = parameterStorageBackend,
-          ingestionStorageBackend = ingestionStorageBackend,
-          eventStorageBackend = eventStorageBackend,
-          completionStorageBackend = completionStorageBackend,
-          stringInterningStorageBackend = stringInterningStorageBackend,
-          updatingStringInterningView = inMemoryState.stringInterningView,
-          postProcessor = postProcessor,
-          achsStateCache = inMemoryState.achsStateCache,
-          achsConfig = config.achsConfig,
-          metrics = metrics,
-          loggerFactory = loggerFactory,
-        ),
+        initializeParallelIngestion = initParallelIngestion,
         parallelIndexerSubscription = ParallelIndexerSubscription(
           parameterStorageBackend = parameterStorageBackend,
           ingestionStorageBackend = ingestionStorageBackend,
@@ -155,7 +164,7 @@ object JdbcIndexer {
         loggerFactory = loggerFactory,
         indexerDbDispatcherOverride = indexerDbDispatcherOverride,
         clock = clock,
-      )
+      ).map(indexer => (indexer, achsKillSwitch))
     }
   }
 }

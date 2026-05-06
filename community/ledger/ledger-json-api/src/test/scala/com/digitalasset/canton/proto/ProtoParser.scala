@@ -4,6 +4,7 @@
 package com.digitalasset.canton.proto
 
 import com.digitalasset.canton.http.json.v2.ExtractedProtoComments
+import io.protostuff.compiler.model.Proto
 import io.protostuff.compiler.parser.{
   ClasspathFileReader,
   FileDescriptorLoaderImpl,
@@ -26,7 +27,10 @@ object ProtoParser {
   // we need to load any proto file in order to get jarResource (to scan for others)
   private val startingProtoFile = s"$ledgerApiProtoLocation/transaction.proto"
 
-  def readProto(): ExtractedProtoComments = {
+  def readProto(): ExtractedProtoComments =
+    ProtoDescriptionExtractor.extract(parseProtos())
+
+  def parseProtos(): Seq[Proto] = {
 
     val classLoader = Thread.currentThread.getContextClassLoader
     val url = classLoader.getResource(startingProtoFile)
@@ -47,11 +51,10 @@ object ProtoParser {
     val fdLoader = new FileDescriptorLoaderImpl(errorListener, Set.empty.asJava)
     val importer = new ImporterImpl(fdLoader)
 
-    val protos = protoFiles.map { pf =>
+    protoFiles.map { pf =>
       val protoCtx = importer.importFile(fileReader, pf)
       protoCtx.getProto()
     }
-    ProtoDescriptionExtractor.extract(protos)
   }
 
   private def findProtoFilesInJar(jarFile: JarFile) =

@@ -335,6 +335,9 @@ TODO comments should have the form `TODO(#<issue-number>): <description>`, where
 External contributors who cannot create issues in the internal repo should instead use the full
 OSS GitHub URL: `TODO(https://github.com/digital-asset/canton/issues/<issue-number>): <description>`.
 
+For work that spans both the `canton` and `daml` repos, you can also reference a `daml` issue directly:
+`TODO(https://github.com/digital-asset/daml/issues/<issue-number>): <description>`.
+
 A script is used to aggregate TODOs and detect problems such as TODOs without an issue number or referencing a closed issue.
 The script uses a more complex pattern than described above to cover existing TODOs from the codebase,
 but the pattern above should be used for all new TODOs.

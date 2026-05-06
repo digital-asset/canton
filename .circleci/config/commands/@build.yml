@@ -211,7 +211,7 @@ check_pr_compliance_labels:
   steps:
     - run:
         name: Compliance labels check for PR
-        command: .circleci/check-pr-compliance-labels.sh
+        command: scripts/ci/check-pr-compliance-labels.sh
 
 check_pr_skip_ci:
   steps:

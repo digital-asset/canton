@@ -207,11 +207,11 @@ class PruningProcessor(
             .map { firstUnsafeOffset =>
               val result = firstUnsafeOffset
                 .map(_.offset)
-                .flatMap(_.decrement)
-                .map(safeOffset => safeOffset.min(rewoundBoundInclusive))
+                .flatMap(_.decrement) // unsafe -> safe
+                .map(_.min(rewoundBoundInclusive))
 
               logger.debug(
-                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
+                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt, beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
               )
               result
             }

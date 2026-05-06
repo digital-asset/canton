@@ -88,7 +88,10 @@ class UseLedgerApiTestTool(
         .foldRight(getOrDownloadTestTool(testToolRelease, lfVersion)) { (otherLfVersion, res) =>
           res.recoverWith {
             case error if isMissingArtifact(error) =>
-              logger.info(s"unable to load TestTool $lfVersion trying substitute")
+              logger.info(
+                s"LAPITT for LF $lfVersion is not published for release $testToolRelease. " +
+                  s"Falling back to LF $otherLfVersion. This is NOT a test failure."
+              )
               getOrDownloadTestTool(testToolRelease, otherLfVersion).orElse(Failure(error))
           }
         }
@@ -430,4 +433,5 @@ object UseLedgerApiTestTool {
 
     latestReleases
   }
+
 }

@@ -17,7 +17,7 @@ metric_short_version = "canton.failed_test_grouped"
 # Set to 3 to avoid alerting on single transient failures or manual CircleCI job retries.
 CONSECUTIVE_FAILURES_THRESHOLD: Final[int] = 3
 
-hub_milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
+milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN" # https://github.com/orgs/DACH-NY/projects/38/
 
 release_line_field = "PVTSSF_lADOAJX-Fc4AbncNzgcWE1k" # ID of the custom field "Release Line"
@@ -40,7 +40,7 @@ gh_flaky_test_env = os.environ.copy()
 if "GITHUB_FLAKY_TEST_TOKEN" in gh_flaky_test_env:
     gh_flaky_test_env["GITHUB_TOKEN"] = os.environ["GITHUB_FLAKY_TEST_TOKEN"]
 
-def report_issues_to_hub():
+def should_report_issues():
     return branch in branches_to_report
 
 # sbt generates test-reports in junit xml style that we aggregate into test-reports/<subproject>/<reports> in CircleCI
@@ -176,7 +176,7 @@ def report_to_datadog(metric_name: str, test_name: str):
             raise Exception(f"Failed to report test '{test_name}' to Datadog after retry: {resp2}")
         print(f"Received following response upon retrying: \n {resp2}")
 
-def hub_report_issue(issue: str):
+def report_issue(issue: str):
     title = format_issue_title(issue)
     idx = None
     project_item_id = None
@@ -228,18 +228,19 @@ def hub_report_issue(issue: str):
                 gh_assign_release_line(idx, project_item_id)
 
         # update the description and reopen if needed
-        return hub_update_issue(idx, title, body)
+        return update_issue(idx, title, body)
 
     else:
-        hub_create_issue(title)
+        create_issue(title)
 
-def hub_create_issue_table_header():
+def create_issue_table_header():
     return "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
 
-def hub_create_issue_line():
+def create_issue_table_row():
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     commit_hash = os.environ['CIRCLE_SHA1']
-    commit_url = f"https://github.com/DACH-NY/canton/commit/{commit_hash}"
+    project_username = os.environ.get('CIRCLE_PROJECT_USERNAME', 'DACH-NY')
+    commit_url = f"https://github.com/{project_username}/canton/commit/{commit_hash}"
     build_url = os.environ['CIRCLE_BUILD_URL']
     build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
     job = os.environ['CIRCLE_JOB']
@@ -270,7 +271,7 @@ def check_result(result):
 def gh_issue_create_cmd(title: str, body: str):
     result = subprocess.run(
         gh_cmd + ["issue", "create", "--repo", "DACH-NY/canton",
-                  "--title", title, "--body", body, "--milestone", hub_milestone],
+                  "--title", title, "--body", body, "--milestone", milestone],
         capture_output=True, text=True, env=gh_flaky_test_env
     )
     check_result(result)
@@ -293,11 +294,11 @@ def gh_issue_edit_cmd(idx: str, title: str, body: str):
     check_result(result)
     return result
 
-def hub_create_issue(title: str):
+def create_issue(title: str):
     body = f"""This issue was created automatically by the CI system. Please fix the test before closing the issue.
 
-{hub_create_issue_table_header()}
-{hub_create_issue_line()}"""
+{create_issue_table_header()}
+{create_issue_table_row()}"""
     result = gh_issue_create_cmd(title, body)
     print(f"Created issue: {result.stdout}")
 
@@ -380,12 +381,12 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
         return False
     return older_hash in result.stdout.splitlines()
 
-def hub_update_issue(idx: str, title: str, body: str, threshold: Optional[int] = None) -> Optional[tuple[str, str, str]]:
+def update_issue(idx: str, title: str, body: str, threshold: Optional[int] = None) -> Optional[tuple[str, str, str]]:
     if threshold is None:
         threshold = CONSECUTIVE_FAILURES_THRESHOLD
     header = "| Date | Job | Node | Build | Commit |"
     if header not in body:
-        body = body + "\n" + hub_create_issue_table_header()
+        body = body + "\n" + create_issue_table_header()
     commit_hash = os.environ['CIRCLE_SHA1']
 
     consecutive_streak = False
@@ -398,7 +399,7 @@ def hub_update_issue(idx: str, title: str, body: str, threshold: Optional[int] =
             if all(are_consecutive_commits(a, b) for a, b in zip(all_commits, all_commits[1:])):
                 consecutive_streak = True
 
-    new_body = f"{body}\n{hub_create_issue_line()}"
+    new_body = f"{body}\n{create_issue_table_row()}"
     gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: {idx} for {title}")
     if consecutive_streak:
@@ -412,29 +413,42 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
 
 def self_test():
     test_compute_single_log_failure()
-    test_hub_create_issue_line()
-    test_hub_update_issue_old_format()
-    test_hub_update_issue_new_format()
-    test_hub_update_issue_returns_consecutive_streak_info()
+    test_create_issue_table_row()
+    test_update_issue_old_format()
+    test_update_issue_new_format()
+    test_update_issue_returns_consecutive_streak_info()
     print("All self-checks passed")
 
-def test_hub_create_issue_line():
+def test_create_issue_table_row():
     env = {
         'CIRCLE_JOB': 'test_with_java17',
         'CIRCLE_NODE_INDEX': '5',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/3196076',
         'CIRCLE_SHA1': 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+        'CIRCLE_PROJECT_USERNAME': 'DACH-NY',
     }
     with patch.dict(os.environ, env, clear=False):
-        header = hub_create_issue_table_header()
+        header = create_issue_table_header()
         assert '| Date | Job | Node | Build | Commit |' in header, f"Missing header in: {header}"
-        line = hub_create_issue_line()
+        line = create_issue_table_row()
         assert '| test_with_java17 |' in line, f"Missing job in: {line}"
         assert '| 5 |' in line, f"Missing node_index in: {line}"
         assert '[3196076](https://circleci.com/gh/DACH-NY/canton/3196076)' in line, f"Missing build link in: {line}"
         assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
 
-def test_hub_update_issue_old_format():
+    oss_canton_env = {
+        'CIRCLE_JOB': 'test_protocol_version_dev',
+        'CIRCLE_NODE_INDEX': '6',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/digital-asset/canton/1491',
+        'CIRCLE_SHA1': 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
+        'CIRCLE_PROJECT_USERNAME': 'digital-asset',
+    }
+    with patch.dict(os.environ, oss_canton_env, clear=False):
+        line = create_issue_table_row()
+        assert '[1491](https://circleci.com/gh/digital-asset/canton/1491)' in line, f"Missing OSS canton build link in: {line}"
+        assert '[b2c3d4e5](https://github.com/digital-asset/canton/commit/b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3)' in line, f"Missing OSS canton commit link in: {line}"
+
+def test_update_issue_old_format():
     # Old issues have flat-text lines with no table header — the header must be injected before the new row
     old_body = (
         "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
@@ -449,14 +463,14 @@ def test_hub_update_issue_old_format():
     }
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
-        hub_update_issue("42", "Flaky test", old_body)
+        update_issue("42", "Flaky test", old_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
         assert header in msg, f"Table header was not injected into old-format body: {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once"
 
-def test_hub_update_issue_new_format():
+def test_update_issue_new_format():
     # New issues already have the table header — the new row is simply appended, no duplicate header
     new_body = (
         "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
@@ -471,13 +485,13 @@ def test_hub_update_issue_new_format():
     }
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
-        hub_update_issue("42", "Flaky test", new_body)
+        update_issue("42", "Flaky test", new_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
         assert msg.count(header) == 1, f"Table header must appear exactly once in updated body: {msg}"
 
-def test_hub_update_issue_returns_consecutive_streak_info():
+def test_update_issue_returns_consecutive_streak_info():
     # Build exactly CONSECUTIVE_FAILURES_THRESHOLD commits: prior ones go in the body, last is current
     commits = [format(i, '040x') for i in range(CONSECUTIVE_FAILURES_THRESHOLD)]
     current = commits[-1]
@@ -510,7 +524,7 @@ def test_hub_update_issue_returns_consecutive_streak_info():
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
-        result = hub_update_issue("42", "Flaky test", make_body(prior))
+        result = update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {CONSECUTIVE_FAILURES_THRESHOLD} consecutive commits"
         idx, title, commit = result
         assert idx == "42", f"Expected issue idx '42', got: {idx}"
@@ -520,14 +534,14 @@ def test_hub_update_issue_returns_consecutive_streak_info():
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
-        result = hub_update_issue("42", "Flaky test", make_body(prior[:-1]))
+        result = update_issue("42", "Flaky test", make_body(prior[:-1]))
         assert result is None, f"Expected None with only {len(prior) - 1} prior commits"
 
     # full history but not consecutive → no streak
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
-        result = hub_update_issue("42", "Flaky test", make_body(prior))
+        result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits"
 
     # consecutive streak from unstable_test → no alert
@@ -535,7 +549,7 @@ def test_hub_update_issue_returns_consecutive_streak_info():
     with patch.dict(os.environ, unstable_env, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
-        result = hub_update_issue("42", "Flaky test", make_body(prior))
+        result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None when job is unstable_test"
 
 
@@ -594,8 +608,8 @@ if __name__ == "__main__":
         failure_name = sys.argv[1]
         print(f"Reporting following CI failure as a failed test to datadog: {failure_name}")
         report_to_datadog(metric_name=metric_short_version, test_name=failure_name)
-        if report_issues_to_hub():
-            result = hub_report_issue(failure_name)
+        if should_report_issues():
+            result = report_issue(failure_name)
             if result is not None:
                 send_duplicate_summary([result])
     else:
@@ -616,7 +630,7 @@ if __name__ == "__main__":
         # sometimes a fundamental problem would lead to a large number of issues being reported, in that case we limit
         failing_tests_max = 20
 
-        if failing_tests_num > 0 and report_issues_to_hub():
+        if failing_tests_num > 0 and should_report_issues():
             if failing_tests_num > failing_tests_max:
                 print(f"Found too many failed tests {failing_tests_num}, only report {failing_tests_max}")
             else:
@@ -633,7 +647,7 @@ if __name__ == "__main__":
                     print(f"Skipping duplicate issue title: {title}")
                     continue
                 seen_titles.add(title)
-                result = hub_report_issue(test_name)
+                result = report_issue(test_name)
                 if result is not None:
                     duplicates.append(result)
 

@@ -4,9 +4,12 @@
 package com.digitalasset.canton.platform.component
 
 import anorm.SqlParser.long
+import com.daml.ledger.resources.ResourceContext
+import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.AcsRangeInfo
+import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.config.{
@@ -15,9 +18,14 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.dao.events.ACSReader
-import org.apache.pekko.stream.scaladsl.Sink
+import com.digitalasset.canton.util.PekkoUtil
+import com.digitalasset.canton.util.PekkoUtil.{RecoveringFutureQueueImpl, RecoveringQueueMetrics}
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
+import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.flatspec.AnyFlatSpec
 import org.slf4j.event.Level
 
@@ -651,6 +659,124 @@ class AchsIndexComponentTest
           skipLogs.size should be > 100
         }
       },
+    )
+  }
+
+  it should "shut down when ACHS initialization is in progress" in {
+    // Start with ACHS disabled so that restarting with ACHS enabled triggers a large initialization
+    restartIndexer(config = indexerConfig.copy(achsConfig = None))
+
+    val txsCreatedThenArchived = 5
+    val txsCreatedNotArchived = 1
+    val txSize = 3
+    val repetitions = 50
+
+    val allUpdates = (1 to repetitions).flatMap { _ =>
+      createsAndArchives(
+        nextRecordTime = nextRecordTime,
+        txSize = txSize,
+        txsCreatedThenArchived = txsCreatedThenArchived,
+        txsCreatedNotArchived = txsCreatedNotArchived,
+        createPayloadLength = 42,
+        archiveArgumentPayloadLengthFromTo = (10, 20),
+        archiveResultPayloadLengthFromTo = (10, 20),
+      )
+    }
+
+    val lastEventSeqIdBefore = getLastEventSeqId
+    ingestUpdates(allUpdates*)
+
+    val lastEventSeqId =
+      lastEventSeqIdBefore + txSize * (txsCreatedThenArchived * 2 + txsCreatedNotArchived) * repetitions
+    eventually()(getLastEventSeqId shouldBe lastEventSeqId)
+
+    getAchsSize shouldBe 0L
+    getAchsStateRowCount shouldBe 0
+
+    val initConfig = AchsConfig(
+      validAtDistanceTarget = NonNegativeLong.tryCreate(10L),
+      lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(10L),
+    )
+
+    // the initialization stream never completes
+    val achsInitInterceptor: Source[AchsWorkRange, NotUsed] => Source[AchsWorkRange, NotUsed] =
+      _.concat(Source.never)
+
+    // Release the current resources first
+    implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
+    testServices.indexResource.release().futureValue
+
+    val shutdownMessage = "Shutting down ACHS initialization stream via kill switch"
+    loggerFactory.assertLogsSeq(
+      SuppressionRule.LevelAndAbove(Level.INFO)
+    )(
+      {
+        val indexerResource = indexerResourceOwner(
+          config = indexerConfig.copy(achsConfig = Some(initConfig)),
+          achsInitInterceptor = achsInitInterceptor,
+        ).acquire()(resourceContext)
+        val (indexerF, achsKillSwitch, coreDbSupport) =
+          indexerResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
+
+        val coreDbMetrics = DatabaseMetrics.ForTesting("achs-kill-switch-test")
+        def queryAchsSize(): Long =
+          coreDbSupport.dbDispatcher
+            .executeSql(coreDbMetrics) { implicit connection =>
+              SQL"SELECT COUNT(event_sequential_id) AS count FROM lapi_filter_achs_stakeholder"
+                .as(long("count").single)
+            }
+            .futureValue
+
+        val consumerFactory: PekkoUtil.Commit => Future[PekkoUtil.FutureQueueConsumer[Update]] =
+          commit => Future(indexerF(false)(commit))(system.dispatcher).flatten
+
+        val rq = new RecoveringFutureQueueImpl[Update](
+          maxBlockedOffer = indexerConfig.queueMaxBlockedOffer,
+          bufferSize = indexerConfig.queueBufferSize,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(
+            minWait = 100L,
+            multiplier = 2,
+            cap = 5000L,
+          ),
+          retryAttemptWarnThreshold = 3,
+          retryAttemptErrorThreshold = 5,
+          uncommittedWarnTreshold = 1000,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = consumerFactory,
+          initializationKillSwitch = achsKillSwitch,
+        )
+
+        // Wait for ACHS initialization to actually start writing data before shutting down.
+        // The constructor returns immediately now (async consumer factory), so we poll the DB
+        // to confirm ACHS init is actively running.
+        eventually(timeUntilSuccess = 30.seconds) {
+          queryAchsSize() should be > 0L
+        }
+
+        // shut down while ACHS init is in progress
+        rq.shutdown()
+
+        rq.done.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
+
+        indexerResource.release().futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
+      },
+      logs => {
+        val killSwitchLogs = logs.filter(_.message.contains(shutdownMessage))
+        withClue(
+          s"Expected kill switch log '$shutdownMessage' not found. Captured logs:\n${logs.map(_.message).mkString("\n")}"
+        ) {
+          killSwitchLogs should not be empty
+        }
+      },
+    )
+
+    // Restart with original config for the next tests
+    acquireServices(
+      config = indexerConfig,
+      serviceConfig = indexServiceConfig,
+      repairMode = false,
+      incompleteOffsets = Seq.empty,
     )
   }
 

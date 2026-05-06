@@ -46,8 +46,9 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
-import com.digitalasset.canton.platform.indexer.{IndexerConfig, JdbcIndexer}
+import com.digitalasset.canton.platform.indexer.{Indexer, IndexerConfig, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
@@ -94,6 +95,8 @@ import com.digitalasset.daml.lf.transaction.{CommittedTransaction, CreationTime,
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueParty
 import com.google.protobuf.ByteString
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
@@ -154,7 +157,7 @@ trait IndexComponentTest
     )
     .toVector
 
-  private def testServices: TestServices =
+  protected def testServices: TestServices =
     Option(testServicesRef.get())
       .getOrElse(throw new Exception("TestServices not initialized. Not accessing from a test?"))
 
@@ -315,13 +318,15 @@ trait IndexComponentTest
     ): Future[Option[Offset]] = index.indexDbPrunedUpto
   }
 
-  private def indexResourceOwner(
+  private def jdbcIndexerResourceOwner(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
-      repairMode: Boolean,
-      incompleteOffsets: Seq[Offset],
+      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
+        AchsWorkRange,
+        NotUsed,
+      ],
   ): ResourceOwner[
-    (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+    (Indexer, Option[() => Unit], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
   ] =
     for {
       dbStorage <- ResourceOwner
@@ -383,7 +388,7 @@ trait IndexComponentTest
           ),
           loggerFactory = loggerFactory,
         )
-      indexerF <- new JdbcIndexer.Factory(
+      (indexer, killSwitch) <- new JdbcIndexer.Factory(
         participantId = participantId,
         participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
         config = config,
@@ -402,7 +407,21 @@ trait IndexComponentTest
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
+        achsInitInterceptor = achsInitInterceptor,
       ).initialized()
+    } yield (indexer, killSwitch, participantContractStore, dbSupport, inMemoryState)
+
+  private def indexResourceOwner(
+      config: IndexerConfig,
+      serviceConfig: IndexServiceConfig,
+      repairMode: Boolean,
+      incompleteOffsets: Seq[Offset],
+  ): ResourceOwner[
+    (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+  ] =
+    for {
+      (indexerF, _, participantContractStore, dbSupport, inMemoryState) <-
+        jdbcIndexerResourceOwner(config, serviceConfig, achsInitInterceptor = identity)
       indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(repairMode)(_ => ()))
       indexer <- ResourceOwner.forReleasable(() =>
         new IndexingFutureQueue(indexerFutureQueueConsumer)
@@ -456,7 +475,19 @@ trait IndexComponentTest
       )
     } yield (indexService, indexer, participantContractStore, dbSupport, inMemoryState)
 
-  private def acquireServices(
+  protected def indexerResourceOwner(
+      config: IndexerConfig,
+      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
+        AchsWorkRange,
+        NotUsed,
+      ],
+  ): ResourceOwner[(Indexer, Option[() => Unit], DbSupport)] =
+    jdbcIndexerResourceOwner(config, indexServiceConfig, achsInitInterceptor).map {
+      case (indexer, killSwitch, _, dbSupport, _) =>
+        (indexer, killSwitch, dbSupport)
+    }
+
+  protected def acquireServices(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
       repairMode: Boolean,

@@ -26,5 +26,4 @@ object LsuError extends LsuErrorGroup {
     ) extends CantonError.Impl(cause = s"Lsu failed: $details")
         with LsuError
   }
-
 }

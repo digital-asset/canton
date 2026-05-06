@@ -18,5 +18,4 @@ fi
 
 echo "Unpacking to directory $TARGET_DIR"
 mkdir -p "$TARGET_DIR"
-ls "$TARGET_DIR"
 tar xzf "$TGZ_FILE" -C "$TARGET_DIR/" --strip-components 1

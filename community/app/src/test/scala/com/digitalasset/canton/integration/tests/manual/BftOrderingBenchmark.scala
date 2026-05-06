@@ -66,9 +66,8 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
   * -Dbft-ordering-benchmark.enable-prometheus-metrics=true \
   * -Dscala.concurrent.context.numThreads=30 \
   * -Dbft-ordering-benchmark.num-db-connections-per-node=5 \
-  * -Dbft-ordering-benchmark.transaction-sizes-and-weights="{payloads=[{size-bytes=2000,weight=1}]}"
-  * \
-  * -Dbft-ordering-benchmark.benchmark-duration=1minute \ "
+  * -Dbft-ordering-benchmark.transaction-sizes-and-weights={payloads=[{size-bytes=2000,weight=1}]} \
+  * -Dbft-ordering-benchmark.benchmark-duration=1minute"
   *
   * export CI=1 # When this defined, it ensures no dockerized Postgres is being used
   *
@@ -311,6 +310,8 @@ class BftOrderingBenchmark
       )
       .withNetworkBootstrap { implicit env =>
         import env.*
+
+        logger.info(s"Actual Canton config: ${env.actualConfig.dumpString}")
 
         new NetworkBootstrapper(
           NetworkTopologyDescription(

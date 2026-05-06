@@ -71,9 +71,7 @@ object LAPITTResolver {
         sys.error(s"Failed to download ledger api test tool. Response: $response")
       }
       logger.debug("Verifying downloaded archive")
-      val output = s"jar -tvf ${destination.toJava.getAbsolutePath}" !! stdErrLogger
-      if (output.nonEmpty) logger.info(output)
-      if (stdErrOutput.nonEmpty) logger.info(stdErrOutput)
+      (s"jar -tvf ${destination.toJava.getAbsolutePath}" !! stdErrLogger): Unit
     }.recoverWith { case t =>
       if (destination.exists) destination.delete(swallowIOExceptions = true)
       if (retries > 0) {

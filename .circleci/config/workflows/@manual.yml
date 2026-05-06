@@ -463,6 +463,20 @@ manual_snapshot_release:
 #          - azure-self-cache
 #        requires:
 #          - compile
+    - release_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        is_manual: true
+        is_nightly_workflow: false
+        requires:
+          - package_community
+          - package_kms_driver
     - publish_libraries:
         context:
         - datadog
@@ -491,6 +505,7 @@ manual_snapshot_release:
           - package_sequencer_driver_api
           - assembly_ledger_api_test_tool
           - package_kms_driver
+          - release_test
 # TODO(i29845): Fix and re-enable
 #          - build_systematic_testing_inventory
           - build_scaladoc

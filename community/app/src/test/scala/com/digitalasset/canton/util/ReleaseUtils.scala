@@ -64,6 +64,37 @@ object ReleaseUtils {
     sharded.toList
   }
 
+  /** Lists `canton-open-source-*` releases published in the public S3 bucket.
+    *
+    * Returned versions are deduplicated and parsed as [[ReleaseVersion]]; entries that fail to
+    * parse (e.g. legacy or unrelated objects) are silently ignored.
+    *
+    * @param includeAdHoc:
+    *   default to `false`. If false, ad-hoc releases are excluded
+    * @param includeSnapshot:
+    *   default true. If `false`, snapshot releases are excluded
+    */
+  def listAllReleases(
+      includeAdHoc: Boolean = false,
+      includeSnapshot: Boolean = true,
+  ): Seq[ReleaseVersion] = {
+    import scala.sys.process.*
+    val output =
+      """aws s3api list-objects-v2 --bucket canton-public-releases --prefix releases/canton-open-source- --query 'Contents[].Key' --output text --no-sign-request""".!!
+    output
+      .split("\\s+")
+      .toSeq
+      .filter(_.endsWith(".tar.gz"))
+      .filterNot(_.contains("-protobuf"))
+      .flatMap { key =>
+        ReleaseVersion
+          .create(key.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
+          .toOption
+      }
+      .filter(r => (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot))
+      .distinct
+  }
+
   // All previous stable releases minus releases that support only deleted protocol versions
   lazy val previousSupportedStableReleases: List[ReleaseVersion] =
     File("release-notes/")

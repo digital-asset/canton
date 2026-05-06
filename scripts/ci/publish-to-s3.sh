@@ -33,8 +33,8 @@ ls -all /tmp/workspace/community/app/target/release/
 run " copy tarball to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}.tar.gz" "s3://canton-public-releases/releases/$filename.tar.gz"
 run " copy zip to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}.zip" "s3://canton-public-releases/releases/$filename.zip"
 
-run " copy tarball to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}-protobuf.tar.gz" "s3://canton-public-releases/releases/$filename-protobuf.tar.gz"
-run " copy zip to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}-protobuf.zip" "s3://canton-public-releases/releases/$filename-protobuf.zip"
+run " copy tarball to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}-api.tar.gz" "s3://canton-public-releases/releases/$filename-api.tar.gz"
+run " copy zip to s3" aws s3 cp --no-overwrite "/tmp/workspace/community/app/target/release/canton-open-source-${RELEASE_SUFFIX}-api.zip" "s3://canton-public-releases/releases/$filename-api.zip"
 
 run " copy scaladoc to s3" aws s3 cp --no-overwrite /tmp/workspace/scaladoc.tar.gz "s3://canton-public-releases/releases/canton-scaladoc-${RELEASE_SUFFIX}.tar.gz"
 # TODO(i29845): Uncomment the two following lines when `build_systematic_testing_inventory` is fixed

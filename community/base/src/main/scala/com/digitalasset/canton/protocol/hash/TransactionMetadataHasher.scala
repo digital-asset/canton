@@ -20,12 +20,14 @@ object TransactionMetadataHasher {
       metadata: TransactionMetadataForHashing,
       hashTracer: HashTracer = HashTracer.NoOp,
   ): Hash = {
-    // Do not enforce node seed for create nodes here as we hash disclosed events which do not have a seed
-    val common = new NodeBuilderV1(
+    val common = NodeHashBuilder(
       HashPurpose.PreparedSubmission,
       hashTracer,
+      // Do not enforce node seed for create nodes here as we hash disclosed events which do not have a seed
       enforceNodeSeedForCreateNodes = false,
-    ).addPurpose()
+      hashVersion,
+    )
+      .addPurpose()
       .addMetadataEncodingVersion(1)
       .withContext("Act As Parties")(
         _.addIterator(metadata.actAs.iterator, metadata.actAs.size)(_ addString _)

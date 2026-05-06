@@ -19,20 +19,30 @@ import com.digitalasset.canton.crypto.kms.{
   KmsKeyId,
   KmsSigningPublicKey,
 }
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
-import com.google.api.core.ApiFunction
+import com.google.api.core.{ApiFunction, ApiFuture, ApiFutureCallback, ApiFutures}
 import com.google.api.gax.core.FixedCredentialsProvider
 import com.google.api.gax.rpc.{ApiException, ResourceExhaustedException}
 import com.google.auth.oauth2.GoogleCredentials
 import com.google.cloud.kms.v1 as gcp
 import com.google.cloud.kms.v1.CryptoKey.CryptoKeyPurpose
 import com.google.cloud.kms.v1.CryptoKeyVersion.CryptoKeyVersionAlgorithm
-import com.google.cloud.kms.v1.{AsymmetricSignRequest, CryptoKeyVersion}
+import com.google.cloud.kms.v1.{
+  AsymmetricDecryptRequest,
+  AsymmetricSignRequest,
+  CreateCryptoKeyRequest,
+  CryptoKeyVersion,
+  DecryptRequest,
+  DestroyCryptoKeyVersionRequest,
+  EncryptRequest,
+  GetCryptoKeyVersionRequest,
+  GetPublicKeyRequest,
+}
+import com.google.common.util.concurrent.MoreExecutors
 import com.google.protobuf.ByteString
 import io.grpc.ManagedChannelBuilder
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
@@ -41,7 +51,7 @@ import org.bouncycastle.openssl.PEMParser
 import java.io.{IOException, StringReader}
 import java.util.UUID
 import scala.annotation.unused
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Stands for Google Cloud Platform - Key Management Service and is an internal KMS implementation
   * that wraps the necessary cryptographic functions from the GCP SDK.
@@ -134,19 +144,37 @@ class GcpKms(
         kmsErrorGen(ThrowableUtil.messageWithStacktrace(err), false)
     }
 
+  private def toScalaFuture[T](apiFuture: ApiFuture[T]): Future[T] = {
+    val promise = Promise[T]()
+
+    ApiFutures.addCallback(
+      apiFuture,
+      new ApiFutureCallback[T] {
+        override def onFailure(t: Throwable): Unit =
+          promise.failure(t)
+
+        override def onSuccess(result: T): Unit =
+          promise.success(result)
+      },
+      MoreExecutors.directExecutor(),
+    ) // Executes on the thread that completes the ApiFuture
+
+    promise.future
+  }
+
   private def wrapKmsCall[A](
       kmsErrorGen: (String, Boolean) => KmsError,
       functionName: String,
   )(
-      kmsCall: => A
+      kmsCall: => ApiFuture[A]
   )(implicit ec: ExecutionContext, tc: TraceContext): EitherT[FutureUnlessShutdown, KmsError, A] =
     EitherT {
       synchronizeWithClosingF(functionName) {
-        Future {
-          blocking {
-            Either.catchOnly[RuntimeException](kmsCall)
+        toScalaFuture(kmsCall)
+          .map(Right(_))
+          .recover { case runtimeException: RuntimeException =>
+            Left(runtimeException)
           }
-        }
       }
     }.leftMap[KmsError](err =>
       errorHandler(err, (errStr, retryable) => kmsErrorGen(errStr, retryable))
@@ -194,7 +222,14 @@ class GcpKms(
                   .setProtectionLevel(gcp.ProtectionLevel.HSM)
               )
               .build()
-          kmsClient.createCryptoKey(keyRingName, kmsKeyIdStr, key)
+          kmsClient.createCryptoKeyCallable.futureCall(
+            CreateCryptoKeyRequest
+              .newBuilder()
+              .setParent(keyRingName.toString)
+              .setCryptoKeyId(kmsKeyIdStr)
+              .setCryptoKey(key)
+              .build()
+          )
         }
       }
       kmsKeyId <- String300
@@ -275,7 +310,11 @@ class GcpKms(
       wrapKmsCall(
         kmsErrorGen = (errStr, retryable) => KmsGetPublicKeyError(keyId, errStr, retryable),
         functionName = functionFullName,
-      )(kmsClient.getPublicKey(keyVersionName))
+      )(
+        kmsClient.getPublicKeyCallable.futureCall(
+          GetPublicKeyRequest.newBuilder().setName(keyVersionName.toString).build()
+        )
+      )
     )
   }
 
@@ -427,7 +466,15 @@ class GcpKms(
         wrapKmsCall(
           kmsErrorGen = (errStr, retryable) => KmsEncryptError(keyId, errStr, retryable),
           functionName = functionFullName,
-        )(kmsClient.encrypt(keyName, data.unwrap).getCiphertext)
+        )(
+          kmsClient.encryptCallable.futureCall(
+            EncryptRequest
+              .newBuilder()
+              .setName(keyName.toString)
+              .setPlaintext(data.unwrap)
+              .build()
+          )
+        ).map(_.getCiphertext)
       )
       ciphertext <- ByteString6144
         .create(dataEnc)
@@ -463,8 +510,14 @@ class GcpKms(
           kmsErrorGen = (errStr, retryable) => KmsDecryptError(keyId, errStr, retryable),
           functionName = functionFullName,
         )(
-          kmsClient.decrypt(keyName, data.unwrap).getPlaintext
-        )
+          kmsClient.decryptCallable.futureCall(
+            DecryptRequest
+              .newBuilder()
+              .setName(keyName.toString)
+              .setCiphertext(data.unwrap)
+              .build()
+          )
+        ).map(_.getPlaintext)
       )
       plaintext <- ByteString4096
         .create(dataPlain)
@@ -503,8 +556,14 @@ class GcpKms(
           kmsErrorGen = (errStr, retryable) => KmsDecryptError(keyId, errStr, retryable),
           functionName = functionFullName,
         )(
-          kmsClient.asymmetricDecrypt(keyName, data.unwrap).getPlaintext
-        )
+          kmsClient.asymmetricDecryptCallable.futureCall(
+            AsymmetricDecryptRequest
+              .newBuilder()
+              .setName(keyName.toString)
+              .setCiphertext(data.unwrap)
+              .build()
+          )
+        ).map(_.getPlaintext)
       )
       plaintext <- ByteString190
         .create(dataPlain)
@@ -532,10 +591,15 @@ class GcpKms(
         kmsErrorGen = (errStr, retryable) => KmsSignError(keyId, errStr, retryable),
         functionName = functionFullName,
       ) {
-        val request =
-          AsymmetricSignRequest.newBuilder().setData(data).setName(keyVersionName.toString).build()
-        kmsClient.asymmetricSign(request).getSignature
-      }
+        kmsClient.asymmetricSignCallable
+          .futureCall(
+            AsymmetricSignRequest
+              .newBuilder()
+              .setData(data)
+              .setName(keyVersionName.toString)
+              .build()
+          )
+      }.map(_.getSignature)
     )
 
   override protected def signInternal(
@@ -619,8 +683,13 @@ class GcpKms(
         kmsErrorGen = (errStr, retryable) => KmsDeleteKeyError(keyId, errStr, retryable),
         functionName = functionFullName,
       )(
-        kmsClient.destroyCryptoKeyVersion(keyVersionName).discard
-      )
+        kmsClient.destroyCryptoKeyVersionCallable.futureCall(
+          DestroyCryptoKeyVersionRequest
+            .newBuilder()
+            .setName(keyVersionName.toString)
+            .build()
+        )
+      ).map(_ => ())
     )
   }
 
@@ -651,7 +720,12 @@ class GcpKms(
         kmsErrorGen = (errStr, retryable) => KmsRetrieveKeyMetadataError(keyId, errStr, retryable),
         functionName = functionFullName,
       )(
-        kmsClient.getCryptoKeyVersion(keyVersionName)
+        kmsClient.getCryptoKeyVersionCallable.futureCall(
+          GetCryptoKeyVersionRequest
+            .newBuilder()
+            .setName(keyVersionName.toString)
+            .build()
+        )
       )
     )
   }

@@ -1194,6 +1194,7 @@ object PekkoUtil extends HasLoggerName {
       uncommittedWarnTreshold: Int,
       recoveringQueueMetrics: RecoveringQueueMetrics,
       consumerFactory: Commit => Future[FutureQueueConsumer[T]],
+      initializationKillSwitch: Option[() => Unit],
   ) extends RecoveringFutureQueue[T] {
     assert(maxBlockedOffer > 0)
     assert(retryAttemptWarnThreshold > 0)
@@ -1203,7 +1204,7 @@ object PekkoUtil extends HasLoggerName {
     private val logger = loggerFactory.getLogger(this.getClass)
     private implicit val directEC: ExecutionContext = DirectExecutionContext(logger)
 
-    private var consumer: Consumer[T] = Consumer.InitializationInProgress
+    private var consumer: Consumer[T] = Consumer.InitializationInProgress(initializationKillSwitch)
 
     private val recoveringQueue: RecoveringQueue[T] = new RecoveringQueue(
       maxBlocked = maxBlockedOffer,
@@ -1273,8 +1274,16 @@ object PekkoUtil extends HasLoggerName {
           logger.info("Consumer shutdown initiated")
           c.shutdown()
 
-        case Consumer.InitializationInProgress =>
-          logger.debug("Consumer initialization is in progress, delaying shutdown...")
+        case Consumer.InitializationInProgress(killSwitch) =>
+          killSwitch match {
+            case Some(kill) =>
+              logger.info(
+                "Consumer initialization is in progress, invoking initialization kill switch..."
+              )
+              kill()
+            case None =>
+              logger.debug("Consumer initialization is in progress, delaying shutdown...")
+          }
 
         case Consumer.WaitingForRetry =>
           logger.info("Interrupting wait for initialization retry, shutdown complete")
@@ -1284,7 +1293,7 @@ object PekkoUtil extends HasLoggerName {
 
     private def initializeConsumer(attempt: Int = 1): Unit = blockingSynchronized {
       logger.info("Initializing consumer...")
-      consumer = Consumer.InitializationInProgress
+      consumer = Consumer.InitializationInProgress(initializationKillSwitch)
       consumerFactory(recoveringQueue.commit)
         .onComplete(consumerInitialized(_, attempt))(directEC)
     }
@@ -1386,7 +1395,8 @@ object PekkoUtil extends HasLoggerName {
   }
 
   private object Consumer {
-    case object InitializationInProgress extends Consumer[Nothing]
+    final case class InitializationInProgress(killSwitch: Option[() => Unit])
+        extends Consumer[Nothing]
 
     case object WaitingForRetry extends Consumer[Nothing]
 
