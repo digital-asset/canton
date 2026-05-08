@@ -476,15 +476,15 @@ object Hash {
             exerciseResult,
             keyOpt,
             byKey,
-            // TODO(https://github.com/digital-asset/canton/issues/513)
-            // handle external calls
-            _,
+            externalCallResults,
             version,
           ) =>
         if (choiceAuthorizers.nonEmpty)
           notSupported("choiceAuthorizers in Exercise node") // 2.dev feature
         if (keyOpt.nonEmpty) notSupported("keyOpt in Exercise node") // 2.dev feature
         if (byKey == true) notSupported("byKey in Exercise node") // 2.dev feature
+        if (externalCallResults.nonEmpty)
+          notSupported("externalCallResults in Exercise node") // 2.dev feature
         addContext("Exercise Node")
           .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
           .addByte(NodeBuilder.NodeTag.ExerciseTag.tag, "Node Tag")

@@ -38,6 +38,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, result => resume(result).map(f))
   }
 
   def flatMap[B](f: A => Result[B]): Result[B] = this match {
@@ -58,6 +60,8 @@ sealed trait Result[+A] extends Product with Serializable {
       )
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, result => resume(result).flatMap(f))
   }
 
   private[lf] def consume(
@@ -85,6 +89,16 @@ sealed trait Result[+A] extends Product with Serializable {
         case ResultNeedKey(key, _, _, resume) =>
           go(resume(keys.lift(key).getOrElse(Vector.empty), NeedKeyProgression.Finished))
         case ResultPrefetch(_, _, result) => go(result())
+        case ResultNeedExternalCall(extId, funcId, _, _, _) =>
+          Left(Error.Interpretation(
+            Error.Interpretation.Internal(
+              "Result.consume",
+              s"Result.consume cannot handle ResultNeedExternalCall " +
+                s"(extensionId=$extId, functionId=$funcId)",
+              None,
+            ),
+            None,
+          ))
       }
     go(this)
   }
@@ -202,6 +216,33 @@ final case class ResultPrefetch[A](
     resume: () => Result[A],
 ) extends Result[A]
 
+/** Indicates that the host must provide an external-call result to complete the computation.
+  * The request fields use canonical lowercase hexadecimal encoding. To resume a successful external
+  * call, the host must provide the output using the same canonical encoding.
+  *
+  * To resume the computation, the caller must invoke `resume` with either:
+  * - Right(output) if the external call succeeded with canonical lowercase hexadecimal output
+  * - Left(error) if the host failed to complete the external call
+  *
+  * @param extensionId Identifier of the configured extension
+  * @param functionId Function identifier within the extension
+  * @param configHash Configuration hash as canonical lowercase hex
+  * @param input Input data as canonical lowercase hex
+  * @param resume Callback to provide the result or error
+  */
+final case class ResultNeedExternalCall[A](
+    extensionId: String,
+    functionId: String,
+    configHash: String,
+    input: String,
+    resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+) extends Result[A]
+
+object ResultNeedExternalCall {
+  /** Error information from external call failures */
+  final case class Error(message: String)
+}
+
 object Result {
 
   val Unit: ResultDone[Unit] = ResultDone.Unit
@@ -299,6 +340,17 @@ object Result {
                 keys,
                 () =>
                   resume().flatMap(x =>
+                    Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
+                  ),
+              )
+            case ResultNeedExternalCall(extId, funcId, configHash, input, resume) =>
+              ResultNeedExternalCall(
+                extId,
+                funcId,
+                configHash,
+                input,
+                result =>
+                  resume(result).flatMap(x =>
                     Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
                   ),
               )

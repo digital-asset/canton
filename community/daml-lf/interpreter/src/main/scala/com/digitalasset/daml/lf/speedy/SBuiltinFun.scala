@@ -910,6 +910,84 @@ private[lf] object SBuiltinFun {
     }
   }
 
+  final case object SBExternalCall extends UpdateBuiltin(5) {
+    override protected def executeUpdate(
+        args: ArraySeq[SValue],
+        machine: UpdateMachine,
+    ): Control[Question.Update] = {
+      val extensionId = getSText(args, 0)
+      val functionId = getSText(args, 1)
+      val configHex = getSText(args, 2)
+      val inputHex = getSText(args, 3)
+      checkToken(args, 4)
+
+      machine.updateGasBudget(_.BExternalCall.cost(functionId))
+
+      // Validate hex encoding before making the external call
+      (Bytes.fromString(configHex), Bytes.fromString(inputHex)) match {
+        case (Right(config), Right(input)) =>
+          // Ask the host for the external-call result.
+          machine.needExternalCall(
+            extensionId = extensionId,
+            functionId = functionId,
+            configHash = configHex,
+            input = inputHex,
+          ) {
+            case Right(responseBodyRaw) =>
+              Bytes.fromString(responseBodyRaw) match {
+                case Right(output) =>
+                  val updatedPtx = machine.ptx.recordExternalCallResult(
+                    extensionId = extensionId,
+                    functionId = functionId,
+                    config = config,
+                    input = input,
+                    output = output,
+                  ).getOrElse(
+                    crash(
+                      s"lost enclosing exercise context while resuming external call " +
+                        s"(extensionId=$extensionId, functionId=$functionId)"
+                    )
+                  )
+                  machine.ptx = updatedPtx
+                  Control.Value(SText(responseBodyRaw))
+                case Left(_) =>
+                  Control.Error(
+                    IE.ExternalCall(
+                      IE.ExternalCall.ExecutionFailed(
+                        extensionId,
+                        functionId,
+                        IE.ExternalCall.ExecutionFailed.InvalidOutput(
+                          "Invalid external call output: expected canonical lowercase hex"
+                        ),
+                      )
+                    )
+                  )
+              }
+            case Left(error) =>
+              Control.Error(
+                IE.ExternalCall(
+                  IE.ExternalCall.ExecutionFailed(
+                    extensionId,
+                    functionId,
+                    IE.ExternalCall.ExecutionFailed.CallFailed(error.message),
+                  )
+                )
+              )
+          }
+        case _ =>
+          Control.Error(
+            IE.ExternalCall(
+              IE.ExternalCall.PreparationFailed(
+                extensionId,
+                functionId,
+                "Invalid external call config or input: expected canonical lowercase hex",
+              )
+            )
+          )
+      }
+    }
+  }
+
   final case object SBFoldl extends SBuiltinFun(3) {
     override private[speedy] def execute[Q](
         args: ArraySeq[SValue],

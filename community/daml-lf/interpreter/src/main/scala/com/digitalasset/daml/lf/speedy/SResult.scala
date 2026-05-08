@@ -48,6 +48,30 @@ object Question {
         committers: Set[Party],
         callback: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Unit,
     ) extends Update
+
+    /** Update interpretation requires an external-call result from the host.
+      * The engine suspends until the host resumes the request.
+      * The request fields use canonical lowercase hexadecimal encoding. To resume a successful
+      * external call, the host must provide the output using the same canonical encoding.
+      *
+      * @param extensionId Identifier of the configured extension
+      * @param functionId Function identifier within the extension
+      * @param configHash Configuration hash as canonical lowercase hex
+      * @param input Input data as canonical lowercase hex
+      * @param callback Callback to provide the result or error
+      */
+    final case class NeedExternalCall(
+        extensionId: String,
+        functionId: String,
+        configHash: String,
+        input: String,
+        callback: Either[NeedExternalCall.Error, String] => Unit,
+    ) extends Update
+
+    object NeedExternalCall {
+      /** Error information from external call failures */
+      final case class Error(message: String)
+    }
   }
 }
 

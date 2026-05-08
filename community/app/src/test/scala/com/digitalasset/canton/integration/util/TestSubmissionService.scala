@@ -57,6 +57,7 @@ import com.digitalasset.daml.lf.engine.{
   ResultError,
   ResultInterruption,
   ResultNeedContract,
+  ResultNeedExternalCall,
   ResultNeedKey,
   ResultNeedPackage,
   ResultPrefetch,
@@ -396,6 +397,23 @@ class TestSubmissionService(
         resolve(iterateOverInterrupts(continue))
 
       case ResultPrefetch(_, _, resume) => resolve(resume())
+
+      // TODO(https://github.com/digital-asset/canton/issues/513): Double-check whether
+      // tests using this helper can safely skip external calls, or whether this should
+      // mock the external-call response instead.
+      case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
+        Future.successful(
+          Left(
+            Error.Interpretation(
+              Error.Interpretation.Internal(
+                "test",
+                s"External calls are not supported in TestSubmissionService: extension=$extensionId, function=$functionId",
+                None,
+              ),
+              None,
+            )
+          )
+        )
     }
   }
 }
