@@ -637,13 +637,10 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Record an external call result in the nearest enclosing exercise context.
-    * Walks up through try/catch scopes and returns None only when not inside any
-    * exercise context.
+  /** Record an external call result in the nearest enclosing exercise context,
+    * walking up through try/catch scopes. A missing exercise context indicates
+    * an interpreter invariant violation.
     */
-  def canRecordExternalCallResult: Boolean =
-    findEnclosingExercise(context.info).nonEmpty
-
   def recordExternalCallResult(
       extensionId: String,
       functionId: String,

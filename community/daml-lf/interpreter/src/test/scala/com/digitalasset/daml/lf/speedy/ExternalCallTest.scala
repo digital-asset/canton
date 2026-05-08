@@ -122,9 +122,6 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       val runInTryRollback : Party -> Update Text = \(party: Party) ->
         ubind cid: ContractId M:T <- create @M:T M:T { party = party }
         in exercise @M:T CallInTryRollback cid ();
-
-      val runAtRoot : Update Text =
-        EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
     }
   """)
 
@@ -152,10 +149,58 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
     )
 
     questions shouldBe 0
+    assertPreparationFailed(result)
+  }
+
+  private def assertPreparationFailed(result: Either[SError.SError, SValue]): Unit = {
     discard(
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("Invalid external call config or input")
-        message should include("expected canonical lowercase hex")
+      inside(result) {
+        case Left(
+              SError.SErrorDamlException(
+                IE.ExternalCall(IE.ExternalCall.PreparationFailed("ext", "fun", message))
+              )
+            ) =>
+          message should include("Invalid external call config or input")
+          message should include("expected canonical lowercase hex")
+      }
+    )
+  }
+
+  private def assertInvalidOutput(result: Either[SError.SError, SValue]): Unit = {
+    discard(
+      inside(result) {
+        case Left(
+              SError.SErrorDamlException(
+                IE.ExternalCall(
+                  IE.ExternalCall.ExecutionFailed(
+                    "ext",
+                    "fun",
+                    IE.ExternalCall.ExecutionFailed.InvalidOutput(message),
+                  )
+                )
+              )
+            ) =>
+          message should include("Invalid external call output")
+          message should include("expected canonical lowercase hex")
+      }
+    )
+  }
+
+  private def assertCallFailed(result: Either[SError.SError, SValue]): Unit = {
+    discard(
+      inside(result) {
+        case Left(
+              SError.SErrorDamlException(
+                IE.ExternalCall(
+                  IE.ExternalCall.ExecutionFailed(
+                    "ext",
+                    "fun",
+                    IE.ExternalCall.ExecutionFailed.CallFailed(message),
+                  )
+                )
+              )
+            ) =>
+          message shouldBe "upstream unavailable"
       }
     )
   }
@@ -310,10 +355,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
         machine,
       )
 
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("Invalid external call output")
-        message should include("expected canonical lowercase hex")
-      }
+      assertInvalidOutput(result)
     }
 
     "reject non-canonical external call outputs" in {
@@ -330,10 +372,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
             machine,
           )
 
-          inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-            message should include("Invalid external call output")
-            message should include("expected canonical lowercase hex")
-          }
+          assertInvalidOutput(result)
         }
       }
     }
@@ -360,10 +399,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       )
 
       questions shouldBe 0
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("Invalid external call config or input")
-        message should include("expected canonical lowercase hex")
-      }
+      assertPreparationFailed(result)
     }
 
     "reject malformed input hex before issuing NeedExternalCall" in {
@@ -388,10 +424,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       )
 
       questions shouldBe 0
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("Invalid external call config or input")
-        message should include("expected canonical lowercase hex")
-      }
+      assertPreparationFailed(result)
     }
 
     "reject non-canonical config and input hex before issuing NeedExternalCall" in {
@@ -419,18 +452,14 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       val result = SpeedyTestLib.runTxQ[Question.Update](
         {
           case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
-            callback(Left(Question.Update.ExternalCallError("upstream unavailable")))
+            callback(Left(Question.Update.NeedExternalCall.Error("upstream unavailable")))
           case other =>
             fail(s"Unexpected question: $other")
         },
         machine,
       )
 
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("External call failed: upstream unavailable")
-        message should include("extensionId=ext")
-        message should include("functionId=fun")
-      }
+      assertCallFailed(result)
       machine.ptx.externalCallResults shouldBe empty
     }
 
@@ -446,44 +475,15 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       val result = SpeedyTestLib.runTxQ[Question.Update](
         {
           case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
-            callback(Left(Question.Update.ExternalCallError("upstream unavailable")))
+            callback(Left(Question.Update.NeedExternalCall.Error("upstream unavailable")))
           case other =>
             fail(s"Unexpected question: $other")
         },
         machine,
       )
 
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("External call failed: upstream unavailable")
-      }
+      assertCallFailed(result)
       machine.ptx.externalCallResults shouldBe empty
-    }
-
-    "reject root-level external calls before issuing NeedExternalCall" in {
-      val machine = Speedy.Machine.fromUpdateSExpr(
-        pkgs,
-        transactionSeed,
-        pkgs.compiler.unsafeCompile(e"M:runAtRoot"),
-        Set(alice),
-        MachineLogger(),
-      )
-
-      var questions = 0
-      val result = SpeedyTestLib.runTxQ[Question.Update](
-        {
-          case Question.Update.NeedExternalCall(_, _, _, _, callback) =>
-            questions += 1
-            callback(Right("beef"))
-          case other =>
-            fail(s"Unexpected question: $other")
-        },
-        machine,
-      )
-
-      questions shouldBe 0
-      inside(result) { case Left(SError.SErrorDamlException(IE.UserError(message))) =>
-        message should include("External calls are only supported within exercise context")
-      }
     }
   }
 }

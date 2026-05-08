@@ -777,8 +777,9 @@ class Engine(
                 functionId,
                 configHash,
                 input,
-                { (result: Either[ExternalCallError, String]) =>
-                  val speedyResult = result.left.map(e => Question.Update.ExternalCallError(e.message))
+                { (result: Either[ResultNeedExternalCall.Error, String]) =>
+                  val speedyResult =
+                    result.left.map(e => Question.Update.NeedExternalCall.Error(e.message))
                   callback(speedyResult)
                   interpretLoop(machine, time, submissionInfo)
                 },

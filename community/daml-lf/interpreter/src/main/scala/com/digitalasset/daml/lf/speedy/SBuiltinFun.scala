@@ -926,57 +926,62 @@ private[lf] object SBuiltinFun {
       // Validate hex encoding before making the external call
       (Bytes.fromString(configHex), Bytes.fromString(inputHex)) match {
         case (Right(config), Right(input)) =>
-          if (!machine.ptx.canRecordExternalCallResult) {
-            Control.Error(IE.UserError(
-              s"External calls are only supported within exercise context. " +
-                s"extensionId=$extensionId, functionId=$functionId"
-            ))
-          } else {
-            // Ask the host for the external-call result.
-            machine.needExternalCall(
-              extensionId = extensionId,
-              functionId = functionId,
-              configHash = configHex,
-              input = inputHex,
-            ) {
-              case Right(responseBodyRaw) =>
-                Bytes.fromString(responseBodyRaw) match {
-                  case Right(output) =>
-                    // The external-call question is only issued after confirming that the
-                    // current partial transaction can record a result, so resuming here must
-                    // still be inside an enclosing exercise context.
-                    val updatedPtx = machine.ptx.recordExternalCallResult(
-                      extensionId = extensionId,
-                      functionId = functionId,
-                      config = config,
-                      input = input,
-                      output = output,
-                    ).getOrElse(
-                      InternalError.runtimeException(
-                        NameOf.qualifiedNameOfCurrentFunc,
-                        s"lost enclosing exercise context while resuming external call " +
-                          s"(extensionId=$extensionId, functionId=$functionId)",
+          // Ask the host for the external-call result.
+          machine.needExternalCall(
+            extensionId = extensionId,
+            functionId = functionId,
+            configHash = configHex,
+            input = inputHex,
+          ) {
+            case Right(responseBodyRaw) =>
+              Bytes.fromString(responseBodyRaw) match {
+                case Right(output) =>
+                  val updatedPtx = machine.ptx.recordExternalCallResult(
+                    extensionId = extensionId,
+                    functionId = functionId,
+                    config = config,
+                    input = input,
+                    output = output,
+                  ).getOrElse(
+                    crash(
+                      s"lost enclosing exercise context while resuming external call " +
+                        s"(extensionId=$extensionId, functionId=$functionId)"
+                    )
+                  )
+                  machine.ptx = updatedPtx
+                  Control.Value(SText(responseBodyRaw))
+                case Left(_) =>
+                  Control.Error(
+                    IE.ExternalCall(
+                      IE.ExternalCall.ExecutionFailed(
+                        extensionId,
+                        functionId,
+                        IE.ExternalCall.ExecutionFailed.InvalidOutput(
+                          "Invalid external call output: expected canonical lowercase hex"
+                        ),
                       )
                     )
-                    machine.ptx = updatedPtx
-                    Control.Value(SText(responseBodyRaw))
-                  case Left(_) =>
-                    Control.Error(
-                      IE.UserError(
-                        "Invalid external call output: expected canonical lowercase hex"
-                      )
-                    )
-                }
-              case Left(error) =>
-                val errorMsg = s"External call failed: ${error.message}" +
-                  s" (extensionId=$extensionId, functionId=$functionId)"
-                Control.Error(IE.UserError(errorMsg))
-            }
+                  )
+              }
+            case Left(error) =>
+              Control.Error(
+                IE.ExternalCall(
+                  IE.ExternalCall.ExecutionFailed(
+                    extensionId,
+                    functionId,
+                    IE.ExternalCall.ExecutionFailed.CallFailed(error.message),
+                  )
+                )
+              )
           }
         case _ =>
           Control.Error(
-            IE.UserError(
-              "Invalid external call config or input: expected canonical lowercase hex"
+            IE.ExternalCall(
+              IE.ExternalCall.PreparationFailed(
+                extensionId,
+                functionId,
+                "Invalid external call config or input: expected canonical lowercase hex",
+              )
             )
           )
       }

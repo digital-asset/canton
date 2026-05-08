@@ -4692,12 +4692,11 @@ External call functions
   canonical lowercase hexadecimal-encoded configuration hash, and the fourth
   argument is the canonical lowercase hexadecimal-encoded input payload. The
   result is the canonical lowercase hexadecimal-encoded output payload.
-  Successful evaluation requires an enclosing exercise context, and records the
-  external call result on the nearest enclosing exercise node.
-  Evaluation fails with a runtime error if no enclosing exercise context
-  exists, if the configuration hash, input payload, or output payload is
-  malformed or non-canonical hexadecimal, or if the external call cannot be
-  completed successfully.
+  Successful evaluation records the external call result on the nearest
+  enclosing exercise node. Evaluation fails with a runtime error if the
+  configuration hash, input payload, or output payload is malformed or
+  non-canonical hexadecimal, or if the external call cannot be completed
+  successfully.
 
   [*Available in version >= 2.dev*]
 

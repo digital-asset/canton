@@ -180,6 +180,32 @@ object Error {
       metadata: Map[String, String],
   ) extends Error
 
+  sealed case class ExternalCall(error: ExternalCall.Error) extends Error
+
+  object ExternalCall {
+    sealed abstract class Error extends Serializable with Product
+
+    final case class PreparationFailed(
+        extensionId: String,
+        functionId: String,
+        message: String,
+    ) extends Error
+
+    final case class ExecutionFailed(
+        extensionId: String,
+        functionId: String,
+        error: ExecutionFailed.Error,
+    ) extends Error
+
+    object ExecutionFailed {
+      sealed abstract class Error extends Serializable with Product
+
+      final case class CallFailed(message: String) extends Error
+
+      final case class InvalidOutput(message: String) extends Error
+    }
+  }
+
   sealed case class Upgrade(error: Upgrade.Error) extends Error
 
   object Upgrade {

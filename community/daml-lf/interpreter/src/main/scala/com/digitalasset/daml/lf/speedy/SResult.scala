@@ -56,7 +56,7 @@ object Question {
       *
       * @param extensionId Identifier of the configured extension
       * @param functionId Function identifier within the extension
-      * @param configHash Configuration hash as canonical lowercase hex for version validation
+      * @param configHash Configuration hash as canonical lowercase hex
       * @param input Input data as canonical lowercase hex
       * @param callback Callback to provide the result or error
       */
@@ -65,11 +65,13 @@ object Question {
         functionId: String,
         configHash: String,
         input: String,
-        callback: Either[ExternalCallError, String] => Unit,
+        callback: Either[NeedExternalCall.Error, String] => Unit,
     ) extends Update
 
-    /** Error information from external call failures */
-    final case class ExternalCallError(message: String)
+    object NeedExternalCall {
+      /** Error information from external call failures */
+      final case class Error(message: String)
+    }
   }
 }
 

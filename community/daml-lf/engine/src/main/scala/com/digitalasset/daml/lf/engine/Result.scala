@@ -89,14 +89,12 @@ sealed trait Result[+A] extends Product with Serializable {
         case ResultNeedKey(key, _, _, resume) =>
           go(resume(keys.lift(key).getOrElse(Vector.empty), NeedKeyProgression.Finished))
         case ResultPrefetch(_, _, result) => go(result())
-        // TODO(https://github.com/digital-asset/canton/issues/513): Teach consume how to
-        // provide or replay external-call results once the later stack layers are wired.
         case ResultNeedExternalCall(extId, funcId, _, _, _) =>
           Left(Error.Interpretation(
             Error.Interpretation.Internal(
               "Result.consume",
-              s"Result.consume cannot handle ResultNeedExternalCall; handle it explicitly " +
-                s"before consuming (extensionId=$extId, functionId=$funcId)",
+              s"Result.consume cannot handle ResultNeedExternalCall " +
+                s"(extensionId=$extId, functionId=$funcId)",
               None,
             ),
             None,
@@ -228,7 +226,7 @@ final case class ResultPrefetch[A](
   *
   * @param extensionId Identifier of the configured extension
   * @param functionId Function identifier within the extension
-  * @param configHash Configuration hash as canonical lowercase hex for version validation
+  * @param configHash Configuration hash as canonical lowercase hex
   * @param input Input data as canonical lowercase hex
   * @param resume Callback to provide the result or error
   */
@@ -237,11 +235,13 @@ final case class ResultNeedExternalCall[A](
     functionId: String,
     configHash: String,
     input: String,
-    resume: Either[ExternalCallError, String] => Result[A],
+    resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
 ) extends Result[A]
 
-/** Error information from external call failures */
-final case class ExternalCallError(message: String)
+object ResultNeedExternalCall {
+  /** Error information from external call failures */
+  final case class Error(message: String)
+}
 
 object Result {
 

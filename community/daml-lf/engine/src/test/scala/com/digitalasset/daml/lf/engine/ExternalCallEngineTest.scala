@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.ResultNeedExternalCall
+import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -112,10 +113,24 @@ class ExternalCallEngineTest
       inside(result) {
         case ResultNeedExternalCall(_, _, _, _, resume) =>
           inside(
-            resume(Left(ExternalCallError("upstream unavailable"))).consume()
+            resume(Left(ResultNeedExternalCall.Error("upstream unavailable"))).consume()
           ) {
-            case Left(err @ Error.Interpretation(Error.Interpretation.DamlException(_), _)) =>
-              err.message should include("External call failed: upstream unavailable")
+            case Left(
+                  err @ Error.Interpretation(
+                    Error.Interpretation.DamlException(
+                      IE.ExternalCall(
+                        IE.ExternalCall.ExecutionFailed(
+                          "ext",
+                          "fun",
+                          IE.ExternalCall.ExecutionFailed.CallFailed(message),
+                        )
+                      )
+                    ),
+                    _,
+                  )
+                ) =>
+              message shouldBe "upstream unavailable"
+              err.message should include("External call execution failed")
               err.message should include("extensionId=ext")
               err.message should include("functionId=fun")
           }

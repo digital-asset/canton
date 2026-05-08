@@ -549,7 +549,7 @@ final class LfValueTranslation(
 
           case LfEngine.ResultNeedExternalCall(_, _, _, _, _) =>
             Future.failed(
-              new IllegalStateException("External calls are not supported during view computation")
+              new IllegalStateException("View computation must be a pure function")
             )
         }
 

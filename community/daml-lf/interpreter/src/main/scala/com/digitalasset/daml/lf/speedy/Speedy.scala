@@ -370,7 +370,7 @@ private[lf] object Speedy {
         configHash: String,
         input: String,
     )(
-        continue: Either[Question.Update.ExternalCallError, String] => Control[Question.Update]
+        continue: Either[Question.Update.NeedExternalCall.Error, String] => Control[Question.Update]
     ): Control.Question[Question.Update] =
       Control.Question(
         Question.Update.NeedExternalCall(

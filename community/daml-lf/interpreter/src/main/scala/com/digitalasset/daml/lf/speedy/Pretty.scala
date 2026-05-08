@@ -144,6 +144,23 @@ private[lf] object Pretty {
         text(s"Text is malformed: $err")
       case FailureStatus(errorId, cantonCategoryId, errorMessage, _) =>
         text(s"User failure: $errorId (error category $cantonCategoryId): $errorMessage")
+      case ExternalCall(error) =>
+        error match {
+          case ExternalCall.PreparationFailed(extensionId, functionId, message) =>
+            text(
+              s"External call preparation failed (extensionId=$extensionId, functionId=$functionId): $message"
+            )
+          case ExternalCall.ExecutionFailed(extensionId, functionId, executionError) =>
+            val reason = executionError match {
+              case ExternalCall.ExecutionFailed.CallFailed(message) =>
+                s"call failed: $message"
+              case ExternalCall.ExecutionFailed.InvalidOutput(message) =>
+                s"invalid output: $message"
+            }
+            text(
+              s"External call execution failed (extensionId=$extensionId, functionId=$functionId): $reason"
+            )
+        }
       case Upgrade(error) =>
         error match {
           case Upgrade.ValidationFailed(
