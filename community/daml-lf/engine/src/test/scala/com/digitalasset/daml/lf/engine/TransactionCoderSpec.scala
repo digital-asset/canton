@@ -25,7 +25,6 @@ import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
-import com.google.protobuf.ByteString
 import org.scalacheck.Gen
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
@@ -119,19 +118,39 @@ final class TransactionCoderSpec
       }
     }
 
-    "reject Node.Exercise with external call results" in {
+    "do Node.Exercise with external call results" in {
       forAll(danglingRefExerciseNodeGen) { exerciseNode =>
         val normalizedNode = normalizeExe(exerciseNode).copy(
           version = SerializationVersion.VDev,
           externalCallResults = ImmArray(externalCallResult()),
         )
 
+        val Right(encodedNode) =
+          TransactionCoder.internal.encodeNode(
+            enclosingVersion = SerializationVersion.VDev,
+            nodeId = NodeId(0),
+            node = normalizedNode,
+          )
+
+        TransactionCoder.internal.decodeNode(SerializationVersion.VDev, encodedNode) shouldBe Right(
+          (NodeId(0), normalizedNode)
+        )
+      }
+    }
+
+    "reject Node.Exercise with external call results before minExternalCallResults" in {
+      val nodeVersion = SerializationVersion.StableVersions.max
+      forAll(danglingRefExerciseNodeGen) { exerciseNode =>
+        val normalizedNode = normalizeExe(exerciseNode.updateVersion(nodeVersion)).copy(
+          externalCallResults = ImmArray(externalCallResult())
+        )
+
         TransactionCoder.internal.encodeNode(
-          enclosingVersion = SerializationVersion.VDev,
+          enclosingVersion = nodeVersion,
           nodeId = NodeId(0),
           node = normalizedNode,
         ) shouldBe Left(
-          EncodeError("external call results are not supported by transaction encoding")
+          EncodeError(s"external call results are not supported by version $nodeVersion")
         )
       }
     }
@@ -347,18 +366,20 @@ final class TransactionCoderSpec
       }
     }
 
-    "reject exercise nodes with external call results" in {
+    "decode exercise nodes with external call results" in {
       forAll(danglingRefExerciseNodeGen) { exerciseNode =>
-        val normalizedNode = normalizeExe(exerciseNode).copy(
+        val result = externalCallResult()
+        val nodeWithoutExternalCallResults = normalizeExe(exerciseNode).copy(
           version = SerializationVersion.VDev,
           externalCallResults = ImmArray.Empty,
         )
+        val expectedNode = nodeWithoutExternalCallResults.copy(externalCallResults = ImmArray(result))
 
         val Right(encoded) = TransactionCoder.internal
           .encodeNode(
             enclosingVersion = SerializationVersion.VDev,
             nodeId = NodeId(0),
-            node = normalizedNode,
+            node = nodeWithoutExternalCallResults,
           )
 
         val withExternalCallResultsBuilder = encoded.toBuilder
@@ -369,9 +390,9 @@ final class TransactionCoderSpec
               .newBuilder()
               .setExtensionId("ext")
               .setFunctionId("fn")
-              .setConfig(ByteString.copyFromUtf8("cfg"))
-              .setInput(ByteString.copyFromUtf8("in"))
-              .setOutput(ByteString.copyFromUtf8("out"))
+              .setConfig(result.config.toByteString)
+              .setInput(result.input.toByteString)
+              .setOutput(result.output.toByteString)
               .build()
           )
         val withExternalCallResults = withExternalCallResultsBuilder.build()
@@ -379,8 +400,45 @@ final class TransactionCoderSpec
         TransactionCoder.internal.decodeNode(
           SerializationVersion.VDev,
           withExternalCallResults,
+        ) shouldBe Right(
+          (NodeId(0), expectedNode)
+        )
+      }
+    }
+
+    "reject exercise nodes with external call results before minExternalCallResults" in {
+      val nodeVersion = SerializationVersion.StableVersions.max
+      forAll(danglingRefExerciseNodeGen) { exerciseNode =>
+        val result = externalCallResult()
+        val nodeWithoutExternalCallResults = normalizeExe(exerciseNode.updateVersion(nodeVersion))
+
+        val Right(encoded) = TransactionCoder.internal
+          .encodeNode(
+            enclosingVersion = nodeVersion,
+            nodeId = NodeId(0),
+            node = nodeWithoutExternalCallResults,
+          )
+
+        val withExternalCallResultsBuilder = encoded.toBuilder
+        withExternalCallResultsBuilder
+          .getExerciseBuilder
+          .addExternalCallResults(
+            proto.ExternalCallResult
+              .newBuilder()
+              .setExtensionId(result.extensionId)
+              .setFunctionId(result.functionId)
+              .setConfig(result.config.toByteString)
+              .setInput(result.input.toByteString)
+              .setOutput(result.output.toByteString)
+              .build()
+          )
+        val withExternalCallResults = withExternalCallResultsBuilder.build()
+
+        TransactionCoder.internal.decodeNode(
+          nodeVersion,
+          withExternalCallResults,
         ) shouldBe Left(
-          DecodeError("external call results are not supported by transaction decoding")
+          DecodeError(s"External call results not supported by version $nodeVersion")
         )
       }
     }
@@ -474,11 +532,14 @@ private object TransactionCoderSpec {
         case otherwise => otherwise
       },
       keyOpt = exe.keyOpt.map(normalizeKey(_, exe.version)),
-      externalCallResults = ImmArray.Empty,
       byKey =
         if (exe.version >= SerializationVersion.minContractKeys)
           exe.byKey
         else false,
+      externalCallResults =
+        if (exe.version >= SerializationVersion.minExternalCallResults)
+          exe.externalCallResults
+        else ImmArray.empty,
     )
   }
 
