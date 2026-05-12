@@ -79,13 +79,13 @@ lazy val licenseFileMappings =
 inThisBuild(
   List(
     licenseFileMappings := {
-      (`community-app` / dumpLicenseReport).value
-      val thirdPartyReport = s"${(`community-app` / licenseReportTitle).value}.html"
+      // license report disabled temporarily to unblock bundle
+      // (`community-app` / dumpLicenseReport).value
       Seq(
         // primary license for canton
-        (file("LICENSE.txt"), "LICENSE.txt"),
-        // aggregated license details for our dependencies
-        ((`community-app` / target).value / "license-reports" / thirdPartyReport, thirdPartyReport),
+        (file("LICENSE.txt"), "LICENSE.txt")
+        // re-enable once license report is fixed
+        // ((`community-app` / target).value / "license-reports" / thirdPartyReport, thirdPartyReport),
       )
     },
     semanticdbEnabled := true,

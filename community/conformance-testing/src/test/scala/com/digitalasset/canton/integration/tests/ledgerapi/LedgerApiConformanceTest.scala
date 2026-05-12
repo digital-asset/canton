@@ -22,6 +22,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
@@ -67,7 +68,10 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
   ): Unit = {
     import env.*
 
-    require(env.environment.config.sequencers.sizeIs == connectedSynchronizersCount)
+    require(
+      (env.environment.config.sequencers.size + env.environment.config.remoteSequencers.size)
+        == connectedSynchronizersCount
+    )
 
     implicit val e: TestConsoleEnvironment = env
 
@@ -85,6 +89,8 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
     )
 
     participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
+
+    participants.all.foreach(_.resources.set_resource_limits(ResourceLimits.noLimit))
   }
 
   def shutdownLedgerApiConformanceEnvironment(env: TestConsoleEnvironment): Unit = {
@@ -185,6 +191,8 @@ object LedgerApiConformanceBase {
     "UserManagementServiceIT:RaceConditionCreateUsers", // See LedgerApiConformanceSuppressedLogs
     // Following value normalisation (https://github.com/digital-asset/daml/pull/19912), this throws a different, equally correct, error
     "CommandServiceIT:CSRefuseBadParameter",
+    // TODO(i31186): enable this once the issue is fixed
+    "TransactionServiceVisibilityIT:TXLedgerEffectsHideCommandIdToNonSubmittingStakeholders",
   )
 }
 

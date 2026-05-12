@@ -107,15 +107,17 @@ private[mediator] class Mediator(
     with FlagCloseableAsync
     with HasCloseContext {
 
-  val lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorAfterUpgradeTime =
-    new Mediator.LsuSuccessorAfterUpgradeTime {
-      override def apply(ts: CantonTimestamp)(implicit
-          traceContext: TraceContext
-      ): FutureUnlessShutdown[Option[SynchronizerSuccessor]] = for {
-        snapshot <- syncCrypto.awaitSnapshot(ts)
-        lsuO <- snapshot.ipsSnapshot.announcedLsu()
-        activeSuccessor = lsuO.collect { case (s, _) if s.upgradeTime <= ts => s }
-      } yield activeSuccessor
+  val lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorLookup =
+    new Mediator.LsuSuccessorLookup {
+      def getKnownSuccessor(
+          at: CantonTimestamp
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SynchronizerSuccessor]] =
+        for {
+          snapshot <- syncCrypto.ips.awaitSnapshot(at)
+          lsuO <- snapshot.announcedLsu()
+
+        } yield lsuO.map { case (successor, _) => successor }
+
     }
 
   def psid: PhysicalSynchronizerId = sequencerClient.psid
@@ -428,13 +430,13 @@ private[mediator] class Mediator(
 
 private[mediator] object Mediator {
 
-  /** LsuSuccessorAfterUpgradeTime gives us the successor to the current physical synchronizer id,
-    * iff the provided timestamp is past the upgrade time. Otherwise it returns None.
-    */
-  trait LsuSuccessorAfterUpgradeTime {
-    def apply(at: CantonTimestamp)(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
+  trait LsuSuccessorLookup {
+
+    /** Returns the known successor to the current physical synchronizer id.
+      */
+    def getKnownSuccessor(
+        at: CantonTimestamp
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
   }
 
   sealed trait PruningError {

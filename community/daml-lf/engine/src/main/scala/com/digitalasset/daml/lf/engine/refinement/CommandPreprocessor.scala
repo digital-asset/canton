@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.digitalasset.daml.lf.data.Ref.PackageRef
 import com.digitalasset.daml.lf.data._
@@ -18,8 +18,6 @@ private[lf] final class CommandPreprocessor(
     pkgInterface: language.PackageInterface,
     forbidLocalContractIds: Boolean,
 ) {
-
-  import Preprocessor._
 
   private val valueTranslator =
     new ValueTranslator(
@@ -157,7 +155,7 @@ private[lf] final class CommandPreprocessor(
   }
 
   @throws[Error.Preprocessing.Error]
-  private[preprocessing] def unsafePreprocessLookupByKey(
+  private[refinement] def unsafePreprocessLookupByKey(
       templateId: Ref.ValueRef,
       contractKey: Value,
       extendLocalIdForbiddanceToRelativeV2: Boolean,
@@ -167,7 +165,7 @@ private[lf] final class CommandPreprocessor(
     speedy.Command.LookupByKey(templateId, key)
   }
 
-  private[preprocessing] def unsafeResolveTyConId(
+  private[refinement] def unsafeResolveTyConId(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       tyConRef: Ref.TypeConRef,
       context: => language.Reference,
@@ -185,7 +183,7 @@ private[lf] final class CommandPreprocessor(
 
   // returns the speedy translation of an API command.
   @throws[Error.Preprocessing.Error]
-  private[preprocessing] def unsafePreprocessApiCommand(
+  private[refinement] def unsafePreprocessApiCommand(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       cmd: command.ApiCommand,
   ): speedy.ApiCommand = {
@@ -249,7 +247,7 @@ private[lf] final class CommandPreprocessor(
 
   // returns the speedy translation of an Replay command.
   @throws[Error.Preprocessing.Error]
-  private[preprocessing] def unsafePreprocessReplayCommand(
+  private[refinement] def unsafePreprocessReplayCommand(
       cmd: command.ReplayCommand
   ): speedy.Command = {
     val extendLocalIdForbiddanceToRelativeV2 = true

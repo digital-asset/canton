@@ -18,11 +18,9 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.projections.Projections
 import com.digitalasset.canton.testing.modelbased.runner.{CantonInterpreter, ReferenceInterpreter}
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.canton.topology.PartyKind
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 import scala.concurrent.duration.DurationInt
 
@@ -64,11 +62,8 @@ abstract class ModelBasedCantonIntegrationTest
 
   private val generators =
     new ConcreteGenerators(
-      languageVersion = LanguageVersion.v2_3,
+      contractKeys = true,
       readOnlyRollbacks = true,
-      keyMode = KeyMode.NonUniqueContractKeys,
-      generateQueryByKey = true,
-      singleCommand = externalPartyTesting,
     )
 
   "The canton interpreter" should {
@@ -92,6 +87,7 @@ abstract class ModelBasedCantonIntegrationTest
             numPackages,
             numParticipants,
             numCommands = numCommands,
+            singletonCommands = externalPartyTesting,
           )
 
         val result = PropertyChecker

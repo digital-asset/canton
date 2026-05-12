@@ -153,9 +153,9 @@ class ProtocolConverters(
                 jsonArgsValue = cmd.choiceArgument,
               )
             contractKey <-
-              schemaProcessors.contractArgFromJsonToProto(
+              schemaProcessors.keyArgFromJsonToProto(
                 template = cmd.templateId.withDecodingPackageId,
-                jsonArgsValue = cmd.contractKey,
+                protoArgs = cmd.contractKey,
               )
           } yield lapi.commands.Command.Command.ExerciseByKey(
             lapi.commands.ExerciseByKeyCommand(

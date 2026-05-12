@@ -21,6 +21,12 @@ template T1 with
   key t1_p : Party
   maintainer key
 
+  choice Noop : ()
+    controller t1_p
+    do
+      cid <- lookupByKey @T1 t1_p
+      cid === None
+
 template T2 with
     t2_p : Party
     moreThan3 : Int

@@ -7,7 +7,6 @@ import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.ErrorCategory.SecurityAlert
 import com.digitalasset.base.error.{ErrorCode, Explanation, Resolution}
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.CantonError
@@ -139,6 +138,35 @@ final case class MinProtocolError(
   override def asStatus: Status = Status.INVALID_ARGUMENT.withDescription(description)
 }
 
+final case class UnstableProtocolRequiresMatchingBinaries(
+    server: ProtocolVersion,
+    serverBinary: String,
+    clientBinary: String,
+) extends HandshakeError {
+
+  override def description: String =
+    s"The server version is running an unstable protocol version $server which requires both client ($clientBinary) and server ($serverBinary) to use the same binary"
+
+  override def asStatus: Status = Status.INVALID_ARGUMENT.withDescription(description)
+
+}
+
+// Generally, we don't check by binary version,
+// but by protocol version compatibility. This error is used to signal a special
+// case when we explicitly need to ban a version from connecting.
+// This was introduced as part of the LSU34->35.
+final case class ClientBinaryIsTooOld(
+    server: ProtocolVersion,
+    clientBinary: String,
+) extends HandshakeError {
+
+  override def description: String =
+    s"The server is running protocol $server and does not support clients with binary $clientBinary. This may mean that your binary is explicitly blocked from connecting. Please upgrade to a supported version."
+
+  override def asStatus: Status = Status.INVALID_ARGUMENT.withDescription(description)
+
+}
+
 final case class VersionNotSupportedError(
     server: ProtocolVersion,
     clientSupportedVersions: Seq[ProtocolVersion],
@@ -160,7 +188,7 @@ object HandshakeErrors extends HandshakeErrorGroup {
   )
   object DeprecatedProtocolVersion extends ErrorCode("DEPRECATED_PROTOCOL_VERSION", SecurityAlert) {
     final case class WarnSequencerClient(
-        synchronizerAlias: SynchronizerAlias,
+        synchronizer: String,
         version: ProtocolVersion,
     )(implicit
         val loggingContext: ErrorLoggingContext

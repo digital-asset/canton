@@ -29,7 +29,6 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.participant.synchronizer.*
-import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.SynchronizerRegistryInternalError
 import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   TopologyComponentFactory,
@@ -103,7 +102,7 @@ class GrpcSynchronizerRegistry(
       override val psid: PhysicalSynchronizerId,
       override val synchronizerAlias: SynchronizerAlias,
       override val staticParameters: StaticSynchronizerParameters,
-      sequencer: RichSequencerClient,
+      override val sequencerClient: RichSequencerClient,
       override val sequencerChannelClientO: Option[SequencerChannelClient],
       override val topologyClient: SynchronizerTopologyClientWithInit,
       override val topologyFactory: TopologyComponentFactory,
@@ -114,7 +113,8 @@ class GrpcSynchronizerRegistry(
       with FlagCloseableAsync
       with NamedLogging {
 
-    override val sequencerClient: RichSequencerClient = sequencer
+    override val connectionPool: SequencerConnectionPool = sequencerClient.connectionPool
+
     override def loggerFactory: NamedLoggerFactory = GrpcSynchronizerRegistry.this.loggerFactory
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
@@ -139,15 +139,18 @@ class GrpcSynchronizerRegistry(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SynchronizerHandle, SequencerConnections)]
+    Either[SynchronizerRegistryError, SynchronizerHandle]
   ] = {
 
     val connectionPoolE = getConnectionPool(storedConfig)
 
     val runE = for {
-      ret <- connectHandshakeGeneric(connectionPoolE, storedConfig.config, storedConfig.predecessor)
+      info <- connectHandshakeGeneric(
+        connectionPoolE,
+        storedConfig.config,
+        storedConfig.predecessor,
+      )
       connectionPool <- connectionPoolE.toEitherT[FutureUnlessShutdown]
-      (info, updatedSequencerConnections) = ret
 
       synchronizerHandle <- getSynchronizerHandle(
         storedConfig.config,
@@ -166,7 +169,7 @@ class GrpcSynchronizerRegistry(
         metrics,
       )
     } yield {
-      val grpcHandle = new GrpcSynchronizerHandle(
+      new GrpcSynchronizerHandle(
         synchronizerHandle.synchronizerId,
         synchronizerHandle.alias,
         synchronizerHandle.staticParameters,
@@ -178,7 +181,6 @@ class GrpcSynchronizerRegistry(
         synchronizerHandle.syncCryptoApi,
         synchronizerHandle.timeouts,
       )
-      (grpcHandle, updatedSequencerConnections)
     }
 
     runE.thereafter {
@@ -258,9 +260,8 @@ class GrpcSynchronizerRegistry(
   ): EitherT[
     FutureUnlessShutdown,
     SynchronizerRegistryError,
-    (SequencerAggregatedInfo, SequencerConnections),
-  ] = {
-
+    SequencerAggregatedInfo,
+  ] =
     for {
       connectionPool <- connectionPoolE.toEitherT[FutureUnlessShutdown]
       _ <- connectionPool.start().leftMap {
@@ -301,15 +302,9 @@ class GrpcSynchronizerRegistry(
           )
         )
 
-        NonEmpty.from(connectionPool.getAllConnections()) match {
-          case Some(allConnectionsNE) =>
-            val expectedSequencers = allConnectionsNE.map { connection =>
-              val name = connection.config.name
-              val alias = name.substring(0, name.lastIndexOf('-'))
-              val sequencerId = connection.attributes.sequencerId
-              SequencerAlias.tryCreate(alias) -> sequencerId
-            }.toMap
-            val aliasToSequencerConnection = expectedSequencers.map { case (alias, sequencerId) =>
+        NonEmpty.from(connectionPool.getAllSequencerIds) match {
+          case Some(aliasToSequencerIdNE) =>
+            val aliasToSequencerConnection = aliasToSequencerIdNE.map { case (alias, sequencerId) =>
               val sequencerConnection = config.sequencerConnections.aliasToConnection
                 .getOrElse(alias, ErrorUtil.invalidState(s"Unknown alias: $alias"))
               alias -> sequencerConnection.withSequencerId(sequencerId)
@@ -331,7 +326,7 @@ class GrpcSynchronizerRegistry(
                 SequencerAggregatedInfo(
                   psid = psid,
                   staticSynchronizerParameters = staticParameters,
-                  expectedSequencersO = Some(expectedSequencers),
+                  expectedSequencersO = Some(aliasToSequencerIdNE),
                   sequencerConnections = newSequencerConnections,
                 )
               )
@@ -355,31 +350,6 @@ class GrpcSynchronizerRegistry(
         .processHandshake(config.synchronizerAlias, info.psid)
         .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
 
-      updatedSequencerConnectionsE = {
-        val connectionsWithSequencerId = info.sequencerConnections.aliasToConnection
-        val updatedConnections = config.sequencerConnections.aliasToConnection.map {
-          case (_, connection) =>
-            val potentiallyUpdatedConnection =
-              connectionsWithSequencerId.getOrElse(connection.sequencerAlias, connection)
-            val updatedConnection = potentiallyUpdatedConnection.sequencerId
-              .map(connection.withSequencerId)
-              .getOrElse(connection)
-            updatedConnection
-        }.toSeq
-        SequencerConnections
-          .many(
-            updatedConnections,
-            config.sequencerConnections.sequencerTrustThreshold,
-            config.sequencerConnections.sequencerLivenessMargin,
-            config.sequencerConnections.submissionRequestAmplification,
-            config.sequencerConnections.sequencerConnectionPoolDelays,
-          )
-      }
-
-      updatedSequencerConnections <- EitherT
-        .fromEither[FutureUnlessShutdown](updatedSequencerConnectionsE)
-        .leftMap(SynchronizerRegistryInternalError.InvalidState(_): SynchronizerRegistryError)
-
       // create persistent state for the synchronizer if it does not exist yet
       _ <- syncPersistentStateManager
         .lookupOrCreatePersistentState(
@@ -387,15 +357,14 @@ class GrpcSynchronizerRegistry(
           info.staticSynchronizerParameters,
           synchronizerPredecessor,
         )
-    } yield (info, updatedSequencerConnections)
-  }
+    } yield info
 
   override def pureHandshake(
       storedConfig: StoredSynchronizerConnectionConfig
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SequencerConnections)]
+    Either[SynchronizerRegistryError, SequencerAggregatedInfo]
   ] = {
     val connectionPoolE = getConnectionPool(storedConfig)
 

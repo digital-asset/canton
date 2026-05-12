@@ -189,9 +189,7 @@ def encode_query_by_key_node(query_by_key):
         + encode_identifier(query_by_key.template_id)
         + encode_bool(query_by_key.exhaustive)
         + encode_key_with_maintainers(query_by_key.key)
-        + encode_proto_optional(
-            query_by_key, "result", query_by_key.result, encode_hex_string
-        )
+        + encode_repeated(query_by_key.result, encode_hex_string)
     )
 
 

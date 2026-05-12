@@ -379,7 +379,6 @@ class TopologyStateProcessorImpl private[processing] (
       // subsequently activate the given transaction
       tx_mergedProposalSignatures <- EitherT.right(mergeWithPendingProposal(effective, txA))
       (isMerge, tx_deduplicatedAndMerged) = mergeSignatures(tx_inStore, tx_mergedProposalSignatures)
-      // Run mapping specific semantic checks
       _ <- topologyMappingChecks.checkTransaction(
         effective,
         tx_deduplicatedAndMerged,

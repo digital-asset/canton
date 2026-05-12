@@ -35,7 +35,10 @@ service TopologyManagerReadService {
 
   rpc ListAvailableStores(ListAvailableStoresRequest) returns (ListAvailableStoresResponse);
   rpc ListAll(ListAllRequest) returns (ListAllResponse);
-  rpc ExportTopologySnapshot(ExportTopologySnapshotRequest) returns (stream ExportTopologySnapshotResponse);
+  // Deprecated in favor of ExportTopologySnapshotV2
+  rpc ExportTopologySnapshot(ExportTopologySnapshotRequest) returns (stream ExportTopologySnapshotResponse) {
+    option deprecated = true;
+  }
   rpc ExportTopologySnapshotV2(ExportTopologySnapshotV2Request) returns (stream ExportTopologySnapshotV2Response);
 
   // Fetch the genesis topology state.

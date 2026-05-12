@@ -415,7 +415,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   @VisibleForTesting
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     // Helper case class to produce comparable output to the InMemoryStore
@@ -1415,6 +1415,37 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           s"Deleted ${numDeleted.sum} transaction(s) and watermark(s) from the topology store $storeId"
         )
       }
+  }
+
+  override def deleteDataChunk(
+      chunkSize: PositiveInt
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
+    // We materialize the full chunk rather than using a subquery, as the update statement must be idempotent
+    val queryChunkIds =
+      sql"select id from common_topology_transactions where store_id = $storeIndex limit ${chunkSize.value}"
+        .as[Long]
+    for {
+      // There can be at most one of these rows, so we don't include it in our chunking.
+      _ <- storage.update(
+        sql"delete from common_topology_dispatching where store_id = $storeIndex".asUpdate,
+        functionFullName,
+      )
+
+      chunkIds <- storage.query(queryChunkIds, functionFullName)
+      // The return value of the update is not reliable with an interpolated literal.
+      _ <-
+        if (chunkIds.nonEmpty) {
+          val deleteChunk =
+            sql"delete from common_topology_transactions where id IN (#${chunkIds.mkString(",")})".asUpdate
+          storage.update(deleteChunk, functionFullName)
+        } else FutureUnlessShutdown.pure(0)
+    } yield {
+      logger.info(
+        if (chunkIds.nonEmpty) s"Deleted chunk of ${chunkIds.size} from topology store $storeId."
+        else s"No chunk to delete from topology store $storeId."
+      )
+      chunkIds.nonEmpty
+    }
   }
 
   override def findEffectiveStateChanges(

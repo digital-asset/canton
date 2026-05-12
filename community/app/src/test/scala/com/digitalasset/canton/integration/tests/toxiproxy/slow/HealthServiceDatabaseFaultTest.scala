@@ -6,7 +6,12 @@ package com.digitalasset.canton.integration.tests.toxiproxy.slow
 import com.digitalasset.canton
 import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.{LocalNodeConfig, ReplicationConfig}
+import com.digitalasset.canton.config.{
+  DbLockedConnectionPoolConfig,
+  LocalNodeConfig,
+  PositiveFiniteDuration,
+  ReplicationConfig,
+}
 import com.digitalasset.canton.integration.ConfigTransforms.ConfigNodeType
 import com.digitalasset.canton.integration.plugins.toxiproxy.*
 import com.digitalasset.canton.integration.plugins.{
@@ -102,7 +107,9 @@ trait HealthServiceDatabaseFaultTest extends HealthReportingTestHelper {
 
         // Wait until participant shows NOT_SERVING
         clue("Waiting for not serving") {
-          eventually() {
+          // decrease maxPollInterval to avoid long poll intervals causing toxic to stay too long and cause
+          // the database health to report fatal
+          eventually(maxPollInterval = 500.millis) {
             checkNotServing(nodeHealth)
           }
           checkHttpHealth(config.monitoring.httpHealthServer.value.port)(503)
@@ -209,8 +216,18 @@ class HealthServiceSequencerFaultBftOrderingIntegrationTestPostgres
         Seq(
           lowerFailedToFatalDelay, // Run after the DB plugin to alter the DB configuration
           ConfigTransforms.updateSequencerConfig("sequencer1")(
-            // This test only works with replication turned off, otherwise the sequencer node would crash
-            _.focus(_.replication).replace(Some(ReplicationConfig(enabled = Some(false))))
+            _.focus(_.replication).replace(
+              Some(
+                ReplicationConfig(
+                  enabled = Some(true),
+                  connectionPool = DbLockedConnectionPoolConfig(healthCheckPeriod =
+                    // since we decreased the failedToFatalDelay, we must also decrease the healthCheckPeriod,
+                    // to avoid falsely fatally simply because it has been too long since we last checked and we were previously failing
+                    PositiveFiniteDuration.ofSeconds(1)
+                  ),
+                )
+              )
+            )
           ),
         ),
         loggerFactory,

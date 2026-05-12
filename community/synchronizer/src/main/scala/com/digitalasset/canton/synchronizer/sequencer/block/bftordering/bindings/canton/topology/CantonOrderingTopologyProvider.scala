@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveLong}
 import com.digitalasset.canton.crypto.{
   SigningPublicKey,
   SynchronizerCryptoClient,
@@ -23,14 +23,19 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  EpochLength,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
   SequencingParameters,
@@ -46,6 +51,7 @@ import scala.concurrent.ExecutionContext
 
 private[canton] final class CantonOrderingTopologyProvider(
     cryptoApi: SynchronizerCryptoClient,
+    config: BftBlockOrdererConfig,
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
 )(implicit
@@ -156,7 +162,7 @@ private[canton] final class CantonOrderingTopologyProvider(
       val topology =
         OrderingTopology(
           nodesTopologyInfo,
-          sequencingDynamicParameters.segmentLength.epochLength(sequencers.size.toLong),
+          getEpochLength(sequencingDynamicParameters, sequencers),
           sequencingDynamicParameters,
           MaxBytesToDecompress(maxRequestSize),
           TopologyActivationTime(snapshot.ipsSnapshot.timestamp),
@@ -168,6 +174,20 @@ private[canton] final class CantonOrderingTopologyProvider(
       s"get ordering topology at activation time $activationTime",
       () => topologyWithCryptoProvider,
     )
+  }
+
+  private def getEpochLength(
+      sequencingDynamicParameters: SequencingParameters,
+      sequencers: Seq[SequencerId],
+  ): EpochLength = {
+    val oldSegmentLength = for {
+      _ <- Option.when(synchronizerProtocolVersion == ProtocolVersion.v34)(())
+      segmentLengthInt <- config.segmentLengthForPv34
+      segmentLength <- PositiveLong.create(segmentLengthInt).toOption
+    } yield SegmentLength(segmentLength)
+    oldSegmentLength
+      .getOrElse(sequencingDynamicParameters.segmentLength)
+      .epochLength(sequencers.size.toLong)
   }
 
   private def getSnapshot(

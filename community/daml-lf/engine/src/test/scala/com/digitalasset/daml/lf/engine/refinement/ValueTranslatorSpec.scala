@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, Reference}

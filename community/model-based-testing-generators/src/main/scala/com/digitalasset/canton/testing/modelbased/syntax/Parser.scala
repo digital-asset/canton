@@ -28,7 +28,6 @@ object Lexer extends RegexParsers {
   final case object PARTIES extends Token
   final case object CREATE extends Token
   final case object CREATE_WITH_KEY extends Token
-  final case object LOOKUP_BY_KEY extends Token
   final case object SUCCESS extends Token
   final case object FAILURE extends Token
   final case object EXERCISE extends Token
@@ -77,7 +76,6 @@ object Lexer extends RegexParsers {
   private def parties: Parser[Token] = "parties" ^^^ PARTIES
   private def create: Parser[Token] = "Create" ^^^ CREATE
   private def createWithKey: Parser[Token] = "CreateWithKey" ^^^ CREATE_WITH_KEY
-  private def lookupByKey: Parser[Token] = "LookupByKey" ^^^ LOOKUP_BY_KEY
   private def exercise: Parser[Token] = "Exercise" ^^^ EXERCISE
   private def exerciseByKey: Parser[Token] = "ExerciseByKey" ^^^ EXERCISE_BY_KEY
   private def fetch: Parser[Token] = "Fetch" ^^^ FETCH
@@ -132,7 +130,7 @@ object Lexer extends RegexParsers {
       indentation | nat | braceOpen | braceClose | bracketOpen | bracketClose
         | comma | parenOpen
         | parenClose | equal | bigParticipant | smallParticipant | parties
-        | fetchByKey | fetch | rollback | queryByKey | createWithKey | create | lookupByKey
+        | fetchByKey | fetch | rollback | queryByKey | createWithKey | create
         | exerciseByKey | exercise | success | failure | consuming
         | nonConsuming | key | ctl | cobs | sigs | obs | scenario | topology
         | ledger | commands | actAs | disclosures | pkgs | pkg | cids
@@ -255,31 +253,6 @@ object Parser extends Parsers {
     _ <- accept(EQUAL).commit
     obs <- partySet.commit
   } yield (Create(cid, sigs, obs), pkgId)
-
-  def lookupByKey(keys: Keys): Parser[(LookupByKey, Option[PackageId])] = for {
-    _ <- accept(LOOKUP_BY_KEY)
-    res <- lookupByKeySuccess(keys) | lookupByKeyFailure
-  } yield res
-
-  def lookupByKeySuccess(keys: Keys): Parser[(LookupByKey, Option[PackageId])] = for {
-    _ <- accept(SUCCESS)
-    cid <- contractId.commit
-    pkgId <- maybePkgKeyVal.commit
-  } yield {
-    val (keyId, maintainers) = keys(cid)
-    (LookupByKey(Some(cid), keyId, maintainers), pkgId)
-  }
-
-  def lookupByKeyFailure: Parser[(LookupByKey, Option[PackageId])] = for {
-    _ <- accept(FAILURE)
-    pkgId <- maybePkgKeyVal.commit
-    _ <- accept(KEY).commit
-    _ <- accept(EQUAL).commit
-    key <- key.commit
-  } yield {
-    val (keyId, maintainers) = key
-    (LookupByKey(None, keyId, maintainers), pkgId)
-  }
 
   def boolVal: Parser[Boolean] =
     accept(TRUE) ^^^ true | accept(FALSE) ^^^ false
@@ -417,7 +390,6 @@ object Parser extends Parsers {
       | fetch.map { case (fe, pkgId) => (fe, pkgId, keys) }
       | fetchByKey(keys).map { case (fe, pkgId) => (fe, pkgId, keys) }
       | rollback(keys).map { case (rb, keys) => (rb, Option.empty[PackageId], keys) }
-      | lookupByKey(keys).map { case (lbk, pkgId) => (lbk, pkgId, keys) }
       | queryByKey(keys).map { case (qbk, pkgId) => (qbk, pkgId, keys) })
 
   def nestedAction(keys: Keys): Parser[(Action, Keys)] =

@@ -15,7 +15,6 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueConversionError,
 }
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -56,7 +55,6 @@ class GrpcTopologyManagerWriteService(
     managers: => Seq[TopologyManager[TopologyStoreId, BaseCrypto]],
     physicalSynchronizerIdLookup: PsidLookup,
     temporaryStoreRegistry: TemporaryStoreRegistry,
-    nodeParameters: CantonNodeParameters,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends v30.TopologyManagerWriteServiceGrpc.TopologyManagerWriteService
@@ -143,9 +141,6 @@ class GrpcTopologyManagerWriteService(
             )
           (op, serial, validatedMapping, signingKeys, forceChanges) = mapping
 
-          // TODO(#28972) Remove this check once LSU is stable
-          _ <- EitherT.fromEither[FutureUnlessShutdown](ensureLsuPreviewEnabled(validatedMapping))
-
           manager <- targetManagerET(store)
           signedTopoTx <- manager
             .proposeAndAuthorize(
@@ -162,22 +157,6 @@ class GrpcTopologyManagerWriteService(
         } yield signedTopoTx
     }
     CantonGrpcUtil.mapErrNewEUS(result.map(tx => v30.AuthorizeResponse(Some(tx.toProtoV30))))
-  }
-
-  // LSU announcement require preview features enabled
-  // TODO(#28972) Remove when LSU is stable
-  private def ensureLsuPreviewEnabled(
-      mapping: TopologyMapping
-  )(implicit traceContext: TraceContext): Either[RpcError, Unit] = {
-    val isLsuMapping = TopologyMapping.Code.lsuMappings.contains(mapping.code)
-    Either
-      .cond(
-        !isLsuMapping || nodeParameters.enablePreviewFeatures,
-        (),
-        TopologyManagerError.PreviewFeature
-          .Error(operation = "synchronizer upgrade announcement"),
-      )
-      .leftWiden[RpcError]
   }
 
   override def signTransactions(

@@ -234,8 +234,8 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
         if (racyTopologyStateCrashRecovery) {
-          (1 to 3).foreach { idx =>
-            val threshold = if (idx % 2 == 0) 2 else 4
+          Seq(2, 1, 4, 1, 3).foreach { threshold =>
+            logger.info("Testing with threshold " + threshold)
             adjustMediatorThreshold(PositiveInt.tryCreate(threshold))
             val p1Runner = runners.headOption.value
             p1Runner.setActive(false)

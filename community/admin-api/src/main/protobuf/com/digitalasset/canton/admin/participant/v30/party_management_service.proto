@@ -31,6 +31,12 @@ service PartyManagementService {
   // a specific, intermediate step, and therefore the target participant signature must not
   // already be in place prior to the call.
   //
+  //  This operation assumes full trust in the source participant to provide a complete and
+  //  untampered state. Because the target participant cannot independently verify
+  //  the historical provenance of the imported contracts,
+  //  validation is performed on a best-effort basis.
+  //  Use only when the source participant is a known, trusted authority.
+  //
   // Returns a 'request_id' that is stable across each retry with the same request parameters.
   rpc AddPartyAsync(AddPartyAsyncRequest) returns (AddPartyAsyncResponse);
 
@@ -40,6 +46,12 @@ service PartyManagementService {
   // in the specified synchronizer along with the party's Active Contract Set (ACS) streamed
   // in the request.
   // Uploads the ACS synchronously and then performs the party addition asynchronously.
+  //
+  // This operation assumes full trust in the source participant to provide a complete and
+  // untampered state. Because the target participant cannot independently verify
+  // the historical provenance of the imported contracts,
+  // validation is performed on a best-effort basis.
+  // Use only when the source participant is a known, trusted authority.
   //
   // Returns a 'request_id' that is stable across each retry with the same request parameters.
   rpc AddPartyWithAcsAsync(stream AddPartyWithAcsAsyncRequest) returns (AddPartyWithAcsAsyncResponse);
@@ -68,6 +80,13 @@ service PartyManagementService {
   // Offline party replication focused ACS import.
   //
   // Imports the party's ACS into the target participant.
+  //
+  // This operation assumes the provided snapshot
+  // contains the complete and untampered ACS originating from a trusted source participant.
+  // Because the target participant cannot independently verify the historical provenance
+  // of the imported contracts, validation is performed on a best-effort basis,
+  // even if `contractImportMode` is `Validation`.
+  // Use only when the provided snapshot comes from a known, trusted authority.
   //
   // This endpoint works in conjunction with the ExportPartyAcs endpoint.
   rpc ImportPartyAcs(stream ImportPartyAcsRequest) returns (ImportPartyAcsResponse);
@@ -322,10 +341,6 @@ message ImportPartyAcsRequest {
   // Required
   bytes acs_snapshot = 1;
 
-  // TODO(#30096) – The synchronizer_id contains either a logical or a physical synchronizer ID; required for LSU test scenarios currently
-  // We may want to revert this to logical synchronizer ID again once the topology state copy happens with the initial handshake with the
-  // new synchronizer.
-  //
   // The identifier of the synchronizer managing the contracts to be imported.
   // Only contracts in the snapshot assigned to this exact synchronizer ID will be imported.
   // Any contract that is assigned to another synchronizer will be ignored.

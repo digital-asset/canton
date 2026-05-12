@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.traffic
 
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.transaction.Transaction
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,16 +13,22 @@ import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.TestUtils
+import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
-  TrafficTestUtils,
 }
+import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
+import com.digitalasset.canton.resource.{DbStorage, StorageSingleFactory}
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedUncompressedEnvelope, Recipients}
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.PartyId
+import com.google.protobuf.ByteString
 
 /** Test the traffic inspection service on the sequencer Specifically that it can be used to
   * correlate with the mediator inspection service verdict's to obtain accurate traffic cost of
@@ -46,11 +53,12 @@ trait TrafficSummariesTest
       }
       .withTrafficControl(
         TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
-        trafficControlParameters = TrafficTestUtils.predictableTraffic,
+        trafficControlParameters = TrafficControlUtils.predictableTraffic,
         topUpAllMembers = true,
         disableCommitments = true,
       )
 
+  private var alice: PartyId = _
   private var createRecordTime: CantonTimestamp = _
 
   "traffic summaries" when {
@@ -58,7 +66,7 @@ trait TrafficSummariesTest
       import env.*
 
       // Create 3 parties on different nodes
-      val alice = participant1.parties.enable("Alice")
+      alice = participant1.parties.enable("Alice")
       val bob = participant2.parties.enable("Bob")
       val charlie = participant3.parties.enable("Charlie")
 
@@ -158,7 +166,72 @@ trait TrafficSummariesTest
           _.shouldBeCantonErrorCode(TrafficControlErrors.NoEventAtTimestamps.code),
         )
     }
+
+    "fallback to no view hashes if the envelope cannot be opened" in { implicit env =>
+      import env.*
+
+      val factory = new StorageSingleFactory(sequencer1.config.storage)
+      val storage = factory.tryCreate(
+        connectionPoolForParticipant = false,
+        logQueryCost = None,
+        new SimClock(CantonTimestamp.Epoch, loggerFactory),
+        scheduler = None,
+        CommonMockMetrics.dbStorage,
+        DefaultProcessingTimeouts.testing,
+        loggerFactory,
+      ) match {
+        case jdbc: DbStorage => jdbc
+        case _ => fail("should be db storage")
+      }
+      import storage.api.*
+      import storage.DbStorageConverters.*
+
+      // Create a corrupted envelope
+      val corruptedBytes = ByteString.copyFromUtf8("corrupted-envelope-content")
+      val corruptedEnvelope = ClosedUncompressedEnvelope.create(
+        corruptedBytes,
+        Recipients.cc(participant1),
+        Seq.empty,
+        testedProtocolVersion,
+      )
+      // Put it in a well-formed batch
+      val corruptedBatch = Batch.fromClosed(testedProtocolVersion, corruptedEnvelope)
+      val corruptedPayload = corruptedBatch.toByteString
+
+      // Write the corrupted payload back to the DB
+      storage
+        .update_(
+          sqlu"""update sequencer_payloads set content = $corruptedPayload where id = ${createRecordTime.toMicros}""",
+          "corrupt payload",
+        )
+        .futureValueUS
+
+      storage.close()
+
+      // Evict the payload cache by restarting the sequencer
+      sequencer1.stop()
+      sequencer1.start()
+      sequencer1.health.wait_for_running()
+
+      // Now request traffic summaries; the envelope should fail to open but we should still get
+      // a result with no view hashes
+      val summaries = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        sequencer1.traffic_control.traffic_summaries(Seq(createRecordTime)),
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq(
+            (
+              _.warningMessage should include("Failed to open envelope to extract view hashes"),
+              "expected failed to open envelope message",
+            )
+          )
+        ),
+      )
+
+      summaries.loneElement.envelopes.loneElement.viewHashes shouldBe empty
+      summaries.loneElement.envelopes.loneElement.envelopeTrafficCost should be > 0L
+    }
   }
+
 }
 
 class TrafficSummariesTestH2 extends TrafficSummariesTest {

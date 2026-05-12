@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.digitalasset.daml.lf.command.ReplayCommand
 import com.digitalasset.daml.lf.data._

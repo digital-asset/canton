@@ -94,7 +94,7 @@ object SequencerConnectClient {
         new GrpcSequencerConnectClient(
           member,
           connection,
-          synchronizerAlias,
+          synchronizerAlias.unwrap,
           timeouts,
           params,
           SequencerClient

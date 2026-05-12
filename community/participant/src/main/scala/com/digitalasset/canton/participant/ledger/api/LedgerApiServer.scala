@@ -23,9 +23,9 @@ import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.{HttpApiServer, JsonApiConfig}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.{
-  AcsRangeInfo,
   CumulativeFilter,
   EventFormat,
   IdentityProviderId,
@@ -277,7 +277,7 @@ class LedgerApiServer(
               candidatePackageIds,
               candidatePackageIdsRestrictionDescription,
             )(
-              loggingContext
+              loggingContext.traceContext
             ),
         participantContractStore = participantContractStore.value,
         pruningOffsetService =

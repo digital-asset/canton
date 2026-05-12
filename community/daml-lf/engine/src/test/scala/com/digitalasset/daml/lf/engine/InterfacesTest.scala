@@ -46,7 +46,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
   private[this] val engine = Engine.DevEngine(loggerFactory)
   private[this] val contractStateMode = ContractStateMachine.Mode.devDefault
   private[this] val compiledPackages = ConcurrentCompiledPackages(engine.config.getCompilerConfig)
-  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
+  private[this] val preprocessor = refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)

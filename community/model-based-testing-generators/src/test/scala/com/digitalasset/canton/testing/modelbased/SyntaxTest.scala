@@ -10,29 +10,28 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 }
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.syntax.{Parser, Pretty}
-import com.digitalasset.daml.lf.language.LanguageVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 class SyntaxTestPVDev
     extends SyntaxTest(
-      languageVersion = LanguageVersion.v2_dev,
+      contractKeys = true,
       readOnlyRollbacks = true,
     )
 
 class SyntaxTestPV34
     extends SyntaxTest(
-      languageVersion = LanguageVersion.v2_2,
+      contractKeys = false,
       readOnlyRollbacks = false,
     )
 
-abstract class SyntaxTest(languageVersion: LanguageVersion, readOnlyRollbacks: Boolean)
+abstract class SyntaxTest(contractKeys: Boolean, readOnlyRollbacks: Boolean)
     extends AnyWordSpec
     with Matchers
     with PropertyCheckerResultAssertions {
 
   private val generators =
-    new ConcreteGenerators(languageVersion, readOnlyRollbacks, generateQueryByKey = true)
+    new ConcreteGenerators(contractKeys, readOnlyRollbacks)
 
   "The parser and the pretty-printer" should {
     "verify the roundtrip property" in {

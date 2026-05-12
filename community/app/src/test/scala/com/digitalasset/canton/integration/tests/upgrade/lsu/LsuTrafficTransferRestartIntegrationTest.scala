@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftBlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 
@@ -227,11 +226,8 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
         ),
         // TODO(#29833) Remove this rule when shutdown of the BFT orderer is improved
         (
-          LogEntryOptionality.Optional,
-          entry => {
-            entry.loggerName shouldBe include(BftBlockOrderer.getClass.getSimpleName)
-            entry.warningMessage should include("shutdown did not complete gracefully in allotted")
-          },
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include("shutdown did not complete gracefully in allotted"),
         ),
       )
     }

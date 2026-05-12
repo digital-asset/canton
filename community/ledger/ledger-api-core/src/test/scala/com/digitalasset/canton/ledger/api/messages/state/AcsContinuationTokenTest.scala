@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api
+package com.digitalasset.canton.ledger.api.messages.state
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
-import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.messages.state.AcsContinuationToken.Checksum
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref

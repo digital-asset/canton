@@ -24,6 +24,8 @@
     </encoder>
   </appender>
 
+    <logger name="slick.jdbc.JdbcBackend.statement" level="DEBUG" />
+
   <!-- Include general rewrite rules for messages we also want to rewrite in production
        By setting the REWRITE_TESTING variable we can include the warning suppression of testing messages.
   -->

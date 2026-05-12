@@ -16,6 +16,7 @@ import com.digitalasset.canton.synchronizer.block.{AsyncWriterParameters, Sequen
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLsuConfig,
   SequencerNodeParameters,
   TimeAdvancingTopologyConfig,
 }
@@ -90,6 +91,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      lsuConfig = SequencerLsuConfig(),
     )
 
   "Reference sequencer" when runSequencerApiTests()

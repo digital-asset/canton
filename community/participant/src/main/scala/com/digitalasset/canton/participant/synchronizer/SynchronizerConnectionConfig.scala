@@ -101,14 +101,15 @@ final case class SynchronizerConnectionConfig(
             `timeTracker`,
             `initializeFromTrustedSynchronizer`,
           ) =>
+        val unknownAliases =
+          otherAliasToConnection.keySet.diff(sequencerConnections.aliasToConnection.keySet)
         for {
           updatedSynchronizerId <- mergeOrRequireEqual(synchronizerId, otherSynchronizerId)
           _ <- Either.cond(
-            otherAliasToConnection.keySet
-              .diff(sequencerConnections.aliasToConnection.keySet)
-              .isEmpty,
+            unknownAliases.isEmpty,
             (),
-            "new synchronizer connection does not contain all previous sequencer connections",
+            s"new synchronizer connection contains aliases not present in the existing configuration: ${unknownAliases
+                .mkString(", ")}",
           )
           updatedConnections <- sequencerConnections.aliasToConnection.toSeq.toNEF
             .traverse { case (_, thisConnection: GrpcSequencerConnection) =>
@@ -122,24 +123,28 @@ final case class SynchronizerConnectionConfig(
                         `thisConnection`.sequencerAlias,
                         otherSequencerId,
                       ) =>
+                    val unknownEndpoints = otherEndPoints.toSet -- thisConnection.endpoints
                     for {
                       updatedSequencerId <- mergeOrRequireEqual(
                         thisConnection.sequencerId,
                         otherSequencerId,
                       )
                       _ <- Either.cond(
-                        (otherEndPoints.toSet -- thisConnection.endpoints).isEmpty,
+                        unknownEndpoints.isEmpty,
                         (),
-                        "new sequencer connection does not contain all endpoints of the previously configured sequencer connection",
+                        s"new sequencer connection ${thisConnection.sequencerAlias} contains endpoints that are not present in the existing configuration: ${unknownEndpoints
+                            .mkString(", ")}",
                       )
                     } yield thisConnection
                       .focus(_.endpoints)
+                      // The check above ensures 'other' only contains existing endpoints.
+                      // We use .modify solely to satisfy the NonEmpty type constraints.
                       .modify(_.++(otherEndPoints))
                       .focus(_.sequencerId)
                       .replace(updatedSequencerId)
                   case otherConnection =>
                     Left(
-                      s"new sequencer connection $thisConnection not subsume the previously existing sequencer connection $otherConnection"
+                      s"new sequencer connection $otherConnection does not subsume the previously existing sequencer connection $thisConnection"
                     )
                 }
                 .map(_.getOrElse(thisConnection))

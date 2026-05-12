@@ -19,11 +19,6 @@ import com.microsoft.z3.Status.{SATISFIABLE, UNKNOWN, UNSATISFIABLE}
 import scala.util.Random
 
 object SymbolicSolver {
-  sealed trait KeyMode
-  object KeyMode {
-    case object UniqueContractKeys extends KeyMode
-    case object NonUniqueContractKeys extends KeyMode
-  }
 
   /** Result of validating a concrete scenario against ledger model invariants. */
   sealed trait ValidityResult
@@ -58,10 +53,6 @@ object SymbolicSolver {
     *
     * Note that this only sets an upper bound on the range: the solver is always free to unify keys
     * within the allowed range when other constraints require it.
-    * @param keyMode
-    *   determines whether contract-key uniqueness is strictly enforced
-    *   ([[KeyMode.UniqueContractKeys]]) or relaxed ([[KeyMode.NonUniqueContractKeys]], the
-    *   default).
     * @return
     *   `Some(concreteScenario)` if a satisfying assignment was found, or `None` if the problem is
     *   unsatisfiable or the solver timed out.
@@ -71,12 +62,11 @@ object SymbolicSolver {
       numPackages: Int,
       numParties: Int,
       distinctKeyToContractRatio: Double = 1,
-      keyMode: KeyMode = KeyMode.NonUniqueContractKeys,
   ): Option[Concrete.Scenario] = {
     Global.setParameter("model_validate", "true")
     val ctx = new Context()
-    val res = new SymbolicSolver(ctx, numPackages, numParties, distinctKeyToContractRatio, keyMode)
-      .solve(skeleton)
+    val res =
+      new SymbolicSolver(ctx, numPackages, numParties, distinctKeyToContractRatio).solve(skeleton)
     ctx.close()
     res
   }
@@ -85,7 +75,6 @@ object SymbolicSolver {
       scenario: Concrete.Scenario,
       numPackages: Int,
       numParties: Int,
-      keyMode: KeyMode = KeyMode.NonUniqueContractKeys,
   ): ValidityResult = {
     val ctx = new Context()
     val res =
@@ -94,7 +83,6 @@ object SymbolicSolver {
         numPackages,
         numParties,
         distinctKeyToContractRatio = 1,
-        keyMode = keyMode,
       )
         .validate(scenario)
     ctx.close()
@@ -122,9 +110,8 @@ private class SymbolicSolver(
     numPackages: Int,
     numParties: Int,
     distinctKeyToContractRatio: Double,
-    keyMode: SymbolicSolver.KeyMode,
 ) {
-  import SymbolicSolver.{KeyMode, SeqZipWithPrefixOps}
+  import SymbolicSolver.SeqZipWithPrefixOps
 
   private val participantIdSort = ctx.mkIntSort()
   private val contractIdSort = ctx.mkIntSort()
@@ -291,8 +278,6 @@ private class SymbolicSolver(
       Set.empty
     case FetchByKey(_, _, _) =>
       Set.empty
-    case LookupByKey(_, _, _) =>
-      Set.empty
     case QueryByKey(_, _, _, _) =>
       Set.empty
     case Rollback(subTransaction) =>
@@ -319,8 +304,6 @@ private class SymbolicSolver(
       Set.empty
     case FetchByKey(_, _, _) =>
       Set.empty
-    case LookupByKey(_, _, _) =>
-      Set.empty
     case QueryByKey(_, keyId, _, _) =>
       Set.empty
     case Rollback(subTransaction) =>
@@ -339,7 +322,6 @@ private class SymbolicSolver(
       subTransaction.view.flatMap(collectQueryByKeyKeyIds).toSet
     case Fetch(_) => Set.empty
     case FetchByKey(_, _, _) => Set.empty
-    case LookupByKey(_, keyId, _) => Set(keyId)
     case QueryByKey(_, keyId, _, _) => Set(keyId)
     case Rollback(subTransaction) =>
       subTransaction.view.flatMap(collectQueryByKeyKeyIds).toSet
@@ -364,8 +346,6 @@ private class SymbolicSolver(
     case Fetch(contractId) =>
       Set(contractId)
     case FetchByKey(_, _, _) =>
-      Set.empty
-    case LookupByKey(_, _, _) =>
       Set.empty
     case QueryByKey(_, _, _, _) =>
       Set.empty
@@ -396,8 +376,6 @@ private class SymbolicSolver(
         List.empty
       case FetchByKey(_, _, maintainers) =>
         List(maintainers)
-      case LookupByKey(_, _, maintainers) =>
-        List(maintainers)
       case QueryByKey(_, _, maintainers, _) =>
         List(maintainers)
       case Rollback(subTransaction) =>
@@ -418,7 +396,6 @@ private class SymbolicSolver(
       subTransaction.flatMap(collectQueryByKeyAnswers)
     case Fetch(_) => List.empty
     case FetchByKey(_, _, _) => List.empty
-    case LookupByKey(_, _, _) => List.empty
     case QueryByKey(contractIds, _, _, _) => List(contractIds)
     case Rollback(subTransaction) => subTransaction.flatMap(collectQueryByKeyAnswers)
   }
@@ -449,8 +426,6 @@ private class SymbolicSolver(
       case Fetch(_) =>
         List.empty
       case FetchByKey(_, _, maintainers) =>
-        List(maintainers)
-      case LookupByKey(_, _, maintainers) =>
         List(maintainers)
       case QueryByKey(_, _, maintainers, _) =>
         List(maintainers)
@@ -494,8 +469,6 @@ private class SymbolicSolver(
       case Fetch(_) =>
         ctx.mkTrue()
       case FetchByKey(_, _, _) =>
-        ctx.mkTrue()
-      case LookupByKey(_, _, _) =>
         ctx.mkTrue()
       case QueryByKey(_, _, _, _) =>
         ctx.mkTrue()
@@ -608,25 +581,6 @@ private class SymbolicSolver(
         ctx.mkEq(ctx.mkApp(maintainersOf, contractId), maintainers),
       )
 
-    /* Asserts that no currently active contract has the given key. For every previously created
-     * contract, if it has the specified (keyId, maintainers) pair then it must already be
-     * consumed.
-     */
-    def noActiveContractWithKey(
-        keyId: KeyId,
-        maintainers: PartySet,
-        global: State,
-        local: State,
-    ): BoolExpr =
-      and(
-        for {
-          cid <- allCreated(global, local).toSeq
-        } yield ctx.mkImplies(
-          contractHasKey(cid, keyId, maintainers),
-          elem(cid, allConsumed(global, local)),
-        )
-      )
-
     // Builds the ordered list of candidate contracts for key resolution.
     // Priority (most recent first):
     //   1. Contracts created in the current Commands (local.created)
@@ -683,10 +637,6 @@ private class SymbolicSolver(
      *   - Fetch: the target contract must be active
      *   - FetchByKey: the target contract must be the most recent active contract with the given
      *     key, where "most recent" is defined by the NUCK lookup semantics.
-     *   - LookupByKey: If the lookup is successful then the looked up contract must be the most
-     *     recent active contract with the given key, where "most recent" is defined by the NUCK
-     *     lookup semantics. If the lookup failed then there must be no active contract with that
-     *     key.
      *   - Rollback: processes the sub-transaction for constraint generation but restores the
      *     created/consumed state afterwards, modelling the rollback semantics.
      *
@@ -704,21 +654,9 @@ private class SymbolicSolver(
             .modify[State](l => l.copy(created = contractId :: l.created))
             .as(ctx.mkNot(ctx.mkApp(hasKey, contractId)))
         case CreateWithKey(contractId, keyId, maintainers, _, _) =>
-          keyMode match {
-            case KeyMode.UniqueContractKeys =>
-              for {
-                local <- CatsState.get[State]
-                constraint = ctx.mkAnd(
-                  contractHasKey(contractId, keyId, maintainers),
-                  noActiveContractWithKey(keyId, maintainers, global, local),
-                )
-                _ <- CatsState.modify[State](l => l.copy(created = contractId :: l.created))
-              } yield constraint
-            case KeyMode.NonUniqueContractKeys =>
-              CatsState
-                .modify[State](l => l.copy(created = contractId :: l.created))
-                .as(contractHasKey(contractId, keyId, maintainers))
-          }
+          CatsState
+            .modify[State](l => l.copy(created = contractId :: l.created))
+            .as(contractHasKey(contractId, keyId, maintainers))
         case Exercise(kind, contractId, _, _, subTransaction) =>
           for {
             local <- CatsState.get[State]
@@ -731,23 +669,15 @@ private class SymbolicSolver(
         case ExerciseByKey(kind, contractId, keyId, maintainers, _, _, subTransaction) =>
           for {
             local <- CatsState.get[State]
-            pre = keyMode match {
-              case KeyMode.UniqueContractKeys =>
-                ctx.mkAnd(
-                  isActive(contractId, global, local),
-                  contractHasKey(contractId, keyId, maintainers),
-                )
-              case KeyMode.NonUniqueContractKeys =>
-                val candidates = buildKeyCandidates(global, local, disclosures)
-                mostRecentActiveContractWithKey(
-                  contractId,
-                  keyId,
-                  maintainers,
-                  candidates,
-                  global,
-                  local,
-                )
-            }
+            candidates = buildKeyCandidates(global, local, disclosures)
+            pre = mostRecentActiveContractWithKey(
+              contractId,
+              keyId,
+              maintainers,
+              candidates,
+              global,
+              local,
+            )
             _ <- CatsState
               .modify[State](l => l.copy(consumed = l.consumed + contractId))
               .whenA(kind == Consuming)
@@ -757,48 +687,15 @@ private class SymbolicSolver(
           CatsState.inspect(local => isActive(contractId, global, local))
         case FetchByKey(contractId, keyId, maintainers) =>
           CatsState.inspect { local =>
-            keyMode match {
-              case KeyMode.UniqueContractKeys =>
-                ctx.mkAnd(
-                  isActive(contractId, global, local),
-                  contractHasKey(contractId, keyId, maintainers),
-                )
-              case KeyMode.NonUniqueContractKeys =>
-                val candidates = buildKeyCandidates(global, local, disclosures)
-                mostRecentActiveContractWithKey(
-                  contractId,
-                  keyId,
-                  maintainers,
-                  candidates,
-                  global,
-                  local,
-                )
-            }
-          }
-        case LookupByKey(contractId, keyId, maintainers) =>
-          contractId match {
-            case Some(cid) =>
-              CatsState.inspect { local =>
-                keyMode match {
-                  case KeyMode.UniqueContractKeys =>
-                    ctx.mkAnd(
-                      isActive(cid, global, local),
-                      contractHasKey(cid, keyId, maintainers),
-                    )
-                  case KeyMode.NonUniqueContractKeys =>
-                    val candidates = buildKeyCandidates(global, local, disclosures)
-                    mostRecentActiveContractWithKey(
-                      cid,
-                      keyId,
-                      maintainers,
-                      candidates,
-                      global,
-                      local,
-                    )
-                }
-              }
-            case None =>
-              CatsState.inspect(local => noActiveContractWithKey(keyId, maintainers, global, local))
+            val candidates = buildKeyCandidates(global, local, disclosures)
+            mostRecentActiveContractWithKey(
+              contractId,
+              keyId,
+              maintainers,
+              candidates,
+              global,
+              local,
+            )
           }
         case QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
           CatsState.inspect { local =>
@@ -946,13 +843,6 @@ private class SymbolicSolver(
         visibleContractId(actAs, disclosures, participantId, contractId)
       case FetchByKey(contractId, _, _) =>
         visibleContractId(actAs, disclosures, participantId, contractId)
-      case LookupByKey(contractId, _, _) =>
-        contractId match {
-          case Some(cid) =>
-            visibleContractId(actAs, disclosures, participantId, cid)
-          case None =>
-            ctx.mkTrue()
-        }
       case QueryByKey(contractIds, _, _, _) =>
         allListElementsSatisfy(
           contractIds,
@@ -1078,8 +968,6 @@ private class SymbolicSolver(
             )
           )
         )
-      case LookupByKey(_, _, maintainers) =>
-        ctx.mkSetSubset(maintainers, actAs)
       case QueryByKey(_, _, maintainers, _) =>
         ctx.mkSetSubset(maintainers, actAs)
       case Rollback(subTransaction) =>
@@ -1209,8 +1097,6 @@ private class SymbolicSolver(
       case Fetch(_) =>
         ctx.mkTrue()
       case FetchByKey(_, _, _) =>
-        ctx.mkTrue()
-      case LookupByKey(_, _, _) =>
         ctx.mkTrue()
       case QueryByKey(_, _, _, _) =>
         ctx.mkTrue()

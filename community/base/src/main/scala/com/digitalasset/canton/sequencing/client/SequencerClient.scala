@@ -229,6 +229,8 @@ trait RichSequencerClient extends SequencerClient {
 
   def healthComponent: CloseableHealthComponent
 
+  def connectionPool: SequencerConnectionPool
+
   def getConnectionPoolHealthStatus: Seq[HealthQuasiComponent]
 
   def changeTransport(
@@ -282,7 +284,7 @@ abstract class SequencerClientImpl(
   override def logout()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, Unit] =
-    connectionPool.getAllConnections().parTraverse_(_.logout())
+    connectionPool.getAllConnections.parTraverse_(_.logout())
 
   protected val sequencersTransportState: SequencersTransportState =
     new SequencersTransportState(sequencerTransports)
@@ -1223,7 +1225,7 @@ class RichSequencerClientImpl(
     override val synchronizerPredecessor: Option[SynchronizerPredecessor],
     member: Member,
     sequencerTransports: SequencerTransports,
-    connectionPool: SequencerConnectionPool,
+    override val connectionPool: SequencerConnectionPool,
     config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
     synchronizerParametersLookup: DynamicSynchronizerParametersLookup[

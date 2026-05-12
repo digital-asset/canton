@@ -27,6 +27,39 @@ final case class PackageMetadata(
     packages: Map[Ref.PackageId, Ast.PackageSignature] = Map.empty,
 ) {
 
+  /** Compute the transitive dependency set for each input package ID. Assuming that the package
+    * store is closed under dependencies, it throws an exception if a package is unknown.
+    *
+    * @param packageIds
+    *   the set of packages from which to compute the dependencies
+    * @return
+    *   the map of input package IDs to their transitive dependency sets
+    */
+  def allDependencySetsRecursively(
+      packageIds: Set[Ref.PackageId]
+  ): Map[Ref.PackageId, Set[Ref.PackageId]] = {
+    @tailrec
+    def go(
+        todo: List[Ref.PackageId],
+        acc: Map[Ref.PackageId, Set[Ref.PackageId]],
+    ): Map[Ref.PackageId, Set[Ref.PackageId]] =
+      todo match {
+        case head :: tail =>
+          if (acc.contains(head)) go(tail, acc)
+          else {
+            val deps = tryGet(head).directDeps
+            val missingDeps = deps -- acc.keySet
+            if (missingDeps.nonEmpty) go(missingDeps.toList ++ todo, acc)
+            else {
+              val allDeps = deps.flatMap(acc.apply) + head
+              go(tail, acc.updated(head, allDeps))
+            }
+          }
+        case Nil => acc.view.filterKeys(packageIds.contains).toMap
+      }
+    go(packageIds.toList, Map.empty)
+  }
+
   /** Compute the set of dependencies recursively. Assuming that the package store is closed under
     * dependencies, it throws an exception if a package is unknown.
     *

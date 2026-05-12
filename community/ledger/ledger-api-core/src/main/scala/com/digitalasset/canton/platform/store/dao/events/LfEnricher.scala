@@ -69,7 +69,7 @@ object LfEnricher {
       ) => Future[Option[com.digitalasset.daml.lf.archive.DamlLf.Archive]],
   ): LfEnricher =
     new Impl(
-      new Enricher(
+      Enricher(
         engine = engine,
         addTrailingNoneFields = false,
         forbidLocalContractIds = forbidLocalContractIds,

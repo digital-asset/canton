@@ -92,7 +92,7 @@ class Engine(
   private[this] val stablePackageIds = StablePackages.ids(config.allowedLanguageVersions)
 
   private[engine] val preprocessor =
-    new preprocessing.Preprocessor(
+    new refinement.Preprocessor(
       compiledPackages = compiledPackages,
       loadPackage = loadPackage,
       forbidLocalContractIds = config.forbidLocalContractIds,
@@ -500,7 +500,7 @@ class Engine(
     }
   }
 
-  private lazy val enricher = new Enricher(
+  private lazy val enricher = refinement.Enricher(
     compiledPackages,
     loadPackage,
     addTypeInfo = true,
@@ -572,7 +572,7 @@ class Engine(
                   "transaction encoding/decoding is not idempotent",
                 )
                 // check that impoverishment is indempotent on engine output
-                poor = Enricher.impoverish(tx)
+                poor = refinement.Enricher.impoverish(tx)
                 _ <- Either.cond(
                   tx == poor,
                   (),
@@ -584,7 +584,7 @@ class Engine(
                   .consume()
                   .left
                   .map("transaction enrichment fails: " + _)
-                poor = Enricher.impoverish(rich)
+                poor = refinement.Enricher.impoverish(rich)
                 _ <- Either.cond(
                   tx == poor,
                   (),

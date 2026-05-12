@@ -4,6 +4,7 @@
 package com.digitalasset.base.error
 
 import com.google.rpc.status.Status as ProtoStatus
+import org.slf4j.event.Level
 
 /** The main error interface for everything that should be logged and notified.
   *
@@ -12,6 +13,11 @@ import com.google.rpc.status.Status as ProtoStatus
   * the user by failing the API call with an error string.
   */
 trait BaseError extends LocationMixin {
+
+  /** Optional override for the log level used when this error is logged. If defined, this level
+    * will be used instead of the default level associated with the error code.
+    */
+  def overrideLogLevel: Option[Level] = None
 
   /** The error code, usually passed in as implicit where the error class is defined */
   def code: ErrorCode
@@ -52,7 +58,7 @@ trait BaseError extends LocationMixin {
   def logWithContext(extra: Map[String, String] = Map())(implicit
       errorLoggingContext: BaseErrorLogger
   ): Unit =
-    errorLoggingContext.logError(this, extra)
+    errorLoggingContext.logError(this, extra, overrideLogLevel)
 
   /** Returns retryability information of this particular error
     *

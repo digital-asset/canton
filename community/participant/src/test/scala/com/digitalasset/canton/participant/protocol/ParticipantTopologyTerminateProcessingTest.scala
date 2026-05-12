@@ -44,7 +44,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -125,7 +124,6 @@ final class ParticipantTopologyTerminateProcessingTest
       pendingLsuOperationsStore = mock[PendingLsuOperation.Store],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
-      retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
       metrics,
       loggerFactory,
     )

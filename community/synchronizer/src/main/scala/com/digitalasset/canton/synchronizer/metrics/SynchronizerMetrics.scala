@@ -16,6 +16,7 @@ import com.daml.metrics.api.{
 }
 import com.daml.metrics.grpc.{DamlGrpcServerHistograms, DamlGrpcServerMetrics}
 import com.daml.metrics.{CacheMetrics, HealthMetrics}
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
@@ -30,7 +31,7 @@ import com.digitalasset.canton.metrics.{
   TrafficConsumptionMetrics,
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -316,6 +317,59 @@ class SequencerMetrics(
       )
   }
   val trafficControl = new TrafficControlMetrics
+
+  // Since gauges don't support metrics context per update, create a map with a gauge per successor psid.
+  private val lsuStatus: TrieMap[PhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
+
+  def setLsuContactSuccessorStatus(
+      value: Int,
+      successorPsid: PhysicalSynchronizerId,
+  ): Unit =
+    lsuStatus
+      .updateWith(successorPsid) {
+        case None =>
+          Some(
+            newLsuContactSuccessorStatus(
+              MetricsContext("successor_psid" -> successorPsid.toProtoPrimitive),
+              value = value,
+            )
+          )
+        case Some(gauge) =>
+          gauge.updateValue(_ => value)
+          Some(gauge)
+      }
+      .discard
+
+  private def newLsuContactSuccessorStatus(mc: MetricsContext, value: Int): Gauge[Int] =
+    openTelemetryMetricsFactory.gauge(
+      info = MetricInfo(
+        name = prefix :+ "lsu_contact_successor_status",
+        summary = "Tracks whether the sequencer was able to contact its successor.",
+        qualification = MetricQualification.Debug,
+        description =
+          """The value represents the progress of LSU from the participant point of view.
+              |-1: No LSU ongoing
+              |0: No successful contact yet.
+              |1: Successor successfully contacted
+              |""".stripMargin,
+        labelsWithDescription = Map(
+          "successor_psid" -> "The physical synchronizer id of the successor"
+        ),
+      ),
+      initial = value,
+    )(mc)
+
+  // The metrics documentation generation requires all metrics to be registered in the factory.
+  // However, the following metric is registered on-demand during normal operation. Therefore,
+  // we use this environment variable approach to guard against instantiation in production; but
+  // register the metric for the documentation generation.
+  if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
+    val dummyPsid = PhysicalSynchronizerId.tryFromString(
+      "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1::34-0"
+    )
+
+    setLsuContactSuccessorStatus(0, dummyPsid)
+  }
 }
 
 object SequencerMetrics {
@@ -451,11 +505,9 @@ class MediatorMetrics(
         qualification = MetricQualification.Debug,
       ),
       0L,
-    )(
-      MetricsContext.Empty
-    )
+    )(MetricsContext.Empty)
 
-  lazy val receivedTestingLsuSequencingMessages: Meter =
+  val receivedTestingLsuSequencingMessages: Meter =
     openTelemetryMetricsFactory.meter(
       MetricInfo(
         name = histograms.parent :+ "received-lsu-sequencing-test-messages",

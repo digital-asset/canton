@@ -3,6 +3,7 @@
 
 package com.digitalasset.daml.lf
 package engine
+package refinement
 
 import cats.Order
 import cats.data.NonEmptySet
@@ -35,7 +36,12 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
+class EnricherSpec
+    extends AnyWordSpec
+    with Matchers
+    with Inside
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   import TransactionBuilder.Implicits.{defaultPackageId => _, _}
 
@@ -163,14 +169,18 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
   preloadPackage(pkgId2, pkg2)
   preloadPackage(pkgId3, pkg3)
 
-  "enrichValue" should {
+  "Enricher.enrichValue" should {
 
     val testCases = Table[Type, Value, Value](
       ("type", "input", "expected output"),
       (TUnit, ValueUnit, ValueUnit),
       (TBool, ValueTrue, ValueTrue),
       (TInt64, ValueInt64(42), ValueInt64(42)),
-      (TTimestamp, ValueTimestamp("1969-07-20T20:17:00Z"), ValueTimestamp("1969-07-20T20:17:00Z")),
+      (
+        TTimestamp,
+        ValueTimestamp("1969-07-20T20:17:00Z"),
+        ValueTimestamp("1969-07-20T20:17:00Z"),
+      ),
       (TDate, ValueDate("1879-03-14"), ValueDate("1879-03-14")),
       (TText, ValueText("daml"), ValueText("daml")),
       (
@@ -229,15 +239,15 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       (TTyCon("Mod:Enum"), ValueEnum(None, "value1"), ValueEnum(Some("Mod:Enum"), "value1")),
     )
 
-    "enrich values as expected" in {
-      val enricher = new Enricher(engine)
+    "enriches values as expected" in {
+      val enricher = Enricher(engine)
       forEvery(testCases) { (typ, input, output) =>
         enricher.enrichValue(typ, input) shouldBe ResultDone(output)
       }
     }
 
-    "not add trailing None fields when instructed" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "does not add trailing None fields when instructed" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       val testCases = Table[Type, Value, Value](
         ("type", "input", "expected output"),
@@ -263,8 +273,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
     }
 
-    "blow up if it encounters texts with null characters" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "blows up if it encounters texts with null characters" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       val testCases = Table(
         "type" -> "LF value with null character",
@@ -283,8 +293,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
     }
 
-    "blow up if it encounters too deeply nested values" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "blows up if it encounters too deeply nested values" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       def toNat(i: Int): ValueVariant =
         if (i <= 0) ValueVariant(None, "Z", ValueUnit)
@@ -304,8 +314,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
     }
   }
 
-  "enrichTransaction" should {
-    val enricher = new Enricher(engine)
+  "Enricher.enrichTransaction" should {
 
     import TreeTransactionBuilder._
 
@@ -324,16 +333,15 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
 
       val nodeBuilder = TestNodeBuilder
-      val create =
-        nodeBuilder.create(
-          id = cid("#01"),
-          templateId = "Mod:Contract",
-          argument = contract,
-          signatories = Set("Alice"),
-          observers = Set("Alice"),
-          key = CreateKey.SignatoryMaintainerKey(key, keyHash),
-          version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
-        )
+      val create = nodeBuilder.create(
+        id = cid("#01"),
+        templateId = "Mod:Contract",
+        argument = contract,
+        signatories = Set("Alice"),
+        observers = Set("Alice"),
+        key = CreateKey.SignatoryMaintainerKey(key, keyHash),
+        version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
+      )
       txBuilder.toCommittedTransaction(
         create,
         nodeBuilder.fetch(create, byKey = false),
@@ -350,8 +358,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       )
     }
 
-    "enrich transaction as expected" in {
-
+    "enriches transaction as expected" in {
+      val enricher = Enricher(engine)
       val inputKeySValue: SValue.SRecord = SValue.SRecord(
         "Mod:Key",
         ImmArray("party", "idx"),
@@ -418,8 +426,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
 
     }
 
-    "enricher can keep field name without type annotation" in {
-      val enrich = new Enricher(
+    "keeps field name without type annotation" in {
+      val enrich = Enricher(
         engine,
         addTypeInfo = false,
         addFieldNames = true,
@@ -442,7 +450,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
 
     // enrichContractWithPackages test cases
     {
-      val enrich = new Enricher(
+      val enrich = Enricher(
         engine,
         addTypeInfo = true,
         addFieldNames = true,
@@ -460,7 +468,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       implicit val `Package ID Order`: Order[PackageId] =
         Order.fromOrdering(PackageId.ordering)
 
-      "enrich a fat contract instance with packages that agree on the enrichment" in {
+      "enriches a fat contract instance with packages that agree on the enrichment" in {
         // pkgId1 and pkgId2 agree on the enrichment
         val expectedPkgId = Order[PackageId].min(pkgId1, pkgId2)
         inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId2))) {
@@ -472,12 +480,82 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
         }
       }
 
-      "fail to enrich a fat contract instance with packages that disagree on the enrichment" in {
+      "fails to enrich a fat contract instance with packages that disagree on the enrichment" in {
         // pkgId1 and pkgId3 disagree on the enrichment
         inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId3))) {
           case ResultDone(result) =>
             result shouldBe a[Left[_, _]]
         }
+      }
+
+      s"does not stack overflow " in {
+        val largeTx = {
+
+          val inputKeySValue: SValue.SRecord = SValue.SRecord(
+            "Mod:Key",
+            ImmArray("party", "idx"),
+            ArraySeq(SValue.SParty("Alice"), SValue.SInt64(0)),
+          )
+
+          val inputKey: Value = inputKeySValue.toNormalizedValue
+
+          val inputKeyHash: Hash = SValueHash.assertHashContractKey(
+            TestNodeBuilder.defaultPackageName,
+            "Mod:Key",
+            inputKeySValue,
+          )
+
+          val inputContract: ValueRecord =
+            ValueRecord(
+              "",
+              ImmArray(
+                "" -> inputKey,
+                "" -> Value.ValueNil,
+              ),
+            )
+
+          val inputRecord =
+            ValueRecord(None, ImmArray(None -> ValueInt64(33)))
+
+          val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId.apply)
+
+          // We want the same node ids used each time for this test to create a new tree builder
+          val txBuilder = new TreeTransactionBuilder {
+            override def nextNodeId(): NodeId = ids.next()
+          }
+
+          val nodeBuilder = TestNodeBuilder
+          val create = nodeBuilder.create(
+            id = cid("#01"),
+            templateId = "Mod:Contract",
+            argument = inputContract,
+            signatories = Set("Alice"),
+            observers = Set("Alice"),
+            key = CreateKey.SignatoryMaintainerKey(inputKey, inputKeyHash),
+            version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
+          )
+          val exe: NodeWrapper = nodeBuilder.exercise(
+            contract = create,
+            choice = "Noop",
+            consuming = false,
+            actingParties = Set("Alice"),
+            argument = inputRecord,
+            result = Some(inputRecord),
+            byKey = false,
+          )
+          txBuilder.toCommittedTransaction(
+            (create: NodeWrapper) :: List.fill(50000)(exe): _*
+          )
+        }
+        val enricher = Enricher(Engine.DevEngine(loggerFactory))
+
+        val result = for {
+          _ <- ResultDone.Unit
+          _ <- enricher.enrichVersionedTransaction(largeTx)
+          _ <- ResultDone.Unit
+        } yield ()
+        result.consume(pkgs = Map(defaultPackageId -> pkg))
+        succeed
       }
     }
   }

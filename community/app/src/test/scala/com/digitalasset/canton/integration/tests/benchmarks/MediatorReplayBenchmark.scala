@@ -101,6 +101,9 @@ class MediatorReplayBenchmark
 
     // Kick-off the replay
     sequencer1.start()
+    // ensure that the sequencer produced a block with a recent wall clock time, so that
+    // the mediator's acknowledgements aren't considered future dated because of the restore of the DB.
+    sequencer1.underlying.value.sequencer.timeTracker.awaitTick(environment.clock.now)
     mediator1.start()
 
     val lastFlushTs = new AtomicReference(Instant.now())

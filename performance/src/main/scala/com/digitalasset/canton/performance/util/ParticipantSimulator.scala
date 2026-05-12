@@ -683,9 +683,7 @@ class ParticipantSimulator(
                       .leftMap(err => new IllegalArgumentException(err.toString))
                   )
                   _ <- EitherTUtil.toFutureUnlessShutdown(
-                    pool
-                      .getAllConnections()
-                      .headOption
+                    pool.getAllConnections.headOption
                       .map(
                         _.sendAsync(
                           request = signedRequest,

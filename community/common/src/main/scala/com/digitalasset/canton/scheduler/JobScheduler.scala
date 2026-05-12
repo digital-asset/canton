@@ -188,6 +188,7 @@ abstract class JobScheduler(
     }
   }
 
+  override def close(): Unit = stop()(TraceContext.empty)
 }
 
 object JobScheduler {

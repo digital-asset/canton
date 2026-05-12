@@ -123,6 +123,13 @@ object SyncServiceError extends SyncServiceErrorGroup {
           cause = s"The synchronizer with alias ${synchronizerAlias.unwrap} is unknown."
         )
         with SyncServiceError
+
+    final case class UnknownPhysicalSynchronizerId(psid: PhysicalSynchronizerId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"The synchronizer with alias physical synchronizer id $psid is unknown."
+        )
+        with SyncServiceError
   }
 
   @Explanation(
@@ -292,7 +299,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
     "This error is logged when a synchronizer has a non-active status."
   )
   @Resolution(
-    """If you attempt to connect to a synchronizer that has either been migrated off or has a pending migration,
+    """If you attempt to modify the configuration of a synchronizer or connect to a synchronizer that has either been migrated off or has a pending migration or upgrade,
       |this error will be emitted. Please complete the migration before attempting to connect to it."""
   )
   object SyncServiceSynchronizerIsNotActive

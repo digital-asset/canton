@@ -5,7 +5,7 @@ package com.daml.ledger.api.testtool.suites.v2_2
 
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
-import com.daml.ledger.test.java.semantic.limits.{WithList, WithMap}
+import com.daml.ledger.test.java.semantic.limits.*
 
 import scala.jdk.CollectionConverters.*
 
@@ -70,6 +70,92 @@ final class LimitsIT extends LedgerTestSuite {
       contract: WithList.ContractId <- ledger
         .create(alice, new WithList(alice, List.empty[String].asJava))(WithList.COMPANION)
       _ <- ledger.exercise(alice, contract.exerciseWithList_Expand(elements))
+    } yield {
+      ()
+    }
+  })
+
+  test(
+    "LDeepTransaction",
+    "Create a transaction with a long chain of exercises",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    // TODO(#26565) should handle at least depth=10000
+    val depth = 100
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      _ <- ledger.exercise(alice, contract.exerciseBuild(depth, 1))
+    } yield ()
+  })
+
+  test(
+    "LWideTransaction",
+    "Create a transaction with many sibling exercises",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      _ <- ledger.exercise(alice, contract.exerciseBuild(1, 12500))
+    } yield ()
+  })
+
+  test(
+    "LWithLargeTransaction",
+    "Create a large balanced binary transaction tree",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      _ <- ledger.exercise(alice, contract.exerciseBuild(12, 2))
+    } yield ()
+  })
+
+  test(
+    "ExternalWithDeepTransaction",
+    "External submission with a long chain of exercises",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    // TODO(#26565) should handle at least depth=10000
+    val depth = 100
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      prepareRequest = ledger.prepareSubmissionRequest(
+        alice,
+        contract.exerciseBuild(depth, 1).commands(),
+      )
+      _ <- ledger.prepareSubmission(prepareRequest)
+    } yield {
+      ()
+    }
+  })
+
+  test(
+    "ExternalWithWideTransaction",
+    "External submission with many sibling exercises",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      prepareRequest = ledger.prepareSubmissionRequest(
+        alice,
+        contract.exerciseBuild(1, 12000).commands(),
+      )
+      _ <- ledger.prepareSubmission(prepareRequest)
+    } yield ()
+  })
+
+  test(
+    "ExternalWithLargeTransaction",
+    "External submission of a large balanced binary transaction tree",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
+    for {
+      contract: Tree.ContractId <- ledger.create(alice, new Tree(alice))(Tree.COMPANION)
+      prepareRequest = ledger.prepareSubmissionRequest(
+        alice,
+        contract.exerciseBuild(8, 2).commands(),
+      )
+      _ <- ledger.prepareSubmission(prepareRequest)
     } yield {
       ()
     }

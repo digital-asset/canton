@@ -159,7 +159,11 @@ object SequencerBftAdminData {
     ) extends PeerConnectionStatus {
 
       override val pretty: Pretty[PeerEndpointStatus] =
-        prettyOfClass(param("p2pEndpointId", _.p2pEndpointId), param("health", _.health))
+        prettyOfClass(
+          param("p2pEndpointId", _.p2pEndpointId),
+          param("isOutgoingConnection", _.isOutgoingConnection),
+          param("health", _.health),
+        )
 
       def toProto: ProtoPeerConnectionStatus =
         ProtoPeerConnectionStatus(

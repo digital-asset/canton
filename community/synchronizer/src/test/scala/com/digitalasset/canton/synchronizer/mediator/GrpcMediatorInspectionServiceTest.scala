@@ -20,7 +20,7 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.mediator.admin.v30
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.InformeeMessage
-import com.digitalasset.canton.synchronizer.mediator.Mediator.LsuSuccessorAfterUpgradeTime
+import com.digitalasset.canton.synchronizer.mediator.Mediator.LsuSuccessorLookup
 import com.digitalasset.canton.synchronizer.mediator.MediatorVerdict.MediatorApprove
 import com.digitalasset.canton.synchronizer.mediator.service.GrpcMediatorInspectionService
 import com.digitalasset.canton.synchronizer.mediator.store.InMemoryFinalizedResponseStore
@@ -101,8 +101,10 @@ class GrpcMediatorInspectionServiceTest
       () => timeAwaiter.getCurrentKnownTime(),
       ts => tc => timeAwaiter.awaitKnownTimestamp(ts)(tc),
       batchSize = PositiveInt.tryCreate(batchSize),
-      lsuSuccessorAfterUpgradeTime = new LsuSuccessorAfterUpgradeTime {
-        override def apply(at: CantonTimestamp)(implicit tc: TraceContext) =
+      lsuSuccessorAfterUpgradeTime = new LsuSuccessorLookup {
+        def getKnownSuccessor(at: CantonTimestamp)(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[Option[SynchronizerSuccessor]] =
           FutureUnlessShutdown.pure(None)
       },
       loggerFactory = loggerFactory,

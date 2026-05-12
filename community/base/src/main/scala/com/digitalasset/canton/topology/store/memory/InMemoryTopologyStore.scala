@@ -8,6 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.NonEmptyReturningOps.`NE Iterable Ops`
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -255,7 +256,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   @VisibleForTesting
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     val entries =
@@ -775,6 +776,23 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       watermark.set(None)
     })
     FutureUnlessShutdown.unit
+  }
+
+  override def deleteDataChunk(
+      chunkSize: PositiveInt
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
+    def removeFromIndex(tx: TopologyStoreEntry) =
+      topologyTransactionsStoreUniqueIndex.remove((tx.from, tx.batchIdx)).discard
+    val deleted = lock.exclusive {
+      val count = chunkSize.value
+      if (topologyTransactionStore.nonEmpty && count > 0) {
+        topologyTransactionStore.view.takeRight(count).foreach(removeFromIndex)
+        topologyTransactionStore.dropRightInPlace(count)
+        watermark.set(None) // Assumes this was only set if the store is non-empty.
+        true
+      } else false
+    }
+    FutureUnlessShutdown.pure(deleted)
   }
 
   override protected def doCopyFromPredecessorSynchronizerStore(

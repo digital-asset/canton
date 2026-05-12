@@ -114,26 +114,26 @@ Now create temporary topology stores to bootstrap the Synchronizer's topology in
 Export the Sequencer and Mediator identities from both Sequencers' consoles:
 
 .. snippet:: decentralized_synchronizer_install_separate_consoles
-    .. success:: sequencer1.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto")
-    .. success:: mediator1.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto")
+    .. success:: sequencer1.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto")
+    .. success:: mediator1.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto")
 
 .. snippet:: decentralized_synchronizer_install_separate_consoles
-    .. success:: sequencer2.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto")
-    .. success:: mediator2.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto")
+    .. success:: sequencer2.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto")
+    .. success:: mediator2.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto")
 
 Import the node identities into the respective temporary topology stores from the respective consoles:
 
 .. snippet:: decentralized_synchronizer_install_separate_consoles
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer1TempStore)
 
 .. snippet:: decentralized_synchronizer_install_separate_consoles
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer2TempStore)
 
 Propose and export the decentralized namespace declaration with the first Sequencer's signature:
 
@@ -317,36 +317,36 @@ Now create temporary topology stores to bootstrap the Synchronizer's topology in
 Export the Sequencer and Mediator identities from all four Sequencer nodes' consoles:
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer1.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto")
-    .. success:: mediator1.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto")
+    .. success:: sequencer1.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto")
+    .. success:: mediator1.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto")
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer2.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto")
-    .. success:: mediator2.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto")
+    .. success:: sequencer2.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto")
+    .. success:: mediator2.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto")
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer3.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto")
+    .. success:: sequencer3.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto")
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer4.topology.transactions.export_identity_transactions("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto")
+    .. success:: sequencer4.topology.transactions.export_identity_transactionsV2("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto")
 
 Import the node identities into the respective temporary topology stores from the respective consoles:
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer1TempStore)
-    .. success:: sequencer1.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer1TempStore)
+    .. success:: sequencer1.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer1TempStore)
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer2TempStore)
-    .. success:: sequencer2.topology.transactions.import_topology_snapshot_from("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer1-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer2-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer3-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/sequencer4-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator1-identity.proto", sequencer2TempStore)
+    .. success:: sequencer2.topology.transactions.import_topology_snapshot_fromV2("tmp/synchronizer-bootstrapping-files/mediator2-identity.proto", sequencer2TempStore)
 
 Propose and export the decentralized namespace declaration with the first Sequencer's signature:
 

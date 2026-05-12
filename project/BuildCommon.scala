@@ -143,7 +143,6 @@ object BuildCommon {
           maxConcurrentSbtTestTasks,
       //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
-      Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `community-app` / Compile / damlDarLfVersions,
       Global / excludeLintKeys += `community-app` / Compile / useVersionedDarName,
       Global / excludeLintKeys += `community-app` / autoAPIMappings,
@@ -321,12 +320,9 @@ object BuildCommon {
       import CommunityProjects.`community-common`
 
       val log = streams.value.log
-      dumpLicenseReport.value
-      val thirdPartyReport = s"${licenseReportTitle.value}.html"
-      val licenseFiles = Seq(
-        // aggregated license details for our dependencies
-        (target.value / "license-reports" / thirdPartyReport, thirdPartyReport)
-      )
+      // license report disabled temporarily to unblock bundle
+      // dumpLicenseReport.value
+      val licenseFiles = Seq.empty[(File, String)]
       log.info("Copying over compiled files")
       // include daml source files (as we as project file) for users to build our daml samples themselves
       val damlSampleSource = {
@@ -798,6 +794,7 @@ object BuildCommon {
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
         `ledger-common-dars` % Test,
+        `model-based-testing-drivers` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -2494,7 +2491,7 @@ object BuildCommon {
     lazy val `model-based-testing-generators` = project
       .in(file("community/model-based-testing-generators"))
       .dependsOn(
-        DamlProjects.`daml-lf-language`
+        DamlProjects.`scala-utils`
       )
       .settings(
         sharedCommunitySettings,

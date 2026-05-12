@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api
+package com.digitalasset.canton.ledger.api.messages.state
 
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
@@ -11,13 +11,12 @@ import com.daml.platform.v1.acs_continuation.{
 }
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
-import com.digitalasset.canton.ledger.api.util.UpdateFormatHashUtils
-import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
+import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValidationErrors}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
 
-import scala.util.Try
 import scala.util.chaining.scalaUtilChainingOps
 
 final case class AcsRangeInfo(
@@ -73,18 +72,18 @@ object AcsContinuationToken {
       .addInt(TokenVersion)
       .addString(participantId)
       .finish()
-      .pipe(UpdateFormatHashUtils.toChecksum)
+      .pipe(PageTokenUtils.toChecksum)
       .pipe(Checksum(_))
 
   def decodeAndValidate(expectedChecksum: Checksum, token: ByteString)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, AcsContinuationPointer] =
-    Try(AcsContinuationTokenPayload.parseFrom(token.toByteArray)).toEither.left
-      .map(_ =>
-        ValidationErrors.invalidField(
-          fieldName = "stream_continuation_token",
-          message = "Invalid continuation token for GetActiveContractsRequest",
-        )
+    FieldValidator
+      .validateProtobufEncodedField(
+        token,
+        AcsContinuationTokenPayload,
+        fieldName = "stream_continuation_token",
+        errorMessage = "Invalid continuation token for GetActiveContractsRequest",
       )
       .ensure(ValidationErrors.invalidContinuationToken)(proto =>
         proto.checksum == expectedChecksum.bytes

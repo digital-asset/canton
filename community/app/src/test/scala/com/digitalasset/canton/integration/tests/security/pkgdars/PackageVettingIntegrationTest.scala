@@ -295,7 +295,6 @@ sealed trait PackageVettingIntegrationTest
   }
 
   // TODO(#20873): test the interaction between package vetting and package version selection for upgrading
-
   "rolls back a view referring to a package that has not been vetted by an informee participant" taggedAs ledgerIntegrity
     .setAttack(
       Attack(

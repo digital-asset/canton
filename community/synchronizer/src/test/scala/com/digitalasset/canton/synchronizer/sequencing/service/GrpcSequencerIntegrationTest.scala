@@ -232,6 +232,7 @@ class Env(
     clock = clock,
     lsuSequencingBounds = None,
     sanitizePublicErrorMessages = false,
+    disableReleaseVersionHandshakeCheck = false,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,
     metrics = SequencerTestMetrics,
     loggerFactory = loggerFactory,

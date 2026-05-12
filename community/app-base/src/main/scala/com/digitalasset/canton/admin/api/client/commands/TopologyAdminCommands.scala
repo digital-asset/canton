@@ -555,6 +555,11 @@ object TopologyAdminCommands {
             StoredTopologyTransactions.fromProtoV30(collection).leftMap(_.toString)
           }
     }
+
+    @deprecated(
+      "Use ExportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ExportTopologySnapshot(
         observer: StreamObserver[ExportTopologySnapshotResponse],
         query: BaseQuery,
@@ -845,6 +850,10 @@ object TopologyAdminCommands {
       ): Either[String, Unit] =
         Either.unit
     }
+    @deprecated(
+      "Use ImportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ImportTopologySnapshot(
         topologySnapshot: ByteString,
         store: TopologyStoreId,

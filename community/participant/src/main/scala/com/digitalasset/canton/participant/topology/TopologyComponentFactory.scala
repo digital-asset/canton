@@ -99,11 +99,6 @@ class TopologyComponentFactory(
       recordOrderPublisher: RecordOrderPublisher,
       pendingLsuOperationsStore: PendingLsuOperation.Store,
       pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
-      retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
-        FutureUnlessShutdown,
-        String,
-        Unit,
-      ],
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
@@ -128,7 +123,6 @@ class TopologyComponentFactory(
         pendingLsuOperationsStore = pendingLsuOperationsStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
-        retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         metrics = metrics,
         loggerFactory,
       )

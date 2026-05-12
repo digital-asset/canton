@@ -37,7 +37,7 @@ import com.typesafe.scalalogging.LazyLogging
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.concurrent.ExecutionContextExecutor
 
 class BftSequencerFactory(
     config: BftBlockOrdererConfig,
@@ -122,7 +122,7 @@ class BftSequencerFactory(
       lsuSequencingBounds: Option[LsuSequencingBounds],
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
-      ec: ExecutionContext,
+      ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
   ): BlockSequencer =
@@ -135,7 +135,7 @@ class BftSequencerFactory(
       store,
       sequencerStore,
       blockSequencerConfig,
-      producePostOrderingTopologyTicks,
+      producePostOrderingTopologyTicks = producePostOrderingTopologyTicks,
       balanceStore,
       storage,
       futureSupervisor,
@@ -144,18 +144,10 @@ class BftSequencerFactory(
       rateLimitManager,
       orderingTimeFixMode,
       lsuSequencingBounds,
-      drSequencingTimeUpperBound = nodeParameters.drSequencingTimeUpperBound,
-      nodeParameters.processingTimeouts,
-      nodeParameters.loggingConfig.eventDetails,
-      nodeParameters.loggingConfig.api.printer,
       metrics,
-      nodeParameters.batchingConfig,
-      consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
-      disableSubmissionChecksForTesting = nodeParameters.disableSubmissionChecksForTesting,
       synchronizerLoggerFactory,
-      exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
-      delayRequestsBeforeLsuTrafficInit = nodeParameters.delayRequestsBeforeLsuTrafficInit,
+      nodeParameters,
     )
 }
 

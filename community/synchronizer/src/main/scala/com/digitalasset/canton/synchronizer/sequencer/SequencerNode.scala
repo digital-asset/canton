@@ -741,6 +741,8 @@ class SequencerNodeBootstrap(
               new GrpcSequencerAuthenticationService(
                 authenticationService,
                 staticSynchronizerParameters.protocolVersion,
+                disableReleaseVersionHandshakeCheck =
+                  parameters.disableReleaseVersionHandshakeCheck,
                 loggerFactory,
               )
 

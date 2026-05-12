@@ -358,6 +358,18 @@ object LsuBase {
     })
   }.toMap
 
+  // Return the status of the contact of the successor per psid
+  def getLsuSuccessorContactStatusMetricValues(
+      node: LocalSequencerReference
+  ): Map[PhysicalSynchronizerId, Int] = {
+    getMetricValues(node, "daml.sequencer.lsu_contact_successor_status").toList.flatMap(_.collect {
+      case l: LongPoint =>
+        PhysicalSynchronizerId.tryFromString(
+          l.attributes.get("successor_psid").value
+        ) -> l.value.toInt
+    })
+  }.toMap
+
   private def getMetricValues(
       node: LocalInstanceReference,
       metricName: String,

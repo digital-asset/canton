@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api
+package com.digitalasset.canton.ledger.api.messages.state
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsPageRequest
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.daml.platform.v1.acs_page_token.AcsPageTokenPayload
-import com.digitalasset.canton.ledger.api.AcsPageToken.{
+import com.digitalasset.canton.ledger.api.messages.state.AcsPageToken.{
   calcParticipantChecksum,
   calcRequestChecksum,
 }
