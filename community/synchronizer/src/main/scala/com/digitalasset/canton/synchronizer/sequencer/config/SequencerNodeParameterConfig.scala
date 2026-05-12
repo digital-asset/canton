@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.config
 
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -53,6 +54,10 @@ final case class AsyncWriterConfig(
   *   If true, disable checks on the write path of the sequencer in order to allow testing the same
   *   checks on the post-processing path (malicious sequencer node tests). Only to be used for
   *   testing purposes.
+  * @param disableReleaseVersionHandshakeCheck
+  *   If true, then we won't check whether the client binaries are really supported during
+  *   handshake. This is normally only useful for unstable protocol versions to avoid accidental
+  *   ledger forks.
   */
 final case class SequencerNodeParameterConfig(
     override val alphaVersionSupport: Boolean = false,
@@ -68,8 +73,10 @@ final case class SequencerNodeParameterConfig(
     // TODO(#30769) remove this flag once the feature is complete
     producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
+    lsu: SequencerLsuConfig = SequencerLsuConfig(),
     delayRequestsBeforeLsuTrafficInit: Boolean = false,
     disableSubmissionChecksForTesting: Boolean = false,
+    disableReleaseVersionHandshakeCheck: Boolean = false,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 
@@ -86,6 +93,19 @@ final case class SequencerNodeParameterConfig(
 final case class LsuRepair(
     lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None,
     globalMaxSequencingTimeExclusive: Option[CantonTimestamp] = None,
+)
+
+/** Config for LSU.
+  *
+  * @param contactSuccessorRetry
+  *   Config for the retries of the contact of the successor
+  */
+final case class SequencerLsuConfig(
+    contactSuccessorRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofSeconds(15),
+      maxDelay = config.NonNegativeDuration.ofMinutes(1),
+      maxRetries = Int.MaxValue,
+    )
 )
 
 /** Used to override values usually derived from the LSU announcement. MUST be used only for roll

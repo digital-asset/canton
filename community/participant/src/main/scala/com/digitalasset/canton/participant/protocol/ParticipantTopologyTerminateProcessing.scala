@@ -35,10 +35,9 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.TopologyMapping
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerCounter, topology}
-import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
 
@@ -63,11 +62,6 @@ class ParticipantTopologyTerminateProcessing(
     pendingLsuOperationsStore: PendingLsuOperation.Store,
     pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
     onboardingClearanceScheduler: OnboardingClearanceScheduler,
-    retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
-      FutureUnlessShutdown,
-      String,
-      Unit,
-    ],
     metrics: ParticipantMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends topology.processing.TerminateProcessing
@@ -264,12 +258,6 @@ class ParticipantTopologyTerminateProcessing(
     // on receiving multiple Replaces. PendingLsuOperation uses an empty string ("")
     // for its operationKey, so the store will safely overwrite the
     // existing operation for this synchronizer.
-
-    EitherTUtil.doNotAwaitUS(
-      retrieveAndStoreMissingSequencerIds(traceContext),
-      s"retrieve and store missing sequencer ids for $psid",
-      failLevel = Level.WARN,
-    )
   }
 
   override def notifyUpgradeCancellation(successor: SynchronizerSuccessor)(implicit

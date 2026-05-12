@@ -34,7 +34,7 @@ import org.apache.pekko.stream.Materializer
 import pureconfig.ConfigCursor
 
 import java.util.ServiceLoader
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.*
 
 import BlockSequencerFactory.OrderingTimeFixMode
@@ -112,7 +112,7 @@ class DriverBlockSequencerFactory[C](
       lsuSequencingBounds: Option[LsuSequencingBounds],
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
-      ec: ExecutionContext,
+      ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
   ): BlockSequencer =
@@ -134,18 +134,10 @@ class DriverBlockSequencerFactory[C](
       rateLimitManager,
       orderingTimeFixMode,
       lsuSequencingBounds,
-      drSequencingTimeUpperBound = nodeParameters.drSequencingTimeUpperBound,
-      nodeParameters.processingTimeouts,
-      nodeParameters.loggingConfig.eventDetails,
-      nodeParameters.loggingConfig.api.printer,
       metrics,
-      nodeParameters.batchingConfig,
-      consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
-      disableSubmissionChecksForTesting = nodeParameters.disableSubmissionChecksForTesting,
       synchronizerLoggerFactory,
-      exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
-      delayRequestsBeforeLsuTrafficInit = nodeParameters.delayRequestsBeforeLsuTrafficInit,
+      nodeParameters,
     )
 }
 

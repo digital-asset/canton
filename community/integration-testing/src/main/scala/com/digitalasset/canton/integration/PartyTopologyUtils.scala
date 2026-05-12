@@ -38,7 +38,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
           synchronizer: Option[SynchronizerAlias] = None,
       ): Unit = {
         val synchronizerId =
-          participant.parties.testing.external.lookupOrDetectSynchronizerId(synchronizer).value
+          participant.parties.testing.external.lookupOrDetectActivePsid(synchronizer).value
         party match {
           case _: ExternalParty =>
             this.party_to_participant_mappings

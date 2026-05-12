@@ -56,7 +56,11 @@ abstract class AbstractErrorLoggingContext(
     * second string version as "err-context". When we log to file, we add the err-context to the log
     * output. When we log to JSON, we ignore the err-context field.
     */
-  override def logError(err: BaseError, extra: Map[String, String]): Unit = {
+  override def logError(
+      err: BaseError,
+      extra: Map[String, String],
+      overrideLogLevel: Option[Level] = None,
+  ): Unit = {
     implicit val traceContextImplicit: TraceContext = traceContext
 
     val mergedContext = err.context ++ err.location.map(("location", _)).toList.toMap ++ extra
@@ -67,13 +71,17 @@ abstract class AbstractErrorLoggingContext(
       "err-context" -> ("{" + ErrorLoggingContext.formatContextAsString(mergedContext) + "}"),
     ) ++ properties
     val message = err.code.toMsg(err.cause, correlationId, None)
+
+    // Log level after applying overrides (call-site or error-level), falling back to the default from the error code
+    val effectiveLogLevel: Level =
+      overrideLogLevel.getOrElse(err.overrideLogLevel.getOrElse(err.code.logLevel))
+
     withContext(arguments) {
-      (err.code.logLevel, err.throwableO) match {
+      (effectiveLogLevel, err.throwableO) match {
         case (Level.INFO, None) => logger.info(message)
         case (Level.INFO, Some(tr)) => logger.info(message, tr)
         case (Level.WARN, None) => logger.warn(message)
         case (Level.WARN, Some(tr)) => logger.warn(message, tr)
-        // an error that is logged with < INFO is not an error ...
         case (_, None) => logger.error(message)
         case (_, Some(tr)) => logger.error(message, tr)
       }
@@ -205,7 +213,11 @@ class NoLogging(
 ) extends ErrorLoggingContext {
   private val underlying: slf4j.Logger = NOPLogger.NOP_LOGGER
 
-  override def logError(err: BaseError, extra: Map[String, String]): Unit = ()
+  override def logError(
+      err: BaseError,
+      extra: Map[String, String],
+      overrideLogLevel: Option[Level] = None,
+  ): Unit = ()
   override def trace(message: => String): Unit = ()
   override def trace(message: => String, throwable: Throwable): Unit = ()
   override def debug(message: => String): Unit = ()

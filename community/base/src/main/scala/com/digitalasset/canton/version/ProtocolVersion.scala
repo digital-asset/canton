@@ -248,7 +248,7 @@ object ProtocolVersion {
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v34)
+    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35)
 
   // LF versions that should only be used with alpha/beta protocol versions
   val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
@@ -266,7 +266,7 @@ object ProtocolVersion {
   )
 
   val alpha: NonEmpty[List[AlphaProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v35, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.dev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -303,8 +303,7 @@ object ProtocolVersion {
       .get(CANTON_PROTOCOL_VERSION)
       .orElse(sys.props.get(CANTON_PROTOCOL_VERSION))
       .map(ProtocolVersion.tryCreate)
-      // TODO(i31167): When PV35 is stable, change the following line to use `latest` instead of `v35`
-      .getOrElse(ProtocolVersion.v35)
+      .getOrElse(ProtocolVersion.latest)
 
   lazy val dev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue)
@@ -312,8 +311,8 @@ object ProtocolVersion {
   lazy val v34: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(34)
 
-  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
-    ProtocolVersion.createAlpha(35)
+  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
+    ProtocolVersion.createStable(35)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34

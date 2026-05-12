@@ -9,7 +9,6 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, Lf
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{NodeId, SerializationVersion}
-import com.digitalasset.daml.lf.value.Value
 import org.scalatest.prop.{TableFor3, TableFor4}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -193,12 +192,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           ),
         ),
         WithoutSuffixes,
-        List(
-          """unable to serialize contract instance in node 0: """ +
-            s"""Provided Daml-LF value to encode exceeds maximum nesting level of ${Value.MAXIMUM_NESTING}""",
-          """unable to serialize chosen value in node 1: """ +
-            s"""Provided Daml-LF value to encode exceeds maximum nesting level of ${Value.MAXIMUM_NESTING}""",
-        ).sorted.mkString(", "),
+        "unable to encode value for NodeId.1.: Provided Daml-LF value to encode exceeds maximum nesting level of 100",
       ),
       (
         "Failure to parse party id",

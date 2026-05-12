@@ -1892,6 +1892,19 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: "5"
                 timeout: 40m
+    model_based_external_parties_test:
+        executor: canton-xlarge-docker-with-postgres
+        steps:
+            - set_external_parties
+            - run_tests:
+                command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                report_to_datadog: false
+                timeout: 120m
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U03NCGBFCDP
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
         steps:
@@ -1991,11 +2004,7 @@ jobs:
                 name: Package performance runner
             - run:
                 command: |
-                    set -eo pipefail
-                    . scripts/daml.sh
-                    DAML_VERSION=$(fetch_daml_version $PWD)
-                    GIT_SHA=$(git rev-parse HEAD)
-                    echo "daml_version=$DAML_VERSION sha=$GIT_SHA" | tee info.properties
+                    .ci/nix-exec scripts/ci/generate_info_properties.sh
                 name: Remember version info
             - persist_to_workspace:
                 paths:
@@ -2209,11 +2218,11 @@ jobs:
                 steps:
                     - publish_api_to_gar:
                         gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
-            - unless:
+            - when:
                 condition:
-                    or:
-                        - << parameters.is_nightly_workflow >>
-                        - << parameters.is_manual >>
+                    and:
+                        - not: << parameters.is_nightly_workflow >>
+                        - not: << parameters.is_manual >>
                 steps:
                     - publish_api_to_gar:
                         gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven
@@ -2577,6 +2586,69 @@ jobs:
                 num_parallel_tasks: "1"
                 succeed_on_error: true
                 timeout: 90m
+    transaction_snapshot_benchmark:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            github_tag:
+                default: main
+                type: string
+            repository_url:
+                default: https://github.com/DACH-NY/canton-network-utilities.git
+                type: string
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    git clone --depth 1 --branch << parameters.github_tag >> << parameters.repository_url >>
+                    cd $(basename << parameters.repository_url >> .git)
+                    dpm build --all
+                name: Clone and Build Daml project from Github URL
+            - run:
+                command: |
+                    mkdir -p $SNAPSHOT_DIR/dars
+                    cd $(basename << parameters.repository_url >> .git)
+                    find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
+                environment:
+                    SNAPSHOT_DIR: /tmp/workspace
+                name: Save Test Dar Files to Workspace
+            - run_tests:
+                command: dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.GenerateSnapshots" checkErrors
+                environment:
+                    DAR_DIR: /tmp/workspace/dars
+                    SNAPSHOT_DIR: /tmp/workspace
+                    STANDALONE: "True"
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                report_to_datadog: false
+            - run_tests:
+                command: dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.ExtractSnapshotChoices" checkErrors
+                environment:
+                    SNAPSHOT_DIR: /tmp/workspace
+                    STANDALONE: "True"
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                report_to_datadog: false
+            - execute_sbt_command:
+                cmd: daml-lf-snapshot/Jmh/run -p entriesFile=$SNAPSHOT_FILE -p choiceName=$(paste -sd, ${SNAPSHOT_FILE}.choices) -p darDir=$SNAPSHOT_DIR/dars -rff $SNAPSHOT_DIR/benchmarking-results.json -rf json
+                environment:
+                    SNAPSHOT_DIR: /tmp/workspace
+                    SNAPSHOT_FILE: $(ls $SNAPSHOT_DIR/snapshot-*.bin | head -n 1)
+                fail_on_error_in_output: false
+                timeout: 1h
+            - run:
+                command: |
+                    mkdir -p log
+                    mv $SNAPSHOT_DIR/snapshot-*.bin log
+                    mv $SNAPSHOT_DIR/benchmarking-results.json log
+                environment:
+                    SNAPSHOT_DIR: /tmp/workspace
+                name: Copy Dar files, snapshot data and benchmarking results and preserve them as build artefacts
+                when: always
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U03K3A3UAGY
     unit_test_coverage:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -3353,6 +3425,33 @@ workflows:
                     equal:
                         - main
                         - << pipeline.git.branch >>
+    manual_model_based_external_parties_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - model_based_external_parties_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - model-based-external-parties-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
     manual_model_based_test:
         jobs:
             - compile:
@@ -3834,7 +3933,9 @@ workflows:
                     - datadog
                     - artifactory
                     - azure-self-cache
+                    - gpg-signing
                     - maven-mirror
+                    - maven-publish
                     - da-images
                 is_manual: true
                 is_nightly_workflow: false
@@ -4192,6 +4293,33 @@ workflows:
             and:
                 - equal:
                     - toxiproxy-slow-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_transaction_snapshot_benchmark:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - transaction_snapshot_benchmark:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - transaction-snapshot-benchmark
                     - << pipeline.parameters.manual_job >>
                 - not:
                     equal:

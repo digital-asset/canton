@@ -116,7 +116,7 @@ abstract class ReplayBenchmarkITBase(
 
         // Replay and attempt to validate the snapshot file
         val benchmark = new ReplayBenchmark
-        benchmark.darFile = darPath.toFile.getAbsolutePath
+        benchmark.darDir = darPath.getParent.toFile.getAbsolutePath
         benchmark.choiceName = "ReplayBenchmark:T:Add"
         benchmark.entriesFile = snapshotFile.toFile.getAbsolutePath
         benchmark.contractIdVersion = contractIdVersion.toString
@@ -148,7 +148,7 @@ abstract class ReplayBenchmarkITBase(
 
         // Replay and validate the snapshot file
         val benchmark = new ReplayBenchmark
-        benchmark.darFile = darPath.toFile.getAbsolutePath
+        benchmark.darDir = darPath.getParent.toFile.getAbsolutePath
         benchmark.choiceName = "ReplayBenchmark:T:Add"
         benchmark.entriesFile = snapshotFile.toFile.getAbsolutePath
         benchmark.contractIdVersion = contractIdVersion.toString
@@ -171,7 +171,7 @@ abstract class ReplayBenchmarkITBase(
 
         // Replay and validate the snapshot file
         val benchmark = new ReplayBenchmark
-        benchmark.darFile = darPath.toFile.getAbsolutePath
+        benchmark.darDir = darPath.getParent.toFile.getAbsolutePath
         benchmark.choiceName = "ReplayBenchmark:T:Add"
         benchmark.entriesFile = snapshotFile.toFile.getAbsolutePath
         benchmark.contractIdVersion = contractIdVersion.toString
@@ -218,7 +218,7 @@ abstract class ReplayBenchmarkITBase(
 
         // Replay and validate the snapshot file
         val benchmark = new ReplayBenchmark
-        benchmark.darFile = darPath.toFile.getAbsolutePath
+        benchmark.darDir = darPath.getParent.toFile.getAbsolutePath
         benchmark.choiceName = "ReplayBenchmark:T:Add"
         benchmark.entriesFile = snapshotFile.toFile.getAbsolutePath
         benchmark.contractIdVersion = contractIdVersion.toString

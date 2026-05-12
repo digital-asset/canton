@@ -383,11 +383,6 @@ object ExampleTransactionFactory {
   def rootViewPosition(index: Int, total: Int): ViewPosition =
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
-  def asSerializableRaw(contractInstance: LfThinContractInst): SerializableRawContractInstance =
-    SerializableRawContractInstance
-      .create(contractInstance)
-      .fold(err => throw new IllegalArgumentException(err.toString), Predef.identity)
-
   private def asAuthenticationData(
       salt: Salt,
       version: CantonContractIdVersion,

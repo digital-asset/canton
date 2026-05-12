@@ -36,6 +36,11 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
@@ -209,11 +214,27 @@ trait Sequencer
   def adminStatus: SequencerAdminStatus
 
   /** To be called by the topology processing to set/update/remove a synchronizer upgrade
+    *
+    * @param successor
+    *   Information about the successor synchronizer
+    * @param announcementEffectiveTime
+    *   Effective time of the announcement
+    * @param isReplace
+    *   True if replace. False if remove.
     */
   private[sequencer] def updateLsuSuccessor(
-      successorO: Option[SynchronizerSuccessor],
+      successor: SynchronizerSuccessor,
       announcementEffectiveTime: EffectiveTime,
+      isReplace: Boolean,
   )(implicit traceContext: TraceContext): Unit
+
+  /** Process sequencer connection successor.
+    */
+  def handleLsuSequencerConnectionSuccessor(
+      successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
+  )(implicit
+      traceContext: TraceContext
+  ): Unit
 
   /** Get the traffic state for LSU.
     *

@@ -284,6 +284,10 @@ class TopologyAdministrationGroup(
     @Help.Description(
       "Transactions serialized this way should be loaded into another node with load_from_file"
     )
+    @deprecated(
+      "Use export_identity_transactionsV2 instead.",
+      since = "3.5",
+    )
     def export_identity_transactions(file: String): Unit = {
       val bytes = instance.topology.transactions
         .export_topology_snapshot(
@@ -308,11 +312,19 @@ class TopologyAdministrationGroup(
 
     @Help.Summary("Loads topology transactions from a file into the specified topology store")
     @Help.Description("The file must contain data serialized by TopologyTransactions.")
+    @deprecated(
+      "Use import_topology_snapshot_fromV2 instead.",
+      since = "3.5",
+    )
     def import_topology_snapshot_from(file: String, store: TopologyStoreId): Unit =
       BinaryFileUtil.readByteStringFromFile(file).map(import_topology_snapshot(_, store)).valueOr {
         err =>
           throw new IllegalArgumentException(s"import_topology_snapshot failed: $err")
       }
+    @deprecated(
+      "Use import_topology_snapshotV2 instead.",
+      since = "3.5",
+    )
     def import_topology_snapshot(
         topologyTransactions: ByteString,
         store: TopologyStoreId,
@@ -352,7 +364,7 @@ class TopologyAdministrationGroup(
         adminCommand(
           TopologyAdminCommands.Write
             .ImportTopologySnapshotV2(
-              topologyTransactions,
+              topologyTransactions.newInput(),
               store,
               synchronize,
             )
@@ -603,6 +615,10 @@ class TopologyAdministrationGroup(
         |- protocolVersion: The protocol version used to serialize the topology transactions. If
         |  not provided, the latest protocol version is used.
         """
+    )
+    @deprecated(
+      "Use export_topology_snapshotV2 instead.",
+      since = "3.5",
     )
     def export_topology_snapshot(
         store: TopologyStoreId = TopologyStoreId.Authorized,

@@ -14,9 +14,9 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
-
 ### Minor Improvements
 
+-
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
   of an onboarding party.
 - OpenAPI and AsyncAPI files are now included in the API archive, and the bundle is published as a Maven artifact on

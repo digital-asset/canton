@@ -1,14 +1,13 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/*package com.digitalasset.canton.integration.tests.security
+package com.digitalasset.canton.integration.tests.security
 
 import com.daml.ledger.api.v2.commands.Command
-import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres, UseH2}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -17,29 +16,15 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
-import com.digitalasset.canton.protocol.{
-  CreatedContract,
-  SerializableContract,
-  SerializableRawContractInstance,
-}
+import com.digitalasset.canton.protocol.{ContractInstance, CreatedContract}
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  TransactionCoder,
-  TransactionOuterClass,
-}
-import com.digitalasset.daml.lf.value.ValueOuterClass
-import monocle.Focus
-import monocle.Traversal.fromTraverse
+import com.google.protobuf.ByteString
+import monocle.Traversal
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.CollectionConverters.*
-
- TODO(#20297) Ensure that canton handles unsupported transaction versions correctly.
 
 sealed abstract class TransactionVersionIntegrationTest
     extends CommunityIntegrationTest
@@ -79,7 +64,6 @@ sealed abstract class TransactionVersionIntegrationTest
 
     "Fail deserialization but not prevent further processing" in { implicit env =>
       import env.*
-      val pureCrypto = sequencer1.crypto.pureCrypto
 
       val cmd =
         new UniversalContract(
@@ -96,36 +80,30 @@ sealed abstract class TransactionVersionIntegrationTest
       val command = CommandsWithMetadata(
         commands = cmd,
         actAs = Seq(alice),
-        disclosures = ImmArray.empty[FatContractInstance],
       )
 
       val changeTxVersion: GenTransactionTree => GenTransactionTree =
         GenTransactionTree.rootViewsUnsafe
-          .andThen(
-            MerkleSeq.unblindedElementsUnsafe[TransactionView](pureCrypto, testedProtocolVersion)
-          )
-          .andThen(fromTraverse[Seq, TransactionView])
-          .andThen(TransactionView.viewParticipantDataUnsafe)
-          .andThen(MerkleTree.tryUnwrap[ViewParticipantData])
-          .andThen(Focus[ViewParticipantData](_.createdCore))
-          .andThen(fromTraverse[Seq, CreatedContract])
-          .andThen(CreatedContract.contractUnsafe)
-          .andThen(Focus[SerializableContract].apply(_.rawContractInstance))
-          .modify { c =>
-            val tocBuilder = TransactionOuterClass.ThinContractInstance
-              .newBuilder(ContractInstanceCoder.encodeContractInstance(c.contractInstance).value)
-            val vv = ValueOuterClass.VersionedValue
-              .newBuilder(tocBuilder.getArgVersioned)
-              .setVersion("3.99")
-              .build()
-            val toc = tocBuilder.setArgVersioned(vv).build()
-            // To add an invalid transaction version we leave the contract instance as
-            // but provide a corrupted deserialized form that will be used when
-            // serializing without error but will error on deserialization
-            SerializableRawContractInstance.createWithSerialization(c.contractInstance)(
-              toc.toByteString
-            )
-          }
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
+          .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+          .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+          .andThen(ViewParticipantData.Optics.createdCoreUnsafe)
+          .andThen(Traversal.fromTraverse[Seq, CreatedContract])
+          .andThen(CreatedContract.Optics.contractUnsafe)
+          .modify({ c =>
+            // The first char of the serialization version is stored in the stored in the
+            // second byte of the serialization. To verify this look at the `Versioned`
+            // message in `transaction.proto` and `SerializationVersion.toProtoValue`.
+            val serialization: Array[Byte] = c.serialization.toByteArray
+            val svCharPos = 2
+            // Verify that the existing version starts with a 2 (e.g. 2.1)
+            serialization(svCharPos) shouldBe '2'.toByte
+            // Change the version to 9 (so `2.1` becomes `9.1`)
+            serialization.update(svCharPos, '9'.toByte)
+            ContractInstance
+              .createWithSerialization(c.inst, c.metadata, ByteString.copyFrom(serialization))
+          })
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
@@ -142,19 +120,12 @@ sealed abstract class TransactionVersionIntegrationTest
         LogEntry.assertLogSeq(
           Seq(
             (
-              _.shouldBeCantonError(
-                MalformedRejects.Payloads,
-                _ shouldBe """Rejected transaction due to malformed payload within views Vector(SymmetricDecryptError(
-                                     |  FailedToDeserialize(DefaultDeserializationError(message = Unable to convert field `raw_contract_instance`: ValueConversionError(,DecodeError(Unsupported transaction version '3.99'))))
-                                     |))""".stripMargin,
-              ),
-              "Malformed SymmetricDecryptError Error",
+              _.warningMessage should include regex raw"(?s).*FailedToDeserialize.*Unsupported serialization version '9.*",
+              "TransactionProcessor warning",
             ),
             (
-              _.message shouldBe """Request 0: Decryption error: SymmetricDecryptError(
-                                     |  FailedToDeserialize(DefaultDeserializationError(message = Unable to convert field `raw_contract_instance`: ValueConversionError(,DecodeError(Unsupported transaction version '3.99'))))
-                                     |)""".stripMargin,
-              "Decryption SymmetricDecryptError Error",
+              _.warningMessage should include regex raw"(?s)LOCAL_VERDICT_MALFORMED_PAYLOAD.*Rejected transaction due to malformed payload.*Unsupported serialization version '9.*",
+              "TransactionProcessingSteps warning",
             ),
           )
         ),
@@ -169,4 +140,3 @@ final class ReferenceTransactionVersionIntegrationTestPostgres
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
- */

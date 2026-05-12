@@ -63,7 +63,6 @@ import com.digitalasset.canton.topology.{
   PartyId,
   PhysicalSynchronizerId,
   SequencerId,
-  Synchronizer,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -714,7 +713,7 @@ object ParticipantAdminCommands {
 
     final case class ImportPartyAcs(
         file: File,
-        synchronizer: Synchronizer,
+        synchronizerId: SynchronizerId,
         workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
@@ -746,7 +745,7 @@ object ParticipantAdminCommands {
               val isFirst = isFirstChunk.getAndSet(false)
               v30.ImportPartyAcsRequest(
                 ByteString.copyFrom(bytes),
-                synchronizerId = Option.when(isFirst)(synchronizer.toProtoPrimitive),
+                synchronizerId = Option.when(isFirst)(synchronizerId.toProtoPrimitive),
                 workflowIdPrefix =
                   if (isFirst) OptionUtil.emptyStringAsNone(workflowIdPrefix) else None,
                 contractImportMode = Option.when(isFirst)(contractImportMode.toProtoV30),
@@ -1185,6 +1184,33 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: v30.PerformLateLsuResponse
+      ): Either[String, Unit] = Either.unit
+    }
+
+    final case class DeleteSynchronizerConfig(
+        psid: PhysicalSynchronizerId
+    ) extends GrpcAdminCommand[
+          v30.DeleteSynchronizerConnectionConfigRequest,
+          v30.DeleteSynchronizerConnectionConfigResponse,
+          Unit,
+        ] {
+      override type Svc = ParticipantRepairServiceStub
+
+      override protected def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        v30.ParticipantRepairServiceGrpc.stub(channel)
+
+      override protected def createRequest()
+          : Either[String, v30.DeleteSynchronizerConnectionConfigRequest] =
+        Right(v30.DeleteSynchronizerConnectionConfigRequest(psid.toProtoPrimitive))
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.DeleteSynchronizerConnectionConfigRequest,
+      ): Future[v30.DeleteSynchronizerConnectionConfigResponse] =
+        service.deleteSynchronizerConnectionConfig(request)
+
+      override protected def handleResponse(
+          response: v30.DeleteSynchronizerConnectionConfigResponse
       ): Either[String, Unit] = Either.unit
     }
   }

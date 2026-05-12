@@ -112,12 +112,6 @@ class SymbolicToConcrete(numPackages: Int, numParties: Int, ctx: Context, model:
         evalKeyId(keyId),
         evalPartySet(maintainers),
       )
-    case Sym.LookupByKey(contractId, keyId, maintainers) =>
-      Conc.LookupByKey(
-        contractId.map(evalContractId),
-        evalKeyId(keyId),
-        evalPartySet(maintainers),
-      )
     case Sym.QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
       Conc.QueryByKey(
         evalBoundedContractIdList(contractIds),

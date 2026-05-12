@@ -265,6 +265,8 @@ final case class ViewParticipantData private (
             show"Key $key of LookupByKey root action is not resolved."
           ),
         )
+        // TODO(i32321): Remove the suppression again
+        @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
         val maintainers = (resolution.contracts, resolution.maintainers) match {
           case (Seq(), maintainers) => maintainers
           case (Seq(contractId), maintainers) if maintainers.isEmpty =>

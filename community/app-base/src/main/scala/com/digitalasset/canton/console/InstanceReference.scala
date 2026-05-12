@@ -652,6 +652,7 @@ abstract class ParticipantReference(
         }
       }
   }
+
   override protected def participantIsActiveOnSynchronizer(
       synchronizerId: SynchronizerId,
       participantId: ParticipantId,

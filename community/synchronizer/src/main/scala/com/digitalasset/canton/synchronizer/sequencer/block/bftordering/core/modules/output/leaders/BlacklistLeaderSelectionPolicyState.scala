@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
+  EpochLength,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
@@ -30,6 +31,7 @@ import scala.collection.immutable.SortedSet
 final case class BlacklistLeaderSelectionPolicyStateWithTopology(
     state: BlacklistLeaderSelectionPolicyState,
     topology: OrderingTopology,
+    protocolVersion: ProtocolVersion,
 ) {
   def epochNumber: EpochNumber = state.epochNumber
   def startBlock: BlockNumber = state.startBlock
@@ -48,12 +50,9 @@ final case class BlacklistLeaderSelectionPolicyStateWithTopology(
   ): BlacklistLeaderSelectionPolicyStateWithTopology = {
     val newBlacklist = updateBlacklist(newTopology, blockToLeader, nodesToPunish)
     BlacklistLeaderSelectionPolicyStateWithTopology(
-      BlacklistLeaderSelectionPolicyState.create(
-        EpochNumber(epochNumber + 1),
-        BlockNumber(startBlock + topology.epochLength),
-        newBlacklist,
-      )(state.representativeProtocolVersion.representative),
+      state.update(topology.epochLength, newBlacklist, protocolVersion),
       newTopology,
+      protocolVersion,
     )
   }
   private def updateBlacklist(
@@ -123,6 +122,17 @@ final case class BlacklistLeaderSelectionPolicyState(
       startBlock,
       blacklist.view.mapValues(_.toProto30).toMap,
     )
+
+  def update(
+      epochLength: EpochLength,
+      newBlacklist: Blacklist,
+      protocolVersion: ProtocolVersion,
+  ): BlacklistLeaderSelectionPolicyState =
+    BlacklistLeaderSelectionPolicyState.create(
+      EpochNumber(epochNumber + 1),
+      BlockNumber(startBlock + epochLength),
+      newBlacklist,
+    )(protocolVersion)
 
   override protected val companionObj: BlacklistLeaderSelectionPolicyState.type =
     BlacklistLeaderSelectionPolicyState

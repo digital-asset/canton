@@ -3,8 +3,14 @@
 
 package com.digitalasset.base.error
 
+import org.slf4j.event.Level
+
 trait BaseErrorLogger {
-  def logError(err: BaseError, extra: Map[String, String]): Unit
+  def logError(
+      err: BaseError,
+      extra: Map[String, String],
+      overrideLogLevel: Option[Level] = None,
+  ): Unit
   def correlationId: Option[String]
   def traceId: Option[String]
   def properties: Map[String, String]
@@ -21,7 +27,11 @@ class NoBaseLogging(
     val correlationId: Option[String],
     val traceId: Option[String] = None,
 ) extends BaseErrorLogger {
-  override def logError(err: BaseError, extra: Map[String, String]): Unit = ()
+  override def logError(
+      err: BaseError,
+      extra: Map[String, String],
+      overrideLogLevel: Option[Level] = None,
+  ): Unit = ()
   override def warn(message: => String): Unit = ()
   override def error(message: => String, throwable: Throwable): Unit = ()
 }

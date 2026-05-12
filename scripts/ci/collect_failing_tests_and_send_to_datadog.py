@@ -6,6 +6,7 @@ import re
 import sys
 import subprocess
 import datetime
+import time
 from pathlib import Path
 import json
 import urllib.request
@@ -30,7 +31,7 @@ branches_to_report = {
     "main-2.x" : "073b4df3" # ID of the value "main-2.x" for the Release Line field in the project
 }
 
-gh_cmd = ["gh"]
+
 
 branch = os.environ.get('CIRCLE_BRANCH', '')
 
@@ -76,7 +77,7 @@ def check_for_log_failures(failing_tests_result: Set[str]):
     failure = None
     if os.path.exists("found_problems.txt"):
         with open("found_problems.txt", "r") as f:
-            lines = f.readlines() # Assumes that the file is not too big
+            lines = f.read().splitlines() # splitlines() strips trailing newlines unlike readlines()
             failure = compute_single_log_failure(lines)
 
     if failure:
@@ -184,7 +185,7 @@ def report_issue(issue: str):
     is_archived = False
 
     # search issues by title. also returns partial matches
-    result = subprocess.run(gh_cmd + ["api", "graphql", "-F", "query=@scripts/ci/findIssueByTitle.graphql", "-f", f"searchstr=repo:DACH-NY/canton in:title {title}"], capture_output=True, text=True, env=gh_flaky_test_env)
+    result = run_gh_with_retries(["api", "graphql", "-F", "query=@scripts/ci/findIssueByTitle.graphql", "-f", f"searchstr=repo:DACH-NY/canton in:title {title}"])
     check_result(result)
     search_result_json = json.loads(result.stdout)
 
@@ -241,24 +242,41 @@ def create_issue_table_row():
     commit_hash = os.environ['CIRCLE_SHA1']
     project_username = os.environ.get('CIRCLE_PROJECT_USERNAME', 'DACH-NY')
     commit_url = f"https://github.com/{project_username}/canton/commit/{commit_hash}"
-    build_url = os.environ['CIRCLE_BUILD_URL']
-    build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
     job = os.environ['CIRCLE_JOB']
     node_index = os.environ['CIRCLE_NODE_INDEX']
-    return f"| {date_str} | {job} | {node_index} | [{build_number}]({build_url}) | [{commit_hash[:8]}]({commit_url}) |"
+    build_url = os.environ['CIRCLE_BUILD_URL']
+    build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
+    parallel_run_url = f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
+    return f"| {date_str} | {job} | {node_index} | [{build_number}]({parallel_run_url}) | [{commit_hash[:8]}]({commit_url}) |"
 
 def gh_assign_release_line(idx: str, project_item_id: str):
     release_line_value = branches_to_report.get(branch, None)
     if release_line_value:
-        result = subprocess.run(gh_cmd + ["api", "graphql",
-                                          "-F", "query=@scripts/ci/assignReleaseLine.graphql",
-                                          "-F", f"issue={project_item_id}",
-                                          "-F", f"project={flaky_test_project}",
-                                          "-F", f"field={release_line_field}",
-                                          "-F", f"value={release_line_value}"], capture_output=True, text=True, env=gh_flaky_test_env)
+        result = run_gh_with_retries(["api", "graphql",
+                                  "-F", "query=@scripts/ci/assignReleaseLine.graphql",
+                                  "-F", f"issue={project_item_id}",
+                                  "-F", f"project={flaky_test_project}",
+                                  "-F", f"field={release_line_field}",
+                                  "-F", f"value={release_line_value}"])
         check_result(result)
-        print(f"Assigned release line \"{release_line_value}\" to issue: {idx}")
+        print(f"Assigned release line \"{release_line_value}\" to issue: https://github.com/DACH-NY/canton/issues/{idx}")
 
+
+GH_RETRY_ATTEMPTS: Final[int] = 3
+GH_RETRY_DELAY_SECONDS: Final[int] = 5
+TRANSIENT_HTTP_CODES: Final[frozenset] = frozenset({"502", "503", "504"})
+
+def is_transient_gh_error(result) -> bool:
+    combined = result.stderr + result.stdout
+    return any(code in combined for code in TRANSIENT_HTTP_CODES)
+
+def run_gh_with_retries(args: list, attempts: int = GH_RETRY_ATTEMPTS) -> subprocess.CompletedProcess:
+    result = subprocess.run(["gh"] + args, capture_output=True, text=True, env=gh_flaky_test_env)
+    if result.returncode != 0 and is_transient_gh_error(result) and attempts > 1:
+        print(f"Transient gh error (attempt {GH_RETRY_ATTEMPTS - attempts + 1}/{GH_RETRY_ATTEMPTS}), retrying in {GH_RETRY_DELAY_SECONDS}s...")
+        time.sleep(GH_RETRY_DELAY_SECONDS)
+        return run_gh_with_retries(args, attempts - 1)
+    return result
 
 def check_result(result):
     if result.returncode != 0:
@@ -269,28 +287,19 @@ def check_result(result):
         raise Exception("gh command failed")
 
 def gh_issue_create_cmd(title: str, body: str):
-    result = subprocess.run(
-        gh_cmd + ["issue", "create", "--repo", "DACH-NY/canton",
-                  "--title", title, "--body", body, "--milestone", milestone],
-        capture_output=True, text=True, env=gh_flaky_test_env
-    )
+    result = run_gh_with_retries(["issue", "create", "--repo", "DACH-NY/canton",
+                               "--title", title, "--body", body, "--milestone", milestone])
     check_result(result)
     return result
 
 def gh_issue_edit_cmd(idx: str, title: str, body: str):
     # gh issue edit has no --state flag; reopen separately first
     idx = str(idx)
-    reopen_result = subprocess.run(
-        gh_cmd + ["issue", "reopen", idx, "--repo", "DACH-NY/canton"],
-        capture_output=True, text=True, env=gh_flaky_test_env
-    )
+    reopen_result = run_gh_with_retries(["issue", "reopen", idx, "--repo", "DACH-NY/canton"])
     if reopen_result.returncode != 0 and "already open" not in reopen_result.stderr.lower():
         check_result(reopen_result)
-    result = subprocess.run(
-        gh_cmd + ["issue", "edit", idx, "--repo", "DACH-NY/canton",
-                  "--title", title, "--body", body],
-        capture_output=True, text=True, env=gh_flaky_test_env
-    )
+    result = run_gh_with_retries(["issue", "edit", idx, "--repo", "DACH-NY/canton",
+                  "--title", title, "--body", body])
     check_result(result)
     return result
 
@@ -300,7 +309,7 @@ def create_issue(title: str):
 {create_issue_table_header()}
 {create_issue_table_row()}"""
     result = gh_issue_create_cmd(title, body)
-    print(f"Created issue: {result.stdout}")
+    print(f"Created issue: {result.stdout.strip()}")
 
 def select_volunteer() -> str:
     script = Path(__file__).resolve().parent / 'select_volunteer.sh'
@@ -347,7 +356,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
             "text": {"type": "mrkdwn", "text": "*Affected tests:*\n" + "\n".join(issue_lines)},
         },
     ]
-    payload = json.dumps({"channel": channel, "blocks": blocks}).encode("utf-8")
+    payload = json.dumps({"channel": channel, "blocks": blocks, "icon_emoji": ":this-is-fine-fire:"}).encode("utf-8")
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
         data=payload,
@@ -373,9 +382,8 @@ def extract_commit_hashes_from_body(body: str) -> list[str]:
 
 def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
     """Returns True if newer_hash is a direct child of older_hash in git history."""
-    result = subprocess.run(
-        gh_cmd + ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"],
-        capture_output=True, text=True, env=gh_flaky_test_env
+    result = run_gh_with_retries(
+        ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"]
     )
     if result.returncode != 0:
         return False
@@ -401,23 +409,36 @@ def update_issue(idx: str, title: str, body: str, threshold: Optional[int] = Non
 
     new_body = f"{body}\n{create_issue_table_row()}"
     gh_issue_edit_cmd(idx, title, new_body)
-    print(f"Updated issue: {idx} for {title}")
+    print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if consecutive_streak:
         return (idx, title, commit_hash)
     return None
 
 def gh_unarchive_issue(idx: str, project_item_id: str):
-    result = subprocess.run(gh_cmd + ["api", "graphql", "-F", "query=@scripts/ci/unarchiveIssue.graphql", "-F", f"issue={project_item_id}", "-F", f"project={flaky_test_project}"], capture_output=True, text=True, env=gh_flaky_test_env)
+    result = run_gh_with_retries(["api", "graphql", "-F", "query=@scripts/ci/unarchiveIssue.graphql", "-F", f"issue={project_item_id}", "-F", f"project={flaky_test_project}"])
     check_result(result)
-    print(f"Unarchived issue: {idx}")
+    print(f"Unarchived issue: https://github.com/DACH-NY/canton/issues/{idx}")
 
 def self_test():
+    test_gh_flags()
     test_compute_single_log_failure()
     test_create_issue_table_row()
     test_update_issue_old_format()
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info()
     print("All self-checks passed")
+
+def test_gh_flags():
+    checks = [
+        (["issue", "create", "--help"], ["--title", "--body", "--milestone", "--repo"]),
+        (["issue", "edit",   "--help"], ["--title", "--body", "--repo"]),
+        (["issue", "reopen", "--help"], ["--repo"]),
+    ]
+    for subcommand, flags in checks:
+        result = subprocess.run(["gh"] + subcommand, capture_output=True, text=True)
+        help_text = result.stdout + result.stderr
+        for flag in flags:
+            assert flag in help_text, f"`gh {' '.join(subcommand[:-1])}` help does not mention flag `{flag}` — was it renamed?"
 
 def test_create_issue_table_row():
     env = {
@@ -433,7 +454,7 @@ def test_create_issue_table_row():
         line = create_issue_table_row()
         assert '| test_with_java17 |' in line, f"Missing job in: {line}"
         assert '| 5 |' in line, f"Missing node_index in: {line}"
-        assert '[3196076](https://circleci.com/gh/DACH-NY/canton/3196076)' in line, f"Missing build link in: {line}"
+        assert '[3196076](https://app.circleci.com/jobs/github/DACH-NY/canton/3196076/parallel-runs/5)' in line, f"Missing parallel-run build link in: {line}"
         assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
 
     oss_canton_env = {
@@ -445,7 +466,7 @@ def test_create_issue_table_row():
     }
     with patch.dict(os.environ, oss_canton_env, clear=False):
         line = create_issue_table_row()
-        assert '[1491](https://circleci.com/gh/digital-asset/canton/1491)' in line, f"Missing OSS canton build link in: {line}"
+        assert '[1491](https://app.circleci.com/jobs/github/digital-asset/canton/1491/parallel-runs/6)' in line, f"Missing OSS canton build link in: {line}"
         assert '[b2c3d4e5](https://github.com/digital-asset/canton/commit/b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3)' in line, f"Missing OSS canton commit link in: {line}"
 
 def test_update_issue_old_format():
@@ -630,7 +651,9 @@ if __name__ == "__main__":
         # sometimes a fundamental problem would lead to a large number of issues being reported, in that case we limit
         failing_tests_max = 20
 
-        if failing_tests_num > 0 and should_report_issues():
+        if failing_tests_num > 0 and not should_report_issues():
+            print(f"Skipping GitHub issue updates: branch '{branch}' is not a tracked branch.")
+        elif failing_tests_num > 0:
             if failing_tests_num > failing_tests_max:
                 print(f"Found too many failed tests {failing_tests_num}, only report {failing_tests_max}")
             else:

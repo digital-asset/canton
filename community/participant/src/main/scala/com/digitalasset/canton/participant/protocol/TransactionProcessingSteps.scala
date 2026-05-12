@@ -48,6 +48,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessSet,
   CommitSet,
 }
+import com.digitalasset.canton.participant.protocol.decrypter.ViewMessageDecrypter
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.{
@@ -605,14 +606,16 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[DecryptedView]] =
     metrics.protocolMessages.transactionMessageReceipt.timeEitherFUS {
-      new ViewMessageDecrypter(
-        participantId,
-        protocolVersion,
-        sessionKeyStore,
-        snapshot,
-        futureSupervisor,
-        loggerFactory,
-      ).decryptViews(batch)
+      ViewMessageDecrypter
+        .create(
+          participantId,
+          protocolVersion,
+          sessionKeyStore,
+          snapshot,
+          futureSupervisor,
+          loggerFactory,
+        )
+        .decryptViews(batch)
     }
 
   override def absolutizeLedgerEffects(
@@ -874,6 +877,7 @@ class TransactionProcessingSteps(
             commonData,
             getEngineAbortStatus = () => engineController.abortStatus,
             reInterpretedTopLevelViews,
+            protocolVersion,
           )
 
         internalConsistencyResultET = EitherT(
@@ -883,7 +887,7 @@ class TransactionProcessingSteps(
                 internalConsistencyChecker
                   .check(
                     parsedRequest.rootViewTrees,
-                    mcResult.suffixedTransaction.unwrap.transaction,
+                    mcResult.unmergedTransactionsWithoutToplevelRollbackNodes,
                     topologySnapshot = ipsSnapshot,
                   )
                   .value

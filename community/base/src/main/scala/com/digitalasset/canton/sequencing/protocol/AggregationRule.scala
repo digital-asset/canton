@@ -504,9 +504,25 @@ final case class AggregationRule(
 
 }
 
+// See https://github.com/DACH-NY/canton/pull/32193
+private[sequencing] final case class LegacyUseMemberIdsAsEligibleMembers(v: Boolean) extends AnyVal
+
+object LegacyUseMemberIdsAsEligibleMembers {
+  def apply(pv: ProtocolVersion): LegacyUseMemberIdsAsEligibleMembers =
+    if (pv == ProtocolVersion.v34) LegacyUseMemberIdsAsEligibleMembers(true)
+    else LegacyUseMemberIdsAsEligibleMembers(false)
+}
+
 object AggregationRule
-    extends VersioningCompanionContext[AggregationRule, ProtocolVersion]
+    extends VersioningCompanionContext[AggregationRule, LegacyUseMemberIdsAsEligibleMembers]
     with ProtocolVersionedCompanionDbHelpers[AggregationRule] {
+
+  override val versioningTable: VersioningTable = VersioningTable(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AggregationRule)(
+      supportedProtoVersion(_)(fromProtoV30),
+      _.toProtoV30,
+    )
+  )
 
   @VisibleForTesting
   def testing(
@@ -565,19 +581,13 @@ object AggregationRule
 
   override def name: String = "AggregationRule"
 
-  override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AggregationRule)(
-      supportedProtoVersion(_)(fromProtoV30),
-      _.toProtoV30,
-    )
-  )
-
   private[canton] def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersion,
+      useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers,
       proto: v30.AggregationRule,
   ): ParsingResult[AggregationRule] = {
     val v30.AggregationRule(eligibleMembersP, thresholdP) = proto
-    if (expectedProtocolVersion == ProtocolVersion.v34) {
+
+    if (useMemberIdsAsEligibleMembers.v) {
       for {
         eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(
           Member.fromProtoPrimitive(_, "eligible_members"),
@@ -619,10 +629,11 @@ object AggregationRule
               threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
             } yield AggregationRuleInput.Resolved(membersNE, threshold)
         }
+
       for {
         recipients <- eligibleMembersP.traverse(Recipient.fromProtoPrimitive(_, "eligible_members"))
         rule <- ruleFromRecipients(recipients.toList)
-        rpv = protocolVersionRepresentativeFor(expectedProtocolVersion)
+        rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       } yield AggregationRule(rule)(rpv)
     }
   }

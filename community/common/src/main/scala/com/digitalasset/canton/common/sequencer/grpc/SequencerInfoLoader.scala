@@ -39,7 +39,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, LoggerUtil, retry}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -189,6 +189,7 @@ class SequencerInfoLoader(
           HandshakeRequest(
             clientProtocolVersions,
             minimumProtocolVersion,
+            ReleaseVersion.current,
           ),
           dontWarnOnDeprecatedPV,
         )

@@ -48,6 +48,7 @@ class BlacklistLeaderSelectionPolicyTest extends AnyWordSpec with BaseTest {
         BlacklistLeaderSelectionPolicy.create(
           state,
           orderingTopology,
+          testedProtocolVersion,
           store,
           metrics,
           loggerFactory,
@@ -67,6 +68,7 @@ class BlacklistLeaderSelectionPolicyTest extends AnyWordSpec with BaseTest {
         BlacklistLeaderSelectionPolicy.create(
           state,
           orderingTopology,
+          testedProtocolVersion,
           store,
           metrics,
           loggerFactory,

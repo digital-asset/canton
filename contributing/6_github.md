@@ -9,6 +9,7 @@ When creating a new issue:
 * Assign a Milestone.
 * Add relevant labels.
 * Assign the issue to you, if and only if you take responsibility for completing.
+* Please also consult our [AI contribution guidelines](AI_POLICY.md) for guidelines on AI-created issues.
 
 Please perform the following cleanup tasks periodically:
 * For every issue created by you, close it if it has been completed or is no longer relevant.
@@ -21,6 +22,8 @@ The title and description should be helpful to reviewers and document why the ch
 In particular:
 * The description should summarize all changes made and explain why they have been made.
 * The description should reference all related issues using [GitHub notation](https://help.github.com/en/articles/closing-issues-using-keywords) (e.g. `closes #42` or `part of #733`).
+* Keep the text in your PR concise, write only what is useful for the reviewers to read. Specifically,
+  avoid AI-generated text in PR descriptions. See our [AI contribution guidelines](AI_POLICY.md).
 
 When a pull request is not ready for review,
 either make sure that no reviewer is assigned or put the pull request into draft state.

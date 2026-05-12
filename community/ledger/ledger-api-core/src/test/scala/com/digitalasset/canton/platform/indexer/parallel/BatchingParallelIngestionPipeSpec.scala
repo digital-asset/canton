@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.util.BatchN
 import org.apache.pekko.NotUsed
@@ -19,7 +18,6 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.chaining.*
 
-@UnstableTest // TODO(#19208)
 class BatchingParallelIngestionPipeSpec
     extends AsyncFlatSpec
     with Matchers

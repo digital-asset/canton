@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
   SynchronizerTrustCertificate,
   TopologyChangeOp,
   TopologyMapping,
+  TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{
   KeyCollection,
@@ -222,7 +223,9 @@ class WriteThroughCacheTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     // since the state lookup cannot look at the state just based on the type,
     // we first have to load the current registered sequencers in SequencerSynchronizerState,
     // and then lookup the corresponding SequencerConnectionSuccessor transactions.
@@ -255,7 +258,7 @@ class WriteThroughCacheTopologySnapshot(
       .view
       .collect {
         case stored if stored.mapping.successorPsid == successorPsid =>
-          stored.mapping.sequencerId -> stored.mapping
+          stored.mapping.sequencerId -> stored.transaction.transaction
       }
       .toMap
 

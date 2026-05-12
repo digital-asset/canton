@@ -4,19 +4,8 @@
 package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
-import cats.syntax.traverse.*
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
-import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedMessageCompanionDbHelpers,
-  HasVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-}
 import com.digitalasset.canton.{LfPartyId, LfVersioned, checked}
 
 /** Metadata for a contract.
@@ -32,8 +21,7 @@ final case class ContractMetadata private (
     signatories: Set[LfPartyId],
     stakeholders: Set[LfPartyId],
     maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
-) extends HasVersionedWrapper[ContractMetadata]
-    with PrettyPrinting {
+) extends PrettyPrinting {
 
   {
     val nonSignatoryMaintainers = maintainers -- signatories
@@ -46,8 +34,6 @@ final case class ContractMetadata private (
       )
   }
 
-  override protected def companionObj: ContractMetadata.type = ContractMetadata
-
   def maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers] =
     maybeKeyWithMaintainersVersioned.map(_.unversioned)
 
@@ -55,26 +41,6 @@ final case class ContractMetadata private (
 
   def maintainers: Set[LfPartyId] =
     maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.maintainers)
-
-  private[protocol] def toProtoV30: v30.SerializableContract.Metadata =
-    v30.SerializableContract.Metadata(
-      nonMaintainerSignatories = (signatories -- maintainers).toList,
-      nonSignatoryStakeholders = (stakeholders -- signatories).toList,
-      key = maybeKeyWithMaintainersVersioned.map(keyWithMaintainersVersioned =>
-        GlobalKeySerialization.assertToProtoV30(keyWithMaintainersVersioned.map(_.globalKey))
-      ),
-      maintainers = maintainers.toSeq,
-    )
-
-  private[protocol] def toProtoV31: v31.SerializableContract.Metadata =
-    v31.SerializableContract.Metadata(
-      nonMaintainerSignatories = (signatories -- maintainers).toList,
-      nonSignatoryStakeholders = (stakeholders -- signatories).toList,
-      key = maybeKeyWithMaintainersVersioned.map(keyWithMaintainersVersioned =>
-        GlobalKeySerialization.assertToProtoV31(keyWithMaintainersVersioned.map(_.globalKey))
-      ),
-      maintainers = maintainers.toSeq,
-    )
 
   override protected def pretty: Pretty[ContractMetadata] = prettyOfClass(
     param("signatories", _.signatories),
@@ -84,23 +50,7 @@ final case class ContractMetadata private (
   )
 }
 
-object ContractMetadata
-    extends HasVersionedMessageCompanion[ContractMetadata]
-    with HasVersionedMessageCompanionDbHelpers[ContractMetadata] {
-  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v34,
-      supportedProtoVersion(v30.SerializableContract.Metadata)(fromProtoV30),
-      _.toProtoV30,
-    ),
-    ProtoVersion(31) -> ProtoCodec(
-      ProtocolVersion.v35,
-      supportedProtoVersion(v31.SerializableContract.Metadata)(fromProtoV31),
-      _.toProtoV31,
-    ),
-  )
-
-  override def name: String = "contract metadata"
+object ContractMetadata {
 
   final case class InvalidContractMetadata(message: String) extends RuntimeException(message)
 
@@ -127,83 +77,4 @@ object ContractMetadata
 
   def empty: ContractMetadata = checked(ContractMetadata.tryCreate(Set.empty, Set.empty, None))
 
-  def fromProtoV30(
-      metadataP: v30.SerializableContract.Metadata
-  ): ParsingResult[ContractMetadata] = {
-    val v30.SerializableContract.Metadata(
-      nonMaintainerSignatoriesP,
-      nonSignatoryStakeholdersP,
-      keyP,
-      maintainersP,
-    ) =
-      metadataP
-    for {
-      nonMaintainerSignatories <- nonMaintainerSignatoriesP.traverse(
-        ProtoConverter.parseLfPartyId(_, "non_maintainer_signatories")
-      )
-      nonSignatoryStakeholders <- nonSignatoryStakeholdersP.traverse(
-        ProtoConverter.parseLfPartyId(_, "non_signatory_stakeholders")
-      )
-      keyVersionedO <- keyP.traverse(GlobalKeySerialization.fromProtoV30)
-      maintainersList <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
-      _ <- Either.cond(
-        maintainersList.isEmpty || keyVersionedO.isDefined,
-        (),
-        FieldNotSet("Metadata.key"),
-      )
-    } yield {
-      val maintainers = maintainersList.toSet
-      val keyWithMaintainersO = keyVersionedO.map(_.map(LfGlobalKeyWithMaintainers(_, maintainers)))
-      val signatories = maintainers ++ nonMaintainerSignatories.toSet
-      val stakeholders = signatories ++ nonSignatoryStakeholders.toSet
-      checked(ContractMetadata.tryCreate(signatories, stakeholders, keyWithMaintainersO))
-    }
-  }
-
-  def fromProtoV31(
-      metadataP: v31.SerializableContract.Metadata
-  ): ParsingResult[ContractMetadata] = {
-    val v31.SerializableContract.Metadata(
-      nonMaintainerSignatoriesP,
-      nonSignatoryStakeholdersP,
-      keyP,
-      maintainersP,
-    ) =
-      metadataP
-    for {
-      nonMaintainerSignatories <- nonMaintainerSignatoriesP.traverse(
-        ProtoConverter.parseLfPartyId(_, "non_maintainer_signatories")
-      )
-      nonSignatoryStakeholders <- nonSignatoryStakeholdersP.traverse(
-        ProtoConverter.parseLfPartyId(_, "non_signatory_stakeholders")
-      )
-      keyVersionedO <- keyP.traverse(GlobalKeySerialization.fromProtoV31)
-      maintainersList <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
-      _ <- Either.cond(
-        maintainersList.isEmpty || keyVersionedO.isDefined,
-        (),
-        FieldNotSet("Metadata.key"),
-      )
-    } yield {
-      val maintainers = maintainersList.toSet
-      val keyWithMaintainersO = keyVersionedO.map(_.map(LfGlobalKeyWithMaintainers(_, maintainers)))
-      val signatories = maintainers ++ nonMaintainerSignatories.toSet
-      val stakeholders = signatories ++ nonSignatoryStakeholders.toSet
-      checked(ContractMetadata.tryCreate(signatories, stakeholders, keyWithMaintainersO))
-    }
-  }
-}
-
-final case class WithContractMetadata[+A](private val x: A, metadata: ContractMetadata) {
-  def unwrap: A = x
-}
-
-object WithContractMetadata {
-  implicit def prettyWithContractMetadata[A: Pretty]: Pretty[WithContractMetadata[A]] = {
-    import Pretty.*
-    prettyOfClass(
-      unnamedParam(_.x),
-      param("metadata", _.metadata),
-    )
-  }
 }

@@ -37,7 +37,7 @@ class LegacyInternalConsistencyChecker(
     */
   override def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext

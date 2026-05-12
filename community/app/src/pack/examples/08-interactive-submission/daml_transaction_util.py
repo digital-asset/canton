@@ -7,7 +7,9 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service_pb2 as 
 from google.protobuf.json_format import MessageToJson
 import argparse
 import base64
-from daml_transaction_hashing_v2 import encode_prepared_transaction, create_nodes_dict
+from daml_transaction_hashing_common import create_nodes_dict
+import daml_transaction_hashing_v2
+import daml_transaction_hashing_v3
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -27,6 +29,14 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument("--hash", help="Hash Transaction", action="store_true")
+    parser.add_argument(
+        "--version",
+        "-v",
+        type=int,
+        choices=[2, 3],
+        default=2,
+        help="Hashing scheme version to use (2 or 3)",
+    )
     parser.add_argument(
         "--base64",
         "-b",
@@ -49,6 +59,10 @@ if __name__ == "__main__":
     if args.decode:
         print(MessageToJson(prepared_transaction))
     elif args.hash:
+        if args.version == 3:
+            encode_prepared_transaction = daml_transaction_hashing_v3.encode_prepared_transaction
+        else:
+            encode_prepared_transaction = daml_transaction_hashing_v2.encode_prepared_transaction
         encoded_hash = encode_prepared_transaction(
             prepared_transaction, create_nodes_dict(prepared_transaction)
         )

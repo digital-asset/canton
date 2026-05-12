@@ -1,8 +1,8 @@
 // Linting plugins
-addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.4.1")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.3.4")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.0")
+addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.5.6")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.3")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage

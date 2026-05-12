@@ -37,14 +37,17 @@ import com.digitalasset.canton.synchronizer.sequencing.service.GrpcSequencerAuth
 import com.digitalasset.canton.synchronizer.service.HandshakeValidator
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcSequencerAuthenticationService(
     authenticationService: MemberAuthenticationService,
     protocolVersion: ProtocolVersion,
+    disableReleaseVersionHandshakeCheck: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends SequencerAuthenticationService
@@ -81,7 +84,12 @@ class GrpcSequencerAuthenticationService(
       val redactedError =
         if (isSensitive) {
           SequencerAuthenticationFaultyOrMalicious
-            .AuthenticationFailure(request.member, error)
+            .AuthenticationFailure(
+              request.member,
+              error,
+              if (error.getCode != Status.INTERNAL.getCode) Some(Level.INFO)
+              else None,
+            )
             .discard
           error.withDescription("Bad authentication request")
         } else {
@@ -122,6 +130,8 @@ class GrpcSequencerAuthenticationService(
               request.member,
               request.memberProtocolVersions,
               error,
+              if (error.getCode != Status.INTERNAL.getCode) Some(Level.INFO)
+              else None,
             )
             .discard
           error.withDescription("Bad challenge request")
@@ -176,7 +186,13 @@ class GrpcSequencerAuthenticationService(
 
   private def handshakeValidation(request: ChallengeRequest): Either[(Status, Boolean), Unit] =
     HandshakeValidator
-      .clientIsCompatible(protocolVersion, request.memberProtocolVersions, minClientVersionP = None)
+      .clientIsCompatible(
+        protocolVersion,
+        request.memberProtocolVersions,
+        minClientVersionP = None,
+        clientBinaryVersion = OptionUtil.emptyStringAsNone(request.clientVersion),
+        disableReleaseVersionHandshakeCheck = disableReleaseVersionHandshakeCheck,
+      )
       .leftMap((_, false))
 
   /** Unconditionally revoke a member's authentication tokens and disconnect it
@@ -258,6 +274,7 @@ object GrpcSequencerAuthenticationService extends GrpcSequencerAuthenticationErr
         member: String,
         supportedProtocol: Seq[Int],
         response: Status,
+        override val overrideLogLevel: Option[Level] = None,
     )(implicit override val loggingContext: ErrorLoggingContext)
         extends Alarm(
           cause =
@@ -265,7 +282,11 @@ object GrpcSequencerAuthenticationService extends GrpcSequencerAuthenticationErr
         )
         with ContextualizedCantonError
 
-    final case class AuthenticationFailure(member: String, response: Status)(implicit
+    final case class AuthenticationFailure(
+        member: String,
+        response: Status,
+        override val overrideLogLevel: Option[Level] = None,
+    )(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends Alarm(
           cause =

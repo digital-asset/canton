@@ -22,8 +22,8 @@ members=(
   "U046D8XGD7H" # Kirill
   "U03FH83LRNH" # Meriam
   "UF766DLN4"   # Oliver
+  "U0ASDV1UV2S" # Ostap
   "U020XUXADCP" # Raf
-  "UDDVDCKD0"   # Raphael
   "U04DC4NAK1S" # Yves
   # LAPI
   "U08LBV2U75H" # Adrien

@@ -55,7 +55,6 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
@@ -110,7 +109,6 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       alphaVersionSupport: Boolean = false,
       betaVersionSupport: Boolean = false,
       dontWarnOnDeprecatedPV: Boolean = false,
-      initialProtocolVersion: ProtocolVersion = testedProtocolVersion,
       exitOnFatalFailures: Boolean = true,
       watchdog: Option[WatchdogConfig] = None,
       startupMemoryCheckConfig: StartupMemoryCheckConfig = StartupMemoryCheckConfig(

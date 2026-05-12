@@ -9,11 +9,13 @@ import com.digitalasset.canton.integration.tests.upgrade.CantonNetworkTopologyIn
 import com.digitalasset.canton.integration.{EnvironmentDefinition, SharedEnvironment}
 import com.digitalasset.canton.logging.NodeLoggingUtil
 import com.digitalasset.canton.synchronizer.sequencer.OnboardingStateForSequencerV2
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.util.{FutureUtil, GrpcStreamingUtils}
 import com.google.cloud.storage.Storage.BlobListOption
 import com.google.cloud.storage.StorageOptions
+import io.circe.parser as circeParser
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.apache.commons.io.FilenameUtils
 
@@ -36,6 +38,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
 
   /** Name of the GCP bucket that contains the CN topology snapshots */
   private val bucketName = "cn-topology-snapshots"
+  private val storage = StorageOptions.getDefaultInstance.getService
 
   registerPlugin(new UsePostgres(loggerFactory))
 
@@ -64,8 +67,9 @@ trait CantonNetworkRecentTopologyIntegrationTest
     * max on the ISO timestamp), and download the `onboarding-state` blob into a local temporary
     * file.
     */
-  private def downloadLatestOnboardingState()(implicit ec: ExecutionContext): InputStream = {
-    val storage = StorageOptions.getDefaultInstance.getService
+  private def downloadLatestOnboardingState()(implicit
+      ec: ExecutionContext
+  ): (InputStream, String) = {
     val prefix = s"$environmentName/sv-1/"
 
     // List all blobs under the environment's sv-1/ prefix to discover snapshot folders.
@@ -88,6 +92,9 @@ trait CantonNetworkRecentTopologyIntegrationTest
         fail(s"No topology snapshot folders found in bucket $bucketName under prefix $prefix")
       )
 
+    val snapshotFolder =
+      onboardingStateBlobName.substring(0, onboardingStateBlobName.lastIndexOf('/'))
+
     logger.info(s"Downloading $onboardingStateBlobName from bucket $bucketName")
 
     val blob = Option(storage.get(bucketName, onboardingStateBlobName))
@@ -108,23 +115,53 @@ trait CantonNetworkRecentTopologyIntegrationTest
       "Failed to download file from bucket",
     )
 
-    // Future-proof for when CN switches to compressed snapshots
-    // https://github.com/hyperledger-labs/splice/issues/5041
-    FilenameUtils.getExtension(onboardingStateBlobName) match {
+    val stream: InputStream = FilenameUtils.getExtension(onboardingStateBlobName) match {
       case "" => raw
       case "gz" => new GZIPInputStream(raw)
       case "zst" => new ZstdCompressorInputStream(raw)
       case other => fail(s"Unsupported file extension: $other")
     }
+    (stream, snapshotFolder)
+  }
+
+  /** Try to download and parse the metadata file from the same snapshot folder. Returns the parsed
+    * [[PhysicalSynchronizerId]] if the file exists and contains valid JSON with a
+    * "physicalSynchronizerId" field, or [[None]] otherwise.
+    */
+  private def downloadAndParseMetadata(snapshotFolder: String): Option[PhysicalSynchronizerId] = {
+    val storage = StorageOptions.getDefaultInstance.getService
+    val metadataBlobName = s"$snapshotFolder/metadata"
+
+    val blob = Option(storage.get(bucketName, metadataBlobName))
+    blob.flatMap { b =>
+      val content = new String(b.getContent(), "UTF-8")
+      logger.info(s"Downloaded metadata file: $content")
+      circeParser
+        .parse(content)
+        .toOption
+        .flatMap(_.hcursor.get[String]("physicalSynchronizerId").toOption)
+        .flatMap { psidStr =>
+          PhysicalSynchronizerId.fromString(psidStr) match {
+            case Right(psid) =>
+              logger.info(s"Parsed physicalSynchronizerId from metadata: $psid")
+              Some(psid)
+            case Left(err) =>
+              logger.warn(s"Failed to parse physicalSynchronizerId '$psidStr': $err")
+              None
+          }
+        }
+    }
   }
 
   private val snapshot = new AtomicReference[Option[GenericStoredTopologyTransactions]](None)
+  private val physicalSynchronizerId = new AtomicReference[Option[PhysicalSynchronizerId]](None)
 
   "Canton node " can {
     "successfully deserialize the topology snapshot" in { env =>
       import env.*
 
-      val in = downloadLatestOnboardingState()
+      val (in, snapshotFolder) = downloadLatestOnboardingState()
+      physicalSynchronizerId.set(downloadAndParseMetadata(snapshotFolder))
       val transactions =
         try {
           GrpcStreamingUtils
@@ -147,6 +184,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
         snapshot.get().value,
         cleanupTopologyState = false,
         timeout,
+        physicalSynchronizerIdOverride = physicalSynchronizerId.get(),
       ).discard
     }
   }

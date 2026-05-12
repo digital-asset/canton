@@ -15,8 +15,9 @@ import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
-import com.digitalasset.canton.ledger.api.{AcsRangeInfo, EventFormat, UpdateFormat}
+import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics

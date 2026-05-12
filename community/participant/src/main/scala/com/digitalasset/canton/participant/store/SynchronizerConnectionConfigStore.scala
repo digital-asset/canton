@@ -87,6 +87,13 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Unit]
 
+  /** Deletes the configuration for the given synchronizer psid. Fails if no such configuration can
+    * be found.
+    */
+  def delete(psid: PhysicalSynchronizerId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, UnknownPsid, Unit]
+
   /** Replaces the config for the given alias and physical synchronizer id. Will return an
     * [[SynchronizerConnectionConfigStore.MissingConfigForSynchronizer]] error if there is no config
     * for the (alias, physicalSynchronizerId).
@@ -239,6 +246,10 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     * to ensure it has accurate configs cached.
     */
   def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+
+  /** Clears the config cache. Used when a participant replica becomes passive.
+    */
+  def clearCache()(implicit traceContext: TraceContext): Unit
 
   /** Set the synchronizer configuration status */
   def setStatus(
@@ -408,6 +419,14 @@ object SynchronizerConnectionConfigStore {
   ) extends Error {
     val message =
       s"Connection for synchronizer $psid cannot be updated to set ids $sequencerIds: $details."
+  }
+
+  final case class LsuOngoing(
+      predecessorPsid: PhysicalSynchronizerId,
+      successorPsid: PhysicalSynchronizerId,
+  ) extends Error {
+    val message =
+      s"The operation is not allowed when an LSU is ongoing. Found LSU from $predecessorPsid to $successorPsid."
   }
 
   final case class MissingConfigForSynchronizer(

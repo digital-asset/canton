@@ -53,6 +53,7 @@ fi
 TIMEOUT="${TIMEOUT:-25m}"
 SUCCEED_ON_ERROR="${SUCCEED_ON_ERROR:-0}"
 RETRY_FETCH="${RETRY_FETCH:-0}"
+REPORT_TO_DATADOG="${REPORT_TO_DATADOG:-true}"
 FAIL_ON_ERROR_IN_OUTPUT="${FAIL_ON_ERROR_IN_OUTPUT:-1}"
 
 if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
@@ -124,7 +125,16 @@ on_exit() {
         else
             err "The script has failed with exit code $CODE."
         fi
-        python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
+        if [[ "${REPORT_TO_DATADOG,,}" == "true" || "${REPORT_TO_DATADOG}" == "1" ]]; then
+          if [[ -z "${DATADOG_API_KEY:-}" ]]; then
+            err "REPORT_TO_DATADOG is enabled, but DATADOG_API_KEY is not set"
+            exit 1
+          else
+            python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
+          fi
+        else
+          info "REPORT_TO_DATADOG is disabled, skipping Datadog reporting"
+        fi
     fi
     # ${variable,,} -- convert value to lowercase (Bash ver > 4)
     if [[ "${SUCCEED_ON_ERROR,,}" == "true" || "${SUCCEED_ON_ERROR}" == "1" ]]; then
@@ -147,6 +157,7 @@ for i in EXECUTION_CONTEXT_SIZE \
          EXECUTOR_JVM_METASPACE_SIZE \
          TIMEOUT \
          SUCCEED_ON_ERROR \
+         REPORT_TO_DATADOG \
          RETRY_FETCH \
          FAIL_ON_ERROR_IN_OUTPUT \
          CUSTOM_JAVA_HOME \
@@ -188,16 +199,34 @@ if [[ "${USE_MAVEN_MIRROR,,}" == "true" || "${USE_MAVEN_MIRROR}" == "1" ]]; then
   SBT_CMD+=("-Dsbt.override.build.repos=true")
   SBT_CMD+=("-Dsbt.repository.config=${ABSDIR}/repositories")
   #  *** Credentials for Azure maven mirror ***
-  #   `realm` - must be `null` or `empty  to work with Azure
-  #   `host` - `pkgs.dev.azure.com` for Azure maven mirror
-  #.  `username` - used environment variable `MAVEN_USERNAME``
-  #   `password`- used environment variable `MAVEN_PASSWORD` (PERSONAL_ACCESS_TOKEN)
-  # * Note *
-  #    Variables stored in CircleCi context `maven-mirror`
-  SBT_CMD+=("-Dsbt.boot.credentials=${ABSDIR}/credentials.sbt")
-  # sbt and coursier can have different authorization, so it both need to be authorized dedicated.
+  #   Two separate credential mechanisms are needed:
+  #
+  #   1. Coursier (used by regular compile/test): reads credentials.sbt as Scala.
+  #      Passes null realm; Coursier matches by host only.
+  #      Variables: MAVEN_USERNAME, MAVEN_PASSWORD (stored in CircleCI context `maven-mirror`).
+  #
+  #   2. Ivy (used by sbt-license-report's updateLicenses): reads a Java .properties file.
+  #      -Dsbt.credentials.file CANNOT read Scala .sbt files; it silently produces empty
+  #      credentials if given one. We generate a proper properties file at runtime.
+  #      Realm is left empty; sbt's IvyAuthenticator matches credentials by host only,
+  #      so the exact WWW-Authenticate realm string does not need to match.
+  #   -Dsbt.boot.credentials also expects a .properties file (same format), so we reuse
+  #   the generated file for all three properties.
+  #
+  # Fail early if password is missing: the generated file would be written with an empty
+  # password and the failure would surface much later as a cascade of "module not found".
+  : "${MAVEN_PASSWORD:?MAVEN_PASSWORD must be set when USE_MAVEN_MIRROR=true}"
+  # Generate a Java properties credentials file for Coursier boot, Ivy, and sbt boot.
+  # Empty realm is intentional: sbt's Credentials.forHost matches by host, ignoring realm.
+  IVY_CREDS_FILE="${TEMPDIR}/sbt-ivy-credentials.properties"
+  install -m 600 /dev/null "${IVY_CREDS_FILE}"
+  printf 'realm=\nhost=%s\nuser=%s\npassword=%s\n' \
+    "${MAVEN_HOST:-pkgs.dev.azure.com}" \
+    "${MAVEN_USERNAME:-digitalasset}" \
+    "${MAVEN_PASSWORD}" > "${IVY_CREDS_FILE}"
+  SBT_CMD+=("-Dsbt.boot.credentials=${IVY_CREDS_FILE}")
   SBT_CMD+=("-Dsbt.coursier.credentials=${ABSDIR}/credentials.sbt")
-  SBT_CMD+=("-Dsbt.credentials.file=${ABSDIR}/credentials.sbt")
+  SBT_CMD+=("-Dsbt.credentials.file=${IVY_CREDS_FILE}")
 fi
 
 # Setup heap size

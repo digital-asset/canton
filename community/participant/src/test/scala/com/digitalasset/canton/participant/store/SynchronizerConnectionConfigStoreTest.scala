@@ -20,11 +20,15 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   InconsistentLogicalSynchronizerIds,
   InconsistentPredecessorLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LsuOngoing,
+  LsuSource,
+  LsuTarget,
   MissingConfigForSynchronizer,
   NoActiveSynchronizer,
   SynchronizerIdAlreadyAdded,
   UnknownAlias,
   UnknownPsid,
+  allStatuses,
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryRegisteredSynchronizersStore
 import com.digitalasset.canton.participant.synchronizer.{
@@ -336,6 +340,39 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           acmeStable,
           daStable,
         )
+      }
+
+      "return an error when registering a synchronizer during an LSU" in {
+        val predecessor = SynchronizerPredecessor(
+          psid = daStable,
+          upgradeTime = CantonTimestamp.now(),
+          isLateUpgrade = false,
+        )
+
+        for {
+          sut <- mk
+
+          _ <- sut.put(config, LsuSource, KnownPhysicalSynchronizerId(daStable), None).value
+          _ <- sut
+            .put(getConfig(daDev), LsuTarget, KnownPhysicalSynchronizerId(daDev), Some(predecessor))
+            .value
+
+          error1 <- sut
+            .put(config, Active, UnknownPhysicalSynchronizerId, None)
+            .value
+
+          error2 <- sut
+            .put(
+              config.focus(_.priority).modify(_ + 1),
+              Active,
+              UnknownPhysicalSynchronizerId,
+              None,
+            )
+            .value
+        } yield {
+          error1.left.value shouldBe LsuOngoing(daStable, daDev)
+          error2.left.value shouldBe LsuOngoing(daStable, daDev)
+        }
       }
 
       "allow to store physical synchronizer id when it is known" in {
@@ -943,6 +980,31 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             None,
           )
 
+        } yield succeed
+      }
+    }
+
+    "deleting configs" should {
+      "raise an error for unknown psids" in {
+        for {
+          sut <- mk
+          resultE <- sut.delete(daStable).value
+        } yield resultE shouldBe Left(UnknownPsid(daStable))
+      }
+
+      "work for any status" in {
+        for {
+          sut <- mk
+          _ <- MonadUtil.sequentialTraverse(allStatuses)(status =>
+            for {
+              _ <- sut
+                .put(getConfig(daStable), status, KnownPhysicalSynchronizerId(daStable), None)
+                .valueOrFail("put daStable")
+              _ = sut.get(daStable).valueOrFail("no config for daStable").status shouldBe status
+              _ <- sut.delete(daStable).valueOrFail("deleting daStable")
+              _ = sut.get(daStable).left.value shouldBe UnknownPsid(daStable)
+            } yield ()
+          )
         } yield succeed
       }
     }

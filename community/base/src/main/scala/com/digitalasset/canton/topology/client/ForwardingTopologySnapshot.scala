@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.Party
 import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
@@ -91,8 +92,15 @@ class ForwardingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   /** returns the list of currently known mediators */
   override def mediatorGroups()(implicit
@@ -165,7 +173,9 @@ class ForwardingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }
 
@@ -362,8 +372,15 @@ class CachingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   override def inspectKeys(
       filterOwner: String,
@@ -468,6 +485,8 @@ class CachingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }

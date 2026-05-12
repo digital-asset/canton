@@ -495,7 +495,9 @@ manual_snapshot_release:
         - datadog
         - artifactory
         - azure-self-cache
+        - gpg-signing
         - maven-mirror
+        - maven-publish
         - da-images
         is_nightly_workflow: false
         is_manual: true
@@ -853,6 +855,54 @@ manual_model_based_test:
           - maven-mirror
           - da-images
     - model_based_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+manual_model_based_external_parties_test:
+  when:
+    and:
+      - equal: [ model-based-external-parties-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - model_based_external_parties_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+manual_transaction_snapshot_benchmark:
+  when:
+    and:
+      - equal: [ transaction-snapshot-benchmark, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - transaction_snapshot_benchmark:
         context:
           - datadog
           - artifactory

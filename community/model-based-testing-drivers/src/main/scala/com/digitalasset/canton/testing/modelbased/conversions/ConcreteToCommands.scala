@@ -211,19 +211,6 @@ class ConcreteToCommands(universalTemplatePkgId: Ref.PackageId) {
             "expectedContractId" -> V.ValueInt64(contractId.longValue),
           ),
         )
-      case LookupByKey(contractId, keyId, maintainers) =>
-        for {
-          concreteMaintainers <- partySetToValue(partyIds, maintainers)
-        } yield mkVariant(
-          "Universal:TxAction",
-          "LookupByKey",
-          mkRecord(
-            "Universal:TxAction.LookupByKey",
-            "keyId" -> V.ValueInt64(keyId.longValue),
-            "maintainers" -> concreteMaintainers,
-            "expectedSuccess" -> V.ValueBool(contractId.isDefined),
-          ),
-        )
       case QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
         for {
           concreteMaintainers <- partySetToValue(partyIds, maintainers)
@@ -382,8 +369,6 @@ class ConcreteToCommands(universalTemplatePkgId: Ref.PackageId) {
       case Fetch(_) => throw new RuntimeException("Fetch not supported at command level")
       case FetchByKey(_, _, _) =>
         throw new RuntimeException("FetchByKey not supported at command level")
-      case LookupByKey(_, _, _) =>
-        throw new RuntimeException("LookupByKey not supported at command level")
       case QueryByKey(_, _, _, _) =>
         throw new RuntimeException("QueryByKey not supported at command level")
       case Rollback(_) => throw new RuntimeException("Rollback not supported at command level")

@@ -8,15 +8,13 @@ import com.daml.ledger.api.v2.update_service
 import com.daml.platform.v1.page_tokens
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.util.UpdateFormatHashUtils
+import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidator.Result
-import com.digitalasset.canton.ledger.api.validation.{ParticipantOffsetValidator, ValidationErrors}
+import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ParticipantOffsetValidator}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
-
-import scala.util.Try
 
 final case class UpdatesPageToken(
     lowestPageOffsetExclusive: Option[Offset],
@@ -46,23 +44,19 @@ object UpdatesPageToken {
   val Version: Int = 1
 
   def requestChecksum(request: update_service.GetUpdatesPageRequest): ByteString =
-    Hash
-      .build(HashPurpose.UpdatesPageToken, HashAlgorithm.Sha256)
-      .addOptional(request.beginOffsetExclusive, _.addLong)
-      .addOptional(request.endOffsetInclusive, _.addLong)
-      .addOptional(request.maxPageSize, _.addInt)
-      .addOptional(request.updateFormat, UpdateFormatHashUtils.hashUpdateFormat)
-      .addBool(request.descendingOrder)
-      .finish()
-      .unwrap
-      .substring(0, 4)
+    PageTokenUtils.toChecksum(
+      Hash
+        .build(HashPurpose.UpdatesPageToken, HashAlgorithm.Sha256)
+        .addOptional(request.beginOffsetExclusive, _.addLong)
+        .addOptional(request.endOffsetInclusive, _.addLong)
+        .addOptional(request.maxPageSize, _.addInt)
+        .addOptional(request.updateFormat, UpdateFormatHashUtils.hashUpdateFormat)
+        .addBool(request.descendingOrder)
+        .finish()
+    )
 
-  def participantChecksum(participantId: Ref.ParticipantId): ByteString = Hash
-    .build(HashPurpose.UpdatesPageToken, HashAlgorithm.Sha256)
-    .addString(participantId)
-    .finish()
-    .unwrap
-    .substring(0, 4)
+  def participantChecksum(participantId: Ref.ParticipantId): ByteString =
+    PageTokenUtils.calcParticipantChecksum(HashPurpose.UpdatesPageToken, participantId)
 
   def validateToken(
       updatesPageToken: com.daml.platform.v1.page_tokens.UpdatesPageToken,
@@ -120,23 +114,18 @@ object UpdatesPageToken {
       updatesPageToken.requestChecksum,
     )
 
-  private def deserializePB(byteString: ByteString)(implicit
-      errorLoggingContext: ErrorLoggingContext
-  ): Result[page_tokens.UpdatesPageToken] =
-    Try(page_tokens.UpdatesPageToken.parseFrom(byteString.toByteArray)).toEither.left.map(_ =>
-      ValidationErrors.invalidField(
-        fieldName = "page_token",
-        message = "Invalid page token for GetUpdatesPageRequest",
-      )
-    )
-
   def validateToken(
       request: update_service.GetUpdatesPageRequest,
       participantId: Ref.ParticipantId,
   )(implicit errorLoggingContext: ErrorLoggingContext): Result[Option[UpdatesPageToken]] =
     request.pageToken.traverse { token =>
       for {
-        parsedToken <- deserializePB(token)
+        parsedToken <- FieldValidator.validateProtobufEncodedField(
+          token,
+          page_tokens.UpdatesPageToken,
+          fieldName = "page_token",
+          errorMessage = "Invalid page token for GetUpdatesPageRequest",
+        )
         validated <- validateToken(parsedToken, request, participantId)
       } yield validated
     }

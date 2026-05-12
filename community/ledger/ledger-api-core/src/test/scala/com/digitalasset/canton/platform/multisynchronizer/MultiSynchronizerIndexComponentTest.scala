@@ -7,12 +7,8 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
-  AcsRangeInfo,
-  CumulativeFilter,
-  EventFormat,
-}
+import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
+import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   ReassignmentInfo,

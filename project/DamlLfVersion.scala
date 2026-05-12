@@ -61,8 +61,8 @@ object DamlLfVersion {
     "stagingLfVersion" -> v2_4_1,
   )
 
-  val allLfVersions = List(v2_1, v2_2, v2_3_2, v2_3, v2_4, v2_dev)
-  private val discontinuedLfVersions = List(v2_3_1)
+  val allLfVersions = List(v2_1, v2_2, v2_3, v2_4, v2_dev)
+  private val discontinuedLfVersions = List(v2_3_1, v2_3_2)
   private val stableLfVersions = List(v2_1, v2_2, v2_3)
   private val compilerLfVersions = allLfVersions
   private val earlyAccessLfVersions = stableLfVersions

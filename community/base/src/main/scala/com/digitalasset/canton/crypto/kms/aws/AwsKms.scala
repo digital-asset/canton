@@ -76,6 +76,7 @@ class AwsKms(
     Set(
       "Unable to execute HTTP request: The connection was closed during the request.",
       "Unable to execute HTTP request: connection timed out",
+      "Unable to execute HTTP request: BetterFixedChannelPooled was closed",
     )
 
   private def errorHandler(

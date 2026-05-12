@@ -3177,7 +3177,7 @@ class EngineTestHelpers(
   val suffixStrictEngine: Engine = newEngine(requireCidSuffixes = true)
   val suffixLenientEngine = newEngine()
   val compiledPackages = ConcurrentCompiledPackages(suffixLenientEngine.config.getCompilerConfig)
-  val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
+  val preprocessor = refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)

@@ -185,6 +185,7 @@ class GrpcSequencerServiceTest
         topologyClient,
         None,
         params,
+        logEventDetails = false,
         topologyInitService,
         BaseTest.testedProtocolVersion,
         maxItemsInTopologyResponse = PositiveInt.tryCreate(maxItemsInTopologyBatch),

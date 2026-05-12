@@ -2565,8 +2565,21 @@ fileComments:
             package_name: Required
             key: Required
             hash: 'Required: must be non-empty'
+      GlobalKeyWithMaintainers:
+        message:
+          comments: null
+          fieldComments:
+            key: |-
+              The key
+
+              Required
+            maintainers: |-
+              Key maintainers
+
+              Required: must be non-empty
     oneOfs:
       GlobalKey: {}
+      GlobalKeyWithMaintainers: {}
     services: {}
   interactive/interactive_submission_service.proto:
     messages:
@@ -2875,7 +2888,7 @@ fileComments:
               Required
       GlobalKeyMappingEntry:
         message:
-          comments: null
+          comments: This message is deprecated and may be removed in future releases
           fieldComments:
             key: Required
             value: Optional
@@ -2898,8 +2911,6 @@ fileComments:
               Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer `synchronizer_id`.
               If submitted after it will be rejected even if otherwise valid, in which case it needs to be prepared and signed again
               with a new valid max_record_time.
-              Unsigned in 3.3 to avoid a breaking protocol change
-              Will be signed in 3.4+
               Set max_record_time in the PreparedTransactionRequest to get this field set accordingly
 
               Optional
@@ -2909,8 +2920,8 @@ fileComments:
             mediator_group: Required
             submitter_info: Required
             global_key_mapping: |-
-              Contextual information needed to process the transaction but not signed, either because it's already indirectly
-              signed by signing the transaction, or because it doesn't impact the ledger state
+              This fields is deprecated and will always be empty.
+              Keys and associated contracts are already present and signed within the transaction nodes where they're used
 
               Optional: can be empty
             input_contracts: |-
@@ -3249,17 +3260,14 @@ fileComments:
       - name: ExecuteSubmission
         comments: |-
           Execute a prepared submission _asynchronously_ on the ledger.
+          Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
           Requires a signature of the transaction from the submitting external party.
       - name: ExecuteSubmissionAndWait
-        comments: |-
-          Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-          IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-          A malicious node could make a successfully committed request appeared failed and vice versa
+        comments: Similar to ExecuteSubmission but _synchronously_ wait for the completion
+          of the transaction
       - name: ExecuteSubmissionAndWaitForTransaction
-        comments: |-
-          Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-          IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-          A malicious node could make a successfully committed request appear as failed and vice versa
+        comments: Similar to ExecuteSubmissionAndWait but additionally returns the
+          transaction
       - name: GetPreferredPackageVersion
         comments: |-
           A preferred package is the highest-versioned package for a provided package-name
@@ -3299,11 +3307,15 @@ fileComments:
           comments: Create Node
           fieldComments:
             signatories: 'Required: must be non-empty'
+            key: |-
+              Only populated from lf_version >= 2
+
+              Optional
             package_name: Required
             argument: Required
             stakeholders: 'Required: must be non-empty'
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3322,6 +3334,10 @@ fileComments:
               Optional
             signatories: 'Required: must be non-empty'
             consuming: Required
+            key: |-
+              Can only be populated from lf_version >= 2
+
+              Optional
             acting_parties: 'Required: must be non-empty'
             package_name: Required
             exercise_result: Optional
@@ -3329,8 +3345,12 @@ fileComments:
             choice_id: Required
             choice_observers: 'Optional: can be empty'
             stakeholders: 'Required: must be non-empty'
+            by_key: |-
+              Can only be true from lf_version >= 2
+
+              Required
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3344,11 +3364,19 @@ fileComments:
           fieldComments:
             interface_id: Optional
             signatories: 'Required: must be non-empty'
+            key: |-
+              Can only be populated from lf_version >= 2
+
+              Optional
             acting_parties: 'Required: must be non-empty'
             package_name: Required
             stakeholders: 'Required: must be non-empty'
+            by_key: |-
+              Can only be true from lf_version >= 2
+
+              Required
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3361,9 +3389,32 @@ fileComments:
           comments: null
           fieldComments:
             create: ''
-            fetch: ''
-            exercise: ''
             rollback: ''
+            exercise: ''
+            fetch: ''
+            query_by_key: Only from PV 35
+      QueryByKey:
+        message:
+          comments: null
+          fieldComments:
+            result: |-
+              Result of the query: list of contract Ids matching the query
+
+              Optional: can be empty
+            key: |-
+              key to query for
+
+              Required
+            exhaustive: Required
+            package_name: Required
+            lf_version: |-
+              Specific LF serialization version of the node
+
+              Required
+            template_id: |-
+              The identifier uses the package-id reference format.
+
+              Required
       Rollback:
         message:
           comments: Rollback Node
@@ -3379,9 +3430,11 @@ fileComments:
             comments: Required
             fieldComments:
               create: ''
-              fetch: ''
-              exercise: ''
               rollback: ''
+              exercise: ''
+              fetch: ''
+              query_by_key: Only from PV 35
+      QueryByKey: {}
       Rollback: {}
     services: {}
   offset_checkpoint.proto:

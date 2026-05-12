@@ -20,7 +20,10 @@ import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, Synchroni
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerSends
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
-import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
+import com.digitalasset.canton.sequencing.client.pool.{
+  HasAcceptableSequencers,
+  SequencerConnectionPool,
+}
 import com.digitalasset.canton.sequencing.client.transports.replay.ReplayClientImpl
 import com.digitalasset.canton.sequencing.protocol.{GetTrafficStateForMemberRequest, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.{EventCostCalculator, TrafficStateController}
@@ -80,7 +83,7 @@ object SequencerClientFactory {
       exitOnFatalErrors: Boolean,
       namedLoggerFactory: NamedLoggerFactory,
   ): SequencerClientFactory =
-    new SequencerClientFactory with NamedLogging {
+    new SequencerClientFactory with NamedLogging with HasAcceptableSequencers {
       override protected def loggerFactory: NamedLoggerFactory = namedLoggerFactory
 
       override def create(
@@ -140,9 +143,16 @@ object SequencerClientFactory {
             ts: CantonTimestamp
         ): EitherT[FutureUnlessShutdown, CreateError, Option[TrafficState]] =
           for {
+            syncCrypto <- EitherT.liftF(syncCryptoApi.currentSnapshotApproximation)
+            acceptableSequencersO <- EitherT.right(getAcceptableSequencers(syncCrypto.ipsSnapshot))
             connections <- EitherT.fromEither[FutureUnlessShutdown](
               NonEmpty
-                .from(connectionPool.getOneConnectionPerSequencer("get-traffic-state"))
+                .from(
+                  connectionPool.getOneConnectionPerSequencer(
+                    "get-traffic-state",
+                    acceptableO = acceptableSequencersO,
+                  )
+                )
                 .toRight(
                   NonRetryableError(
                     s"No connection available to retrieve traffic state from synchronizer for $member"

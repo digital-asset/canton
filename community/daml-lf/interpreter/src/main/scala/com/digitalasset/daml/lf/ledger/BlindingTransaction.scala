@@ -59,66 +59,38 @@ object BlindingTransaction {
 
     val initialParentExerciseWitnesses: Set[Party] = Set.empty
 
-    def processNode(
-        state0: BlindState,
-        parentExerciseWitnesses: Set[Party],
-        nodeId: NodeId,
-    ): BlindState =
-      tx.nodes.get(nodeId) match {
-        case Some(action: Node.Action) =>
+    val finalState = tx.foldWithPathState[BlindState, Set[Party]](
+      BlindState.Empty,
+      initialParentExerciseWitnesses,
+    ) { case (state0, parentExerciseWitnesses, nodeId, node) =>
+      node match {
+        case action: Node.Action =>
           val witnesses = parentExerciseWitnesses union action.informeesOfNode
-
-          // actions of every type are disclosed to their witnesses
           val state = state0.discloseNode(witnesses, nodeId)
 
           action match {
-
-            case _: Node.Create => state
-            case _: Node.LookupByKey => state
-
-            // fetch & exercise nodes cause divulgence
-
+            case _: Node.Create =>
+              (state, witnesses)
+            case _: Node.LookupByKey =>
+              (state, witnesses)
             case fetch: Node.Fetch =>
-              state
-                .divulgeCoidTo(parentExerciseWitnesses -- fetch.stakeholders, fetch.coid)
-
+              val state1 =
+                state.divulgeCoidTo(parentExerciseWitnesses -- fetch.stakeholders, fetch.coid)
+              (state1, witnesses)
             case ex: Node.Exercise =>
               val state1 =
                 state.divulgeCoidTo(
                   (parentExerciseWitnesses union ex.choiceObservers) -- ex.stakeholders,
                   ex.targetCoid,
                 )
-
-              ex.children.foldLeft(state1) { (s, childNodeId) =>
-                processNode(
-                  s,
-                  witnesses,
-                  childNodeId,
-                )
-              }
+              (state1, witnesses)
           }
 
-        case Some(rollback: Node.Rollback) =>
-          // Rollback nodes are disclosed to the witnesses of the parent exercise.
+        case _: Node.Rollback =>
           val state = state0.discloseNode(parentExerciseWitnesses, nodeId)
-          rollback.children.foldLeft(state) { (s, childNodeId) =>
-            processNode(
-              s,
-              parentExerciseWitnesses,
-              childNodeId,
-            )
-          }
-        case None =>
-          InternalError.illegalArgumentException(
-            NameOf.qualifiedNameOfCurrentFunc,
-            s"processNode - precondition violated: node $nodeId not present",
-          )
+          (state, parentExerciseWitnesses)
       }
-
-    val finalState =
-      tx.roots.foldLeft(BlindState.Empty) { (s, nodeId) =>
-        processNode(s, initialParentExerciseWitnesses, nodeId)
-      }
+    }
 
     BlindingInfo(
       disclosure = finalState.disclosures,

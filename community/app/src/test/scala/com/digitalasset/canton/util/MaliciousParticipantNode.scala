@@ -63,7 +63,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Ref.UserId
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction, Transaction}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.*
 
@@ -447,7 +447,10 @@ class MaliciousParticipantNode(
 
   def submitCommand(
       command: CommandsWithMetadata,
-      transactionInterceptor: SubmittedTransaction => SubmittedTransaction = identity,
+      transactionInterceptor: (SubmittedTransaction, Transaction.Metadata) => (
+          SubmittedTransaction,
+          Transaction.Metadata,
+      ) = (tx, metadata) => tx -> metadata,
       transactionTreeInterceptor: GenTransactionTree => GenTransactionTree = identity,
       confirmationRequestInterceptor: TransactionConfirmationRequest => TransactionConfirmationRequest =
         identity,
@@ -465,8 +468,8 @@ class MaliciousParticipantNode(
         .interpret(command)
         .leftMap(err => s"Unable to create transaction: $err")
         .mapK(FutureUnlessShutdown.outcomeK)
-      (_submittedTransaction, metadata) = transactionAndMetadata
-      submittedTransaction = transactionInterceptor(_submittedTransaction)
+      modifiedTransactionAndMetadata = transactionInterceptor.tupled(transactionAndMetadata)
+      (submittedTransaction, metadata) = modifiedTransactionAndMetadata
       transactionMeta = command.transactionMeta(submittedTransaction, metadata)
       transactionMetadata = TransactionMetadata
         .fromTransactionMeta(
@@ -476,10 +479,9 @@ class MaliciousParticipantNode(
         )
         .value
 
-      wfTransaction = WellFormedTransaction.checkOrThrow(
+      wfTransaction = WellFormedTransaction.createUnsafe[WellFormedTransaction.WithoutSuffixes](
         submittedTransaction,
         transactionMetadata,
-        WellFormedTransaction.WithoutSuffixes,
       )
 
       now = sequencerClient.clock.now

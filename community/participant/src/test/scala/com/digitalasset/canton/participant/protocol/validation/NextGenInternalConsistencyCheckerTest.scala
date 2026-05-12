@@ -76,7 +76,7 @@ class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTe
             txBuilder.queryByKey(key = key, Vector(cId1, cId2), exhaustive = true),
           )
         )
-        checkTransaction(sut, tx, Set(key.globalKey)) shouldBe Either.unit
+        checkTransaction(sut, Seq(tx), Set(key.globalKey)) shouldBe Either.unit
       }
       "disallow the inconsistent contract ordering" in {
         val tx = txBuilder.toTransaction(
@@ -85,7 +85,7 @@ class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTe
             txBuilder.queryByKey(key = key, Vector(cId2, cId3), exhaustive = false),
           )
         )
-        inside(checkTransaction(sut, tx, Set(key.globalKey))) {
+        inside(checkTransaction(sut, Seq(tx), Set(key.globalKey))) {
           case Left(ErrorWithInternalConsistencyCheck(InconsistentContractKeyError(actual))) =>
             actual shouldBe key.globalKey
         }
@@ -97,7 +97,7 @@ class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTe
             txBuilder.queryByKey(key = key, Vector(cId2, cId3), exhaustive = false),
           )
         )
-        checkTransaction(sut, tx, Set.empty) shouldBe Either.unit
+        checkTransaction(sut, Seq(tx), Set.empty) shouldBe Either.unit
       }
       "disallow an exhaustive query followed by one that returns additional contracts" in {
         val tx = txBuilder.toTransaction(
@@ -106,7 +106,23 @@ class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTe
             txBuilder.queryByKey(key = key, Vector(cId1, cId2, cId3), exhaustive = false),
           )
         )
-        inside(checkTransaction(sut, tx, Set(key.globalKey))) {
+        inside(checkTransaction(sut, Seq(tx), Set(key.globalKey))) {
+          case Left(ErrorWithInternalConsistencyCheck(InconsistentContractKeyError(actual))) =>
+            actual shouldBe key.globalKey
+        }
+      }
+      "disallow an exhaustive query followed by one in a subsequent transaction that returns additional contracts" in {
+        val tx1 = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2), exhaustive = true)
+          )
+        )
+        val tx2 = txBuilder.toTransaction(
+          someExercise.withChildren(
+            txBuilder.queryByKey(key = key, Vector(cId1, cId2, cId3), exhaustive = false)
+          )
+        )
+        inside(checkTransaction(sut, Seq(tx1, tx2), Set(key.globalKey))) {
           case Left(ErrorWithInternalConsistencyCheck(InconsistentContractKeyError(actual))) =>
             actual shouldBe key.globalKey
         }

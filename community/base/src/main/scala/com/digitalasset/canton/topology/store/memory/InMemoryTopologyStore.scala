@@ -256,7 +256,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   @VisibleForTesting
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     val entries =

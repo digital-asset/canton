@@ -9,7 +9,7 @@ override-components:
   codegen:
     version: $DAML_VERSION
 build-options:
-- --target=2.3-staging
+- --target=2.3
 - --ghc-option=-Wno-deprecated-exception
 name: CantonTestsLF23
 source: CantonTests.daml

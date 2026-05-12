@@ -8,7 +8,7 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.logging.SuppressionRule

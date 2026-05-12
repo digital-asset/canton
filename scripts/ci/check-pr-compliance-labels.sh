@@ -51,13 +51,13 @@ get_pull_files_changed () {
     "https://api.github.com/repos/${REPO}/pulls/${PULL_NUMBER}/files?per_page=100" \
       | (grep "filename" || true ) \
       | sed -n -e 's/\s*"filename": "//p' | sed -n -e 's/",//p' \
-      | (grep -v -x -f .circleci/compliance-files-exceptions.txt || true ) > .files_changed
+      | (grep -v -x -f scripts/ci/compliance-files-exceptions.txt || true ) > .files_changed
 }
 
 get_merge_base_files_changed () {
   BASE=$(detect_base)
   echo "Using git diff to detect changes vs the base merge branch '$BASE'..."
-  git diff --merge-base --name-only "$BASE" HEAD | (grep -v -x -f .circleci/compliance-files-exceptions.txt || true) > .files_changed
+  git diff --merge-base --name-only "$BASE" HEAD | (grep -v -x -f scripts/ci/compliance-files-exceptions.txt || true) > .files_changed
 }
 
 has_changed_path_prefix () {

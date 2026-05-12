@@ -94,7 +94,7 @@ object ExternalAuthorization
       signatures <- signaturesP.traverse(fromProtoV30)
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV30(proto.hashingSchemeVersion)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-    } yield create(signatures.toMap, hashingSchemeVersion, None, rpv.representative)
+    } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, None)(rpv)
   }
 
   def fromProtoV31(
@@ -106,7 +106,7 @@ object ExternalAuthorization
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV31(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-    } yield create(signatures.toMap, hashingSchemeVersion, maxRecordTime, rpv.representative)
+    } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, maxRecordTime)(rpv)
   }
 
 }

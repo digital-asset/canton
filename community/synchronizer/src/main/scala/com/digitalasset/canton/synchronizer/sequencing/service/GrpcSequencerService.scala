@@ -147,6 +147,7 @@ object GrpcSequencerService {
       topologyClient: SynchronizerTopologyClient,
       overrideMaxRequestSize: Option[NonNegativeInt],
       parameters: SequencerParameters,
+      logEventDetails: Boolean,
       protocolVersion: ProtocolVersion,
       topologyStateForInitializationService: TopologyStateForInitializationService,
       loggerFactory: NamedLoggerFactory,
@@ -177,6 +178,7 @@ object GrpcSequencerService {
       topologyClient,
       overrideMaxRequestSize,
       parameters,
+      logEventDetails = logEventDetails,
       topologyStateForInitializationService,
       protocolVersion,
       acknowledgementsConflateWindow = acknowledgementsConflateWindow,
@@ -209,6 +211,7 @@ class GrpcSequencerService(
     topologyClient: SynchronizerTopologyClient,
     overrideMaxRequestSize: Option[NonNegativeInt],
     parameters: SequencerParameters,
+    logEventDetails: Boolean,
     topologyStateForInitializationService: TopologyStateForInitializationService,
     protocolVersion: ProtocolVersion,
     maxItemsInTopologyResponse: PositiveInt = PositiveInt.tryCreate(100),
@@ -265,6 +268,15 @@ class GrpcSequencerService(
             .fromByteString(protocolVersion, requestP.signedSubmissionRequest)
             .leftMap(requestDeserializationError(_, maxRequestSize))
         )
+        _ = if (logEventDetails) {
+          // escape hatch to log the content of the submission request for debugging purposes.
+          // decoding can then be performed using
+          // SubmissionRequest.fromByteString(PV, MaxBytesToDecompress(...))(ByteString.copyFrom(Base64.getDecoder.decode(str)))
+          logger.info(
+            s"Received sendAsync from $senderFromMetadata with payload ${java.util.Base64.getEncoder
+                .encodeToString(signedContent.content.bytes.toByteArray)}"
+          )
+        }
         signedSubmissionRequest <- EitherT.fromEither[FutureUnlessShutdown](
           signedContent
             .deserializeContent(

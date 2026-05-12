@@ -93,28 +93,6 @@ object ContractInstance {
         .leftMap(err => s"Failed parsing disclosed contract authentication data: $err")
     else Left("Missing authentication data in provided disclosed contract")
 
-  def toSerializableContract(inst: LfFatContractInst): Either[String, SerializableContract] =
-    for {
-      contractIdVersion <- CantonContractIdVersion
-        .extractCantonContractIdVersion(inst.contractId)
-        .leftMap(err => s"Invalid disclosed contract id: ${err.toString}")
-      authenticationData <- contractAuthenticationData(contractIdVersion, inst)
-      metadata <- ContractMetadata.create(
-        signatories = inst.signatories,
-        stakeholders = inst.stakeholders,
-        maybeKeyWithMaintainersVersioned =
-          inst.contractKeyWithMaintainers.map(Versioned(inst.version, _)),
-      )
-      serializable <- SerializableContract(
-        contractId = inst.contractId,
-        contractInstance = inst.toCreateNode.versionedCoinst,
-        metadata = metadata,
-        ledgerTime = CantonTimestamp(inst.createdAt.time),
-        authenticationData = authenticationData,
-      ).leftMap(err => s"Failed creating serializable contract from disclosed contract: $err")
-
-    } yield serializable
-
   def create[Time <: CreationTime](
       inst: FatContractInstance { type CreatedAtTime <: Time }
   ): Either[String, GenContractInstance { type InstCreatedAtTime <: Time }] =
@@ -130,17 +108,6 @@ object ContractInstance {
           inst.contractKeyWithMaintainers.map(Versioned(inst.version, _)),
       )
     } yield ContractInstanceImpl[inst.CreatedAtTime](inst, metadata, serialization)
-
-  def fromSerializable(serializable: SerializableContract): Either[String, ContractInstance] = {
-    val inst = FatContractInstance.fromCreateNode(
-      serializable.toLf,
-      serializable.ledgerCreateTime,
-      serializable.authenticationData.toLfBytes,
-    )
-    for {
-      serialization <- encodeInst(inst)
-    } yield ContractInstanceImpl(inst, serializable.metadata, serialization)
-  }
 
   def decode(bytes: ByteString): Either[String, GenContractInstance] =
     for {

@@ -286,10 +286,7 @@ object GenTransactionTree {
   /** Indicates an attempt to create an invalid [[GenTransactionTree]]. */
   final case class InvalidGenTransactionTree(message: String) extends RuntimeException(message) {}
 
-  @VisibleForTesting
-  val submitterMetadataUnsafe: Lens[GenTransactionTree, MerkleTree[SubmitterMetadata]] =
-    GenLens[GenTransactionTree](_.submitterMetadata)
-
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
   val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
     GenLens[GenTransactionTree](_.rootViews)

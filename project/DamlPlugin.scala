@@ -22,8 +22,6 @@ object DamlPlugin extends AutoPlugin {
     val damlInstall = taskKey[Unit]("Use dpm to install daml components")
 
     val damlSourceDirectory = settingKey[File]("Directory containing daml projects")
-    val damlCompileDirectory =
-      settingKey[File]("Directory to put the daml projects in for building")
     val damlBuildOrder =
       settingKey[Seq[String]](
         "List of directory names used to sort the Daml building by order in this list"
@@ -87,7 +85,6 @@ object DamlPlugin extends AutoPlugin {
     sourceGenerators += damlGenerateJava.taskValue,
     resourceGenerators += damlBuild.taskValue,
     damlSourceDirectory := sourceDirectory.value / "daml",
-    damlCompileDirectory := target.value / "daml",
     damlDarOutput := resourceManaged.value,
     damlJavaCodegenOutput := codegenOutput(configuration.value, target.value, "java"),
     damlTsCodegenOutput := codegenOutput(configuration.value, target.value, "ts"),
@@ -338,13 +335,13 @@ object DamlPlugin extends AutoPlugin {
     cachedOutput(cacheInput)
   }
 
-  private def damlBuildTask = Def.task {
+  private def damlBuildTask = Def.taskDyn {
     damlInstall.value
     val streams = Keys.streams.value
     val dependencies = damlDependencies.value
     val outputDirectory = damlDarOutput.value
-    val outputLfVersions = damlDarLfVersions.value.toSet
-    val buildDirectory = damlCompileDirectory.value
+    val lfVersions = damlDarLfVersions.value
+    val targetDir = target.value
     val sourceDirectory = damlSourceDirectory.value
     val useVersionedDarFileName = useVersionedDarName.value
     val damlVersion = damlCompilerVersion.value
@@ -354,11 +351,10 @@ object DamlPlugin extends AutoPlugin {
       .map(p => sourceDirectory.toPath.resolve("daml.yaml").relativize(p.toPath).normalize().toFile)
       .toSet
 
-    if (outputLfVersions.isEmpty) {
+    if (lfVersions.isEmpty)
       throw new MessageOnlyException(
         s"DamlPlugin: Cannot have 0 damlDarLfVersions, must specify at least one."
       )
-    }
 
     def buildOrder(fst: File, snd: File): Boolean = {
       def indexOf(file: File): Int = {
@@ -381,26 +377,23 @@ object DamlPlugin extends AutoPlugin {
     val allDamlFiles = (sourceDirectory ** "*.daml").get
     val damlProjectFiles = (sourceDirectory ** "daml.yaml").get
     // we don't really know dependencies between daml files, so just assume if any change then we need to rebuild all packages
-    val filesHash =
+    val inputFileHash =
       (allDamlFiles.toSet ++ damlProjectFiles ++ dependencies).map(FileInfo.hash(_))
 
     import CacheImplicits._
     val cacheInput = (
-      filesHash,
+      inputFileHash,
       outputDirectory.toString,
-      outputLfVersions,
       useVersionedDarFileName,
       damlVersion,
       shouldExtractMainDalf,
       relativePinnedProjectFiles,
     )
-    val cacheStore = streams.cacheStoreFactory.make("damlBuild")
     // implicit resolution fails
     val cacheFormat = basicCache(
-      tuple7Format(
+      tuple6Format(
         immSetFormat[HashFileInfo], // source files and dependencies
         StringJsonFormat, // outputDirectory
-        immSetFormat(StringJsonFormat), // output lf version
         BooleanJsonFormat, // useVersionedDarFileName
         StringJsonFormat, // daml compiler version
         BooleanJsonFormat, // shouldExtractMainDalf
@@ -409,32 +402,38 @@ object DamlPlugin extends AutoPlugin {
       FileStamp.Formats.seqFileJsonFormatter,
     )
 
-    val cachedOutputDars =
-      Cache.cached(cacheStore) {
-        (_: (Set[HashFileInfo], String, Set[String], Boolean, String, Boolean, Set[File])) =>
-          // build the daml files in a sorted way, using the build order definition
-          for {
-            projectFile <- damlProjectFiles.sortWith(buildOrder)
-            relativeProjectFile =
-              sourceDirectory.toPath.relativize(projectFile.toPath).normalize().toFile
-            if !relativePinnedProjectFiles.contains(relativeProjectFile)
-            outputLfVersion <- outputLfVersions.toSeq
-            file <-
-              buildDamlProject(
-                streams.log,
-                sourceDirectory,
-                buildDirectory,
-                outputDirectory,
-                outputLfVersion,
-                outputLfVersions.size > 1,
-                useVersionedDarFileName,
-                relativeProjectFile,
-                damlVersion,
-                shouldExtractMainDalf,
-              )
-          } yield file
-      }(cacheFormat)
-    cachedOutputDars(cacheInput)
+    // start a new task for each LF version, for parallelization
+    def cachedTask(lfVersion: String) = Def.task {
+      val cacheStore = streams.cacheStoreFactory.make(s"damlBuild-$lfVersion")
+      val cachedOutputDars =
+        Cache.cached(cacheStore) {
+          (_: (Set[HashFileInfo], String, Boolean, String, Boolean, Set[File])) =>
+            // build the daml files in a sorted way, using the build order definition
+            for {
+              projectFile <- damlProjectFiles.sortWith(buildOrder)
+              relativeProjectFile =
+                sourceDirectory.toPath.relativize(projectFile.toPath).normalize().toFile
+              if !relativePinnedProjectFiles.contains(relativeProjectFile)
+              file <-
+                buildDamlProject(
+                  streams.log,
+                  sourceDirectory,
+                  targetDir / s"daml-$lfVersion",
+                  outputDirectory,
+                  lfVersion,
+                  lfVersions.size > 1,
+                  useVersionedDarFileName,
+                  relativeProjectFile,
+                  damlVersion,
+                  shouldExtractMainDalf,
+                )
+            } yield file
+        }(cacheFormat)
+      cachedOutputDars(cacheInput)
+    }
+
+    import sbt.Scoped.richTaskSeq
+    lfVersions.map(cachedTask).join.map(_.flatten)
   }
 
   /** We intentionally take the unusual step of checking in certain DARs to ensure stable package
@@ -443,7 +442,7 @@ object DamlPlugin extends AutoPlugin {
   private def damlPinProjectsTask = Def.task {
     damlInstall.value
     val streams = Keys.streams.value
-    val buildDirectory = damlCompileDirectory.value
+    val targetDir = target.value
     val outputDirectory = damlDarOutput.value
     val outputLfVersions = damlDarLfVersions.value.toSet
     val useVersionedDarFileName = useVersionedDarName.value
@@ -459,7 +458,7 @@ object DamlPlugin extends AutoPlugin {
         file <- buildDamlProject(
           streams.log,
           projectPath,
-          buildDirectory,
+          targetDir / "daml",
           destinationDirectory,
           outputLfVersion,
           outputLfVersions.size > 1,

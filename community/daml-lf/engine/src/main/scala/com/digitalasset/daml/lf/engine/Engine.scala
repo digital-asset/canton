@@ -91,7 +91,7 @@ class Engine(
   private[this] val stablePackageIds = StablePackages.ids(config.allowedLanguageVersions)
 
   private[engine] val preprocessor =
-    new preprocessing.Preprocessor(
+    new refinement.Preprocessor(
       compiledPackages = compiledPackages,
       loadPackage = loadPackage,
       forbidLocalContractIds = config.forbidLocalContractIds,
@@ -161,6 +161,9 @@ class Engine(
           contractStateMode = contractStateMode,
           packageResolution = pkgResolution,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
+          metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
+            Seq(new metrics.StepCount(config.iterationsBetweenInterruptions), new metrics.TxNodeCount)
+          },
         )
       (tx, meta, _) = result
     } yield (tx, meta)
@@ -499,7 +502,7 @@ class Engine(
     }
   }
 
-  private lazy val enricher = new Enricher(
+  private lazy val enricher = refinement.Enricher(
     compiledPackages,
     loadPackage,
     addTypeInfo = true,
@@ -571,7 +574,7 @@ class Engine(
                   "transaction encoding/decoding is not idempotent",
                 )
                 // check that impoverishment is indempotent on engine output
-                poor = Enricher.impoverish(tx)
+                poor = refinement.Enricher.impoverish(tx)
                 _ <- Either.cond(
                   tx == poor,
                   (),
@@ -583,7 +586,7 @@ class Engine(
                   .consume()
                   .left
                   .map("transaction enrichment fails: " + _)
-                poor = Enricher.impoverish(rich)
+                poor = refinement.Enricher.impoverish(rich)
                 _ <- Either.cond(
                   tx == poor,
                   (),
@@ -618,6 +621,21 @@ class Engine(
                   .fold(
                     err => Some(("TransactionCoder.encodeTransaction", err)),
                     encoded => {
+                      val metricPlugins =
+                        machine.metrics.totalCount[metrics.StepCount].map { stepCount =>
+                          Snapshot.MetricPlugin
+                            .newBuilder()
+                            .setName("StepCount")
+                            .setTotal(stepCount)
+                            .build()
+                        } ++
+                          machine.metrics.totalCount[metrics.TxNodeCount].map { txNodeCount =>
+                            Snapshot.MetricPlugin
+                              .newBuilder()
+                              .setName("TxNodeCount")
+                              .setTotal(txNodeCount)
+                              .build()
+                          }
                       val txEntry = Snapshot.TransactionEntry
                         .newBuilder()
                         .setRawTransaction(encoded.toByteString)
@@ -626,6 +644,7 @@ class Engine(
                         .setLedgerTime(time.micros)
                         .setPreparationTime(meta.preparationTime.micros)
                         .setSubmissionSeed(submissionSeed.bytes.toByteString)
+                        .addAllMetricPlugins(metricPlugins.asJava)
                         .build()
                       val txSubmission = Snapshot.SubmissionEntry
                         .newBuilder()

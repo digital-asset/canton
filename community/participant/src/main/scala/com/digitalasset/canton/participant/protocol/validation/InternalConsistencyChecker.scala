@@ -21,6 +21,7 @@ import com.digitalasset.canton.protocol.{
   LfGlobalKey,
   LfTemplateId,
   LfTransaction,
+  LfVersionedTransaction,
   RollbackContext,
 }
 import com.digitalasset.canton.topology.ParticipantId
@@ -38,7 +39,7 @@ trait InternalConsistencyChecker {
 
   def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfVersionedTransaction],
       topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext,
@@ -59,12 +60,18 @@ trait InternalConsistencyChecker {
       hostedKeys = keyMaintainers.toSeq.collect {
         case (key, maintainers) if maintainers.exists(hostedMaintainers.contains) => key
       }.toSet
-      _ <- EitherT.fromEither(check(rootViewTrees, mergedTransaction, hostedKeys))
+      _ <- EitherT.fromEither(
+        check(
+          rootViewTrees,
+          unmergedTransactionsWithoutToplevelRollbackNodes.map(_.transaction),
+          hostedKeys,
+        )
+      )
     } yield ()
 
   protected[validation] def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext

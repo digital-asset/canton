@@ -128,7 +128,12 @@ private[snapshot] object TransactionSnapshot {
     engine
   }
 
-  def getAllTopLevelChoiceNames(dumpFile: Path): Set[String] = {
+  def getAllTopLevelChoiceNames(
+      dumpFile: Path,
+      stepCountFilter: Option[Long] = None,
+      txNodeCountFilter: Option[Long] = None,
+      debug: Boolean = false,
+  ): Set[String] = {
     val inputStream = new BufferedInputStream(Files.newInputStream(dumpFile))
 
     val entries = new Iterator[Snapshot.SubmissionEntry] {
@@ -150,10 +155,42 @@ private[snapshot] object TransactionSnapshot {
         )
     }
 
-    def updateWithChoicesFromTx(tx: SubmittedTx): Unit =
+    def updateWithChoicesFromTx(txEntry: Snapshot.TransactionEntry, tx: SubmittedTx): Unit = {
+      val stepCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "StepCount" =>
+          plugin.getTotal
+      }
+      val txNodeCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "TxNodeCount" =>
+          plugin.getTotal
+      }
       tx.foreachInExecutionOrder(
         exerciseBegin = { (_, exe) =>
-          result = result + s"${exe.templateId}:${exe.choiceId}"
+          (stepCountFilter, txNodeCountFilter) match {
+            case (None, None) =>
+              result = result + s"${exe.templateId}:${exe.choiceId}"
+            case (Some(minStepCount), None) if stepCount.exists(_ >= minStepCount) =>
+              result = result + s"${exe.templateId}:${exe.choiceId}"
+            case (Some(minStepCount), None) if debug =>
+              println(
+                s"Filtering out ${exe.templateId}:${exe.choiceId} as step count = $stepCount < $minStepCount"
+              )
+            case (None, Some(minTxNodeCount)) if txNodeCount.exists(_ >= minTxNodeCount) =>
+              result = result + s"${exe.templateId}:${exe.choiceId}"
+            case (None, Some(minTxNodeCount)) if debug =>
+              println(
+                s"Filtering out ${exe.templateId}:${exe.choiceId} as tx node count = $txNodeCount < $minTxNodeCount"
+              )
+            case (Some(minStepCount), Some(minTxNodeCount))
+                if stepCount.exists(_ >= minStepCount) && txNodeCount.exists(_ >= minTxNodeCount) =>
+              result = result + s"${exe.templateId}:${exe.choiceId}"
+            case (Some(minStepCount), Some(minTxNodeCount)) if debug =>
+              println(
+                s"Filtering out ${exe.templateId}:${exe.choiceId} as step count = $stepCount < $minStepCount or tx node count = $txNodeCount < $minTxNodeCount"
+              )
+            case _ =>
+            // Do nothing
+          }
           ChildrenRecursion.DoNotRecurse
         },
         rollbackBegin = (_, _) => ChildrenRecursion.DoNotRecurse,
@@ -161,6 +198,7 @@ private[snapshot] object TransactionSnapshot {
         exerciseEnd = (_, _) => (),
         rollbackEnd = (_, _) => (),
       )
+    }
 
     try {
       while (entries.hasNext) {
@@ -168,7 +206,7 @@ private[snapshot] object TransactionSnapshot {
         entry.getEntryCase match {
           case EntryCase.TRANSACTION =>
             val tx = decodeTx(entry.getTransaction)
-            updateWithChoicesFromTx(tx)
+            updateWithChoicesFromTx(entry.getTransaction, tx)
 
           case EntryCase.ARCHIVES =>
           // No work to do

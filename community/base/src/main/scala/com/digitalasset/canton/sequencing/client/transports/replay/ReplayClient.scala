@@ -172,7 +172,8 @@ class ReplayClientImpl(
       .getConnections(
         requester,
         PositiveInt.one,
-        exclusions = Set.empty,
+        excluded = Set.empty,
+        acceptableO = None,
       )
       .headOption
       .toRight("No connection available")
@@ -186,11 +187,16 @@ class ReplayClientImpl(
     // latency of the send by comparing now to the time the event eventually arrives
     pendingSends.put(submission.messageId, startedAt).discard
 
-    // Picking a correct max sequencing time could be technically difficult,
-    // so instead we pick max value, which ensures the sequencer always
-    // attempts to sequence valid sends
+    // Picking a correct max sequencing time (default is max value
+    // but we need a lower value if we use aggregation)
     def extendMaxSequencingTime(submission: SubmissionRequest): SubmissionRequest =
-      submission.updateMaxSequencingTime(maxSequencingTime = CantonTimestamp.MaxValue)
+      submission.updateMaxSequencingTime(maxSequencingTime =
+        replaySendsConfig.maxSequencingTimeExtSecs
+          .map(
+            clock.now.plusSeconds
+          )
+          .getOrElse(CantonTimestamp.MaxValue)
+      )
 
     def handleSendResult(
         result: Either[SendAsyncClientError, Unit]

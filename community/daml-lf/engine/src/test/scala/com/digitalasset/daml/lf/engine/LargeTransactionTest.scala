@@ -11,7 +11,14 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, SubmittedTransaction, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  CommittedTransaction,
+  NextGenContractStateMachine => ContractStateMachine,
+  FatContractInstance,
+  Node,
+  SubmittedTransaction,
+  VersionedTransaction,
+}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command._
@@ -63,8 +70,8 @@ class LargeTransactionTest(
           locationInfo = Map.empty,
           l = ledger,
         )
-            ledger = result.newLedger
-            result.richTransaction.transaction
+      ledger = result.newLedger
+      result.richTransaction.transaction
     }
 
     def get(
@@ -109,7 +116,6 @@ class LargeTransactionTest(
 
   private def report(name: String, quantity: Quantity[Double]): Unit =
     if (verbose) println(s"$name: $quantity")
-
 
   private val engine = Engine.DevEngine(loggerFactory)
 
@@ -279,7 +285,7 @@ class LargeTransactionTest(
   ): VersionedTransaction = {
     val effectiveAt = Time.Timestamp.now()
     def enrich(tx: SubmittedTransaction): CommittedTransaction = {
-      val enricher = new Enricher(engine, forbidLocalContractIds = false)
+      val enricher = Enricher(engine, forbidLocalContractIds = false)
       val suffix = Bytes.fromByteArray(Array(0, 0))
       val suffixedTx = data.assertRight(tx.suffixCid(_ => suffix, _ => suffix))
       def consume[V](res: Result[V]): V =

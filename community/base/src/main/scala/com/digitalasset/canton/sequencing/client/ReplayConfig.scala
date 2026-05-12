@@ -53,12 +53,17 @@ object ReplayAction {
   /** Replay sends that were made to the sequencer. Tests can control the
     * [[transports.replay.ReplayClient]] once constructed by waiting for the `replayClient` future
     * to be completed with the `ReplayClient` instance.
+    *
+    * @param maxSequencingTimeExtSecs
+    *   extend max sequencing time by this amount of seconds from clock.now when replaying the
+    *   events
     */
   final case class SequencerSends(
       override protected val loggerFactory: NamedLoggerFactory,
       sendTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.tryOfSeconds(20),
       private val replayClientP: Promise[ReplayClient] = Promise[ReplayClient](),
       usePekko: Boolean = false,
+      maxSequencingTimeExtSecs: Option[Long] = None,
   ) extends ReplayAction
       with NamedLogging {
 

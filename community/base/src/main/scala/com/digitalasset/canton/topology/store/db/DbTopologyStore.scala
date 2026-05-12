@@ -413,7 +413,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   @VisibleForTesting
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     // Helper case class to produce comparable output to the InMemoryStore
@@ -1417,11 +1417,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
 
   override def deleteDataChunk(
       chunkSize: PositiveInt
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
-    // We materialize the full chunk rather than using a subquery, as the update statement must be idempotent
-    val queryChunkIds =
-      sql"select id from common_topology_transactions where store_id = $storeIndex limit ${chunkSize.value}"
-        .as[Long]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     for {
       // There can be at most one of these rows, so we don't include it in our chunking.
       _ <- storage.update(
@@ -1429,22 +1425,39 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         functionFullName,
       )
 
-      chunkIds <- storage.query(queryChunkIds, functionFullName)
-      // The return value of the update is not reliable with an interpolated literal.
-      _ <-
-        if (chunkIds.nonEmpty) {
-          val deleteChunk =
-            sql"delete from common_topology_transactions where id IN (#${chunkIds.mkString(",")})".asUpdate
-          storage.update(deleteChunk, functionFullName)
-        } else FutureUnlessShutdown.pure(0)
+      // We materialize the last chunk key rather than using a subquery within the delete statement, as the update must
+      // be idempotent. We use `(store_id, valid_from, batch_idx)` as the key because the table has this as a unique
+      // constraint which implies an internal index allowing efficient range access. The primary key, `id` did not share
+      // any index with `store_id` so would not have had an efficient lookup.
+      lastKeyInChunk <- storage.query(
+        sql"""
+        select valid_from, batch_idx from (
+          select valid_from, batch_idx from common_topology_transactions where store_id = $storeIndex
+          order by valid_from ASC, batch_idx ASC #${storage.limit(chunkSize.value)}
+        ) as chunk
+        order by valid_from DESC, batch_idx DESC #${storage.limit(1)}
+        """.as[(Long, Int)].headOption,
+        functionFullName,
+      )
+      deleted <-
+        lastKeyInChunk match {
+          case Some((validFrom, batchIdx)) =>
+            storage.update(
+              sql"""delete from common_topology_transactions
+                    where store_id = $storeIndex
+                    and (valid_from, batch_idx) <= ( $validFrom, $batchIdx )
+                    """.asUpdate,
+              functionFullName,
+            )
+          case None => FutureUnlessShutdown.pure(0)
+        }
     } yield {
       logger.info(
-        if (chunkIds.nonEmpty) s"Deleted chunk of ${chunkIds.size} from topology store $storeId."
+        if (deleted > 0) s"Deleted chunk of $deleted from topology store $storeId."
         else s"No chunk to delete from topology store $storeId."
       )
-      chunkIds.nonEmpty
+      deleted > 0
     }
-  }
 
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,

@@ -25,7 +25,7 @@ class NextGenInternalConsistencyChecker(
 
   override def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext
@@ -33,7 +33,7 @@ class NextGenInternalConsistencyChecker(
     for {
       _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
-      _ <- checkKeyState(hostedKeys, Seq(mergedTransaction))
+      _ <- checkKeyState(hostedKeys, unmergedTransactionsWithoutToplevelRollbackNodes)
     } yield ()
 
   private[validation] def checkContractState(

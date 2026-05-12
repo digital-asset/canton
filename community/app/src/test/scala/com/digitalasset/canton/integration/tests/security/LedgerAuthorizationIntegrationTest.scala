@@ -576,7 +576,7 @@ trait LedgerAuthorizationIntegrationTest
           sequencer1,
           mediator1,
           // Approve with invalid signature (i.e., using participant1's private key).
-          withMediatorVerdict(mediatorApprove, participant1),
+          withMediatorVerdict(mediatorApprove, participant1, dropAggregationRule = true),
           // Approve with the correct signature
           withMediatorVerdict(mediatorApprove),
         ) {

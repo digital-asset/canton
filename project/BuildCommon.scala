@@ -143,7 +143,6 @@ object BuildCommon {
           maxConcurrentSbtTestTasks,
       //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
-      Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `community-app` / Compile / damlDarLfVersions,
       Global / excludeLintKeys += `community-app` / Compile / useVersionedDarName,
       Global / excludeLintKeys += `community-app` / autoAPIMappings,
@@ -821,6 +820,7 @@ object BuildCommon {
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
         `ledger-common-dars` % Test,
+        `model-based-testing-drivers` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -945,6 +945,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "foo-0.0.3.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v3",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "VettingMain",
+            (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
+            "com.digitalasset.canton.tests.vettingmain.v1",
+          ),
         ),
         Test / damlTsCodegen := {
           (`ledger-common-dars` / Compile / damlBuild).value
@@ -1053,7 +1058,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("34")),
+          BuildInfoKey("stableProtocolVersions" -> List("34", "35")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1782,7 +1787,7 @@ object BuildCommon {
         .settings(
           sharedCommunitySettings,
           addFilesToHeaderCheck("*.daml", "daml", Compile),
-          damlDarLfVersions := Seq("2.2", "2.3-staging", "2.dev"),
+          damlDarLfVersions := Seq("2.2", "2.3", "2.dev"),
           useVersionedDarName := true,
           Compile / damlBuildOrder := Seq(
             "model_iface",
@@ -1808,7 +1813,7 @@ object BuildCommon {
               "carbonv2",
               "upgrade_iface",
             ).map(codegenTarget(_, "v22")) ++
-              Seq(codegenTarget("keys", "v23-staging"), codegenTarget("experimental", "v2dev")) ++
+              Seq(codegenTarget("keys", "v23"), codegenTarget("experimental", "v2dev")) ++
               Seq(
                 (
                   (Compile / damlSourceDirectory).value / "upgrade" / "1.0.0",
@@ -2147,7 +2152,7 @@ object BuildCommon {
         } else {
           Def.task {
             val log = streams.value.log
-            log.info(s"No change in ${inputFile.getName}, skipping generation")
+            log.debug(s"No change in ${inputFile.getName}, skipping generation")
             val managedDir = (Test / sourceManaged).value
             (managedDir ** "*").get.filter(_.isFile)
           }
@@ -2241,7 +2246,7 @@ object BuildCommon {
         sharedCantonCommunitySettings,
         coverageEnabled := false,
         HouseRules.damlRepoHeaderSettings,
-        Compile / damlDarLfVersions := Seq("2.3-staging"),
+        Compile / damlDarLfVersions := Seq("2.3"),
         Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "benchtool",
@@ -2529,7 +2534,7 @@ object BuildCommon {
     lazy val `model-based-testing-generators` = project
       .in(file("community/model-based-testing-generators"))
       .dependsOn(
-        DamlProjects.`daml-lf-language`
+        DamlProjects.`scala-utils`
       )
       .settings(
         sharedCommunitySettings,

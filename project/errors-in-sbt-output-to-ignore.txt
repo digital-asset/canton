@@ -130,4 +130,8 @@ java\.io\.UncheckedIOException.*No Content-Disposition header in response.*
 Caused by: java\.io\.IOException.*No Content-Disposition header in response.*
 Caused by: java\.io\.UncheckedIOException.*No Content-Disposition header in response.*
 
+# Benign POM property interpolation warning from sbt-license-report 1.9.0 for joda-convert.
+# Known upstream issue: https://github.com/sbt/sbt-license-report/issues/92
+sbt-license-report: unable to find the value for property joda\.artifactId
+
 # Make sure to have a trailing newline

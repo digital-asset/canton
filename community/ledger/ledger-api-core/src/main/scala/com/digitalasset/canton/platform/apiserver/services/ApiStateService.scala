@@ -8,18 +8,18 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
+import com.digitalasset.canton.ledger.api.messages.state.{
+  AcsContinuationToken,
+  AcsPageToken,
+  AcsRangeInfo,
+}
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
   FormatValidator,
   ParticipantOffsetValidator,
-}
-import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
-  AcsPageToken,
-  AcsRangeInfo,
-  ValidationLogger,
 }
 import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.ledger.participant.state.index.{

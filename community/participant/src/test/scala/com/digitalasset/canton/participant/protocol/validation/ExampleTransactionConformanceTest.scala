@@ -21,7 +21,11 @@ import com.digitalasset.canton.participant.protocol.validation.ExampleTransactio
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant.util.DAMLe.{HasReinterpret, ReInterpretationResult}
+import com.digitalasset.canton.participant.util.DAMLe.{
+  HasReinterpret,
+  ReInterpretationResult,
+  UsedPackages,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -85,7 +89,6 @@ class ExampleTransactionConformanceTest
 
     def reinterpretExample(
         example: ExampleTransaction,
-        usedPackages: Set[PackageId] = Set.empty,
         timeBoundaries: LedgerTimeBoundaries = LedgerTimeBoundaries.unconstrained,
     ): HasReinterpret & HashReInterpretationCounter = new HasReinterpret
       with HashReInterpretationCounter {
@@ -126,7 +129,7 @@ class ExampleTransactionConformanceTest
             reinterpretedTx,
             metadata,
             keyResolver,
-            usedPackages,
+            UsedPackages(Set.empty, Set.empty),
             timeBoundaries,
           )
         )
@@ -187,6 +190,7 @@ class ExampleTransactionConformanceTest
           commonData,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
           reInterpretedTopLevelViews,
+          testedProtocolVersion,
         )
         .failOnShutdown
     }
@@ -220,7 +224,7 @@ class ExampleTransactionConformanceTest
                 check(sut, viewsWithNoInputKeys(example.rootTransactionViewTrees))
               )(s"model conformance check for root views")
             } yield {
-              val Result(updateId, absoluteTransaction) = result
+              val Result(updateId, absoluteTransaction, _) = result
               updateId should equal(example.updateId)
 
               absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
@@ -266,7 +270,7 @@ class ExampleTransactionConformanceTest
                 )
               )(s"model conformance check for root views")
             } yield {
-              val Result(updateId, absoluteTransaction) = result
+              val Result(updateId, absoluteTransaction, _) = result
               updateId should equal(example.updateId)
               absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
               absoluteTransaction.unwrap.version should equal(
@@ -290,7 +294,7 @@ class ExampleTransactionConformanceTest
                     s"model conformance check for view at ${viewTree.viewPosition}"
                   )
                 } yield {
-                  val Result(updateId, absoluteTransaction) = result
+                  val Result(updateId, absoluteTransaction, _) = result
                   updateId should equal(example.updateId)
                   absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
                 }

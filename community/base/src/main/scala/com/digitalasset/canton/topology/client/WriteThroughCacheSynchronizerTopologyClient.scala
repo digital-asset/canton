@@ -29,9 +29,11 @@ import com.digitalasset.canton.topology.store.{
   UnknownOrUnvettedPackages,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   LsuSequencerConnectionSuccessor,
   ParticipantAttributes,
+  TopologyTransaction,
   VettedPackage,
 }
 import com.digitalasset.canton.topology.{
@@ -531,7 +533,9 @@ class ValidatingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     verify("sequencerConnectionSuccessors")(_.sequencerConnectionSuccessors(successorPsid))
 
   override private[client] def findUnvettedPackagesOrDependencies(
@@ -539,6 +543,7 @@ class ValidatingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     verify[Id, UnknownOrUnvettedPackages](
       s"findUnvettedPackagesOrDependencies $participant $packages $ledgerTime $vettedPackages"
@@ -548,6 +553,7 @@ class ValidatingTopologySnapshot(
         packages,
         ledgerTime,
         vettedPackages,
+        checkDependencyVetting,
       )
     )
 

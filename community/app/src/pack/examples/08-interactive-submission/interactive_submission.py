@@ -18,11 +18,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes
-from daml_transaction_hashing_v2 import (
-    create_nodes_dict,
-    encode_prepared_transaction,
-    HASHING_SCHEME_VERSION_V2,
-)
+from daml_transaction_hashing_common import create_nodes_dict
+import daml_transaction_hashing_v2
+import daml_transaction_hashing_v3
 from com.daml.ledger.api.v2 import (
     command_completion_service_pb2,
     command_completion_service_pb2_grpc,
@@ -138,8 +136,14 @@ def execute_and_get_contract_id(
     party: str,
     party_private_key: EllipticCurvePrivateKey,
     pub_fingerprint: str,
+    hashing_scheme_version=interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
 ):
     # [Compute transaction hash]
+    if hashing_scheme_version == interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3:
+        encode_prepared_transaction = daml_transaction_hashing_v3.encode_prepared_transaction
+    else:
+        encode_prepared_transaction = daml_transaction_hashing_v2.encode_prepared_transaction
+
     transaction_hash = encode_prepared_transaction(
         prepared_transaction, create_nodes_dict(prepared_transaction)
     )
@@ -168,7 +172,7 @@ def execute_and_get_contract_id(
                 )
             ]
         ),
-        hashing_scheme_version=HASHING_SCHEME_VERSION_V2,
+        hashing_scheme_version=hashing_scheme_version,
         submission_id=str(uuid.uuid4()),
     )
 
@@ -278,6 +282,7 @@ def create_ping_contract(
     responder: str,
     synchronizer_id: str,
     auto_accept: bool,
+    hashing_scheme_version=interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
 ) -> event_pb2.CreatedEvent:
     # [Call the PrepareSubmission RPC]
     prepare_create_response = prepare_create_ping_contract(
@@ -299,6 +304,7 @@ def create_ping_contract(
         initiator,
         initiator_private_key,
         initiator_fingerprint,
+        hashing_scheme_version,
     )
 
     # [Get created event from contract Id]
@@ -330,6 +336,7 @@ def exercise_respond_choice(
     created_event_blob: bytes,
     template_id: value_pb2.Identifier,
     auto_accept: bool,
+    hashing_scheme_version=interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
 ):
     # [Create the exercise command]
     ping_exercise_command = commands_pb2.Command(
@@ -379,6 +386,7 @@ def exercise_respond_choice(
         responder,
         responder_private_key,
         responder_fingerprint,
+        hashing_scheme_version,
     )
 
     # The contract was archived by exercising the choice, we get an archived event this time
@@ -393,7 +401,7 @@ def exercise_respond_choice(
 
 
 def demo_interactive_submissions(
-    participant_id: str, synchronizer_id: str, auto_accept: bool
+    participant_id: str, synchronizer_id: str, auto_accept: bool, hashing_scheme_version=interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
 ):
     alice_pk, alice_pub_fingerprint = onboard_external_party(
         "alice", [participant_id], 1, synchronizer_id, lapi_channel
@@ -408,7 +416,7 @@ def demo_interactive_submissions(
 
     # Alice creates the ping contract
     ping_created_event = create_ping_contract(
-        alice, alice_pk, alice_pub_fingerprint, bob, synchronizer_id, auto_accept
+        alice, alice_pk, alice_pub_fingerprint, bob, synchronizer_id, auto_accept, hashing_scheme_version
     )
 
     # Bob exercises the respond choice, which archives the contract
@@ -421,6 +429,7 @@ def demo_interactive_submissions(
         ping_created_event.created_event_blob,
         ping_created_event.template_id,
         auto_accept,
+        hashing_scheme_version,
     )
 
 
@@ -457,6 +466,13 @@ if __name__ == "__main__":
         help="Accept all transactions without prompting the user explicitly",
         action="store_true",
     )
+    parser_run_demo.add_argument(
+        "--hashing-scheme-version",
+        type=int,
+        choices=[2, 3],
+        default=2,
+        help="Hashing scheme version to use (2 or 3)",
+    )
     parser_onboard_party = subparsers.add_parser(
         "create-party", help="Create a new external party"
     )
@@ -484,8 +500,13 @@ if __name__ == "__main__":
             print(
                 "Transactions will automatically be accepted. This is unsafe and should only be set during testing!"
             )
+        hashing_version_map = {
+            2: interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
+            3: interactive_submission_service_pb2.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3,
+        }
+        hashing_scheme_version = hashing_version_map[args.hashing_scheme_version]
         demo_interactive_submissions(
-            args.participant_id, args.synchronizer_id, args.accept_all_transactions
+            args.participant_id, args.synchronizer_id, args.accept_all_transactions, hashing_scheme_version
         )
     elif args.subcommand == "create-party":
         party_private_key, party_fingerprint = onboard_external_party(

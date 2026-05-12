@@ -40,6 +40,9 @@ trait BaseAlarm extends BaseError {
     ErrorCode.asGrpcError(this)(logger)
 }
 
-abstract class Alarm(override val cause: String, override val throwableO: Option[Throwable] = None)(
-    implicit override val code: AlarmErrorCode
+abstract class Alarm(
+    override val cause: String,
+    override val throwableO: Option[Throwable] = None,
+)(implicit
+    override val code: AlarmErrorCode
 ) extends BaseAlarm

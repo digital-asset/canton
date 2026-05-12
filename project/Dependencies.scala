@@ -38,7 +38,7 @@ object Dependencies {
   lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.41.1"
+  lazy val aws_version = "2.44.3"
   lazy val better_files_version = "3.9.2"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -90,7 +90,7 @@ object Dependencies {
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.7"
-  lazy val slf4j_version = "2.0.6"
+  lazy val slf4j_version = resolveDependency("org.slf4j", "jul-to-slf4j").revision
   lazy val zio_version = "2.1.7"
 
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util

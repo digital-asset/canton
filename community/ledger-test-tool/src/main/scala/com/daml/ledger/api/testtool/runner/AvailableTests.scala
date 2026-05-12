@@ -27,7 +27,7 @@ object AvailableTests {
 
   private def map = Map(
     LanguageVersion.v2_2 -> v2_2,
-    LanguageVersion.v2_3_2 -> v2_3,
+    LanguageVersion.v2_3 -> v2_3,
     LanguageVersion.v2_dev -> v2_dev,
   )
 

@@ -155,10 +155,10 @@ trait ModelConformanceIntegrationTest
             maliciousP1
               .submitCommand(
                 cmdsWithMetadata,
-                transactionInterceptor = tx => {
+                transactionInterceptor = (tx, metadata) => {
                   LfSubmittedTransaction(
                     tx.mapCid(cid => if (cid == dummyLfCid) cidOfNode2 else cid)
-                  )
+                  ) -> metadata
                 },
               )
               .futureValueUS

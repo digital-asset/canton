@@ -56,6 +56,11 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -451,10 +456,18 @@ class ProgrammableSequencer(
     baseSequencer.awaitContainingBlockLastTimestamp(timestamp)
 
   override private[sequencer] def updateLsuSuccessor(
-      successorO: Option[SynchronizerSuccessor],
+      successor: SynchronizerSuccessor,
       announcementEffectiveTime: EffectiveTime,
+      isReplace: Boolean,
   )(implicit traceContext: TraceContext): Unit =
-    baseSequencer.updateLsuSuccessor(successorO, announcementEffectiveTime)
+    baseSequencer.updateLsuSuccessor(successor, announcementEffectiveTime, isReplace = isReplace)
+
+  override def handleLsuSequencerConnectionSuccessor(
+      successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
+  )(implicit
+      traceContext: TraceContext
+  ): Unit =
+    baseSequencer.handleLsuSequencerConnectionSuccessor(successor)
 
   override private[canton] def orderer: Option[BlockOrderer] = baseSequencer.orderer
 

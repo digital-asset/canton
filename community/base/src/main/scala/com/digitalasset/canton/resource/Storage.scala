@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
@@ -56,8 +57,9 @@ import slick.lifted.Aliases
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil, QueryCostTrackerImpl}
 
 import java.sql.{Blob, Connection, SQLException, SQLTransientException, Statement}
+import java.time
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import javax.sql.rowset.serial.SerialBlob
 import scala.collection.immutable
@@ -897,6 +899,31 @@ object DbStorage {
       retryWaitingTime = Duration(1, TimeUnit.SECONDS),
       maxRetries = Int.MaxValue,
     )
+  }
+
+  private[resource] class DatabaseFailureDurationTracker(
+      failedToFatalDelay: time.Duration,
+      logger: TracedLogger,
+      failureLogMessage: (CantonTimestamp, time.Duration) => String = (
+          timeWhenFailureStarted,
+          failureDuration,
+      ) =>
+        s"Storage has been failing since $timeWhenFailureStarted (${LoggerUtil.roundDurationForHumans(failureDuration)} ago)",
+  ) {
+    private val timeWhenFailureStartedRef = new AtomicReference[Option[CantonTimestamp]](None)
+    def failureDurationExceededDelay(
+        now: CantonTimestamp
+    )(implicit tc: TraceContext): Boolean = timeWhenFailureStartedRef.getAndUpdate {
+      case previous @ Some(_) => previous
+      case None => Some(now)
+    } match {
+      case None => false
+      case Some(timeWhenFailureStarted) =>
+        val failureDuration = now - timeWhenFailureStarted
+        logger.debug(failureLogMessage(timeWhenFailureStarted, failureDuration))
+        failureDuration.compareTo(failedToFatalDelay) > 0
+    }
+    def reset(): Unit = timeWhenFailureStartedRef.set(None)
   }
 }
 

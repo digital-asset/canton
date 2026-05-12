@@ -28,15 +28,14 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   GlobalKey,
+  GlobalKeyWithMaintainers,
   Node,
   NodeId,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.value.Value
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.partial.Result
@@ -58,6 +57,7 @@ final class PreparedTransactionEncoder(
     */
   private val nodeTransformers = Map(
     SerializationVersion.V1 -> v1.nodeTransformer(SerializationVersion.V1),
+    SerializationVersion.V2 -> v1.nodeTransformer(SerializationVersion.V2),
     SerializationVersion.VDev -> v1.nodeTransformer(SerializationVersion.VDev),
   )
 
@@ -140,18 +140,22 @@ final class PreparedTransactionEncoder(
    */
   object v1 {
     private implicit def createNodeTransformer(implicit
-        SerializationVersion: SerializationVersion
+        serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
       .definePartial[lf.transaction.Node.Create, isdv1.Create]
       .withFieldRenamed(_.coid, _.contractId)
       .withFieldRenamed(_.arg, _.argument)
       .withFieldComputed(_.signatories, _.signatories.toSeq.sorted)
       .withFieldComputed(_.stakeholders, _.stakeholders.toSeq.sorted)
-      .withFieldConst(_.lfVersion, SerializationVersion.transformInto[String])
+      .withFieldConst(_.lfVersion, serializationVersion.transformInto[String])
+      .withFieldComputedPartial(
+        _.key,
+        _.keyOpt.traverse(_.transformIntoPartial[iscd.GlobalKeyWithMaintainers]),
+      )
       .buildTransformer
 
     private[interactive] implicit def exerciseTransformer(implicit
-        SerializationVersion: SerializationVersion
+        serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Exercise, isdv1.Exercise] = Transformer
       .definePartial[lf.transaction.Node.Exercise, isdv1.Exercise]
       .withFieldRenamed(_.targetCoid, _.contractId)
@@ -159,18 +163,35 @@ final class PreparedTransactionEncoder(
       .withFieldComputed(_.stakeholders, _.stakeholders.toSeq.sorted)
       .withFieldComputed(_.actingParties, _.actingParties.toSeq.sorted)
       .withFieldComputed(_.choiceObservers, _.choiceObservers.toSeq.sorted)
-      .withFieldConst(_.lfVersion, SerializationVersion.transformInto[String])
+      .withFieldConst(_.lfVersion, serializationVersion.transformInto[String])
+      .withFieldComputedPartial(
+        _.key,
+        _.keyOpt.traverse(_.transformIntoPartial[iscd.GlobalKeyWithMaintainers]),
+      )
+      .withFieldComputed(_.byKey, _.byKey)
       .buildTransformer
 
     private[interactive] implicit def fetchTransformer(implicit
-        SerializationVersion: SerializationVersion
+        serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Fetch, isdv1.Fetch] = Transformer
       .definePartial[lf.transaction.Node.Fetch, isdv1.Fetch]
       .withFieldRenamed(_.coid, _.contractId)
       .withFieldComputed(_.signatories, _.signatories.toSeq.sorted)
       .withFieldComputed(_.stakeholders, _.stakeholders.toSeq.sorted)
       .withFieldComputed(_.actingParties, _.actingParties.toSeq.sorted)
-      .withFieldConst(_.lfVersion, SerializationVersion.transformInto[String])
+      .withFieldConst(_.lfVersion, serializationVersion.transformInto[String])
+      .withFieldComputedPartial(
+        _.key,
+        _.keyOpt.traverse(_.transformIntoPartial[iscd.GlobalKeyWithMaintainers]),
+      )
+      .withFieldComputed(_.byKey, _.byKey)
+      .buildTransformer
+
+    private[interactive] implicit def queryByKeyTransformer(implicit
+        serializationVersion: SerializationVersion
+    ): PartialTransformer[lf.transaction.Node.QueryByKey, isdv1.QueryByKey] = Transformer
+      .definePartial[lf.transaction.Node.QueryByKey, isdv1.QueryByKey]
+      .withFieldConst(_.lfVersion, serializationVersion.transformInto[String])
       .buildTransformer
 
     private implicit val rollbackTransformer
@@ -179,7 +200,7 @@ final class PreparedTransactionEncoder(
       .buildTransformer
 
     private[interactive] def nodeTransformer(implicit
-        SerializationVersion: SerializationVersion
+        serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node, iss.DamlTransaction.Node.VersionedNode] =
       PartialTransformer[lf.transaction.Node, iss.DamlTransaction.Node.VersionedNode] { lfNode =>
         val nodeType = lfNode match {
@@ -199,8 +220,15 @@ final class PreparedTransactionEncoder(
             rollback
               .transformIntoPartial[isdv1.Rollback]
               .map(isdv1.Node.NodeType.Rollback.apply)
-          case _: lf.transaction.Node.LookupByKey =>
-            Result.fromErrorString("Lookup By Key nodes are not supporting in V1 Hashing Scheme")
+          case _: lf.transaction.Node.QueryByKey
+              if serializationVersion == SerializationVersion.V1 =>
+            Result.fromErrorString(
+              "Query By Key nodes are not supported in LF serialization version 1"
+            )
+          case queryByKey: lf.transaction.Node.QueryByKey =>
+            queryByKey
+              .transformIntoPartial[isdv1.QueryByKey]
+              .map(isdv1.Node.NodeType.QueryByKey.apply)
         }
 
         nodeType
@@ -253,23 +281,23 @@ final class PreparedTransactionEncoder(
   private implicit val globalKeyTransformer: PartialTransformer[GlobalKey, iscd.GlobalKey] =
     PartialTransformer.derive
 
-  // Transformer for global key mappings
-  private implicit val commandExecutionResultGlobalKeyMappingTransformer
-      : PartialTransformer[Map[GlobalKey, Vector[Value.ContractId]], Seq[
-        Metadata.GlobalKeyMappingEntry
-      ]] = PartialTransformer {
-    _.toList.traverse { case (key, maybeContractId) =>
-      for {
-        convertedKey <- key.transformIntoPartial[iscd.GlobalKey]
-        convertedValue <- maybeContractId.asCidOption
-          .map[lf.value.Value](lf.value.Value.ValueContractId.apply)
-          .traverse(_.transformIntoPartial[lapiValue.Value])
-      } yield iss.Metadata.GlobalKeyMappingEntry(
-        key = Some(convertedKey),
-        value = convertedValue,
+  private implicit def globalKeyWithMaintainersTransformer(implicit
+      serializationVersion: SerializationVersion
+  ): PartialTransformer[GlobalKeyWithMaintainers, iscd.GlobalKeyWithMaintainers] =
+    if (serializationVersion == SerializationVersion.V1) {
+      PartialTransformer[GlobalKeyWithMaintainers, iscd.GlobalKeyWithMaintainers](_ =>
+        Result.fromErrorString("Keys are not supported on LF Serialization version 1")
       )
+    } else {
+      PartialTransformer
+        .define[GlobalKeyWithMaintainers, iscd.GlobalKeyWithMaintainers]
+        .withFieldComputedPartial(
+          _.key,
+          lfKey => lfKey.globalKey.transformIntoPartial[iscd.GlobalKey].map(Some(_)),
+        )
+        .withFieldComputed(_.maintainers, _.maintainers.toSeq.sorted)
+        .buildTransformer
     }
-  }
 
   private implicit val inputContractTransformer
       : PartialTransformer[ExternalInputContract, Metadata.InputContract] =
@@ -329,9 +357,9 @@ final class PreparedTransactionEncoder(
         _.submitterInfo,
         d => Some(d.submitterInfo.transformInto[iss.Metadata.SubmitterInfo]),
       )
-      .withFieldComputedPartial(
+      .withFieldConst(
         _.globalKeyMapping,
-        _.globalKeyMapping.transformIntoPartial[Seq[iss.Metadata.GlobalKeyMappingEntry]],
+        Seq.empty, // This field is deprecated
       )
       .withFieldConst(_.synchronizerId, synchronizer.transformInto[String])
       .withFieldConst(_.transactionUuid, transactionUUID.toString)

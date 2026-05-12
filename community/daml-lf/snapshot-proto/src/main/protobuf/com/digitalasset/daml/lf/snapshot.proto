@@ -7,6 +7,11 @@ package com.digitalasset.daml.lf.testing.snapshot;
 
 option java_package = "com.digitalasset.daml.lf.testing.snapshot";
 
+message MetricPlugin {
+  string name = 1;
+  int64 total = 2;
+}
+
 message TransactionEntry {
   bytes rawTransaction = 1;
   string participantId = 2;
@@ -14,6 +19,7 @@ message TransactionEntry {
   int64 ledgerTime = 4;
   int64 preparationTime = 5;
   bytes submissionSeed = 6;
+  repeated MetricPlugin metricPlugins = 7;
 }
 
 message SubmissionEntry {

@@ -82,7 +82,11 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
   "BlacklistLeaderSelectionPolicyState" should {
     "a clean node" should {
       "stay clean if not punished" in {
-        BlacklistLeaderSelectionPolicyStateWithTopology(initState(), orderingTopology)
+        BlacklistLeaderSelectionPolicyStateWithTopology(
+          initState(),
+          orderingTopology,
+          testedProtocolVersion,
+        )
           .update(
             orderingTopology,
             blockToLeaderAll,
@@ -92,7 +96,11 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       }
 
       "be blacklisted if punished" in {
-        BlacklistLeaderSelectionPolicyStateWithTopology(initState(), orderingTopology)
+        BlacklistLeaderSelectionPolicyStateWithTopology(
+          initState(),
+          orderingTopology,
+          testedProtocolVersion,
+        )
           .update(
             orderingTopology,
             blockToLeaderAll,
@@ -109,6 +117,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.Blacklisted(1, 2)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -122,6 +131,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.Blacklisted(1, 1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -137,6 +147,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAll,
@@ -150,6 +161,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAll,
@@ -163,6 +175,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -175,6 +188,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       BlacklistLeaderSelectionPolicyStateWithTopology(
         initState(n1 -> BlacklistStatus.OnTrial(1), n2 -> BlacklistStatus.Blacklisted(1, 1)),
         orderingTopology,
+        testedProtocolVersion,
       ).computeLeaders() shouldBe Seq(n0, n1, n3)
     }
 
@@ -182,6 +196,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       BlacklistLeaderSelectionPolicyStateWithTopology(
         initState(n1 -> BlacklistStatus.Blacklisted(2, 2), n2 -> BlacklistStatus.Blacklisted(1, 1)),
         orderingTopology,
+        testedProtocolVersion,
       )
         .computeLeaders() shouldBe Seq(n0, n2, n3)
     }
@@ -194,6 +209,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist.NoBlacklisting
           )
         ),
+        testedProtocolVersion,
       ).computeLeaders() shouldBe Seq(n0, n1, n2, n3)
     }
 
@@ -211,6 +227,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
         BlacklistLeaderSelectionPolicyStateWithTopology(
           initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
           topology,
+          testedProtocolVersion,
         ).update(
           topology,
           blockToLeaderAllWithoutN0,
@@ -233,6 +250,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
         BlacklistLeaderSelectionPolicyStateWithTopology(
           initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
           topology,
+          testedProtocolVersion,
         ).update(
           topology,
           blockToLeaderAllWithoutN0,
@@ -248,6 +266,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
         BlacklistLeaderSelectionPolicyStateWithTopology(
           initState(n0 -> BlacklistStatus.Blacklisted(oldValue, oldValue)),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           makeOrderingTopology(
             makeConfig(howLongToBlacklist =

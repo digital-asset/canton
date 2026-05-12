@@ -87,6 +87,31 @@ abstract class LsuMediatorInspectionServiceIntegrationTest
     )
   }
 
+  protected def testVerdictSubscriptionsAroundUpgradeTime()(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    withClue(
+      "requesting verdicts around the upgrade time returns a single completed message"
+    ) {
+      Seq(
+        upgradeTime.immediatePredecessor, // from is exclusive
+        upgradeTime,
+        upgradeTime.immediateSuccessor,
+        upgradeTime.plusSeconds(10000),
+      ).foreach { from =>
+        mediator1.inspection
+          .verdicts_until_complete(
+            fromRecordTimeOfRequestExclusive = from,
+            1,
+            timeout = NonNegativeDuration.ofSeconds(10),
+          )
+          .loneElement
+          .isComplete shouldBe true
+      }
+    }
+  }
+
   // blocking queue used to hold back confirmation responses with the programmable sequencer
   private val confirmationResponses = new LinkedBlockingQueue[Promise[Unit]]()
 
@@ -261,6 +286,15 @@ final class LsuMediatorVerdictsUnconfirmedAndConfirmedIntegrationTest
           timeout = NonNegativeDuration.ofSeconds(1),
         ): @nowarn) shouldBe empty
       }
+
+      // test verdict requests with timestamps around the upgrade time
+      testVerdictSubscriptionsAroundUpgradeTime()
+
+      mediator1.stop()
+      mediator1.start()
+
+      // also after a mediator restart
+      testVerdictSubscriptionsAroundUpgradeTime()
     }
   }
 }
@@ -339,6 +373,15 @@ final class LsuMediatorVerdictsSilentSynchronizerIntegrationTest
             .complete
             .isDefined shouldBe true
         }
+
+        // test verdict requests with timestamps around the upgrade time
+        testVerdictSubscriptionsAroundUpgradeTime()
+
+        mediator1.stop()
+        mediator1.start()
+
+        // also after a mediator restart
+        testVerdictSubscriptionsAroundUpgradeTime()
     }
   }
 }

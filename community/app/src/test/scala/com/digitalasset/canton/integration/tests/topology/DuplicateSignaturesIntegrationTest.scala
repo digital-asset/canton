@@ -23,7 +23,7 @@ import com.digitalasset.canton.integration.bootstrap.{
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.util.{BinaryFileUtil, JarResourceUtils}
+import com.digitalasset.canton.util.JarResourceUtils
 import monocle.macros.syntax.lens.*
 
 /*
@@ -148,18 +148,15 @@ sealed trait DuplicateSignaturesIntegrationTest
     /*
     The snapshot contains two signatures by the same key of sequencer1 (generated using test case above when it was failing).
      */
-    val readSnapshot = BinaryFileUtil
-      .readByteStringFromFile(
-        JarResourceUtils.resourceFile("topology-snapshot-duplicate-signatures").toString
-      )
-      .value
+    val readSnapshot =
+      JarResourceUtils.resourceFile("topology-snapshot-duplicate-signatures").toString
 
     val testTempStoreId =
       participant1.topology.stores
         .create_temporary_topology_store("test", testedProtocolVersion)
 
     participant1.topology.transactions
-      .import_topology_snapshot(readSnapshot, testTempStoreId)
+      .import_topology_snapshot_fromV2(readSnapshot, testTempStoreId)
 
     val importedTx = participant1.topology.transactions
       .list(testTempStoreId, filterMappings = Seq(Code.SynchronizerParametersState))

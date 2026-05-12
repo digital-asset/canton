@@ -82,6 +82,7 @@ case object TransactionViewDecompositionFactory {
       throw new IllegalStateException(s"Did not find $nodeId in node map"),
     )
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     private def build(
         nodeId: LfNodeId,
         state: BuildState[NewView],
@@ -132,6 +133,7 @@ case object TransactionViewDecompositionFactory {
       state.withNewView(newView, childState.rollbackContext)
     }
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     private def buildChildView(
         nodeId: LfNodeId,
         currentParticipants: Set[ParticipantId],
