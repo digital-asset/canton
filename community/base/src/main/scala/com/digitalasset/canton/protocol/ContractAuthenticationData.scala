@@ -27,14 +27,10 @@ sealed trait ContractAuthenticationData extends PrettyPrinting with Product with
     */
   def toLfBytes: LfBytes
 
-  /** Defines the serialization of contract authentication data as stored inside a V30
-    * [[SerializableContract]] serialization on the protocol API.
-    */
+  /** Defines the serialization of contract authentication data as on the protocol API. */
   def toSerializableContractProtoV30: ByteString
 
-  /** Defines the serialization of contract authentication data as stored inside a V30
-    * [[SerializableContract]] serialization on the admin API.
-    */
+  /** Defines the serialization of contract authentication data on the admin API. */
   def toSerializableContractAdminProtoV30: ByteString
 }
 

@@ -54,14 +54,14 @@ abstract class InternalConsistencyCheckerTest extends AnyWordSpec with BaseTest 
       sut: InternalConsistencyChecker,
       views: Seq[FullTransactionViewTree],
   ): Either[ErrorWithInternalConsistencyCheck, Unit] =
-    sut.check(NonEmptyUtil.fromUnsafe(views), dummyTx, Set.empty)
+    sut.check(NonEmptyUtil.fromUnsafe(views), Seq(dummyTx), Set.empty)
 
   def checkTransaction(
       sut: InternalConsistencyChecker,
-      mergedTransaction: LfTransaction,
+      lfTransactions: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   ): Either[ErrorWithInternalConsistencyCheck, Unit] =
-    sut.check(dummyViews, mergedTransaction, hostedKeys)
+    sut.check(dummyViews, lfTransactions, hostedKeys)
 
   def checkStandardHappyCases(sut: InternalConsistencyChecker): Unit = {
     val relevantExamples = factory.standardHappyCases.filter(_.rootTransactionViewTrees.nonEmpty)

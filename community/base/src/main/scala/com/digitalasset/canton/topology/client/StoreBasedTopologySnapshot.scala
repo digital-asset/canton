@@ -12,6 +12,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -210,14 +211,17 @@ class StoreBasedTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     findTransactionsByType(
       types = Seq(TopologyMapping.Code.LsuSequencerConnectionSuccessor)
-    ).map(txs =>
-      txs
-        .collectOfMapping[LsuSequencerConnectionSuccessor]
-        .toTopologyState
-        .collect { case m if m.successorPsid == successorPsid => m.sequencerId -> m }
+    ).map(
+      _.collectOfMapping[LsuSequencerConnectionSuccessor].result.view
+        .collect {
+          case storedTx if storedTx.mapping.successorPsid == successorPsid =>
+            storedTx.mapping.sequencerId -> storedTx.transaction.transaction
+        }
         .toMap
     )
 }

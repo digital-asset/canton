@@ -48,7 +48,10 @@ trait SequencerParameters {
   *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
   *   strictly greater to this value will not be delivered. Important notes:
   *   - SHOULD be set only in disaster recovery scenarios.
-  *   - MUST be the same value in all sequencers of a synchronizer.
+  *   - MUST be the same value in all sequencers of a synchronizer
+  * @param disableReleaseVersionHandshakeCheck
+  *   If set to true, then the sequencer will skip checking that the client binary aligns 100% with
+  *   the server binary when the server is running an unstable protocol version.
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -65,6 +68,8 @@ final case class SequencerNodeParameters(
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
     delayRequestsBeforeLsuTrafficInit: Boolean,
     disableSubmissionChecksForTesting: Boolean = false,
+    lsuConfig: SequencerLsuConfig,
+    disableReleaseVersionHandshakeCheck: Boolean = false,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

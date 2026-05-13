@@ -322,8 +322,10 @@ object SubmissionRequest
           wrapped.messageId,
           wrapped.maxSequencingTime,
           wrapped.topologyTimestamp,
-          (rpv: ProtocolVersion) =>
-            wrapped.aggregationRule.traverse(AggregationRule.fromProtoV30(rpv, _)),
+          (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
+            wrapped.aggregationRule.traverse(
+              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+            ),
           wrapped.submissionCost,
         )
       case ProtoSubmissionRequestV31(wrapped) =>
@@ -332,8 +334,10 @@ object SubmissionRequest
           wrapped.messageId,
           wrapped.maxSequencingTime,
           wrapped.topologyTimestamp,
-          (rpv: ProtocolVersion) =>
-            wrapped.aggregationRule.traverse(AggregationRule.fromProtoV30(rpv, _)),
+          (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
+            wrapped.aggregationRule.traverse(
+              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+            ),
           wrapped.submissionCost,
         )
     }
@@ -350,7 +354,8 @@ object SubmissionRequest
       batch <- batchFromProto
       ts <- topologyTimestamp.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(protoVersion)
-      aggregationRule <- aggregationRuleP(rpv.representative)
+      shipAllUids = LegacyUseMemberIdsAsEligibleMembers(protoVersion.v == 30)
+      aggregationRule <- aggregationRuleP(shipAllUids)
       submissionCost <- submissionCostP.traverse(SequencingSubmissionCost.fromProtoV30)
     } yield new SubmissionRequest(
       sender,

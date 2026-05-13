@@ -8,7 +8,7 @@ import cats.implicits.toTraverseOps
 import com.daml.ledger.javaapi.data.Command
 import com.daml.ledger.javaapi.data.codegen.{Created, Update}
 import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.BaseTest.getResourcePath
+import com.digitalasset.canton.BaseTest.{getResourcePath, testedProtocolVersion}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.TestSalt
@@ -141,7 +141,7 @@ class ModelConformanceCheckerTest
 
   private def buildTopologySnapshotFor(example: Example): TopologySnapshot = {
 
-    val vettedPackages = example.metadata.usedPackages.map(p => VettedPackage(p, None, None)).toSeq
+    val vettedPackages = example.requiredVettedPackages.map(p => VettedPackage(p, None, None)).toSeq
     val informees = example.tx.informees
     val participants = informees.map(partyParticipants)
 
@@ -322,7 +322,7 @@ class ModelConformanceCheckerTest
       inside(checkExample(underTest, example, topologySnapshot, Seq(_))) {
         case ModelConformanceRejection(err) =>
           inside(err.errors.head) { case ModelConformanceChecker.UnvettedPackages(actual) =>
-            actual shouldBe Map(participantId -> example.metadata.usedPackages)
+            actual shouldBe Map(participantId -> example.requiredVettedPackages)
           }
       }
     }
@@ -873,6 +873,7 @@ class ModelConformanceCheckerTest
           commonData = commonData,
           reInterpretedTopLevelViews = reInterpretedTopLevelViews,
           getEngineAbortStatus = getEngineAbortStatus,
+          protocolVersion = testedProtocolVersion,
         )
         .map {
           case valid if valid.updateId == commonData.updateId => valid
@@ -914,7 +915,13 @@ object ModelConformanceCheckerTest extends OptionValues {
       metadata: Transaction.Metadata,
       ledgerTime: CantonTimestamp,
       contracts: Map[LfContractId, GenContractInstance],
-  )
+  ) {
+    lazy val requiredVettedPackages: Set[LfPackageId] =
+      if (testedProtocolVersion >= ProtocolVersion.v35) {
+        // Vetting checks in PV 35 only apply to packages of action nodes
+        tx.nodes.values.collect { case action: LfActionNode => action.packageIds }.flatten.toSet
+      } else metadata.usedPackages
+  }
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {
 

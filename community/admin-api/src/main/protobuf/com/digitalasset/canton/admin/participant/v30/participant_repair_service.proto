@@ -23,6 +23,13 @@ service ParticipantRepairService {
   rpc ExportAcs(ExportAcsRequest) returns (stream ExportAcsResponse);
 
   // Import an existing export into the participant
+  //
+  //  This operation assumes the provided snapshot
+  //  contains the complete and untampered ACS originating from a trusted source participant.
+  //  Because the target participant cannot independently verify the historical provenance
+  //  of the imported contracts, validation is performed on a best-effort basis,
+  //  even if `contractImportMode` is `Validation`.
+  //  Use only when the provided snapshot comes from a known, trusted authority.
   rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
 
   // Remove the given contracts from the participant
@@ -58,6 +65,11 @@ service ParticipantRepairService {
      This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
   */
   rpc PerformLateLsu(PerformLateLsuRequest) returns (PerformLateLsuResponse);
+
+  // Deletes the synchronizer configuration specified by the physical synchronizer id.
+  // WARNING: this should not be executed under normal circumstances, but can be necessary to bring the synchronizer
+  // configuration into a consistent state (e.g. after a failed LSU attempt with the wrong successor synchronizer id).
+  rpc DeleteSynchronizerConnectionConfig(DeleteSynchronizerConnectionConfigRequest) returns (DeleteSynchronizerConnectionConfigResponse);
 }
 
 message PurgeContractsRequest {
@@ -301,3 +313,11 @@ message PerformLateLsuRequest {
 }
 
 message PerformLateLsuResponse {}
+
+message DeleteSynchronizerConnectionConfigRequest {
+  // The physical synchronizer id of the synchronizer for which to delete the config
+  // Required
+  string physical_synchronizer_id = 1;
+}
+
+message DeleteSynchronizerConnectionConfigResponse {}

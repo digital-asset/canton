@@ -1,0 +1,276 @@
+----------------------------------------------------
+Testing Sparse KV journal schema performance 
+Schema creation is starting... 
+----------------------------------------------------
+CREATE EXTENSION
+BEGIN
+psql:01_schema.sql:6: NOTICE:  table "journal_checkpoint" does not exist, skipping
+DROP TABLE
+psql:01_schema.sql:7: NOTICE:  table "journal" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+COMMIT
+----------------------------------------------------
+Data generation is starting... 
+----------------------------------------------------
+SET
+SET
+psql:02_generation.sql:124: NOTICE:  Step 1: Building Global Event Timeline (3 events per timestamp bucket)...
+psql:02_generation.sql:124: NOTICE:  Step 2: Assigning Volatile (20%) and Stable (80%) keys to events...
+psql:02_generation.sql:124: NOTICE:  Step 3: Recording checkpoints...
+psql:02_generation.sql:124: NOTICE:  Generation complete. Shard stats:
+DO
+ANALYZE
+ANALYZE
+----------------------------------------------------
+Generated data verification
+----------------------------------------------------
+Checkpoint count per shard
+----------------------------------------------------
+ shard | count 
+-------+-------
+     1 | 22222
+     2 | 22222
+     3 | 22222
+     4 | 22222
+(4 rows)
+
+----------------------------------------------------
+Journal count per shard 
+----------------------------------------------------
+ shard |  count  
+-------+---------
+     1 | 3157543
+     2 | 3157543
+     3 | 3157544
+     4 | 3157544
+(4 rows)
+
+----------------------------------------------------
+A. 20% high volatility changes, 80% stable
+----------------------------------------------------
+         tier         | Key Count | Total Versions | Avg Versions/Key | Share of Table 
+----------------------+-----------+----------------+------------------+----------------
+ HIGH (20% of keys)   |      8000 |       12030080 |          1503.76 | 95.25%
+ STABLE (80% of keys) |     32000 |         600094 |            18.75 | 4.75%
+(2 rows)
+
+----------------------------------------------------
+Intervening updates - first 20 rows only
+----------------------------------------------------
+ key |              current_v               |                next_v                | intervening_updates 
+-----+--------------------------------------+--------------------------------------+---------------------
+   4 | 0000019d-f3b1-dc11-0000-00b51f0ccc1f | 0000019d-f3b1-ddc9-0000-00b51f0ccdd7 |                2067
+   4 | 0000019d-f3b1-ddc9-0000-00b51f0ccdd7 | 0000019d-f3b1-df81-0000-00b51f0ccf8f |                2066
+   4 | 0000019d-f3b1-df81-0000-00b51f0ccf8f | 0000019d-f3b1-e143-0000-00b51f0cd150 |                2097
+   4 | 0000019d-f3b1-e143-0000-00b51f0cd150 | 0000019d-f3b1-e2fb-0000-00b51f0cd309 |                2085
+   4 | 0000019d-f3b1-e2fb-0000-00b51f0cd309 | 0000019d-f3b1-e4b3-0000-00b51f0cd4bf |                2036
+   4 | 0000019d-f3b1-e4b3-0000-00b51f0cd4bf | 0000019d-f3b1-e675-0000-00b51f0cd683 |                2146
+   4 | 0000019d-f3b1-e675-0000-00b51f0cd683 | 0000019d-f3b1-e82d-0000-00b51f0cd839 |                2036
+   4 | 0000019d-f3b1-e82d-0000-00b51f0cd839 | 0000019d-f3b1-e9e5-0000-00b51f0cd9f1 |                2066
+   4 | 0000019d-f3b1-e9e5-0000-00b51f0cd9f1 | 0000019d-f3b1-eba7-0000-00b51f0cdbb4 |                2131
+   4 | 0000019d-f3b1-eba7-0000-00b51f0cdbb4 | 0000019d-f3b1-ed5f-0000-00b51f0cdd6c |                2070
+   4 | 0000019d-f3b1-ed5f-0000-00b51f0cdd6c | 0000019d-f3b1-ef17-0000-00b51f0cdf23 |                2048
+   4 | 0000019d-f3b1-ef17-0000-00b51f0cdf23 | 0000019d-f3b1-f0d9-0000-00b51f0ce0e7 |                2145
+   4 | 0000019d-f3b1-f0d9-0000-00b51f0ce0e7 | 0000019d-f3b1-f291-0000-00b51f0ce29f |                2066
+   4 | 0000019d-f3b1-f291-0000-00b51f0ce29f | 0000019d-f3b1-f449-0000-00b51f0ce457 |                2071
+   4 | 0000019d-f3b1-f449-0000-00b51f0ce457 | 0000019d-f3b1-f60b-0000-00b51f0ce619 |                2115
+   4 | 0000019d-f3b1-f60b-0000-00b51f0ce619 | 0000019d-f3b1-f7c3-0000-00b51f0ce7d1 |                2066
+   4 | 0000019d-f3b1-f7c3-0000-00b51f0ce7d1 | 0000019d-f3b1-f97b-0000-00b51f0ce987 |                2037
+   4 | 0000019d-f3b1-f97b-0000-00b51f0ce987 | 0000019d-f3b1-fb3d-0000-00b51f0ceb49 |                2111
+   4 | 0000019d-f3b1-fb3d-0000-00b51f0ceb49 | 0000019d-f3b1-fcf5-0000-00b51f0ced02 |                2085
+   4 | 0000019d-f3b1-fcf5-0000-00b51f0ced02 | 0000019d-f3b1-fead-0000-00b51f0ceebb |                2082
+(20 rows)
+
+----------------------------------------------------
+Benchmark of operations is starting... 
+----------------------------------------------------
+----------------------------------------------------
+Testing journal checkpoint count for
+Shard:  1  
+Timestamp:  0000019d-f3b9-2dd1-0000-00b51f141dde
+----------------------------------------------------
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using journal_checkpoint_pkey on journal_checkpoint  (cost=0.42..8.44 rows=1 width=4) (actual time=0.023..0.023 rows=1 loops=1)
+   Index Cond: ((shard = 1) AND (ts = '0000019d-f3b9-2dd1-0000-00b51f141dde'::uuid))
+   Heap Fetches: 1
+   Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.046 ms
+ Execution Time: 0.029 ms
+(8 rows)
+
+----------------------------------------------------
+Testing Point-in-Time Lookup for:
+Shard:  4  | Key:  7
+Timestamp:  0000019d-f3b9-810f-0000-00b51f14711d
+----------------------------------------------------
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.56..4.47 rows=1 width=58) (actual time=0.032..0.032 rows=1 loops=1)
+   Buffers: shared hit=4 read=1 written=1
+   ->  Index Scan Backward using journal_pkey on journal  (cost=0.56..978.87 rows=250 width=58) (actual time=0.032..0.032 rows=1 loops=1)
+         Index Cond: ((shard = 4) AND (key = 7) AND (ts <= '0000019d-f3b9-810f-0000-00b51f14711d'::uuid))
+         Buffers: shared hit=4 read=1 written=1
+ Planning:
+   Buffers: shared hit=17 read=1 written=1
+ Planning Time: 0.074 ms
+ Execution Time: 0.037 ms
+(9 rows)
+
+----------------------------------------------------
+Testing Bulk query for:
+Shard:  2  | Starting Key: >=  1
+Point-in-Time:  0000019d-f3b6-d699-0000-00b51f11c6a7
+Page Size:  1000
+----------------------------------------------------
+                                                                             QUERY PLAN                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=190.03..646.80 rows=101 width=74) (actual time=0.063..40.067 rows=1000 loops=1)
+   Buffers: shared hit=5894 read=4439 written=4239
+   CTE key_batch
+     ->  Recursive Union  (cost=0.56..189.47 rows=101 width=4) (actual time=0.035..21.806 rows=1000 loops=1)
+           Buffers: shared hit=3003 read=2330 written=2225
+           ->  Limit  (cost=0.56..1.05 rows=1 width=4) (actual time=0.034..0.035 rows=1 loops=1)
+                 Buffers: shared hit=4 read=1
+                 ->  Index Only Scan using journal_pkey on journal journal_1  (cost=0.56..786595.32 rows=1590331 width=4) (actual time=0.034..0.034 rows=1 loops=1)
+                       Index Cond: ((shard = 2) AND (key >= 1) AND (ts <= '0000019d-f3b6-d699-0000-00b51f11c6a7'::uuid))
+                       Heap Fetches: 1
+                       Buffers: shared hit=4 read=1
+           ->  WorkTable Scan on key_batch kb  (cost=0.00..18.64 rows=10 width=4) (actual time=0.021..0.021 rows=1 loops=999)
+                 Buffers: shared hit=2999 read=2329 written=2225
+                 SubPlan 1
+                   ->  Limit  (cost=0.56..1.84 rows=1 width=4) (actual time=0.021..0.021 rows=1 loops=999)
+                         Buffers: shared hit=2999 read=2329 written=2225
+                         ->  Index Only Scan using journal_pkey on journal j  (cost=0.56..680699.97 rows=530161 width=4) (actual time=0.020..0.020 rows=1 loops=999)
+                               Index Cond: ((shard = 2) AND (key > kb.key) AND (ts <= '0000019d-f3b6-d699-0000-00b51f11c6a7'::uuid))
+                               Heap Fetches: 999
+                               Buffers: shared hit=2999 read=2329 written=2225
+   ->  Nested Loop  (cost=0.56..457.33 rows=101 width=74) (actual time=0.063..39.982 rows=1000 loops=1)
+         Buffers: shared hit=5894 read=4439 written=4239
+         ->  CTE Scan on key_batch b  (cost=0.00..2.02 rows=101 width=4) (actual time=0.036..22.039 rows=1000 loops=1)
+               Buffers: shared hit=3003 read=2330 written=2225
+         ->  Limit  (cost=0.56..4.49 rows=1 width=74) (actual time=0.017..0.018 rows=1 loops=1000)
+               Buffers: shared hit=2891 read=2109 written=2014
+               ->  Index Scan Backward using journal_pkey on journal  (cost=0.56..676.18 rows=172 width=74) (actual time=0.017..0.017 rows=1 loops=1000)
+                     Index Cond: ((shard = 2) AND (key = b.key) AND (ts <= '0000019d-f3b6-d699-0000-00b51f11c6a7'::uuid))
+                     Buffers: shared hit=2891 read=2109 written=2014
+ Planning:
+   Buffers: shared hit=9
+ Planning Time: 0.184 ms
+ Execution Time: 40.187 ms
+(33 rows)
+
+----------------------------------------------------
+Testing Range Scan for Shard  2
+Time Range (Derived):  1777910406165  to  ('1777910406165'::bigint + 3600000)
+UUID Range:  0000019d-f3b7-dc15-0000-00b51f12cc21  to  0000019d-f3ee-ca95-ffff-ffffffffffff
+Starting Key: >=  1  | Page Size:  1000
+----------------------------------------------------
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.56..609.07 rows=1000 width=58) (actual time=0.035..0.201 rows=1000 loops=1)
+   Buffers: shared hit=20 read=13
+   ->  Index Scan using journal_pkey on journal  (cost=0.56..791600.09 rows=1300874 width=58) (actual time=0.034..0.165 rows=1000 loops=1)
+         Index Cond: ((shard = 2) AND (key >= 1) AND (ts >= '0000019d-f3b7-dc15-0000-00b51f12cc21'::uuid) AND (ts <= '0000019d-f3ee-ca95-ffff-ffffffffffff'::uuid))
+         Buffers: shared hit=20 read=13
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.073 ms
+ Execution Time: 0.229 ms
+(9 rows)
+
+--------------------------------------------------
+Testing Crash recovery Operation 
+for Shard:  1
+Deleting data newer than TS:  0000019d-f3bb-ebd9-0000-00b51f16dbe7
+--------------------------------------------------
+BEGIN
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
+ Delete on journal  (cost=2432.86..105850.41 rows=0 width=0) (actual time=62.259..62.260 rows=0 loops=1)
+   Buffers: shared hit=35802 read=2952 dirtied=3923 written=2262
+   ->  Bitmap Heap Scan on journal  (cost=2432.86..105850.41 rows=47249 width=6) (actual time=4.393..28.550 rows=34322 loops=1)
+         Recheck Cond: ((shard = 1) AND (ts > '0000019d-f3bb-ebd9-0000-00b51f16dbe7'::uuid))
+         Heap Blocks: exact=4065
+         Buffers: shared hit=1480 read=2952 written=2262
+         ->  Bitmap Index Scan on journal_by_time  (cost=0.00..2421.05 rows=47249 width=0) (actual time=2.856..2.856 rows=34322 loops=1)
+               Index Cond: ((shard = 1) AND (ts > '0000019d-f3bb-ebd9-0000-00b51f16dbe7'::uuid))
+               Buffers: shared hit=13 read=354
+ Planning Time: 0.053 ms
+ JIT:
+   Functions: 3
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.160 ms, Inlining 0.000 ms, Optimization 0.133 ms, Emission 1.107 ms, Total 1.400 ms
+ Execution Time: 62.505 ms
+(15 rows)
+
+ROLLBACK
+----------------------------------------------------
+Testing Deep Pruning for Shard:  1
+Pruning Boundary TS: <  0000019d-f3b1-e445-0000-00b51f0cd451
+----------------------------------------------------
+BEGIN
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Delete on journal_checkpoint  (cost=0.42..187.41 rows=0 width=0) (actual time=0.035..0.035 rows=0 loops=1)
+   Buffers: shared hit=74
+   ->  Index Scan using journal_checkpoint_pkey on journal_checkpoint  (cost=0.42..187.41 rows=112 width=6) (actual time=0.015..0.019 rows=70 loops=1)
+         Index Cond: ((shard = 1) AND (ts <= '0000019d-f3b1-e445-0000-00b51f0cd451'::uuid))
+         Buffers: shared hit=4
+ Planning Time: 0.054 ms
+ Execution Time: 0.048 ms
+(7 rows)
+
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ Delete on journal  (cost=47548.73..174788.98 rows=0 width=0) (actual time=49.929..49.931 rows=0 loops=1)
+   Buffers: shared hit=45641 read=2222 dirtied=2073 written=1176
+   ->  Nested Loop  (cost=47548.73..174788.98 rows=248045 width=12) (actual time=8.800..39.500 rows=7535 loops=1)
+         Buffers: shared hit=38106 read=2222 written=1176
+         ->  HashAggregate  (cost=47548.17..47704.87 rows=15670 width=26) (actual time=8.713..10.172 rows=10011 loops=1)
+               Group Key: journal_1.key, journal_1.replaces_ts
+               Batches: 1  Memory Usage: 1553kB
+               Buffers: shared hit=2653
+               ->  Bitmap Heap Scan on journal journal_1  (cost=814.08..47469.38 rows=15758 width=26) (actual time=5.051..7.397 rows=10011 loops=1)
+                     Recheck Cond: ((shard = 1) AND (ts <= '0000019d-f3b1-e445-0000-00b51f0cd451'::uuid))
+                     Heap Blocks: exact=2576
+                     Buffers: shared hit=2653
+                     ->  Bitmap Index Scan on journal_by_time  (cost=0.00..810.14 rows=15758 width=0) (actual time=0.466..0.467 rows=10011 loops=1)
+                           Index Cond: ((shard = 1) AND (ts <= '0000019d-f3b1-e445-0000-00b51f0cd451'::uuid))
+                           Buffers: shared hit=77
+         ->  Index Scan using journal_pkey on journal  (cost=0.56..8.11 rows=1 width=26) (actual time=0.003..0.003 rows=1 loops=10011)
+               Index Cond: ((shard = 1) AND (key = journal_1.key) AND (ts = journal_1.replaces_ts))
+               Buffers: shared hit=35453 read=2222 written=1176
+ Planning:
+   Buffers: shared hit=6
+ Planning Time: 0.146 ms
+ JIT:
+   Functions: 15
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.475 ms, Inlining 0.000 ms, Optimization 0.264 ms, Emission 4.175 ms, Total 4.914 ms
+ Execution Time: 50.556 ms
+(26 rows)
+
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Delete on journal  (cost=810.18..47465.48 rows=0 width=0) (actual time=2.168..2.169 rows=0 loops=1)
+   Buffers: shared hit=2669 dirtied=2
+   ->  Bitmap Heap Scan on journal  (cost=810.18..47465.48 rows=169 width=6) (actual time=0.633..2.138 rows=16 loops=1)
+         Recheck Cond: ((shard = 1) AND (ts <= '0000019d-f3b1-e445-0000-00b51f0cd451'::uuid))
+         Filter: ((value1 IS NULL) AND (value2 IS NULL))
+         Rows Removed by Filter: 2460
+         Heap Blocks: exact=2576
+         Buffers: shared hit=2653
+         ->  Bitmap Index Scan on journal_by_time  (cost=0.00..810.14 rows=15758 width=0) (actual time=0.418..0.418 rows=10011 loops=1)
+               Index Cond: ((shard = 1) AND (ts <= '0000019d-f3b1-e445-0000-00b51f0cd451'::uuid))
+               Buffers: shared hit=77
+ Planning Time: 0.066 ms
+ Execution Time: 2.188 ms
+(13 rows)
+
+ROLLBACK

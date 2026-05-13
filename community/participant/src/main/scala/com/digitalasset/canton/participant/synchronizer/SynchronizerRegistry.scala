@@ -22,9 +22,9 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncServiceError.SynchronizerRegistryErrorGroup
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
@@ -50,7 +50,7 @@ trait SynchronizerRegistry extends AutoCloseable {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SynchronizerHandle, SequencerConnections)]
+    Either[SynchronizerRegistryError, SynchronizerHandle]
   ]
 
   /** Performs the handshake with the synchronizer.
@@ -64,7 +64,7 @@ trait SynchronizerRegistry extends AutoCloseable {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SequencerConnections)]
+    Either[SynchronizerRegistryError, SequencerAggregatedInfo]
   ]
 }
 
@@ -470,4 +470,5 @@ trait SynchronizerHandle extends AutoCloseable {
 
   def syncCrypto: SynchronizerCryptoClient
 
+  def connectionPool: SequencerConnectionPool
 }

@@ -40,9 +40,6 @@ final class TransactionCoderSpec
     with EitherAssertions
     with ScalaCheckPropertyChecks {
 
-  // TODO https://github.com/digital-asset/daml/issues/18457
-  // Tests that messages with unknown field are rejected
-
   import com.digitalasset.daml.lf.value.test.ValueGenerators.*
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =

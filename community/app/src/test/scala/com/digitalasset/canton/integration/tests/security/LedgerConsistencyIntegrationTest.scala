@@ -8,9 +8,10 @@ import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
 import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
+import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.error.MediatorError.DuplicateConfirmationRequest
+import com.digitalasset.canton.error.MediatorError.{DuplicateConfirmationRequest, InvalidMessage}
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
@@ -25,6 +26,7 @@ import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWi
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -32,7 +34,10 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisconnect,
 }
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.CreatesExistingContracts
+import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.{
+  CreatesExistingContracts,
+  ModelConformance,
+}
 import com.digitalasset.canton.sequencing.client.SendResult
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -49,11 +54,15 @@ import com.digitalasset.canton.{
   ReassignmentCounter,
   config,
 }
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.CreationTime
+import monocle.macros.GenLens
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 
+import java.util
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.DurationInt
@@ -63,10 +72,10 @@ import scala.jdk.CollectionConverters.*
   *   - Transactions that are not consistent with the ledger state. (E.g. a contract is archived,
   *     the transaction archives it again.)
   *   - Inconsistent reassignments (E.g. archive a contract that has been unassigned or vice versa.)
-  *   - TBD: Transaction that are internally inconsistent. (E.g. the same transaction archives a
-  *     contract twice.)
-  *   - TBD: Transactions that become inconsistent with the ledger state due to partial rollbacks.
-  *     (E.g. a transaction creates and archives a contract, the view with the create is no
+  *   - Transaction that are internally inconsistent. (E.g. the same transaction archives a contract
+  *     twice.)
+  *   - Transactions that become inconsistent with the ledger state due to partial rollbacks.
+  *     (Namely, the creation of a transient contract is rolled back whereas the archival is
   *     committed.)
   *   - TBD: inconsistent use of contract keys
   *
@@ -99,6 +108,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
   private var defaultPayer: PartyId = _
   private var defaultOwner: PartyId = _
+
+  private var dummyCmd: Seq[data.Command] = _
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
@@ -147,6 +158,25 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         defaultPayer = participant1.adminParty
         defaultOwner = participant1.adminParty
+
+        {
+          val emptyJavaList = new util.ArrayList[String]()
+          val dummyContract = JavaDecodeUtil
+            .decodeAllCreated(UniversalContract.COMPANION)(
+              participant1.ledger_api.javaapi.commands.submit(
+                Seq(defaultPayer),
+                new UniversalContract(
+                  emptyJavaList,
+                  List(defaultPayer.toProtoPrimitive).asJava,
+                  emptyJavaList,
+                  List(defaultPayer.toProtoPrimitive).asJava,
+                ).create().commands().asScala.toSeq,
+              )
+            )
+            .loneElement
+
+          dummyCmd = dummyContract.id.exerciseTouch(emptyJavaList).commands.asScala.toSeq
+        }
       }
 
   private lazy val unexpectedMediatorApproval: (LogEntry => Assertion, String) = (
@@ -166,6 +196,13 @@ abstract sealed class LedgerConsistencyIntegrationTest
       _ shouldBe "Rejected transaction would create contract(s) that already exist ",
     ),
     "Creation of existing contract",
+  )
+  private lazy val viewReconstructionFailure: (LogEntry => Assertion, String) = (
+    _.shouldBeCantonError(
+      ModelConformance,
+      _ should include("Reconstructed view differs from received view."),
+    ),
+    "view reconstruction error",
   )
 
   "A participant" when {
@@ -197,6 +234,140 @@ abstract sealed class LedgerConsistencyIntegrationTest
           ),
         )
       }
+
+      "not create a contract twice within the same transaction" in { implicit env =>
+        import env.*
+
+        // Series of failed attempts to commit a transaction creating the same contract twice.
+
+        val (singleCreateTree, _) = mkCreateData()
+
+        // Duplicate root view in the transaction tree. The mediator will reject this due to non-unique view hashes.
+        val doubleCreateTree = GenTransactionTree.rootViewsUnsafe
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .modify(seq => seq ++ seq)(singleCreateTree)
+
+        val (_, events2) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          trackingLedgerEvents(Seq(participant1), Seq.empty)(
+            maliciousP1.submitTransactionTree(doubleCreateTree)
+          ),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.warningMessage should include regex raw"Unable to create transaction tree: " +
+                  raw"A transaction tree must contain a hash at most once. Found the hash SHA-256:\S+ twice\.",
+                "Non-unique root hash",
+              )
+            ),
+            Seq(_.shouldBeCantonErrorCode(InvalidMessage)),
+          ),
+        )
+        events2.assertNoTransactions()
+
+        // Modify the salt of ViewParticipantData.
+        // This would recover the uniqueness of view hashes, but it will fail the model conformance check.
+        val createTreeModifiedSalt = GenTransactionTree.rootViewsUnsafe
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
+          .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+          .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+          .andThen(GenLens[ViewParticipantData](_.salt))
+          .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto))(
+            singleCreateTree
+          )
+
+        val (_, events3) = runMaliciously()(
+          maliciousP1.submitTransactionTree(createTreeModifiedSalt),
+          LogEntry.assertLogSeq(
+            Seq(viewReconstructionFailure, unexpectedMediatorApproval)
+          ),
+        )
+        events3.assertNoTransactions()
+      }
+
+      "archive a transient contract before its creation" in { implicit env =>
+        import env.*
+
+        // Submit the command sequence dummy; create; archive
+        // but use an interceptor to transform this into archive; create; dummy
+        // The dummy command is needed so that the transformation does not change the position of create in the tree,
+        // because that would change contract ids as well.
+
+        val createAndArchive = IouSyntax
+          .testIou(defaultPayer, defaultOwner)
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
+
+        val rawCmds = (dummyCmd ++ createAndArchive)
+          .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+        val createCmd =
+          CommandsWithMetadata(rawCmds, Seq(defaultPayer), ledgerTime = environment.now.toLf)
+
+        runMaliciously()(
+          maliciousP1
+            .submitCommand(
+              createCmd,
+              transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+                .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+                .modify(_.reverse)(_),
+            ),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonError(
+                  ModelConformance,
+                  _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: Contract id \S+ created in node NodeId\(1\) is referenced before in NodeId\(0\)",
+                ),
+                "model conformance check",
+              ),
+              unexpectedMediatorApproval,
+            )
+          ),
+        )
+      }
+
+      "rollback creation and commit archival of a transient contract" in { implicit env =>
+        import env.*
+
+        val createAndArchive = IouSyntax
+          .testIou(defaultPayer, defaultOwner)
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
+          .toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+        val createCmd =
+          CommandsWithMetadata(
+            createAndArchive,
+            Seq(defaultPayer),
+            ledgerTime = environment.now.toLf,
+          )
+
+        runMaliciously()(
+          maliciousP1
+            .submitCommand(
+              createCmd,
+              // Replace the ViewParticipantData salt of view 0, the view that creates the contract
+              // in order to cause a model conformance error.
+              transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+                .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+                .index(0)
+                .andThen(MerkleTree.Optics.unblinded[TransactionView])
+                .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+                .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+                .andThen(GenLens[ViewParticipantData](_.salt))
+                .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto)),
+            ),
+          LogEntry.assertLogSeq(
+            Seq(viewReconstructionFailure, unexpectedMediatorApproval, indexerWarnings)
+          ),
+        )
+      }
     }
 
     "a contract is archived" can {
@@ -208,7 +379,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         archive(iouInstance.contractId)
 
         val (_, createEvents) = runMaliciously()(
-          submitMaliciously(transactionTree),
+          maliciousP1.submitTransactionTree(transactionTree),
           LogEntry.assertLogSeq(
             Seq(duplicateCreate, unexpectedMediatorApproval)
           ),
@@ -268,7 +439,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
                 _.shouldBeCantonError(
                   SyncServiceSynchronizerDisconnect,
                   _ should (startWith(
-                    "Synchronizer 'synchronizer1' fatally disconnected because of handler returned error:"
+                    "Synchronizer 'synchronizer1' fatally disconnected"
                   ) and
                     include regex raw"Request RequestId\(\S+\) with failed activeness check is approved\."),
                   loggerAssertion = _ should include("participant=participant2"),
@@ -331,7 +502,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Create contract
         val (_, createEvents) = runMaliciously()(
-          submitMaliciously(transactionTree),
+          maliciousP1.submitTransactionTree(transactionTree),
           LogEntry.assertLogSeq(
             Seq(duplicateCreate, unexpectedMediatorApproval)
           ),
@@ -378,13 +549,13 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Create the iou for the first time
         val (_, events1) = runMaliciously()(
-          submitMaliciously(transactionTree)
+          maliciousP1.submitTransactionTree(transactionTree)
         )
         events1.assertStatusOk(participant1)
 
         // Create the iou for the second time
         runMaliciously(suppressionRule = LevelAndAbove(Level.INFO))(
-          submitMaliciously(transactionTree),
+          maliciousP1.submitTransactionTree(transactionTree),
           LogEntry.assertLogSeq(
             Seq(
               (
@@ -410,6 +581,46 @@ abstract sealed class LedgerConsistencyIntegrationTest
         )
         assignEvents.assertStatusOk(participant1)
       }
+
+      "archive the contract twice within the same transaction" in { implicit env =>
+        import env.*
+
+        val iouInstance = create()
+
+        val (_, events) = runMaliciously()(
+          maliciousP1.submitCommand(
+            archiveCmdsWithMetadata(iouInstance.contractId),
+            transactionInterceptor = (tx, metadata) => {
+              val (nodeId, node) = tx.nodes.loneElement
+              val nextNodeId = LfNodeId(nodeId.index + 1)
+              val newTx = LfSubmittedTransaction(
+                LfVersionedTransaction(
+                  tx.version,
+                  Map(nodeId -> node, nextNodeId -> node),
+                  ImmArray(nodeId, nextNodeId),
+                )
+              )
+              val newMetadata = metadata
+                .focus(_.nodeSeeds)
+                .modify(_.slowAppend(ImmArray(nextNodeId -> Hash.fromString("deadbeef" * 8).value)))
+              newTx -> newMetadata
+            },
+          ),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonError(
+                  ModelConformance,
+                  _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: ErrorWithInternalConsistencyCheck\(UsedAfterArchive\(.*\)\)",
+                ),
+                "internal consistency failure",
+              ),
+              unexpectedMediatorApproval,
+            )
+          ),
+        )
+        events.assertStatusOk(participant1)
+      }
     }
 
     "a contract has been assigned" can {
@@ -420,7 +631,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Now run the real creation
         val (_, createEvents) = runMaliciously()(
-          submitMaliciously(transactionTree),
+          maliciousP1.submitTransactionTree(transactionTree),
           LogEntry.assertLogSeq(
             Seq(duplicateCreate, unexpectedMediatorApproval)
           ),
@@ -452,11 +663,6 @@ abstract sealed class LedgerConsistencyIntegrationTest
       .loneElement
   }
 
-  private def submitMaliciously(
-      transactionTree: GenTransactionTree
-  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] =
-    maliciousP1.submitTransactionTree(transactionTree)
-
   private def mkCreateData(
       payer: PartyId = defaultPayer,
       owner: PartyId = defaultOwner,
@@ -464,6 +670,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
       env: TestConsoleEnvironment
   ): (GenTransactionTree, ContractInstance) = {
     import env.*
+
     val createCmdRaw = IouSyntax
       .testIou(payer, owner)
       .create()
@@ -506,15 +713,17 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
   private def archiveMaliciously(cid: LfContractId, payer: PartyId = defaultPayer)(implicit
       env: TestConsoleEnvironment
-  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = {
-    import env.*
+  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] =
+    maliciousP1.submitCommand(archiveCmdsWithMetadata(cid, payer))
 
-    maliciousP1.submitCommand(
-      CommandsWithMetadata(
-        archiveCommands(cid).map(c => Command.fromJavaProto(c.toProtoCommand)),
-        Seq(payer),
-        ledgerTime = environment.now.toLf,
-      )
+  private def archiveCmdsWithMetadata(cid: LfContractId, payer: PartyId = defaultPayer)(implicit
+      env: TestConsoleEnvironment
+  ): CommandsWithMetadata = {
+    import env.*
+    CommandsWithMetadata(
+      archiveCommands(cid).map(c => Command.fromJavaProto(c.toProtoCommand)),
+      Seq(payer),
+      ledgerTime = environment.now.toLf,
     )
   }
 

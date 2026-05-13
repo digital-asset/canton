@@ -51,7 +51,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 
@@ -93,6 +93,9 @@ class ModelConformanceChecker(
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
       reInterpretedTopLevelViews: LazyAsyncReInterpretationMap,
+      // TODO(#29834): Make this a parameter of ModelConformanceChecker as an instance of this is tied to a connected synchronizer and
+      //               implicitly to protocol version
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
@@ -140,6 +143,7 @@ class ModelConformanceChecker(
             topologySnapshot,
             getEngineAbortStatus,
             reInterpretedTopLevelViews,
+            protocolVersion,
           ).value
 
           errorsViewsTxs <- wfTxE match {
@@ -189,7 +193,16 @@ class ModelConformanceChecker(
       NonEmpty.from(errors ++ mergeErrorO) match {
         case None =>
           wftxO match {
-            case Some(wftx) => Right(Result(updateId, wftx))
+            case Some(wftx) =>
+              Right(
+                Result(
+                  updateId,
+                  wftx,
+                  // drop top-level rollback nodes as the internal consistency checker's
+                  // NUCK validation ignores rollback nodes
+                  txs.map(_.unwrap.unwrap),
+                )
+              )
             case _ =>
               ErrorUtil.internalError(
                 new IllegalStateException(
@@ -301,6 +314,7 @@ class ModelConformanceChecker(
       topologySnapshot: TopologySnapshot,
       getEngineAbortStatus: GetEngineAbortStatus,
       reInterpretedTopLevelViewsET: LazyAsyncReInterpretationMap,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, WithRollbackScope[
@@ -337,7 +351,13 @@ class ModelConformanceChecker(
         _,
       ) = lfTxAndMetadata
 
-      _ <- checkPackageVetting(view, topologySnapshot, usedPackages, metadata.ledgerTime)
+      _ <- checkPackageVetting(
+        view,
+        topologySnapshot,
+        usedPackages,
+        metadata.ledgerTime,
+        protocolVersion,
+      )
 
       wfTx <- EitherT.fromEither[FutureUnlessShutdown](
         WellFormedTransaction
@@ -389,8 +409,9 @@ class ModelConformanceChecker(
   private def checkPackageVetting(
       view: TransactionView,
       snapshot: TopologySnapshot,
-      packageIds: Set[PackageId],
+      usedPackages: UsedPackages,
       ledgerTime: CantonTimestamp,
+      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
 
     val informees = view.viewCommonData.tryUnwrap.viewConfirmationParameters.informees
@@ -400,9 +421,26 @@ class ModelConformanceChecker(
         snapshot.activeParticipantsOfParties(informees.toSeq)
 
       informeeParticipants = informeeParticipantsByParty.values.flatten.toSet
+      // Don't check vetting of package dependencies for protocol version v35 and beyond
+      checkDependencyVetting = protocolVersion <= ProtocolVersion.v34
+      packagesForVettingChecks =
+        if (checkDependencyVetting) {
+          // Even though it's redundant with package dependency vetting checks,
+          // preserve protocol version 34 behavior of passing all used packages from reinterpretation to loadUnvettedPackagesOrDependencies
+          usedPackages.allUsedPackageIds
+        } else {
+          // For protocol version v35 and beyond, only pass the directly used packages to loadUnvettedPackagesOrDependencies
+          usedPackages.actionNodePackageIds
+        }
       unvetted <- informeeParticipants.toSeq
-        .parTraverse(p => snapshot.loadUnvettedPackagesOrDependencies(p, packageIds, ledgerTime))
-
+        .parTraverse(p =>
+          snapshot.loadUnvettedPackagesOrDependencies(
+            participantId = p,
+            packages = packagesForVettingChecks,
+            ledgerTime = ledgerTime,
+            checkDependencyVetting = checkDependencyVetting,
+          )
+        )
     } yield {
       val combined = unvetted.combineAll.unknownOrUnvetted
       Either.cond(combined.isEmpty, (), UnvettedPackages(combined))
@@ -642,9 +680,19 @@ object ModelConformanceChecker {
     override protected def pretty: Pretty[MergeError] = prettyOfParam(_.cause.unquoted)
   }
 
+  /** Model conformance successful result as input for indexing and further consistency checks.
+    *
+    * @param updateId
+    *   update id to be used for indexing if the transaction commits
+    * @param suffixedTransaction
+    *   the merged transaction with suffixed contract ids to use for indexing
+    * @param unmergedTransactionsWithoutToplevelRollbackNodes
+    *   the unmerged root transactions to use for internal lf transaction consistency checks
+    */
   final case class Result(
       updateId: UpdateId,
       suffixedTransaction: WellFormedTransaction[WithSuffixesAndMerged],
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfVersionedTransaction],
   )
 
 }

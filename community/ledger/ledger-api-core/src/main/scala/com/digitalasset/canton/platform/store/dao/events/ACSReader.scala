@@ -15,8 +15,8 @@ import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.api.AcsContinuationToken.Checksum
-import com.digitalasset.canton.ledger.api.{
+import com.digitalasset.canton.ledger.api.messages.state.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.messages.state.{
   AcsContinuationPointerActiveContracts,
   AcsContinuationPointerIncompleteReassignments,
   AcsContinuationToken,

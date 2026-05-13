@@ -97,7 +97,6 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
         {
           val onboardingState = utils.read_byte_string_from_file(onboardingStateFile)
           sequencer3.setup.assign_from_onboarding_state(onboardingState)
-
           sequencer3.health.initialized() shouldBe true
         }
 

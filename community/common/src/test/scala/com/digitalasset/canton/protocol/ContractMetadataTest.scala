@@ -32,24 +32,5 @@ class ContractMetadataTest extends AnyWordSpec with BaseTest {
         err should include("Signatories are not stakeholders: ")
       }
     }
-
-    "deserialize to what it was serialized from" in {
-      val metadata = ContractMetadata.tryCreate(
-        Set(ExampleTransactionFactory.submitter, ExampleTransactionFactory.signatory),
-        Set(
-          ExampleTransactionFactory.submitter,
-          ExampleTransactionFactory.signatory,
-          ExampleTransactionFactory.observer,
-        ),
-        Some(
-          ExampleTransactionFactory.globalKeyWithMaintainers(
-            maintainers = Set(ExampleTransactionFactory.submitter)
-          )
-        ),
-      )
-      val serialization = metadata.toProtoVersioned(testedProtocolVersion)
-
-      ContractMetadata.fromProtoVersioned(serialization) shouldBe Right(metadata)
-    }
   }
 }

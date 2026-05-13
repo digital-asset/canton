@@ -187,7 +187,7 @@ object Descriptor:
   private object Lazy:
     private[Descriptor] def apply(compute: => Adt) = new Lazy(compute)
   private final class Lazy private[Descriptor] (compute: => Adt) extends Serializable {
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
     private var _value: Adt = uninitialized
     def value: Adt =
       if _value == null then synchronized(if _value == null then _value = compute)

@@ -139,7 +139,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisState(
-          genesisState,
+          genesisState.newInput(),
           synchronizerParameters.toInternal,
         )
       )
@@ -167,7 +167,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisStateV2(
-          genesisState,
+          genesisState.newInput(),
           synchronizerParameters.toInternal,
         )
       )
@@ -219,7 +219,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
     consoleEnvironment.run {
       runner.adminCommand(
-        InitializeFromOnboardingState(onboardingState = onboardingState)
+        InitializeFromOnboardingState(onboardingStateStream = onboardingState.newInput())
       )
     }
   }
@@ -236,7 +236,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
     consoleEnvironment.run {
       runner.adminCommand(
-        InitializeFromOnboardingStateV2(onboardingState)
+        InitializeFromOnboardingStateV2(onboardingState.newInput())
       )
     }
   }

@@ -289,7 +289,7 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
 }
 
 trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase {
-  override def lfVersion = LanguageVersion.v2_3_2
+  override def lfVersion = LanguageVersion.v2_3
 
   override def connectedSynchronizersCount = 1
 

@@ -4,14 +4,37 @@
 package com.digitalasset.canton.participant.scheduler
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.store.SyncPersistentState
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
+  Active,
+  LsuSource,
+  LsuTarget,
+  Status,
+}
+import com.digitalasset.canton.participant.store.memory.{
+  InMemoryRegisteredSynchronizersStore,
+  InMemorySynchronizerConnectionConfigStore,
+}
+import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
+import com.digitalasset.canton.participant.synchronizer.{
+  SynchronizerAliasManager,
+  SynchronizerConnectionConfig,
+}
 import com.digitalasset.canton.scheduler.IndividualSchedule
 import com.digitalasset.canton.scheduler.JobSchedule.NextRun
 import com.digitalasset.canton.scheduler.JobScheduler.{Done, MoreWorkToPerform, ScheduledRunResult}
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.DummyCopyTopologyStore
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  KnownPhysicalSynchronizerId,
+  PhysicalSynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
+import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, SynchronizerAlias}
 import org.scalatest.Assertion
 
 import java.util.concurrent.LinkedBlockingQueue
@@ -104,6 +127,120 @@ class ParticipantPurgeObsoleteTopologySchedulerTest
       schedule.step(_ shouldBe Done)
 
       // Cleanup
+      scheduler.stop()
+      f.futureValue
+    }
+
+    "identify the obsolete topology stores by their status" in {
+      val alias = SynchronizerAlias.tryCreate("da")
+
+      val oldPsid = DefaultTestIdentities.physicalSynchronizerId
+      val newPsid = oldPsid.incrementSerial
+
+      val configStore = {
+        val synchronizers = new InMemoryRegisteredSynchronizersStore(loggerFactory)
+        synchronizers.addMapping(alias, oldPsid).futureValueUS
+        synchronizers.addMapping(alias, newPsid).futureValueUS
+        val aliasManager =
+          SynchronizerAliasManager.create(synchronizers, loggerFactory).futureValueUS
+        new InMemorySynchronizerConnectionConfigStore(aliasManager, loggerFactory)
+      }
+
+      def setStatus(psid: PhysicalSynchronizerId, status: Status): Assertion = {
+        val cfg = new SynchronizerConnectionConfig(
+          alias,
+          SequencerConnections.single(mock[SequencerConnection]),
+        )
+        // Ensure it's there.
+        configStore.upsert(psid, (cfg, status, None), identity).futureValueUS.value.discard
+        configStore
+          .setStatus(alias, KnownPhysicalSynchronizerId(psid), status)
+          .futureValueUS
+          .value
+          .discard
+        succeed
+      }
+
+      val oldStore = SizeTopologyStore(startingSize = 1)
+      val newStore = SizeTopologyStore(startingSize = 1)
+
+      val schedule = new SteppingSchedule()
+      val scheduler = {
+        val stateManager = mock[SyncPersistentStateManager]
+        val oldPersistentState = mock[SyncPersistentState]
+        val newPersistentState = mock[SyncPersistentState]
+        when(oldPersistentState.topologyStore).thenReturn(oldStore)
+        when(newPersistentState.topologyStore).thenReturn(newStore)
+
+        when(stateManager.get(oldPsid)).thenReturn(Some(oldPersistentState))
+        when(stateManager.get(newPsid)).thenReturn(Some(newPersistentState))
+
+        ParticipantPurgeObsoleteTopologyScheduler.create(
+          Some(schedule),
+          PositiveInt.two,
+          configStore,
+          stateManager,
+          timeouts,
+          loggerFactory,
+        )
+      }
+      val f = scheduler.start()
+
+      schedule.step { result =>
+        result shouldBe MoreWorkToPerform // We start by assuming there's something to do
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
+      }
+
+      schedule.step { result =>
+        // Neither store has a status yet, nothing to be purged.
+        result shouldBe Done
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
+
+        // Now old store becomes active. No status for new store yet.
+        setStatus(oldPsid, Active)
+      }
+
+      schedule.step { result =>
+        // (old = Active, new = None): Nothing obsolete yet, so nothing purged.
+        (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
+
+        // Now new synchronizer is registered, and gets status LsuTarget.
+        setStatus(newPsid, LsuTarget)
+      }
+
+      schedule.step { result =>
+        // (old = Active, new = LsuTarget): Nothing obsolete yet, so nothing purged.
+        (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
+
+        // Now it's upgrade time and the old synchronizer gets status LsuSource
+        setStatus(oldPsid, LsuSource)
+      }
+
+      schedule.step { result =>
+        // (old = LsuSource, new = LsuTarget): Nothing obsolete yet, so nothing purged.
+        (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
+
+        // Next at upgrade time the new synchronizer gets status Active
+        setStatus(newPsid, Active)
+      }
+
+      schedule.step { result =>
+        // (old = LsuSource, new = Active): Now we can purge the old store. New store unaffected.
+        result shouldBe MoreWorkToPerform
+        oldStore.size shouldBe 0
+        newStore.size shouldBe 1
+      }
+
+      schedule.step { result =>
+        // (old = LsuSource, new = Active). Nothing more to purge.
+        result shouldBe Done
+        oldStore.size shouldBe 0
+        newStore.size shouldBe 1
+      }
+
+      // Clean up
       scheduler.stop()
       f.futureValue
     }

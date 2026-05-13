@@ -11,9 +11,7 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 }
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
-import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -36,20 +34,16 @@ class IdeLedgerGenerativeTest
         (
           "pv34",
           new ConcreteGenerators(
-            languageVersion = LanguageVersion.v2_2,
+            contractKeys = false,
             readOnlyRollbacks = false,
-            keyMode = KeyMode.UniqueContractKeys,
-            generateQueryByKey = false,
           ),
           ContractStateMachine.Mode.NoKey,
         ),
         (
           "pv35",
           new ConcreteGenerators(
-            languageVersion = LanguageVersion.v2_3,
+            contractKeys = true,
             readOnlyRollbacks = true,
-            keyMode = KeyMode.NonUniqueContractKeys,
-            generateQueryByKey = true,
           ),
           ContractStateMachine.Mode.NUCK,
         ),

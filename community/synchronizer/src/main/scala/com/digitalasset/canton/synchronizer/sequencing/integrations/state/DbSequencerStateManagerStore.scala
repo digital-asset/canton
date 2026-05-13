@@ -86,7 +86,7 @@ class DbSequencerStateManagerStore(
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[AggregationRule] = GetResult { r =>
     AggregationRule
-      .fromTrustedByteArray(protocolVersion, r.<<[Array[Byte]])
+      .fromTrustedByteArray(LegacyUseMemberIdsAsEligibleMembers(protocolVersion), r.<<[Array[Byte]])
       .valueOr(err =>
         throw new DbDeserializationException(s"Failed to deserialize aggregation rule: $err")
       )

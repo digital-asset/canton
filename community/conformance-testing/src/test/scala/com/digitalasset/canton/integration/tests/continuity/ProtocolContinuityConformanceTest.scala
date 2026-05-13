@@ -33,6 +33,7 @@ import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.util.ReleaseUtils.TestedRelease
 import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.majorMinorToStableProtocolVersions
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import monocle.macros.syntax.lens.*
 import org.scalatest.concurrent.PatienceConfiguration
 
 import scala.concurrent.duration.DurationInt
@@ -118,13 +119,24 @@ trait ProtocolContinuityConformanceTest
 
   override def connectedSynchronizersCount = 1
 
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3S1M1_Manual
+  override def environmentDefinition: EnvironmentDefinition = {
+    val env = EnvironmentDefinition.P3S1M1_Manual
       .addConfigTransforms(ConfigTransforms.clearMinimumProtocolVersion*)
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
+    if (disableBinaryVersionEnforcement)
+      env.addConfigTransform(
+        // Once we remove PV34, we can remove this config transform!
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.parameters.disableReleaseVersionHandshakeCheck).replace(true)
+        )
+      )
+    else env
+  }
 
   protected def numShards: Int
   protected def shard: Int
+  protected def disableBinaryVersionEnforcement: Boolean = false
+
 }
 
 /** For a given release R, the Ledger API conformance test suites at release R are run against:
@@ -278,6 +290,70 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
   }
 }
 
+/** For a given release R, runs a cross-version ping test against:
+  *   - 1x synchronizer based on the current branch with the highest protocol version supported by
+  *     both the current branch and release R
+  *   - 1x participant based on the current branch
+  *   - 1x participant of release R
+  *
+  * This test ensures that a participant on the current branch and a release-R participant can ping
+  * each other in both directions.
+  */
+trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanceTest {
+  private val external = new UseExternalProcess(
+    loggerFactory,
+    externalParticipants = Set("participant2"),
+    fileNameHint = this.getClass.getSimpleName,
+    removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
+  )
+
+  registerPlugin(external)
+
+  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
+    lazy val binDir = ReleaseUtils
+      .retrieve(release)
+      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
+    lazy val pv = protocolVersions.max1
+
+    s"ping between current-branch participant and release $release participant (pv=$pv)" in {
+      implicit env =>
+        import env.*
+
+        val cantonReleaseVersion = RunVersion.Release(binDir)
+
+        sequencer1.start()
+        mediator1.start()
+        mediator1.health.wait_for_ready_for_initialization()
+        sequencer1.health.wait_for_ready_for_initialization()
+
+        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        NetworkBootstrapper(
+          Seq(
+            EnvironmentDefinition.S1M1.copy(staticSynchronizerParameters = staticParams)
+          )
+        ).bootstrap()
+
+        // Local participant on the current branch
+        participant1.start()
+        participant1.health.wait_for_initialized()
+
+        // External participant on release R
+        external.start(remoteParticipant2.name, cantonReleaseVersion)
+        remoteParticipant2.health.wait_for_initialized()
+
+        // Connect both participants to the synchronizer
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+        remoteParticipant2.synchronizers.connect_local(sequencer1, alias = daName)
+
+        // Ping both directions
+        participant1.health.ping(remoteParticipant2)
+        remoteParticipant2.health.ping(participant1)
+
+        external.kill(remoteParticipant2.name)
+    }
+  }
+}
+
 private[continuity] object ProtocolContinuityConformanceTest {
 
   /** Computes the list of previous Canton releases that should be tested against the current
@@ -401,6 +477,8 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.parameters.produce-post-ordering-topology-ticks",
         s"$base.parameters.unsafe-sequencer-channel-support",
         s"$base.parameters.disable-submission-checks-for-testing",
+        // Once we remove PV34, we can remove this exception
+        s"$base.parameters.disable-release-version-handshake-check",
         s"$base.public-api.max-concurrent-calls-per-connection",
         s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
@@ -411,6 +489,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer.block.throughput-cap.strict",
         s"$base.sequencer.block.throughput-cap.thresholds",
         s"$base.sequencer.block.throughput-cap.update-every-ms",
+        s"$base.parameters.lsu",
       )
     }
     (topLevel ++ perParticipant ++ perMediator ++ perSequencer)

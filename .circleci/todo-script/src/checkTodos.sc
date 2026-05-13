@@ -4,6 +4,7 @@ import scala.collection.mutable.ListBuffer
 import scala.collection.{Map, SortedMap}
 import scala.sys.process._
 import scala.util.matching.Regex
+import scala.util.Try
 
 /**  This script depends on `gh` (github cli) and awk
   *
@@ -173,19 +174,19 @@ object Milestone extends RegexCategory {
 }
 
 object GithubIssueLink extends RegexCategory {
-  override val regex: Regex = "canton/issues/[0-9]+".r
+  override val regex: Regex = "(https://github\\.com/DACH-NY/)?canton/issues/[0-9]+".r
 
   override def getBucket(str: String): Bucket = IssueBucket(extractIssueNumber(str))
 }
 
 object OssGithubIssueLink extends RegexCategory {
-  override val regex: Regex = "digital-asset/canton/issues/[0-9]+".r
+  override val regex: Regex = "(https://github\\.com/)?digital-asset/canton/issues/[0-9]+".r
 
   override def getBucket(str: String): Bucket = OssIssueBucket(extractIssueNumber(str))
 }
 
 object DamlGithubIssueLink extends RegexCategory {
-  override val regex: Regex = "digital-asset/daml/issues/[0-9]+".r
+  override val regex: Regex = "(https://github\\.com/)?digital-asset/daml/issues/[0-9]+".r
 
   override def getBucket(str: String): Bucket = DamlIssueBucket(extractIssueNumber(str))
 }
@@ -276,17 +277,37 @@ if (!sys.env.contains("GITHUB_TOKEN")) {
   )
 }
 
-val openIssues: Set[Int] = "gh issue list --limit 2500 --json number --jq '.[].number'".!!.split("\n")
-  .map(_.toInt)
-  .toSet
+@annotation.tailrec
+def retry[T](times: Int, delaySeconds: Int)(block: => T): T =
+  Try(block) match {
+    case scala.util.Success(v) => v
+    case scala.util.Failure(e) if times > 1 =>
+      println(s"Command failed: ${e.getMessage}. Retrying in ${delaySeconds}s (${times - 1} attempts left)...")
+      Thread.sleep(delaySeconds * 1000L)
+      retry(times - 1, delaySeconds)(block)
+    case scala.util.Failure(e) => throw e
+  }
 
-val openOssIssues: Set[Int] = "gh issue list --repo digital-asset/canton --limit 2500 --json number --jq '.[].number'".!!.split("\n")
-  .map(_.toInt)
-  .toSet
+def fetchOpenIssues(repo: Option[String] = None, limit: Int = 2500): Set[Int] = {
+  val repoName = repo.getOrElse("gh repo view --json nameWithOwner --jq '.nameWithOwner'".!!.trim)
+  val repoFlag = repo.map(r => s" --repo $r").getOrElse("")
+  val totalCount = retry(3, 5) {
+    s"gh api 'search/issues?q=repo:$repoName+is:issue+is:open&per_page=1' --jq '.total_count'".!!.trim.toInt
+  }
+  if (totalCount >= limit) {
+    Console.err.println(s"ERROR: $repoName has $totalCount open issues, which meets or exceeds the fetch limit of $limit. Some TODOs may be missed. Increase the limit in fetchOpenIssues.")
+    sys.exit(1)
+  }
+  retry(3, 5) {
+    s"gh issue list$repoFlag --limit $limit --json number --jq '.[].number'".!!.split("\n")
+      .map(_.toInt)
+      .toSet
+  }
+}
 
-val openDamlIssues: Set[Int] = "gh issue list --repo digital-asset/daml --limit 2500 --json number --jq '.[].number'".!!.split("\n")
-  .map(_.toInt)
-  .toSet
+val openIssues: Set[Int] = fetchOpenIssues()
+val openOssIssues: Set[Int] = fetchOpenIssues(repo = Some("digital-asset/canton"))
+val openDamlIssues: Set[Int] = fetchOpenIssues(repo = Some("digital-asset/daml"))
 
 // Issues that have dangling TODOs (e.g., in sql files)
 val ignoredIssues: Set[Int] = Set(282923)
@@ -325,6 +346,7 @@ def grepForPattern(pattern: String): Seq[String] = {
     "--exclude=*.png",
     "--exclude=*checkTodos.sc",
     "--exclude=*UNRELEASED.md",
+    "--exclude=check_todos_on_issue_close.yml",
     pattern,
     projectRoot,
   )

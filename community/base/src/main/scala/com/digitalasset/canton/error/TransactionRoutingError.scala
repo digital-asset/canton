@@ -342,24 +342,36 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
 
-      /** @param synchronizersNotUsed
+      /** @param mainError
+        *   The main error message describing the reason why no synchronizer could be found for
+        *   submission.
+        * @param synchronizersNotUsed
         *   The reason why each synchronizer cannot be used for submission.
         */
-      final case class Error(synchronizersNotUsed: Map[PhysicalSynchronizerId, String])
-          extends TransactionErrorImpl(
-            cause = "No valid synchronizer for submission found."
+      abstract class NoSynchronizerForSubmissionError(
+          mainError: String,
+          synchronizersNotUsed: Map[PhysicalSynchronizerId, String],
+      ) extends TransactionErrorImpl(
+            cause = s"$mainError. Discarded synchronizers: ${synchronizersNotUsed.view
+                .map { case (syncId, reason) => s"$syncId: $reason" }
+                .mkString(", ")}"
           )
+          with Product
+          with Serializable
           with TransactionRoutingError
+
+      final case class Error(synchronizersNotUsed: Map[PhysicalSynchronizerId, String])
+          extends NoSynchronizerForSubmissionError(
+            mainError = "No valid synchronizer for submission found",
+            synchronizersNotUsed = synchronizersNotUsed,
+          )
 
       final case class SynchronizerRankingFailed(
           discardedSynchronizers: Map[PhysicalSynchronizerId, String]
-      ) extends TransactionErrorImpl(
-            cause =
-              s"No valid synchronizer found for synchronizer ranking. Discarded synchronizers: ${discardedSynchronizers.view
-                  .map { case (syncId, reason) => s"$syncId: $reason" }
-                  .mkString(", ")}"
+      ) extends NoSynchronizerForSubmissionError(
+            mainError = "No valid synchronizer found for synchronizer ranking",
+            synchronizersNotUsed = discardedSynchronizers,
           )
-          with TransactionRoutingError
     }
 
     @Explanation(

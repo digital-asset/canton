@@ -9,6 +9,16 @@
 Security properties
 ###################
 
+.. warning::
+   **HISTORICAL REFERENCE ONLY**
+
+   This document is **obsolete**, unmaintained, and has been officially retracted.
+   It does not accurately reflect the current security architecture, trust models, or technical specifications of the system.
+
+   **Notice to Security Researchers:** The contents of this file must not be used to identify or justify alleged vulnerabilities.
+   Reports based on this outdated information will be considered invalid, as the mechanisms described herein have been superseded or removed.
+   This file is retained solely as a source of conceptual inspiration for future documentation.
+
 .. wip::
 
 Security properties
@@ -188,7 +198,7 @@ Trust Assumptions
          implementation satisfies the requirements.
 
   .. _requirements-functional:
-  
+
   Functional requirements
   -----------------------
 
@@ -322,7 +332,7 @@ Trust Assumptions
      keys with no honestly represented maintainers, even if I am a non-maintainer stakeholder of contracts with that key.
 
   .. _integrity-authenticity-hlreq:
-  
+
   * **Integrity: request authenticity**.
     I want the shared ledger to contain a record
     of a change with me as one of the requesters if and only if:
@@ -330,7 +340,7 @@ Trust Assumptions
     1. I actually requested that exact change,
        i.e., I submitted the change via the command submission service, and
     2. I am notified that my change request was added to the shared ledger, unless my participant node crashes forever,
-          
+
     so that, together with the ledger validity requirement, I can be
     sure that the ledger contains no records of:
 
@@ -506,7 +516,7 @@ Trust Assumptions
 
   Resource limits
   ---------------
-  
+
   This section specifies upper bounds on the sizes of data structures.
   The system must be able to process data structures within the given size limits.
 
@@ -549,7 +559,7 @@ Trust Assumptions
        as it is not necessary to flatten values before transmission.
 
   .. _requirements-nonfunctional:
-  
+
   Non-functional requirements
   ---------------------------
 
@@ -675,7 +685,7 @@ Trust Assumptions
 
   .. todo::
     #. `Attestator for Liveness <https://github.com/DACH-NY/canton/issues/186>`_.
-    
+
     **Note**: If a participant is trusted, then the trust assumption
     extends to all parties hosted by the participant.
     Conversely, the system does not support to trust a participant for the actions
@@ -749,7 +759,7 @@ Trust Assumptions
     steps (Daml actions) in different workflows across different synchronizers, as long as
     there exists a single synchronizers to which all participants in all
     workflows are connected.
-    
+
     This item is scheduled on the roadmap.
 
   .. todo::
@@ -778,7 +788,7 @@ Trust Assumptions
     **Design Limitation 1** When a synchronizer needs to be upgraded to a new protocol
     version a new synchronizer is deployed and the participants migrate the active
     contracts' synchronization to the new synchronizer.
-    
+
     **Design Limitation 2** When a replicated node needs to be upgraded, all
     replicas of the node need to be upgraded at the same time.
 
@@ -821,7 +831,7 @@ Trust Assumptions
     still use synchronizers that specify only old versions as allowed.
 
   .. _testability-participant-node-upgrades-historic-data-hlreq:
-  
+
   * **Testability of participant node upgrades on historical data**. I
     want to be able to test new versions of participant nodes against
     historical data from a time window and compare the results to those
@@ -868,7 +878,7 @@ Trust Assumptions
     #. `Synchronizer site disaster recovery <https://github.com/DACH-NY/canton/issues/190>`_.
 
   .. _participant-compromise-recovery-hlreq:
-     
+
   * **Participant corruption recovery**. I want to have a procedure in
     place that can be followed to recover from a malfunctioning or a
     corrupted participant node, so that when the procedure is finished
@@ -1070,7 +1080,7 @@ Trust Assumptions
     Therefore, if a transaction spans several synchronizers and makes use of delegation to non-stakeholders,
     the submitter currently needs to coordinate with other participants to run the transaction,
     because the submitter by itself cannot transfer all used contracts to a single synchronizer.
-    
+
   Reliability
   ^^^^^^^^^^^
 
@@ -1318,7 +1328,7 @@ Trust Assumptions
   Canton architecture ensures the integrity of the ledger for
   honest participants, despite the presence of malicious participants. The key
   ingredients to achieving integrity are the following:
-  
+
   - Deterministic transaction validation to reach consensus
   - Consistent transaction ordering and validation
   - Consistency checks with at least one honest participant per signatory party; and
@@ -1338,7 +1348,7 @@ Trust Assumptions
 
   Consistent transaction ordering and validation
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   Canton uses distributed conflict detection among the involved Participant Nodes
   to ensure integrity since, by design, there is no centralized component that
   knows the activeness of all contracts. Instead all involved participants process
@@ -1349,36 +1359,36 @@ Trust Assumptions
   malicious; it may be the result of a race condition in the application to
   consume the same contract. The Sequencer node guarantees that all messages are
   totally ordered timestamps.
-  
+
   The deterministic order is established with unique timestamps from the
   Sequencer, which implements a guaranteed total order multicast; that is, the
   Sequencer guarantees the delivery of an end-to-end encrypted message to all
   all recipients. The deterministic order of message delivery results in a
   deterministic order of execution which ensures ledger integrity.
-  
+
   For finality and bounded decision times of transactions, the Sequencer is
   immutable and append-only. In the event of a timeout, the timeouts of
   transactions are consistently derived from the Sequencer timestamps so that
   timeouts are deterministic as well.
-  
+
   The set of recipients on the Sequencer message can be validated by a recipient
   to ensure that the other participants of the transaction have been informed as
   well (i.e., guaranteed communication). Otherwise the malicious submitter would
   break consensus, resulting in a loss of ledger integrity where participants
   hosting a signatory are not informed about a state change.
-  
+
   Consistency with at least one honest Participant per signatory party
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   Although participants can verify model conformance and authorization on their
   own, as described in the previous sections, the consistency check needs at least
   one honest participant hosting a signatory party to ensure consistency.
   If all signatories of a contract are hosted by dishonest participants, a
   transaction may use a contract even when the contract is not active.
-  
+
   Authenticated data structure for transactions
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   The hierarchical transactions are represented by an authenticated data structure
   in the form of a generalized blinded Merkle tree (see
   https://www.canton.io/publications/iw2020.pdf). At a high level, the Merkle tree
@@ -1395,37 +1405,37 @@ Trust Assumptions
   transaction. The Mediator also sees the number of participants involved, so it
   can detect a missing or additional participant. The authenticated data structure
   ensures that participants process the same transaction and reach consensus.
-  
+
   Detection of malicious participants
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  
+
   In addition to the steps outlined above, the system has multiple approaches to
   detect malicious behavior and to keep evidence for further investigation:
-  
+
   - Pairs of participants periodically exchange a commitment of the active
     contract set (ACS) for their mutual counterparties. This ensures that any
     diverging views between honest participants will be detected within the ACS
     commitment periods and participants can repair their mutual state.
-  
+
   - Non-repudiation in the form of digital signatures enables honest participants
     to prove that they were honest and who was dishonest by preserving the signed
     responses of each participant.
-  
+
   Consensus and transparency
   --------------------------
-  
+
   :ref:`Consensus <consensus-hlreq>` and :ref:`Transparency <transparency-hlreq>`
   are high-level requirements that ensure that stakeholders are notified about
   changes to their projection of the virtual shared ledger and that they come to
   the same conclusions, in order to stay synchronized with their counterparties.
-  
+
   Operating on the same transaction
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  
+
   The Canton protocol includes the following steps to ensure that the Mediator and
   participants can verify that they have obtained the same transaction tree given
   by its root hash:
-  
+
   (1) Every participant gets a "partially blinded" Merkle tree, defining the
       locations of the views they are privy to.
   (2) That Merkle tree has a root. That root has a hash. That’s the root hash.
@@ -1437,57 +1447,57 @@ Trust Assumptions
       a root hash message and that all hashes are equal.
   (6) The Mediator sends out the result message that includes the verdict and
       root hash.
-  
+
   An important aspect of this process is that transaction metadata, such as a root hash message, is not
   end-to-end encrypted, unlike transaction payloads which are always encrypted. The
   exact same message is delivered to all recipients. In the case of the root hash
   message, both the participant and the Mediator who are recipients of the
   message get the exact same message delivered and can verify that both are the
   recipient of the message.
-  
+
   Stakeholders are notified about their views
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  
+
   Imagine the following attack scenarios on the transaction protocol at the point
   where a dishonest submitter prepares views.
-  
+
   Scenario 1: Invalid view common data
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   The submitter should send a view V2 to Alice and Bob (because it concerns them
   both as they are signatories), but the dishonest submitter tells the Mediator
   that view V2 only requires the approval of Bob, and only sends it to Bob's
   participant. In this scenario both participants of Alice and Bob are honest.
-  
+
   Mitigation
   """"""""""
-  
+
   The view common data is incorrect, because Alice is missing as an informee for
   the view V2. Given that Bob's participant is honest, he will reject the view by
   sending a reject to the Mediator in the case of a signatory confirmation policy
   and not commit the invalid view to his ledger as part of phase 7. The two honest
   participants Alice and Bob thereby do not commit this invalid view to their
   ledger.
-  
+
   Scenario 2: Missing sequencer message recipient
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   The dishonest submitter prepares a correct view common data with Alice and Bob
   as informees, but the corresponding sequencer message for the view is only
   addressed to Bob's participant. The confirmation policy does not require a
   confirmation from Alice's participant, e.g., VIP confirmation policy. In this
   scenario both participants of Alice and Bob are honest.
-  
+
   Mitigation
   """"""""""
-  
+
   The mitigation relies on the following two properties of the Sequencer:
-  
+
   (1) The trust assumption is that the Sequencer is honest and delivers a
   message to all designated recipients.
   (2) A recipient learns the identities of recipients on a particular message from
   a batch if it is a recipient of that message.
-  
+
   The Bob participant can decrypt the view and verify the stakeholders against the
   set of recipients on the Sequencer message. The mapping between parties and
   participants is part of the topology state on the Synchronizer and therefore the
@@ -1497,10 +1507,10 @@ Trust Assumptions
   it will not commit the view as part of phase 7. The two honest
   participants Alice and Bob thereby do not commit this invalid view to their
   ledger.
-  
+
   Scenario 3: All other participants dishonest
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   It is not required that the other participants besides Alice are honest. Let's
   consider a variation of the previous scenario where both the submitter and Bob
   are dishonest. Alice's Participant Node is not a recipient of a view
@@ -1509,10 +1519,10 @@ Trust Assumptions
   seen it. Bob's participant is dishonest and approves and commits the view,
   although it is malformed. However, the Canton protocol does not provide any
   guarantees on the ledger of dishonest participants.
-  
+
   Scenario 4: Invalid encryption of view
   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  
+
   A view is encrypted with a symmetric key and the secret to derive the symmetric
   key for a view is encrypted with another symmetric key (i.e. a session key).
   This short-lived session key is encrypted for each recipient of the view
@@ -1521,17 +1531,17 @@ Trust Assumptions
   recipient list of the corresponding Sequencer message, but encrypts the
   session key for Alice with an invalid key. Alice's participant will be
   notified about the view but unable to decrypt it.
-  
+
   Mitigation
   """"""""""
-  
+
   If the Alice participant is a confirmer of the invalid encrypted view, which is
   the default confirmation policy for signatories, then she will reject the view
   because it is malformed and cannot be decrypted by her.
-  
+
   Currently the check by the other honest Participant Nodes that the symmetric key
   secret is actually encrypted with the public keys of the other recipients is
   missing and a documented limitation. We need to use a deterministic encryption
   scheme to make the encryption verifiable, which is currently not implemented.
-  
-  
+
+

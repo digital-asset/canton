@@ -271,7 +271,12 @@ class ParticipantRepairAdministration(
       |the synchronizer where the contract is assigned to, the whole import process
       |fails depending on the value of `contractImportMode`.
       |
-      |By default `contractImportMode` is set to `ContractImportMode.Validation`.
+      |This operation assumes the provided snapshot file (located at `importFilePath`)
+      |contains the complete and untampered ACS originating from a trusted source participant.
+      |Because the target participant cannot independently verify the historical provenance
+      |of the imported contracts, validation is performed on a best-effort basis,
+      |even if `contractImportMode` is `Validation`.
+      |Use only when the provided snapshot file comes from a known, trusted authority.
       |
       |Expert only: As validation of contract IDs may lengthen the import significantly,
       |you have the option to simply accept the contract IDs as they are using the
@@ -552,5 +557,28 @@ class ParticipantRepairAdministration(
             )
         )
       }
+    }
+
+  @Help.Summary("""Delete a synchronizer configuration""")
+  @Help.Description(
+    """The synchronizer configuration to be deleted is uniquely specified by
+      |the physicalSynchronizerId.
+      |
+      |WARNING: This command should not be executed under normal operational circumstances.
+      |In rare occasions, it can be necessary to bring the synchronizer configuration into
+      |a consistent state by deleting a configuration (for example, after a failed LSU attempt
+      |with the wrong successor synchronizer id).
+      |
+      |Parameters:
+      |- physicalSynchronizerId: the physical synchronizer id of the synchronizer"""
+  )
+  def delete_synchronizer_config(physicalSynchronizerId: PhysicalSynchronizerId): Unit =
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run(
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement
+            .DeleteSynchronizerConfig(physicalSynchronizerId)
+        )
+      )
     }
 }

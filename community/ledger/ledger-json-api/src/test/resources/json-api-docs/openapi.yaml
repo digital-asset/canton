@@ -2211,6 +2211,7 @@ paths:
     post:
       description: |-
         Execute a prepared submission _asynchronously_ on the ledger.
+        Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
         Requires a signature of the transaction from the submitting external party.
       operationId: postV2Interactive-submissionExecute
       requestBody:
@@ -2243,10 +2244,8 @@ paths:
       - apiKeyAuth: []
   /v2/interactive-submission/executeAndWait:
     post:
-      description: |-
-        Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-        IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-        A malicious node could make a successfully committed request appeared failed and vice versa
+      description: Similar to ExecuteSubmission but _synchronously_ wait for the completion
+        of the transaction
       operationId: postV2Interactive-submissionExecuteandwait
       requestBody:
         content:
@@ -2278,10 +2277,8 @@ paths:
       - apiKeyAuth: []
   /v2/interactive-submission/executeAndWaitForTransaction:
     post:
-      description: |-
-        Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-        IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-        A malicious node could make a successfully committed request appear as failed and vice versa
+      description: Similar to ExecuteSubmissionAndWait but additionally returns the
+        transaction
       operationId: postV2Interactive-submissionExecuteandwaitfortransaction
       requestBody:
         content:

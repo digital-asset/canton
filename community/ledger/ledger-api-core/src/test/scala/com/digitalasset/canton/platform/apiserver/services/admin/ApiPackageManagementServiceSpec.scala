@@ -207,9 +207,8 @@ object ApiPackageManagementServiceSpec {
 
     override def prune(
         pruneUpToInclusive: Offset,
-        submissionId: SubmissionId,
         safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-    ): Future[PruningResult] =
+    )(implicit traceContext: TraceContext): Future[PruningResult] =
       throw new UnsupportedOperationException()
 
     override def computePartyVettingMap(

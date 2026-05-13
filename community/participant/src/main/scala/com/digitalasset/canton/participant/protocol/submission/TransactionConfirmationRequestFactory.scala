@@ -345,6 +345,7 @@ class TransactionConfirmationRequestFactory(
           }
       }
 
+      @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
       def createOpenEnvelopes(
           lightTreesByRecipients: Seq[(Recipients, NonEmpty[Seq[LightTransactionViewTree]])]
       ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[

@@ -8,7 +8,6 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.crypto.Hash.HashingMethod.UpgradeFriendly
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
 
@@ -153,8 +152,7 @@ sealed trait CantonContractIdV2Version extends CantonContractIdVersion {
   def versionPrefixBytesAbsolute: Bytes
   override type AuthenticationData = ContractAuthenticationDataV2
 
-  // TODO(#23969) review hashing method for V2
-  override def contractHashingMethod: LfHash.HashingMethod = UpgradeFriendly
+  override def contractHashingMethod: LfHash.HashingMethod = LfHash.HashingMethod.TypedNormalForm
 }
 
 case object CantonContractIdV2Version0 extends CantonContractIdV2Version {

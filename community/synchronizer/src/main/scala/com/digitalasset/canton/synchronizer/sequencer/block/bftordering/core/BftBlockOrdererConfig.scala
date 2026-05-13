@@ -154,6 +154,7 @@ import scala.concurrent.duration.*
   *   execution context as the sequencer.
   */
 final case class BftBlockOrdererConfig(
+    segmentLengthForPv34: Option[Long] = None,
     maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
     // TODO(#24184) make a dynamic sequencing parameter

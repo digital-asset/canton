@@ -153,7 +153,7 @@ class ProtocolConverters(
                 jsonArgsValue = cmd.choiceArgument,
               )
             contractKey <-
-              schemaProcessors.contractArgFromJsonToProto(
+              schemaProcessors.keyArgFromJsonToProto(
                 template = cmd.templateId.withDecodingPackageId,
                 jsonArgsValue = cmd.contractKey,
               )

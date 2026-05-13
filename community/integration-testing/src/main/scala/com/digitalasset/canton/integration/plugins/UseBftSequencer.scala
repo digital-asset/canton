@@ -103,7 +103,7 @@ final class UseBftSequencer(
             synchronizer.synchronizerId,
             DynamicSequencingParameters(Option(sequencingParametersByteString))(
               DynamicSequencingParameters.protocolVersionRepresentativeFor(
-                sequencingParameters.representativeProtocolVersion.representative
+                synchronizer.staticSynchronizerParameters.protocolVersion
               )
             ),
           ),

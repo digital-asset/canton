@@ -202,7 +202,7 @@ private[canton] class DummyCopyTopologyStore(
   override def bulkInsert(initialSnapshot: GenericStoredTopologyTransactions)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = ???
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = ???
   override def inspect(

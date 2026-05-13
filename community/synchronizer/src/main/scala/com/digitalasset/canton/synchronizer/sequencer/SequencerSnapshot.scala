@@ -14,6 +14,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationBySender,
   AggregationId,
   AggregationRule,
+  LegacyUseMemberIdsAsEligibleMembers,
 }
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -171,7 +172,8 @@ object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, P
       for {
         aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
         aggregationRule <- ProtoConverter.parseRequired(
-          AggregationRule.fromProtoV30(expectedProtocolVersion, _),
+          AggregationRule
+            .fromProtoV30(LegacyUseMemberIdsAsEligibleMembers(expectedProtocolVersion), _),
           "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",
           aggregationRuleP,
         )

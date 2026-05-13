@@ -29,7 +29,7 @@ message EnvelopeWithoutRecipients {
 //  - Added the "compressed_recipients" field (which has been removed from Envelope)
 //  - Removed the "Batch" type. We store envelopes directly now in the "compressed_envelopes" field
 message CompressedBatch {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   v30.CompressedBatch.CompressionAlgorithm algorithm = 1;
 
@@ -49,7 +49,7 @@ message CompressedBatch {
 //  - Replaced the type for "batch" (from v30 to v31)
 //  - Removed the reserved (unused) field
 message SequencedEvent {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   // The timestamp of the previous event of the member's event sequence.
   // in microseconds of UTC time since Unix epoch
@@ -88,7 +88,7 @@ message SequencedEvent {
 // Compared to v30:
 //  - Replaced the type for "batch" (from v30 to v31)
 message SubmissionRequest {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   // Sender of the request.
   // This request must be wrapped in a SignedContent and

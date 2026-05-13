@@ -50,7 +50,7 @@ trait SchemaProcessors {
 
   def keyArgFromJsonToProto(
       template: v2.value.Identifier,
-      protoArgs: ujson.Value,
+      jsonArgsValue: ujson.Value,
   )(implicit
       traceContext: TraceContext
   ): Future[v2.value.Value]

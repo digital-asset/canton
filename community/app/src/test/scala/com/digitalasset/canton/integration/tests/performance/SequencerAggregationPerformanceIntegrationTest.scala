@@ -234,8 +234,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
         if (racyTopologyStateCrashRecovery) {
-          (1 to 3).foreach { idx =>
-            val threshold = 2 + idx % 3
+          Seq(2, 1, 4, 1, 3).foreach { threshold =>
             logger.info("Testing with threshold " + threshold)
             adjustMediatorThreshold(PositiveInt.tryCreate(threshold))
             val p1Runner = runners.headOption.value
@@ -293,6 +292,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             "SUBMISSION_SYNCHRONIZER_NOT_READY",
             "No connection available",
             "Is the server running",
+            "Connection is not started",
           ),
           Seq(),
         )

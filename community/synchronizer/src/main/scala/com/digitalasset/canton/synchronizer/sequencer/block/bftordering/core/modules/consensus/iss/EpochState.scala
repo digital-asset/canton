@@ -217,6 +217,7 @@ class EpochState[E <: Env[E]](
       lastBlockCommitMessagesOption = Some(commitCertificate.commits)
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
   private def sendMessageToSegmentModules(
       msg: ConsensusSegment.ConsensusMessage
   )(implicit traceContext: TraceContext): Unit =

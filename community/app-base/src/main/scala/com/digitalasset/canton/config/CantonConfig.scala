@@ -104,6 +104,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuRepair,
   LsuSequencingBoundsOverride,
   RemoteSequencerConfig,
+  SequencerLsuConfig,
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
   SequencerNodeParameters,
@@ -546,6 +547,9 @@ final case class CantonConfig(
           sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
         disableSubmissionChecksForTesting =
           sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
+        lsuConfig = sequencerNodeConfig.parameters.lsu,
+        disableReleaseVersionHandshakeCheck =
+          sequencerNodeConfig.parameters.disableReleaseVersionHandshakeCheck,
       )
 
     }
@@ -769,6 +773,9 @@ object CantonConfig {
           .flatMap(duration => config.PositiveDurationSeconds.fromDuration(duration).leftMap(err))
       }
 
+    lazy implicit final val exponentialBackoffConfigReader: ConfigReader[ExponentialBackoffConfig] =
+      deriveReader[ExponentialBackoffConfig]
+
     object Crypto {
 
       lazy implicit final val cryptoSigningAlgorithmSpecReader: ConfigReader[SigningAlgorithmSpec] =
@@ -801,8 +808,6 @@ object CantonConfig {
       lazy implicit final val cryptoProviderReader: ConfigReader[CryptoProvider] =
         deriveEnumerationReader[CryptoProvider]
 
-      implicit val kmsBackoffConfigReader: ConfigReader[ExponentialBackoffConfig] =
-        deriveReader[ExponentialBackoffConfig]
       implicit val kmsRetryConfigReader: ConfigReader[KmsConfig.RetryConfig] =
         deriveReader[KmsConfig.RetryConfig]
 
@@ -1235,6 +1240,8 @@ object CantonConfig {
         : ConfigReader[TimeAdvancingTopologyConfig] =
       deriveReader[TimeAdvancingTopologyConfig]
 
+    lazy implicit final val lsuConfigConfigReader: ConfigReader[SequencerLsuConfig] =
+      deriveReader[SequencerLsuConfig]
     lazy implicit final val lsuRepairConfigReader: ConfigReader[LsuRepair] = deriveReader[LsuRepair]
 
     lazy implicit final val lsuSequencingBoundsOverrideConfigReader
@@ -1494,6 +1501,7 @@ object CantonConfig {
         deriveReader[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig]
+      implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
       implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig]
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
@@ -2033,6 +2041,11 @@ object CantonConfig {
       implicit val lsuSequencingBoundsOverrideConfigWriter
           : ConfigWriter[LsuSequencingBoundsOverride] =
         deriveWriter[LsuSequencingBoundsOverride]
+
+      implicit val exponentialBackoffConfigWriter: ConfigWriter[ExponentialBackoffConfig] =
+        deriveWriter[ExponentialBackoffConfig]
+      implicit val lsuConfigConfigWriter: ConfigWriter[SequencerLsuConfig] =
+        deriveWriter[SequencerLsuConfig]
       implicit val lsuRepairConfigWriter: ConfigWriter[LsuRepair] = deriveWriter[LsuRepair]
 
       deriveWriter[SequencerNodeParameterConfig]
@@ -2187,6 +2200,7 @@ object CantonConfig {
         deriveWriter[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsConfigWriter: ConfigWriter[ReassignmentsConfig] =
         deriveWriter[ReassignmentsConfig]
+      implicit val purgeWriter: ConfigWriter[PurgeConfig] = deriveWriter[PurgeConfig]
       implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }

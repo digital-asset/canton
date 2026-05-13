@@ -74,11 +74,6 @@ object Symbolic {
       keyId: KeyId,
       maintainers: PartySet,
   ) extends Action
-  final case class LookupByKey(
-      contractId: Option[ContractId],
-      keyId: KeyId,
-      maintainers: PartySet,
-  ) extends Action
   final case class QueryByKey(
       contractIds: BoundedContractIdList,
       keyId: KeyId,

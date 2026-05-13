@@ -35,7 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
   TopologyTransaction,
 }
-import com.digitalasset.canton.util.GrpcStreamingUtils
+import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -43,7 +43,7 @@ import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, InputStream}
 import java.time.Instant
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -555,6 +555,11 @@ object TopologyAdminCommands {
             StoredTopologyTransactions.fromProtoV30(collection).leftMap(_.toString)
           }
     }
+
+    @deprecated(
+      "Use ExportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ExportTopologySnapshot(
         observer: StreamObserver[ExportTopologySnapshotResponse],
         query: BaseQuery,
@@ -845,6 +850,10 @@ object TopologyAdminCommands {
       ): Either[String, Unit] =
         Either.unit
     }
+    @deprecated(
+      "Use ImportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ImportTopologySnapshot(
         topologySnapshot: ByteString,
         store: TopologyStoreId,
@@ -886,36 +895,34 @@ object TopologyAdminCommands {
     }
 
     final case class ImportTopologySnapshotV2(
-        topologySnapshot: ByteString,
+        topologySnapshotStream: InputStream,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
     ) extends BaseWriteCommand[
-          ImportTopologySnapshotV2Request,
+          Unit,
           ImportTopologySnapshotV2Response,
           Unit,
         ] {
-      override protected def createRequest(): Either[String, ImportTopologySnapshotV2Request] =
-        Right(
-          ImportTopologySnapshotV2Request(
-            topologySnapshot,
-            Some(store.toProtoV30),
-            waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
-          )
-        )
+      override protected def createRequest(): Either[String, Unit] =
+        Right(())
+
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
-          request: ImportTopologySnapshotV2Request,
+          request: Unit,
       ): Future[ImportTopologySnapshotV2Response] =
-        GrpcStreamingUtils.streamToServer(
-          service.importTopologySnapshotV2,
-          bytes =>
-            ImportTopologySnapshotV2Request(
-              ByteString.copyFrom(bytes),
-              Some(store.toProtoV30),
-              waitToBecomeEffective.map(_.toProtoPrimitive),
-            ),
-          new ByteArrayInputStream(topologySnapshot.toByteArray),
-        )
+        ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+          GrpcStreamingUtils.streamToServer(
+            service.importTopologySnapshotV2,
+            bytes =>
+              ImportTopologySnapshotV2Request(
+                ByteString.copyFrom(bytes),
+                Some(store.toProtoV30),
+                waitToBecomeEffective.map(_.toProtoPrimitive),
+              ),
+            inputStream,
+          )
+        }
+
       override protected def handleResponse(
           response: ImportTopologySnapshotV2Response
       ): Either[String, Unit] = Either.unit

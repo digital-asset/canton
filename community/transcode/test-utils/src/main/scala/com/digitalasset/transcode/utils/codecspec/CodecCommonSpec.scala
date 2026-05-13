@@ -73,7 +73,7 @@ trait CodecCommonSpec[P] extends ZIOSpecDefault:
             .zipWith(entities)(verifyRoundtrip)
             .entities
             .flatMap(t =>
-              Seq(t.payload) ++ t.key.toSeq ++ t.choices.map(_.argument) ++ t.choices.map(_.result)
+              Seq(t.payload) ++ t.key.toList ++ t.choices.map(_.argument) ++ t.choices.map(_.result)
             )
         )
       }

@@ -87,11 +87,19 @@ class DirectSequencerConnectionPool(
 
   override def nbConnections: NonNegativeInt = NonNegativeInt.one
 
-  override def getConnections(requester: String, nb: PositiveInt, exclusions: Set[SequencerId])(
-      implicit traceContext: TraceContext
+  override def getConnections(
+      requester: String,
+      nb: PositiveInt,
+      excluded: Set[SequencerId],
+      acceptableO: Option[Set[SequencerId]],
+  )(implicit
+      traceContext: TraceContext
   ): Set[SequencerConnection] = Set(directConnection)
 
-  override def getOneConnectionPerSequencer(requester: String)(implicit
+  override def getOneConnectionPerSequencer(
+      requester: String,
+      acceptableO: Option[Set[SequencerId]],
+  )(implicit
       traceContext: TraceContext
   ): Map[SequencerId, SequencerConnection] = Map(sequencerId -> directConnection)
 

@@ -10,10 +10,10 @@ import com.daml.ledger.api.v2.transaction_filter.{
   TransactionFormat,
   UpdateFormat,
 }
-import com.digitalasset.canton.crypto.{Hash, HashBuilder}
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.crypto.HashBuilder
 
 object UpdateFormatHashUtils {
+
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   def hashEventFormat[T <: HashBuilder](
       builder: T
@@ -57,5 +57,4 @@ object UpdateFormatHashUtils {
         hashTransactionFormat,
       )
 
-  def toChecksum(hash: Hash): ByteString = hash.unwrap.substring(0, 4)
 }

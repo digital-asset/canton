@@ -19,7 +19,10 @@ service TopologyManagerWriteService {
 
   rpc AddTransactions(AddTransactionsRequest) returns (AddTransactionsResponse);
 
-  rpc ImportTopologySnapshot(stream ImportTopologySnapshotRequest) returns (ImportTopologySnapshotResponse);
+  // Deprecated in favor of ImportTopologySnapshotV2
+  rpc ImportTopologySnapshot(stream ImportTopologySnapshotRequest) returns (ImportTopologySnapshotResponse) {
+    option deprecated = true;
+  }
   rpc ImportTopologySnapshotV2(stream ImportTopologySnapshotV2Request) returns (ImportTopologySnapshotV2Response);
 
   rpc SignTransactions(SignTransactionsRequest) returns (SignTransactionsResponse);

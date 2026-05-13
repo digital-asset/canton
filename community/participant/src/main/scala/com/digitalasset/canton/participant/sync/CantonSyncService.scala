@@ -79,6 +79,7 @@ import com.digitalasset.canton.participant.protocol.submission.routing.{
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Active
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.FinishAutomaticLsuRequest
@@ -501,20 +502,16 @@ class CantonSyncService(
 
   override def prune(
       pruneUpToInclusive: Offset,
-      submissionId: LedgerSubmissionId,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-  ): Future[PruningResult] =
-    withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
-      span.setAttribute("submission_id", submissionId)
-      pruneInternally(pruneUpToInclusive, safeToPruneCommitmentState)
-        .fold(
-          err => PruningResult.NotPruned(err.asGrpcStatus),
-          _ => PruningResult.ParticipantPruned,
-        )
-        .onShutdown(
-          PruningResult.NotPruned(GrpcErrors.AbortedDueToShutdown.Error().asGrpcStatus)
-        )
-    }
+  )(implicit traceContext: TraceContext): Future[PruningResult] =
+    pruneInternally(pruneUpToInclusive, safeToPruneCommitmentState)
+      .fold(
+        err => PruningResult.NotPruned(err.asGrpcStatus),
+        _ => PruningResult.ParticipantPruned,
+      )
+      .onShutdown(
+        PruningResult.NotPruned(GrpcErrors.AbortedDueToShutdown.Error().asGrpcStatus)
+      )
 
   def pruneInternally(
       pruneUpToInclusive: Offset,
@@ -993,7 +990,7 @@ class CantonSyncService(
         }
     } yield ()
 
-  /** Modifies the settings of the synchronizer connection
+  /** Modifies the settings of an active synchronizer connection
     *
     * @param psidO
     *   If empty, the request will update the single active connection for the alias in `config`
@@ -1008,7 +1005,22 @@ class CantonSyncService(
       _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
 
       connectionIdToUpdateE = psidO match {
-        case Some(psid) => KnownPhysicalSynchronizerId(psid).asRight[SyncServiceError]
+        case Some(psid) =>
+          for {
+            configForPsid <- synchronizerConnectionConfigStore
+              .get(psid)
+              .leftMap(_ =>
+                SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId(psid)
+              )
+            _ <- Either.cond(
+              configForPsid.status != Active,
+              (),
+              SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(
+                configForPsid.config.synchronizerAlias,
+                Seq(configForPsid.configuredPsid -> configForPsid.status),
+              ),
+            )
+          } yield KnownPhysicalSynchronizerId(psid)
         case None =>
           synchronizerConnectionConfigStore
             .getActive(config.synchronizerAlias)
@@ -1027,22 +1039,11 @@ class CantonSyncService(
             .Error(config.synchronizerAlias): SyncServiceError
         )
 
-      // Try to retrieve and store missing sequencer ids
-      _ <- connectionIdToUpdate.toOption
-        .traverse_(connectionsManager.retrieveAndStoreMissingSequencerIds)
-        .leftMap(err =>
-          SyncServiceError.SyncServiceInternalError
-            .Failure(
-              config.synchronizerAlias.toString,
-              new RuntimeException(s"Unable to retrieve and store missing sequencer ids: $err"),
-            )
-        )
-
       // If successor exists, will ensure that connections are updated (e.g., if sequencers are added or removed)
       _ <- EitherT.liftF(
         connectionIdToUpdate.toOption
           .flatMap(connectedSynchronizersLookup.get)
-          .traverse_(_.sequencerConnectionListener.init())
+          .traverse_(_.sequencerConnectionListener.checkAndCreateSynchronizerConfig())
       )
     } yield ()
 
@@ -1196,7 +1197,6 @@ class CantonSyncService(
         metrics,
         pendingLsuOperationsStore,
         parameters.lsuConfig,
-        timeouts,
         loggerFactory.append("lsu", finishLsuRequest.successorPsid.suffix),
       )(finishLsuRequest)
 
@@ -1481,6 +1481,9 @@ class CantonSyncService(
       _ <- synchronizerConnectionConfigStore.refreshCache()
       _ <- resourceManagementService.refreshCache()
     } yield ()
+
+  def clearCaches()(implicit traceContext: TraceContext): Unit =
+    synchronizerConnectionConfigStore.clearCache()
 
   override def onClosed(): Unit = {
     val instances = Seq(

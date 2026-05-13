@@ -422,7 +422,7 @@ class BlockUpdateGeneratorImpl(
                 // DABFT assigns monotonically increasing timestamps to all ordered requests, including acks,
                 //  but the sequencer does not (because acks are not events), so if an epoch ends with an ack and
                 //  DABFT expects a tick at a certain timestamp to be able to query a topology snapshot and
-                //  establish the ordering topology fot the next epoch, we must make sure that sequencing time advances
+                //  establish the ordering topology for the next epoch, we must make sure that sequencing time advances
                 //  at least until that timestamp, else the topology snapshot query could get stuck and the system
                 //  could deadlock.
                 tickAtLeastAt = state.lastChunkTs

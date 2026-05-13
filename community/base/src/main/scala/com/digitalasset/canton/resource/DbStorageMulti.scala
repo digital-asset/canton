@@ -19,12 +19,13 @@ import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.DbStorageMetrics
+import com.digitalasset.canton.resource.DbStorage.DatabaseFailureDurationTracker
 import com.digitalasset.canton.resource.DbStorage.DbAction.{All, ReadTransactional}
 import com.digitalasset.canton.resource.DbStorageMulti.passiveInstanceHealthState
 import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration, WallClock}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, LoggerUtil}
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.SimpleJdbcAction
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, QueryCostTrackerImpl}
@@ -48,6 +49,7 @@ final class DbStorageMulti private (
     val dbConfig: DbConfig,
     onActive: TracedLogger => FutureUnlessShutdown[Unit],
     onPassive: TracedLogger => FutureUnlessShutdown[Unit],
+    mustStayActive: Boolean,
     checkPeriod: PositiveFiniteDuration,
     clock: Clock,
     closeClock: Boolean,
@@ -71,12 +73,57 @@ final class DbStorageMulti private (
     if (active.get()) ComponentHealthState.Ok()
     else passiveInstanceHealthState
 
+  private val databaseConnectionFailureDurationTracker =
+    new DatabaseFailureDurationTracker(
+      dbConfig.parameters.failedToFatalDelay.asJavaApproximation,
+      logger,
+    )
+
+  private val passiveConnectionFailureDurationTracker =
+    new DatabaseFailureDurationTracker(
+      writeConnectionPool.config.activeTimeout.asJavaApproximation,
+      logger,
+      failureLogMessage = (
+          timeWhenFailureStarted,
+          failureDuration,
+      ) =>
+        s"Connection to the database has been passive since $timeWhenFailureStarted (${LoggerUtil.roundDurationForHumans(failureDuration)} ago)",
+    )
+
   private def checkHealth(now: CantonTimestamp): Unit =
     TraceContext.withNewTraceContext("db_health") { implicit traceContext =>
       synchronizeWithClosingSync(functionFullName) {
         logger.trace(s"Checking storage health at $now")
 
-        val connectionPoolActive = writeConnectionPool.isActive
+        val status = writeConnectionPool.mainConnectionStatus
+
+        val connectionPoolActive = if (mustStayActive) {
+          // If mustStayActive is on, it means that when this storage goes passive, it crashes (calling onPassive crashes the process).
+          // However, losing the connection to the database should still be allowed, such as when restarting the database.
+          // Thus, the node remains active for quite some time, even after the connection is initially lost.
+          // The node has failedToFatalDelay minutes to reconnect to the database. During this time, it will report as unhealthy.
+          // If it doesn't re-connect after that time it will switch its health to fatal (and typically will have to be restarted).
+          // If the connection is re-established within the failedToFatalDelay timeout, there is still work to do.
+          // The node might not immediately have acquired the lock, even if the lock is available (no other process has it).
+          // Then it has some seconds (activeTimeout) to see that it has the active lock.
+          // If that time elapses, and it still does not acquire the lock,
+          // only then it will switch to passive and call onPassive which will cause the node to crash.
+          reportStorageHealth(status, now) // report health based on db connectivity
+          status match {
+            case Left(DbLockedConnectionError.DbConnectionNotAvailable(_)) =>
+              passiveConnectionFailureDurationTracker.reset()
+              active.get() // if the database connection is simply lost, that won't change the activeness of this node.
+            case _ =>
+              if (!writeConnectionPool.isActive) {
+                // allow some time to acquire the lock after reconnecting
+                !passiveConnectionFailureDurationTracker.failureDurationExceededDelay(now)
+              } else {
+                passiveConnectionFailureDurationTracker.reset()
+                true
+              }
+          }
+        } else writeConnectionPool.isActive
+
         val activeOrPassive = if (connectionPoolActive) "active" else "passive"
         if (active.compareAndSet(!connectionPoolActive, connectionPoolActive)) {
           logger.debug(
@@ -121,6 +168,26 @@ final class DbStorageMulti private (
       "failed to schedule next health check",
       closeContext = Some(closeContext),
     )
+  }
+
+  private def reportStorageHealth(
+      mainConnectionStatus: Either[DbLockedConnectionError, KeepAliveConnection],
+      now: CantonTimestamp,
+  )(implicit tc: TraceContext): Unit = {
+    val lostConnection = mainConnectionStatus match {
+      case Left(DbLockedConnectionError.DbConnectionNotAvailable(_)) => true
+      case _ => false
+    }
+    if (lostConnection) {
+      if (databaseConnectionFailureDurationTracker.failureDurationExceededDelay(now)) {
+        fatalOccurred(
+          s"Storage failed for more than ${LoggerUtil.roundDurationForHumans(dbConfig.parameters.failedToFatalDelay.asJavaApproximation)}"
+        )
+      } else failureOccurred("Storage connection lost")
+    } else {
+      databaseConnectionFailureDurationTracker.reset()
+      resolveUnhealthy()
+    }
   }
 
   // Run the initial health check
@@ -314,6 +381,7 @@ object DbStorageMulti {
         dbConfig,
         onActive,
         onPassive,
+        mustStayActive,
         writeConnectionPoolConfig.healthCheckPeriod.toInternal,
         clock,
         closeClock = customClock.isEmpty,

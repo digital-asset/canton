@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.data.ActionDescription
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.Stage
@@ -17,6 +16,9 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil, LfTransactionUtil}
 import com.digitalasset.canton.{LfPartyId, checked, protocol}
 import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.transaction.SerializationVersion
+import com.digitalasset.daml.lf.value.{Value, ValueCoder}
+import com.google.common.annotations.VisibleForTesting
 import monocle.macros.syntax.lens.*
 
 import scala.collection.immutable.HashMap
@@ -403,28 +405,51 @@ object WellFormedTransaction {
     } yield ()
   }
 
-  private def checkSerialization(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] =
-    tx.nodes.to(LazyList).traverse_ {
-      case (nodeId, create: LfNodeCreate) =>
-        Checked.fromEitherNonabort(())(
-          SerializableRawContractInstance
-            .create(create.versionedCoinst)
-            .leftMap(err =>
-              show"unable to serialize contract instance in node $nodeId: ${err.errorMessage.unquoted}"
-            )
-            .void
-        )
-      case (nodeId, exercise: LfNodeExercises) =>
-        Checked.fromEitherNonabort(())(
-          ActionDescription
-            .serializeChosenValue(exercise.versionedChosenValue)
-            .leftMap(err => show"unable to serialize chosen value in node $nodeId: ${err.unquoted}")
-            .void
-        )
-      case (_, _: LfNodeFetch) => Checked.result(())
-      case (_, _: LfNodeQueryByKey) => Checked.result(())
-      case (_, _: LfNodeRollback) => Checked.result(())
+  private def checkKeyEncoding(
+      nodeId: LfNodeId,
+      version: SerializationVersion,
+      key: Option[LfGlobalKeyWithMaintainers],
+  ): Either[String, Unit] =
+    key match {
+      case None => Either.unit
+      case Some(LfGlobalKeyWithMaintainers(gk, _)) =>
+        checkValueEncoding(nodeId, version, gk.key, "key")
     }
+
+  private def checkValueEncoding(
+      nodeId: LfNodeId,
+      version: SerializationVersion,
+      value: Value,
+      valueType: String = "value",
+  ): Either[String, Unit] =
+    ValueCoder
+      .encodeValue(version, value)
+      .void
+      .leftMap(err => s"unable to encode $valueType for $nodeId: ${err.errorMessage}")
+
+  private def checkSerialization(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] =
+    Checked.fromEitherNonabort(())(tx.nodes.to(LazyList).traverse_ {
+      case (nodeId, create: LfNodeCreate) =>
+        for {
+          _ <- checkValueEncoding(nodeId, create.version, create.arg)
+          _ <- checkKeyEncoding(nodeId, create.version, create.keyOpt)
+        } yield ()
+
+      case (nodeId, exercise: LfNodeExercises) =>
+        for {
+          _ <- checkValueEncoding(nodeId, exercise.version, exercise.chosenValue)
+          _ <- checkKeyEncoding(nodeId, exercise.version, exercise.keyOpt)
+        } yield ()
+
+      case (nodeId, fetch: LfNodeFetch) =>
+        checkKeyEncoding(nodeId, fetch.version, fetch.keyOpt)
+
+      case (nodeId, query: LfNodeQueryByKey) =>
+        checkKeyEncoding(nodeId, query.version, query.keyOpt)
+
+      case (_, _: LfNodeRollback) =>
+        Either.unit
+    })
 
   private def checkPartyNames(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {
     val lfPartyIds = mutable.HashSet.empty[LfPartyId]
@@ -513,6 +538,14 @@ object WellFormedTransaction {
   ): WellFormedTransaction[S] =
     check(lfTransaction, metadata, state)
       .valueOr(err => throw new IllegalArgumentException(err))
+
+  /** For security testing only. DO NOT USE IN PRODUCTION!
+    */
+  @VisibleForTesting
+  def createUnsafe[S <: Stage](
+      tx: LfVersionedTransaction,
+      metadata: TransactionMetadata,
+  ): WellFormedTransaction[S] = WellFormedTransaction(tx, metadata)
 
   /** Merges a list of well-formed transactions into one, adjusting node IDs as necessary.
     *

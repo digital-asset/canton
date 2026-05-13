@@ -31,8 +31,6 @@ object Implicits {
           0
         case _: Skeleton.FetchByKey =>
           0
-        case _: Skeleton.LookupByKey =>
-          0
         case _: Skeleton.QueryByKey =>
           0
       }
@@ -64,8 +62,6 @@ object Implicits {
           0
         case _: Skeleton.FetchByKey =>
           0
-        case _: Skeleton.LookupByKey =>
-          0
       }
 
       def numNonExhaustiveQueryByKeyCommand(command: Skeleton.Command): Int =
@@ -90,8 +86,6 @@ object Implicits {
         case _: Skeleton.Fetch =>
           0
         case _: Skeleton.FetchByKey =>
-          0
-        case _: Skeleton.LookupByKey =>
           0
         case _: Skeleton.QueryByKey =>
           0
@@ -123,8 +117,6 @@ object Implicits {
         case _: Symbolic.Fetch =>
           0
         case _: Symbolic.FetchByKey =>
-          0
-        case _: Symbolic.LookupByKey =>
           0
         case _: Symbolic.QueryByKey =>
           0
@@ -159,7 +151,7 @@ object Implicits {
           subTransaction.flatMap(fromAction)
         case Concrete.Rollback(subTransaction) => subTransaction.flatMap(fromAction)
         case _: Concrete.Create | _: Concrete.CreateWithKey | _: Concrete.Fetch |
-            _: Concrete.FetchByKey | _: Concrete.LookupByKey =>
+            _: Concrete.FetchByKey =>
           Nil
       }
       tx.flatMap(fromAction)

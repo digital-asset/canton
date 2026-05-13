@@ -206,8 +206,6 @@ final case class RemoteParticipantConfig(
   *   config for ledger api server when using postgres
   * @param databaseConnectionTimeout
   *   database connection timeout
-  * @param initSyncTimeout
-  *   ledger api server startup delay
   * @param indexService
   *   configurations pertaining to the ledger api server's internal "index service"
   * @param commandService
@@ -262,7 +260,7 @@ final case class LedgerApiServerConfig(
       InteractiveSubmissionServiceConfig.Default,
     topologyAwarePackageSelection: TopologyAwarePackageSelectionConfig =
       TopologyAwarePackageSelectionConfig.Default,
-    maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(5.minutes),
+    maxTokenLifetime: config.NonNegativeDuration = config.NonNegativeDuration(5.minutes),
     jwksCacheConfig: JwksCacheConfig = JwksCacheConfig(),
     limits: Option[ActiveRequestLimitsConfig] = None,
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
@@ -310,12 +308,6 @@ object TestingTimeServiceConfig {
   *
   * @param adminWorkflow
   *   Configuration options for Canton admin workflows
-  * @param partyChangeNotification
-  *   Determines how eagerly the participant nodes notify the ledger api of party changes. By
-  *   default ensure that parties are added via at least one synchronizer before ACKing party
-  *   creation to ledger api server indexer. This not only avoids flakiness in tests, but reflects
-  *   that a party is not actually usable in canton until it's available through at least one
-  *   synchronizer.
   * @param maxUnzippedDarSize
   *   maximum allowed size of unzipped DAR files (in bytes) the participant can accept for
   *   uploading. Defaults to 1GB.
@@ -329,9 +321,6 @@ object TestingTimeServiceConfig {
   * @param minimumProtocolVersion
   *   The minimum protocol version that this participant will speak when connecting to a
   *   synchronizer
-  * @param initialProtocolVersion
-  *   The initial protocol version used by the participant (default latest), e.g., used to create
-  *   the initial topology transactions.
   * @param alphaVersionSupport
   *   If set to true, will allow the participant to connect to a synchronizer with dev protocol
   *   version and will turn on unsafe Daml LF versions.
@@ -352,10 +341,8 @@ object TestingTimeServiceConfig {
   *   are logged as warning instead.
   * @param packageMetadataView
   *   Initialization parameters for the package metadata in-memory store.
-  * @param automaticallyPerformLsu
-  *   Whether the participant automatically performs a handshake with the upgraded synchronizer
-  *   after receiving enough sequencer connections, and whether the participants automatically
-  *   connects to the synchronizer after the upgrade time.
+  * @param alphaOnlinePartyReplicationSupport
+  *   Enables online party replication. DO NOT ENABLE IN PRODUCTION!
   * @param activationFrequencyForWarnAboutConsistencyChecks
   *   controls how often warning messages about
   *   [[com.digitalasset.canton.config.CantonParameters.enableAdditionalConsistencyChecks]] being
@@ -445,6 +432,11 @@ final case class ParticipantNodeParameterConfig(
   * @param handshakeRetry
   *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
   *   handshake runs as a non-urgent background task.
+  * @param sequencerIdsRetrievalRetry
+  *   Config for the retries of the task that fetches the sequencer ids.
+  * @param purgeObsoleteTopology
+  *   Config for purging of the topology store of the old physical synchronizer id, after the LSU is
+  *   complete.
   */
 final case class LsuConfig(
     // TODO(#25344): check whether this should be removed
@@ -459,7 +451,36 @@ final case class LsuConfig(
       maxDelay = config.NonNegativeDuration.ofMinutes(5),
       maxRetries = Int.MaxValue,
     ),
+    sequencerIdsRetrievalRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofSeconds(10),
+      maxDelay = config.NonNegativeDuration.ofSeconds(30),
+      maxRetries = Int.MaxValue,
+    ),
+    purgeObsoleteTopology: Option[PurgeConfig] = None,
 )
+
+/** Control incremental purges
+  *
+  * @param chunkSize
+  *   The amount of data that should be removed per purge iteration
+  * @param cron
+  *   A cron expression, definining when the purges can take place
+  * @param maxDuration
+  *   Once triggered, the amount of time to repeatedly purge chunks, before having to wait for the
+  *   next cron-defined trigger.
+  */
+final case class PurgeConfig(
+    chunkSize: PositiveInt = PurgeConfig.DefaultChunkSize,
+    cron: String = PurgeConfig.DefaultCron,
+    maxDuration: config.PositiveFiniteDuration = PurgeConfig.DefaultMaxDuration,
+)
+
+object PurgeConfig {
+  private val DefaultChunkSize: PositiveInt = PositiveInt.tryCreate(1000)
+  private val DefaultCron: String = "0 0 0 * * ?" // Daily on the stroke of midnight
+  private val DefaultMaxDuration: config.PositiveFiniteDuration =
+    config.PositiveFiniteDuration.ofMinutes(30)
+}
 
 /** Parameters for the participant node's stores
   *
@@ -534,7 +555,7 @@ object JournalPruningConfig {
 final case class LedgerApiServerParametersConfig(
     contractIdSeeding: Seeding = Seeding.Strong,
     indexer: IndexerConfig = IndexerConfig(),
-    tokenExpiryGracePeriodForStreams: Option[NonNegativeDuration] = None,
+    tokenExpiryGracePeriodForStreams: Option[config.NonNegativeDuration] = None,
     contractLoader: ContractLoaderConfig = ContractLoaderConfig(),
 )
 

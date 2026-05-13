@@ -123,17 +123,11 @@ final class SerializationDeserializationTest
         }
 
         test(AcknowledgeRequest, version)
-        testContext(AggregationRule, version, version)
+        testContext(AggregationRule, LegacyUseMemberIdsAsEligibleMembers(version), version)
         if (version < ProtocolVersion.v35) {
           test(ClosedUncompressedEnvelope, version)
         }
         test(SequencingSubmissionCost, version)
-        testVersioned(ContractMetadata, version)(
-          generators.protocol.contractMetadataArb(canHaveEmptyKey = true)
-        )
-        testVersioned[SerializableContract](SerializableContract, version)(
-          generators.protocol.serializableContractArb(canHaveEmptyKey = true)
-        )
 
         // Merkle tree leaves
         testContext(CommonMetadata, TestHash, version)

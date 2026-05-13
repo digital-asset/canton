@@ -132,6 +132,12 @@ abstract class HealthAdministration[S <: NodeStatus.Status](
               )(TraceContext.empty)
               false
             case NodeStatus.NotInitialized(_active, waitingFor) =>
+              if (waitingFor.contains(WaitingForInitialization)) {
+                logger.warn(
+                  "Node is waiting for initialization, it will never be ready to have its id set"
+                )(TraceContext.empty)
+              }
+
               waitingFor.contains(WaitingForId)
           },
         )

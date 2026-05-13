@@ -445,6 +445,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
   def withMediatorVerdict(
       verdict: Verdict,
       senderRef: LocalInstanceReference,
+      dropAggregationRule: Boolean = false,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[ConfirmationResultMessage] =
@@ -453,6 +454,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         .andThen(GenLens[ConfirmationResultMessage](_.verdict))
         .replace(verdict)(_),
       senderRef,
+      dropAggregationRule = dropAggregationRule,
     )
 
   /** Convenience method to create a [[SignedMessageTransform]] from a [[MessageTransform]], signing
@@ -490,18 +492,23 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       senderRef: LocalInstanceReference,
       useCurrentSnapshot: Boolean = false,
       approximateTimestampForSigning: Option[CantonTimestamp] = None,
+      dropAggregationRule: Boolean = false,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[A] =
     (_, submissionRequest, synchronizerId) => {
       val (sender, syncCrypto) = senderAndCryptoFromRef(senderRef, synchronizerId)
-
-      (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
+      val modifiedMessage = (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
         .andThen(_.focus(_.sender).replace(sender))
-        // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
-        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning))(
-          submissionRequest
-        )
+      val modifiedMessage2 = if (dropAggregationRule) {
+        modifiedMessage.andThen(_.focus(_.aggregationRule).replace(None))
+      } else modifiedMessage
+      // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
+      modifiedMessage2.andThen(
+        signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning)
+      )(
+        submissionRequest
+      )
     }
 
   private def senderAndCryptoFromRef(

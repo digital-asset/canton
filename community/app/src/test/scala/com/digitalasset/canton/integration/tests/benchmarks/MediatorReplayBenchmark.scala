@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.benchmarks
 
 import better.files.File
 import com.digitalasset.canton.HasExecutionContext
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.integration.plugins.{
   PostgresDumpRestore,
@@ -23,6 +24,7 @@ import com.digitalasset.canton.integration.tests.manual.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -80,6 +82,13 @@ class MediatorReplayBenchmark
     EnvironmentDefinition.P0S1M1_Manual
       .clearConfigTransforms() // to disable globally unique ports
       .addConfigTransforms(configTransforms()*)
+      .addConfigTransform(
+        // In this benchmark we restore a postgres dump and then replay events,
+        // so a delay in processing is expected.
+        ConfigTransforms.setDelayLoggingThreshold(
+          NonNegativeFiniteDuration.tryFromDuration(30.minutes)
+        )
+      )
 
   override def afterAll(): Unit = {
     // ensure that we don't leave the replay config on the mediator class that could be erroneously picked up by other tests
@@ -101,6 +110,9 @@ class MediatorReplayBenchmark
 
     // Kick-off the replay
     sequencer1.start()
+    // ensure that the sequencer produced a block with a recent wall clock time, so that
+    // the mediator's acknowledgements aren't considered future dated because of the restore of the DB.
+    sequencer1.underlying.value.sequencer.timeTracker.awaitTick(environment.clock.now)
     mediator1.start()
 
     val lastFlushTs = new AtomicReference(Instant.now())
@@ -130,8 +142,8 @@ class MediatorReplayBenchmark
 
     val duration = JDuration.between(startTime.toInstant, lastFlushTs.get())
 
-    sequencers.local.stop()
     mediators.local.stop()
+    sequencers.local.stop()
 
     reportSummary(show"""Replayed $numberOfEvents events within $duration.
             |Duration of handover: $handoverDuration

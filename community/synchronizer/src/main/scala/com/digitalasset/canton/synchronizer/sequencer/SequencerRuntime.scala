@@ -5,12 +5,13 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
 import cats.kernel.Semigroup
+import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.SynchronizerSuccessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
@@ -61,13 +62,13 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   LsuAnnouncement,
+  LsuSequencerConnectionSuccessor,
   MediatorSynchronizerState,
   SequencerSynchronizerState,
   SynchronizerTrustCertificate,
-  TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
@@ -291,7 +292,9 @@ class SequencerRuntime(
             syncCrypto,
             clock,
             lsuSequencingBounds,
-            localNodeParameters.sanitizePublicErrorMessages,
+            sanitizePublicErrorMessages = localNodeParameters.sanitizePublicErrorMessages,
+            disableReleaseVersionHandshakeCheck =
+              localNodeParameters.disableReleaseVersionHandshakeCheck,
             metrics,
             loggerFactory,
           )(ec),
@@ -368,21 +371,24 @@ class SequencerRuntime(
         sequencerCounter: SequencerCounter,
         transactions: Seq[GenericSignedTopologyTransaction],
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-      val removeO = transactions
-        .find(tx =>
-          tx.operation == TopologyChangeOp.Remove && tx.mapping.code == Code.LsuAnnouncement
-        )
-        .map(_ => Option.empty[SynchronizerSuccessor])
-      val replaceO = transactions.collectFirst {
-        case tx
-            if tx.operation == TopologyChangeOp.Replace && tx.mapping.code == Code.LsuAnnouncement =>
-          tx.mapping.select[LsuAnnouncement].map(_.successor)
+
+      transactions.mapFilter(_.selectMapping[LsuAnnouncement]).map(_.transaction).foreach { tx =>
+        sequencer
+          .updateLsuSuccessor(
+            tx.mapping.successor,
+            effectiveTimestamp,
+            isReplace = tx.operation == Replace,
+          )
       }
-      // Some(Some(successor)) - replacement, otherwise Some(None) - removal, otherwise None - noop
-      // Replace op takes precedence over Remove op
-      replaceO
-        .orElse(removeO)
-        .foreach(sequencer.updateLsuSuccessor(_, effectiveTimestamp))
+
+      transactions
+        .mapFilter(_.selectMapping[LsuSequencerConnectionSuccessor])
+        .map(_.transaction)
+        .foreach { tx =>
+          sequencer
+            .handleLsuSequencerConnectionSuccessor(tx)
+        }
+
       FutureUnlessShutdown.unit
     }
   })
@@ -476,13 +482,26 @@ class SequencerRuntime(
         )
       _ <- synchronizerOutbox.startup()
       // Note: we use head snapshot as we want the latest announced upgrade anyway, an overlapping update is idempotent
+
       synchronizerUpgradeO <- EitherT.right(
         topologyClient.headSnapshot.announcedLsu()
       )
+
+      sequencerSuccessors <- EitherT
+        .right(synchronizerUpgradeO.traverse { case (successor, _) =>
+          topologyClient.headSnapshot.sequencerConnectionSuccessors(successorPsid = successor.psid)
+        })
+        .map(_.getOrElse(Map.empty))
+
     } yield {
       synchronizerUpgradeO.foreach { case (successor, effectiveTime) =>
-        sequencer.updateLsuSuccessor(Some(successor), effectiveTime)
+        sequencer.updateLsuSuccessor(successor, effectiveTime, isReplace = true)
       }
+
+      sequencerSuccessors
+        .get(sequencerId)
+        .foreach(sequencer.handleLsuSequencerConnectionSuccessor)
+
       logger.info("Sequencer runtime initialized")
       runtimeReadyPromise.outcome_(())
     }

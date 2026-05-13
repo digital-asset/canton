@@ -58,11 +58,11 @@ publish_release:
         steps:
           - publish_api_to_gar:
               gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
-    - unless:
+    - when:
         condition:
-          or:
-            - << parameters.is_nightly_workflow >>
-            - << parameters.is_manual >>
+          and:
+            - not: << parameters.is_nightly_workflow >>
+            - not: << parameters.is_manual >>
         steps:
           - publish_api_to_gar:
               gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven

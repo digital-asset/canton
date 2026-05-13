@@ -17,6 +17,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.util.{HexString, ResourceUtil}
 import com.digitalasset.canton.version.{CommonGenerators, HashingSchemeVersion}
+import com.digitalasset.daml.lf.transaction.SerializationVersion
 import monocle.macros.syntax.lens.*
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
@@ -31,7 +32,11 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
 
   private lazy val generators = new CommonGenerators(testedProtocolVersion)
   private lazy val generatorsInteractiveSubmission =
-    new GeneratorsInteractiveSubmission(generators.lf, generators.topology)
+    new GeneratorsInteractiveSubmission(
+      generators.lf,
+      generators.topology,
+      exclusiveMaxSerializationVersion = SerializationVersion.V2,
+    )
 
   import generatorsInteractiveSubmission.*
 
@@ -74,79 +79,97 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
     environment.writePortsFile()
   }
 
-  "run the interactive submission demo" in { implicit env =>
-    import env.*
-    setupTest
+  private val supportedHashingSchemeVersions =
+    // TODO(i32856): Remove the get / flatMap when PV Dev has a matching supported scheme
+    HashingSchemeVersion.MinimumProtocolVersionToHashingVersion
+      .get(testedProtocolVersion)
+      .toList
+      .flatMap(_.forgetNE)
 
-    runAndAssertCommandSuccess(
+  supportedHashingSchemeVersions.foreach(testExternalSubmissionDemo)
+
+  def testExternalSubmissionDemo(hashingSchemeVersion: HashingSchemeVersion): Unit = {
+    s"run the interactive submission demo ($hashingSchemeVersion)" in { implicit env =>
+      import env.*
+      setupTest
+
+      runAndAssertCommandSuccess(
+        Process(
+          Seq(
+            "python",
+            (interactiveSubmissionFolder / "interactive_submission.py").pathAsString,
+            "--synchronizer-id",
+            sequencer1.synchronizer_id.toProtoPrimitive,
+            "--participant-id",
+            participant1.id.uid.toProtoPrimitive,
+            "run-demo",
+            "--hashing-scheme-version",
+            hashingSchemeVersion.index.toString,
+            "-a", // Automatically accept all transactions (by default the script stops to ask users to explicitly confirm)
+          ),
+          cwd = interactiveSubmissionFolder.toJava,
+        ),
+        processLogger,
+      )
+    }
+
+    def hashFromExamplePythonImplementation(preparedTransaction: PreparedTransaction): String = {
+      val tempFile = File.newTemporaryFile(prefix = "prepared_transaction_proto").deleteOnExit()
+      ResourceUtil.withResource(tempFile.newFileOutputStream()) { fos =>
+        preparedTransaction.writeTo(fos)
+      }
       Process(
         Seq(
           "python",
-          (interactiveSubmissionFolder / "interactive_submission.py").pathAsString,
-          "--synchronizer-id",
-          sequencer1.synchronizer_id.toProtoPrimitive,
-          "--participant-id",
-          participant1.id.uid.toProtoPrimitive,
-          "run-demo",
-          "-a", // Automatically accept all transactions (by default the script stops to ask users to explicitly confirm)
+          "daml_transaction_util.py",
+          "--version",
+          hashingSchemeVersion.index.toString,
+          "--hash",
+          tempFile.pathAsString,
         ),
         cwd = interactiveSubmissionFolder.toJava,
-      ),
-      processLogger,
-    )
-  }
-
-  def hashFromExamplePythonImplementation(preparedTransaction: PreparedTransaction): String = {
-    val tempFile = File.newTemporaryFile(prefix = "prepared_transaction_proto").deleteOnExit()
-    ResourceUtil.withResource(tempFile.newFileOutputStream()) { fos =>
-      preparedTransaction.writeTo(fos)
+      ).!!.stripLineEnd
     }
-    Process(
-      Seq(
-        "python",
-        "daml_transaction_util.py",
-        "--hash",
-        tempFile.pathAsString,
-      ),
-      cwd = interactiveSubmissionFolder.toJava,
-    ).!!.stripLineEnd
-  }
 
-  def buildV2Hash(
-      preparedTransactionData: PrepareTransactionData,
-      hashTracer: HashTracer,
-  ) =
-    preparedTransactionData.computeHash(HashingSchemeVersion.V2, testedProtocolVersion, hashTracer)
-
-  "produce hash consistent with canton implementation" in { implicit env =>
-    import env.*
-    forAll {
-      (
+    def buildHash(
         preparedTransactionData: PrepareTransactionData,
-      ) =>
-        val hashTracer = HashTracer.StringHashTracer(traceSubNodes = true)
-        val expectedHash = buildV2Hash(
-          preparedTransactionData,
-          hashTracer,
-        )
+        hashTracer: HashTracer,
+        hashingSchemeVersion: HashingSchemeVersion,
+    ) =
+      preparedTransactionData.computeHash(hashingSchemeVersion, testedProtocolVersion, hashTracer)
 
-        val result = for {
-          encoded <- encoder.encode(
-            preparedTransactionData
-          )
-        } yield {
+    s"produce hash consistent with canton implementation ($hashingSchemeVersion)" in {
+      implicit env =>
+        import env.*
+        forAll {
+          (
+            preparedTransactionData: PrepareTransactionData,
+          ) =>
+            val hashTracer = HashTracer.StringHashTracer(traceSubNodes = true)
+            val expectedHash = buildHash(
+              preparedTransactionData,
+              hashTracer,
+              hashingSchemeVersion,
+            )
 
-          val pythonHash = hashFromExamplePythonImplementation(encoded)
-          val hashEqual = pythonHash == HexString.toHexString(expectedHash.value.unwrap)
-          if (!hashEqual) {
-            // helpful for debugging, only printed if the test fails
-            logger.debug(hashTracer.result)
-          }
-          assert(hashEqual)
-          succeed
+            val result = for {
+              encoded <- encoder.encode(
+                preparedTransactionData
+              )
+            } yield {
+
+              val pythonHash = hashFromExamplePythonImplementation(encoded)
+              val hashEqual = pythonHash == HexString.toHexString(expectedHash.value.unwrap)
+              if (!hashEqual) {
+                // helpful for debugging, only printed if the test fails
+                logger.debug(hashTracer.result)
+              }
+              assert(hashEqual)
+              succeed
+            }
+
+            timeouts.default.await_("Encoding")(result)
         }
-
-        timeouts.default.await_("Encoding")(result)
     }
   }
 

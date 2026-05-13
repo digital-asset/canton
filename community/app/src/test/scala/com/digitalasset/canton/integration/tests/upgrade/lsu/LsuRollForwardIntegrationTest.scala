@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricQualification
+import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -13,6 +14,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.error.LsuError.FailedLsu
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -27,15 +29,23 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{ConfigTransforms, *}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
+  LsuSource,
+  UnknownPsid,
+}
 import com.digitalasset.canton.sequencing.traffic.TrafficStateController
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuSequencingBoundsOverride,
   SequencerNodeConfig,
 }
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.GrpcConnection
+import com.digitalasset.canton.topology.{
+  KnownPhysicalSynchronizerId,
+  PartyId,
+  PhysicalSynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, UniquePortGenerator, config}
 import io.scalaland.chimney.dsl.*
@@ -44,6 +54,7 @@ import org.slf4j.event.Level
 
 import java.time.Duration
 import scala.annotation.nowarn
+import scala.util.Random
 import scala.util.chaining.*
 
 /*
@@ -392,23 +403,22 @@ abstract class LsuRollForwardIntegrationTest
       }
     }
 
-    "manual upgrade fails if synchronizer index is lower than upgrade time" in { implicit env =>
-      assume(isOnline)
+    "manual upgrade fails if synchronizer index is lower than upgrade time" onlyRunWhen (isOnline) in {
+      implicit env =>
+        import env.*
 
-      import env.*
+        val upgradeTime = cleanSynchronizerIndex(participant1).recordTime.minusSeconds(1)
 
-      val upgradeTime = cleanSynchronizerIndex(participant1).recordTime.minusSeconds(1)
-
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.synchronizers.perform_manual_lsu(
-          currentPsid = fixture2.currentPsid,
-          successorPsid = fixture2.newPsid,
-          upgradeTime = upgradeTime.some, // is smaller than the clean synchronizer index
-          sequencerSuccessors =
-            Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
-        ),
-        _.errorMessage should include("Synchronizer index is past upgrade time"),
-      )
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.synchronizers.perform_manual_lsu(
+            currentPsid = fixture2.currentPsid,
+            successorPsid = fixture2.newPsid,
+            upgradeTime = upgradeTime.some, // is smaller than the clean synchronizer index
+            sequencerSuccessors =
+              Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+          ),
+          _.errorMessage should include("Synchronizer index is past upgrade time"),
+        )
     }
 
     "Traffic can bet set on the new synchronizer" in { _ =>
@@ -451,6 +461,171 @@ abstract class LsuRollForwardIntegrationTest
             "Not enough successors sequencers (1) to meet the sequencer threshold (2)"
           ),
         )
+    }
+
+    "manual upgrade fails if the successorPsid is not for the same logical synchronizer id" in {
+      implicit env =>
+        import env.*
+
+        val wrongPsid =
+          PhysicalSynchronizerId.tryFromString("wrong-" + fixture2.newPsid.toProtoPrimitive)
+        val upgradeTime1 = cleanSynchronizerIndex(participant1).recordTime
+
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.synchronizers.perform_manual_lsu(
+            currentPsid = fixture2.currentPsid,
+            successorPsid = wrongPsid,
+            upgradeTime = Option.when(isOnline)(upgradeTime1),
+            sequencerSuccessors = Map(
+              sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection],
+              sequencer2.id -> sequencer6.sequencerConnection.transformInto[GrpcConnection],
+            ),
+          ),
+          entry => {
+            entry.shouldBeCantonErrorCode(ProtoDeserializationFailure)
+            entry.errorMessage should include(
+              "Current and successor physical synchronizer ids must have same logical ids"
+            )
+          },
+        )
+
+        // a mismatch in the logical synchronizer id is caught before the LSU is kicked off and
+        // therefore no successor config is created ...
+        participant1.underlying.value.sync.synchronizerConnectionConfigStore
+          .get(wrongPsid)
+          .left
+          .value shouldBe UnknownPsid(wrongPsid)
+        // ... and the config for the current psid is still the active one.
+        participant1.synchronizers
+          .config(daName)
+          .value
+          .synchronizerId
+          .value shouldBe fixture2.currentPsid
+    }
+
+    // run this test case only for the offline rollforward test suite, because it leaves the current
+    // synchronizer config in status LsuSource, after which the online LSU is not available as a viable
+    // LSU variant.
+    "manual upgrade fails if the successorPsid does not have the expected protocol version" onlyRunWhen (!isOnline) in {
+      implicit env =>
+        import env.*
+
+        def runLsuWithWrongPsid(wrongPsid: PhysicalSynchronizerId) = {
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+            participant1.synchronizers.perform_manual_lsu(
+              currentPsid = fixture2.currentPsid,
+              successorPsid = wrongPsid,
+              upgradeTime = None,
+              sequencerSuccessors = Map(
+                sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection],
+                sequencer2.id -> sequencer6.sequencerConnection.transformInto[GrpcConnection],
+              ),
+            ),
+            LogEntry.assertLogSeq(
+              Seq(
+                (
+                  _.warningMessage should include(
+                    s"Invalid synchronizer: expected ${Some(wrongPsid)}, got ${fixture2.newPsid}"
+                  ),
+                  "sequencer connection validation",
+                ),
+                (
+                  _.shouldBeCantonErrorCode(FailedLsu),
+                  "command failure",
+                ),
+              )
+            ),
+          )
+
+          // the failed LSU leaves behind an active synchronizer configuration for the wrong psid
+          participant1.synchronizers
+            .config(daName)
+            .value
+            .synchronizerId
+            .value shouldBe wrongPsid
+
+          // the predecessor config now has the status LsuSource
+          def checkPredecessorConfig() = {
+            val predecessorConfig =
+              participant1.underlying.value.sync.synchronizerConnectionConfigStore
+                .get(fixture2.currentPsid)
+                .value
+            predecessorConfig.configuredPsid shouldBe KnownPhysicalSynchronizerId(
+              fixture2.currentPsid
+            )
+            predecessorConfig.status shouldBe LsuSource
+          }
+
+          checkPredecessorConfig()
+
+          // to clean up, the user has to delete that config
+          participant1.repair.delete_synchronizer_config(wrongPsid)
+
+          // now there should be no active configuration anymore, and a subsequent LSU should recreate it
+          participant1.synchronizers.config(daName) shouldBe empty
+          // and the predecessor config should be untouched
+          checkPredecessorConfig()
+        }
+
+        // since the first LSU attempt sees the predecessor config status as `Active` and the second attempt
+        // sees the predecessor config status as `LsuSource`, let's randomly run the test cases in one or the other
+        // order, so that we cover both scenarios across test runs.
+        Random
+          .shuffle(
+            List(
+              fixture2.newPsid.copy(protocolVersion =
+                ProtocolVersion.supported.find(_ != fixture2.newPsid.protocolVersion).value
+              ),
+              fixture2.newPsid.incrementSerial,
+            )
+          )
+          .foreach { wrongPsid =>
+            runLsuWithWrongPsid(wrongPsid)
+          }
+      // runLsuWithWrongPsid deletes the wrong synchronizer connection config at the end, which leaves the predecessor config in status LsuSource.
+      // We know, that the participant can recover from this situation, when the manual LSU in the next test case succeeds.
+    }
+
+    "manual upgrade fails if the wrong sequencer is configured" onlyRunWhen (!isOnline) in {
+      implicit env =>
+        import env.*
+
+        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+          participant1.synchronizers.perform_manual_lsu(
+            currentPsid = fixture2.currentPsid,
+            successorPsid = fixture2.newPsid,
+            upgradeTime = None,
+            sequencerSuccessors = Map(
+              sequencer1.id -> sequencer3.sequencerConnection.transformInto[GrpcConnection],
+              sequencer2.id -> sequencer4.sequencerConnection.transformInto[GrpcConnection],
+            ),
+          ),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.warningMessage should include(
+                  s"sequencer1-0: Invalid synchronizer: expected ${Some(fixture2.newPsid)}, got ${fixture2.currentPsid}"
+                ),
+                "error when connecting to sequencer3",
+              ),
+              (
+                _.warningMessage should include(
+                  s"sequencer2-0: Invalid synchronizer: expected ${Some(fixture2.newPsid)}, got ${fixture2.currentPsid}"
+                ),
+                "error when connecting to sequencer4",
+              ),
+              (
+                _.shouldBeCantonErrorCode(FailedLsu),
+                "command failure",
+              ),
+            )
+          ),
+        )
+        // At this point, the connection config contains the wrong sequencer endpoints.
+        // But this doesn't need to be corrected manually, because the next invocation of perform_manual_lsu
+        // will fix those.
+        // But since the next test case is about missing sequencer connection information, let's remove the config again.
+        participant1.repair.delete_synchronizer_config(fixture2.newPsid)
     }
 
     "(P1, P2) manual upgrade succeeds if the list of successors contains at least threshold elements" in {

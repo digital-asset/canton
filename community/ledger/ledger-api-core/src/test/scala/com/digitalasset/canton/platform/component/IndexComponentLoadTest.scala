@@ -3,14 +3,19 @@
 
 package com.digitalasset.canton.platform.component
 
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
+import com.digitalasset.canton.ledger.api.messages.state.{
+  AcsContinuationPointer,
+  AcsContinuationToken,
+  AcsRangeInfo,
+}
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{
-  AcsRangeInfo,
   CumulativeFilter,
   EventFormat,
   ParticipantAuthorizationFormat,
@@ -172,6 +177,11 @@ class IndexComponentLoadTest
       restartIndexer()
   }
 
+  it should "Fetch ACS paginated" ignore TraceContext.withNewTraceContext("ACS paginated fetch") {
+    implicit traceContext =>
+      fetchAcsPaginated(pageSize = 1000)
+  }
+
   it should "Fetch updates stream in ascending order" ignore {
     fetchUpdatesStream(descendingOrder = false)
   }
@@ -301,6 +311,59 @@ class IndexComponentLoadTest
       .futureValue(
         benchmarkedTaskPatience
       )
+  }
+
+  private def fetchAcsPaginated(pageSize: Int)(implicit traceContext: TraceContext): Unit = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)
+    val ledgerEndOffset = index.currentLedgerEnd().futureValue
+    logger.warn(s"start fetching acs by pages with page size of $pageSize...")
+    val startTime = System.currentTimeMillis()
+
+    def fetch(continuationPointer: Option[AcsContinuationPointer], acc: Int): Future[Int] = index
+      .getActiveContracts(
+        eventFormat = eventFormat(dsoParty.value),
+        activeAt = ledgerEndOffset,
+        rangeInfo = AcsRangeInfo(
+          continuationPointer,
+          AcsContinuationToken.emptyChecksum,
+          Some(pageSize.toLong),
+        ),
+      )
+      .runWith(Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]])
+      .flatMap { page =>
+        page.lastOption match {
+          case Some(last) if !last.streamContinuationToken.isEmpty =>
+            AcsContinuationToken.decodeAndValidate(
+              expectedChecksum = AcsContinuationToken.emptyChecksum,
+              token = last.streamContinuationToken,
+            ) match {
+              case Right(continuationPointer) =>
+                logger.warn(s"fetched page with ${page.size} active contracts")
+                fetch(Some(continuationPointer), acc + page.size)
+              case Left(error) =>
+                logger.error(s"Failed to decode continuation token: ${error.getMessage}")
+                Future.failed(
+                  new RuntimeException(
+                    s"Failed to decode continuation token: ${error.getMessage}",
+                    error,
+                  )
+                )
+            }
+          case _ =>
+            logger.warn("Last page received, finishing...")
+            Future.successful(acc + page.size)
+        }
+      }
+
+    fetch(None, 0)
+      .map { total =>
+        val totalMillis = System.currentTimeMillis() - startTime
+        logger.warn(
+          s"finished fetching acs in pages if $pageSize in ${seconds(totalMillis)} s, $total active contracts returned."
+        )
+      }
+      .futureValue(benchmarkedTaskPatience)
   }
 
   private def seconds(milliseconds: Long): String = {

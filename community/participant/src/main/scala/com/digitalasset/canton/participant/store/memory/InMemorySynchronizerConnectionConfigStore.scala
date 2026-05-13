@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.SynchronizerPredecessor
@@ -20,6 +21,9 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   Error,
   InconsistentLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LsuOngoing,
+  LsuSource,
+  LsuTarget,
   MissingConfigForSynchronizer,
   SynchronizerIdAlreadyAdded,
   UnknownAlias,
@@ -80,11 +84,19 @@ class InMemorySynchronizerConnectionConfigStore(
       status: SynchronizerConnectionConfigStore.Status,
       configuredPsid: ConfiguredPhysicalSynchronizerId,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
-  ) =
+  ): Either[Error, Unit] =
     for {
       _ <- predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
 
       alias = config.synchronizerAlias
+
+      /*
+        Adding a new synchronizer with status Active during an LSU (e.g., register) can break LSU.
+        It is most likely the result of an automation running in the background.
+       */
+      _ <-
+        if (status == Active) checkNoLsuOngoing(config.synchronizerAlias)
+        else ().asRight
 
       _ <- configuredPsid match {
         case KnownPhysicalSynchronizerId(psid) =>
@@ -128,6 +140,43 @@ class InMemorySynchronizerConnectionConfigStore(
     EitherT.fromEither[FutureUnlessShutdown](lock.exclusive {
       putInternal(config, status, configuredPsid, synchronizerPredecessor)
     })
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  override def delete(psid: PhysicalSynchronizerId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, UnknownPsid, Unit] = {
+    var deleted = false
+    lock.exclusive(
+      configuredSynchronizerMap.filterInPlace {
+        case ((_, KnownPhysicalSynchronizerId(`psid`)), _) =>
+          deleted = true
+          false
+        case _ => true
+      }.discard
+    )
+    EitherTUtil.condUnitET[FutureUnlessShutdown](deleted, UnknownPsid(psid))
+  }
+
+  /** Ensure no LSU is ongoing for the alias. An LSU is ongoing if there exists a config and
+    * successor config with statuses LsuSource and LsuTarget respectively.
+    */
+  private def checkNoLsuOngoing(alias: SynchronizerAlias): Either[LsuOngoing, Unit] = {
+    val configPerPsid = configuredSynchronizerMap.toSeq.collect {
+      case ((`alias`, KnownPhysicalSynchronizerId(psid)), storedConfig)
+          if storedConfig.status == LsuSource || storedConfig.status == LsuTarget =>
+        psid -> (storedConfig.predecessor, storedConfig.status)
+    }.toMap
+
+    configPerPsid.toSeq.traverse_ {
+      case (psid, (Some(predecessor), LsuTarget)) =>
+        configPerPsid
+          .get(predecessor.psid)
+          .collect { case (_, LsuSource) => () }
+          .fold(().asRight[LsuOngoing])(_ => LsuOngoing(predecessor.psid, psid).asLeft)
+
+      case _ => Right(())
+    }
+  }
 
   // Ensure there is no other active configuration
   private def checkStatusConsistent(
@@ -231,9 +280,12 @@ class InMemorySynchronizerConnectionConfigStore(
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
     configuredSynchronizerMap.values.toSeq
 
-  /** We have no cache so is effectively a noop. */
+  /** We have no cache, so this is a noop. */
   override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.unit
+
+  /** We have no cache, so this is a noop. */
+  override def clearCache()(implicit traceContext: TraceContext): Unit = ()
 
   override def close(): Unit = ()
 

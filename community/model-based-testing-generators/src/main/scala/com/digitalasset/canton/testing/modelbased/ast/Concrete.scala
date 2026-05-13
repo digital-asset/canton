@@ -53,11 +53,6 @@ object Concrete {
   final case class Fetch(
       contractId: ContractId
   ) extends Action
-  final case class LookupByKey(
-      contractId: Option[ContractId],
-      keyId: KeyId,
-      maintainers: PartySet,
-  ) extends Action
   final case class QueryByKey(
       contractIds: ContractIdList,
       keyId: KeyId,

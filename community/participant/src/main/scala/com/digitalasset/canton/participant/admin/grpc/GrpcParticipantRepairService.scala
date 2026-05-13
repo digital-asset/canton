@@ -7,11 +7,16 @@ import cats.data.EitherT
 import cats.syntax.all.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
-import com.digitalasset.canton.ProtoDeserializationError.{OtherError, ValueConversionError}
+import com.digitalasset.canton.ProtoDeserializationError.{
+  OtherError,
+  ProtoDeserializationFailure,
+  ValueConversionError,
+}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -27,6 +32,7 @@ import com.digitalasset.canton.participant.admin.data.{
 import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.ValidExportAcsRequest
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -632,6 +638,28 @@ final class GrpcParticipantRepairService(
     } yield PerformLateLsuResponse()
 
     CantonGrpcUtil.mapErrNewEUS(res)
+  }
+
+  override def deleteSynchronizerConnectionConfig(
+      request: DeleteSynchronizerConnectionConfigRequest
+  ): Future[DeleteSynchronizerConnectionConfigResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      psid <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          PhysicalSynchronizerId
+            .fromProtoPrimitive(request.physicalSynchronizerId, "physical_synchronizer_id")
+            .leftMap[CantonBaseError](err =>
+              ProtoDeserializationFailure.WrapNoLoggingStr(err.message)
+            )
+        )
+      _ <-
+        sync.synchronizerConnectionConfigStore
+          .delete(psid)
+          .leftMap[CantonBaseError](err => UnknownPhysicalSynchronizerId(err.id))
+    } yield DeleteSynchronizerConnectionConfigResponse()
+
+    CantonGrpcUtil.mapErrNewEUS(ret.leftMap(_.toCantonRpcError))
   }
 }
 

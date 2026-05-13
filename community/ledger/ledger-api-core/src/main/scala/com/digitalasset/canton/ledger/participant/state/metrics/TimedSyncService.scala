@@ -135,12 +135,11 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
 
   override def prune(
       pruneUpToInclusive: Offset,
-      submissionId: Ref.SubmissionId,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-  ): Future[PruningResult] =
+  )(implicit traceContext: TraceContext): Future[PruningResult] =
     Timed.future(
       metrics.services.write.prune,
-      delegate.prune(pruneUpToInclusive, submissionId, safeToPruneCommitmentState),
+      delegate.prune(pruneUpToInclusive, safeToPruneCommitmentState),
     )
 
   override def currentHealth(): HealthStatus =

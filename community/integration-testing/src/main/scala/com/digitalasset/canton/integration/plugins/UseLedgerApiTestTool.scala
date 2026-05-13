@@ -35,7 +35,6 @@ import org.scalatest.concurrent.ScalaFutures.*
 import org.scalatest.time.{Seconds, Span}
 
 import scala.concurrent.blocking
-import scala.util.{Failure, Success, Try}
 
 /** Plugin to provide the LedgerApiTestTool to a
   * [[com.digitalasset.canton.integration.BaseIntegrationTest]] instance for
@@ -83,19 +82,24 @@ class UseLedgerApiTestTool(
           LanguageVersion.stableLfVersions.takeWhile(_ < lfVersion)
         else List.empty
 
+      val allLfVersions = lfVersion :: otherLfVersions
       // find and download test tool with the higher stable LF version
       otherLfVersions
         .foldRight(getOrDownloadTestTool(testToolRelease, lfVersion)) { (otherLfVersion, res) =>
-          res.recoverWith {
-            case error if isMissingArtifact(error) =>
-              logger.info(
-                s"LAPITT for LF $lfVersion is not published for release $testToolRelease. " +
-                  s"Falling back to LF $otherLfVersion. This is NOT a test failure."
-              )
-              getOrDownloadTestTool(testToolRelease, otherLfVersion).orElse(Failure(error))
+          res.orElse {
+            logger.info(
+              s"LAPITT for LF $lfVersion is not published for release $testToolRelease. " +
+                s"Falling back to LF $otherLfVersion. This is NOT a test failure."
+            )
+            getOrDownloadTestTool(testToolRelease, otherLfVersion)
           }
         }
-        .fold(throw _, identity)
+        .getOrElse(
+          sys.error(
+            s"Cannot download test tool for version $testToolRelease. Tried LF versions: ${allLfVersions
+                .mkString(", ")}."
+          )
+        )
     }
 
     testTool = version match {
@@ -182,7 +186,7 @@ class UseLedgerApiTestTool(
   private def getOrDownloadTestTool(
       release: ReleaseVersion,
       lfVersion: LanguageVersion,
-  ): Try[LedgerTestTool.Assembly] = {
+  ): Option[LedgerTestTool.Assembly] = {
     val testToolName: String = s"ledger-api-test-tool-$lfVersion"
     val filename = s"$testToolName-${release.fullVersion}.jar"
     val destination =
@@ -192,16 +196,12 @@ class UseLedgerApiTestTool(
       if (!destination.exists) {
         logger.info(s"Downloading $filename from S3.")
         destination.parent.createDirectoryIfNotExists(createParents = true)
-        LAPITTResolver.download(release, lfVersion, destination, logger)
-      } else Success(())
-    }).map(_ => LedgerTestTool.Assembly(destination))
+        LAPITTResolver
+          .download(release, lfVersion, destination, logger)
+          .map(LedgerTestTool.Assembly(_))
+      } else Some(LedgerTestTool.Assembly(destination))
+    })
   }
-
-  private def isMissingArtifact(error: Throwable): Boolean =
-    Option(error.getMessage).exists { msg =>
-      val lower = msg.toLowerCase
-      msg.contains("404") || lower.contains("not found")
-    }
 
   private def runTestsInternal(
       concurrentTestRuns: Int,

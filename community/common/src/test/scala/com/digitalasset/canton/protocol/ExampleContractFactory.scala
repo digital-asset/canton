@@ -152,10 +152,9 @@ object ExampleContractFactory extends EitherValues {
       createdAt: Option[Time] = None,
   ): GenContractInstance { type InstCreatedAtTime <: Time } = {
     val create = base.toLf
-    val coid = contractId.getOrElse(create.coid)
     val inst = FatContractInstance.fromCreateNode(
       base.toLf.copy(
-        coid = coid,
+        coid = contractId.getOrElse(create.coid),
         templateId = templateId.getOrElse(create.templateId),
         arg = arg.getOrElse(create.arg),
         signatories = metadata.map(_.signatories).getOrElse(create.signatories),

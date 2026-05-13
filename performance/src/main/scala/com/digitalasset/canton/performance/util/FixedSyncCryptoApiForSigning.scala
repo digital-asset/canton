@@ -27,10 +27,12 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   LsuSequencerConnectionSuccessor,
   ParticipantAttributes,
   SynchronizerTrustCertificate,
+  TopologyTransaction,
   VettedPackage,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -235,12 +237,15 @@ class FixedSyncCryptoApiForSigning(
 
     override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] = notImplementedUS
+    ): FutureUnlessShutdown[
+      Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+    ] = notImplementedUS
 
     override def loadUnvettedPackagesOrDependencies(
         participantId: ParticipantId,
         packages: Set[PackageId],
         ledgerTime: CantonTimestamp,
+        checkDependencyVetting: Boolean,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages] =
       notImplementedUS
 

@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -413,11 +412,11 @@ sealed trait SynchronizerConnectivityIntegrationTest
           ),
           validation = SequencerConnectionValidation.ThresholdActive,
         )
-        // now check that the connection for sequencer1 got updated with the sequencer id
 
+        // The sequencer ids are still unset at this point
         val aliasToConnection =
           participant4.synchronizers.config(daName).value.sequencerConnections.aliasToConnection
-        aliasToConnection.get(seq1Alias).value.sequencerId shouldBe Some(sequencer1.id)
+        aliasToConnection.get(seq1Alias).value.sequencerId shouldBe None
         aliasToConnection.get(seq2Alias).value.sequencerId shouldBe None
       }
 
@@ -449,12 +448,11 @@ sealed trait SynchronizerConnectivityIntegrationTest
 
       // Handshake
       testWithHandshake()
-      // sequencer id is properly set when registering a connection with a performing a handshake
-      assertSequencerId(acmeName, sequencer2.id)
-
       testWithHandshake() // idempotency
       participant3.synchronizers.connect(sequencer2, acmeName) // we can connect after registration
       participant3.synchronizers.is_connected(acmeName) shouldBe true
+
+      assertSequencerId(acmeName, sequencer2.id)
 
       testRegistrationFailsWithSequencerIdMismatch()
       testPartialSequencerIdUpdate()
@@ -466,7 +464,6 @@ sealed trait SynchronizerConnectivityIntegrationTest
 //  registerPlugin(new UseH2(loggerFactory))
 //}
 
-@UnstableTest // TODO(#28493) Remove annotation
 class SynchronizerConnectivityBftOrderingIntegrationTestPostgres
     extends SynchronizerConnectivityIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

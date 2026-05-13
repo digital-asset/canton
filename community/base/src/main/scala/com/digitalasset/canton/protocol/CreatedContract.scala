@@ -25,9 +25,6 @@ final case class CreatedContract private (
     rolledBack: Boolean,
 ) extends PrettyPrinting {
 
-  // Note that on behalf of rolledBack contracts we still send the SerializableContract along with the contract instance
-  // mainly to support DAMLe.reinterpret on behalf of a top-level CreateActionDescription under a rollback node because
-  // we need the contract instance to construct the LfCreateCommand.
   def toProtoV30: v30.CreatedContract =
     v30.CreatedContract(
       contract = contract.encoded,

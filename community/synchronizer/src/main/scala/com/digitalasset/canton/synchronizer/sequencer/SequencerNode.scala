@@ -741,6 +741,8 @@ class SequencerNodeBootstrap(
               new GrpcSequencerAuthenticationService(
                 authenticationService,
                 staticSynchronizerParameters.protocolVersion,
+                disableReleaseVersionHandshakeCheck =
+                  parameters.disableReleaseVersionHandshakeCheck,
                 loggerFactory,
               )
 
@@ -785,6 +787,7 @@ class SequencerNodeBootstrap(
             topologyClient,
             config.publicApi.overrideMaxRequestSize,
             parameters,
+            logEventDetails = parameters.loggingConfig.eventDetails,
             staticSynchronizerParameters.protocolVersion,
             topologyStateForInitializationService,
             loggerFactory,
