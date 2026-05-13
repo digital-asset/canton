@@ -96,7 +96,7 @@ class OnboardingClearanceScheduler(
   private[party] val inFlightBackgroundRequests: TrieMap[PartyId, Unit] = TrieMap.empty
 
   // Ensures we only log the LSU warning once for the entire scheduler, across all pending parties and methods
-  // Once LSU is annouced and the topology is frozen, hence submitting onboarding flag clearance would simply result in an error
+  // Once LSU is announced and the topology is frozen, submitting onboarding flag clearance would result in an error
   private val lsuAnnouncementLogged = new AtomicBoolean(false)
 
   /** Ensures that the start and cancellation of an LSU is logged exactly once. */

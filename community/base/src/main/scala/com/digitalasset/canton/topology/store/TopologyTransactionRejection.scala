@@ -295,7 +295,7 @@ object TopologyTransactionRejection {
     final case class AnnouncedLsuTopologyFreeze(synchronizerId: SynchronizerId)
         extends TopologyTransactionRejection {
       override def asString: String =
-        s"The topology state of synchronizer $synchronizerId is frozen due to an announced LSU and no more topology changes are allowed."
+        s"The topology state of synchronizer $synchronizerId is frozen due to an announced LSU. No more topology changes are allowed until upgrade completion."
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.AnnouncedLsuTopologyFreeze.Reject(synchronizerId)

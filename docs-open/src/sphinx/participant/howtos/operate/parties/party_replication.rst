@@ -310,6 +310,29 @@ from a source participant and importing it to the target participant.
     manual operational steps. A backup allows you to safely reset the target participant
     and **still complete the replication**.
 
+Trust Assumptions
+-----------------
+
+Offline party replication involves exporting a party’s Active Contract Set (ACS) from a source participant and importing it into a target participant.
+This process introduces a critical dependency on the integrity of the source participant.
+
+Core Trust Requirement
+^^^^^^^^^^^^^^^^^^^^^^
+
+It is assumed that both the target participant operator and the replicated party maintain a high level of trust in the source participant.
+Specifically, they must trust the source to:
+
+- Provide a complete and accurate snapshot of the ACS representing the ledger state at the time of export.
+- Ensure the exported data has not been tampered with or truncated.
+
+Validation Constraints
+^^^^^^^^^^^^^^^^^^^^^^
+
+While the target participant performs integrity checks during the import process, this validation is conducted on a best-effort basis.
+
+.. note:: Because the target participant was not a witness to the original transactions comprising the ACS,
+    it cannot independently verify the entire historical provenance of the contracts against the underlying ledger.
+    Therefore, the source participant acts as the "root of trust" for the party's state on the new node.
 
 .. _offline-party-replication-steps:
 

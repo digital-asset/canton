@@ -88,6 +88,7 @@ trait SequencerConnectServiceIntegrationTest
             release = ReleaseVersion.current,
           ),
           None,
+          clientVersion = ReleaseVersion.current,
         )
       val successfulRequestWithMinimumVersion =
         HandshakeRequest(
@@ -97,8 +98,10 @@ trait SequencerConnectServiceIntegrationTest
             release = ReleaseVersion.current,
           ),
           Some(testedProtocolVersion),
+          clientVersion = ReleaseVersion.current,
         )
-      val failingRequest = HandshakeRequest(Seq(unsupportedPV), None)
+      val failingRequest =
+        HandshakeRequest(Seq(unsupportedPV), None, clientVersion = ReleaseVersion.current)
 
       grpcSequencerConnectClient
         .handshake(successfulRequest, dontWarnOnDeprecatedPV = true)
@@ -212,7 +215,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
     new GrpcSequencerConnectClient(
       member = member,
       sequencerConnection = grpcSequencerConnection,
-      synchronizerAlias = alias,
+      synchronizerIdentifier = alias.unwrap,
       timeouts = timeouts,
       params = ClientChannelParams.ForTesting
         .copy(traceContextPropagation = TracingConfig.Propagation.Enabled),

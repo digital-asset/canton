@@ -42,6 +42,11 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
   sequencerId,
 }
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{Member, SequencerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -220,9 +225,16 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
     ): EitherT[FutureUnlessShutdown, SequencerError, CantonTimestamp] = ???
 
     override private[sequencer] def updateLsuSuccessor(
-        successorO: Option[SynchronizerSuccessor],
+        successor: SynchronizerSuccessor,
         announcementEffectiveTime: EffectiveTime,
+        isReplace: Boolean,
     )(implicit traceContext: TraceContext): Unit = ???
+
+    override def handleLsuSequencerConnectionSuccessor(
+        successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
+    )(implicit
+        traceContext: TraceContext
+    ): Unit = ???
 
     override def sequencingTime(implicit
         traceContext: TraceContext

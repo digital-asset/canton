@@ -9,7 +9,8 @@ template MainT with
     p: Party
     dep: DepT
   where
-    signatory p, dep.p
+    signatory p
+    observer dep.p
 
     choice MainT_createDep: ContractId DepT
       controller p

@@ -1036,7 +1036,6 @@ abstract class CantonNodeBootstrapImpl[
                       .managers() ++ sequencedTopologyManagers :+ topologyManager,
                     lookupActivePsid,
                     temporaryStoreRegistry,
-                    parameters,
                     bootstrapStageCallback.loggerFactory,
                   ),
                   executionContext,

@@ -152,6 +152,7 @@ class ConnectedSynchronizer(
     participantId: ParticipantId,
     engine: Engine,
     parameters: ParticipantNodeParameters,
+    synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     private[sync] val persistent: SyncPersistentState,
     val ephemeral: SyncEphemeralState,
@@ -389,13 +390,14 @@ class ConnectedSynchronizer(
       promiseFactory = this,
     )
 
-  def addJournalGarageCollectionLock()(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = journalGarbageCollector.addOneLock()
-
-  def removeJournalGarageCollectionLock()(implicit
-      traceContext: TraceContext
-  ): Unit = journalGarbageCollector.removeOneLock()
+  private val sequencerIdsRetriever = new SequencerIdsRetriever(
+    psid,
+    synchronizerHandle.connectionPool,
+    synchronizerConnectionConfigStore,
+    sequencerConnectionListener,
+    parameters,
+    loggerFactory,
+  )
 
   def getTrafficControlState(implicit traceContext: TraceContext): Future[TrafficState] =
     sequencerClient.trafficStateController
@@ -604,7 +606,7 @@ class ConnectedSynchronizer(
     for {
       // Prepare missing key alerter
       _ <- EitherT.right(missingKeysAlerter.init())
-      _ <- EitherT.right(sequencerConnectionListener.init())
+      _ <- EitherT.right(sequencerConnectionListener.checkAndCreateSynchronizerConfig())
 
       // Phase 0: Initialise topology client at current clean head
       _ = initializeClientAtCleanHead()
@@ -849,6 +851,8 @@ class ConnectedSynchronizer(
             .leftMap[ConnectedSynchronizerInitializationError](
               ParticipantTopologyHandshakeError.apply
             )
+
+        _ = sequencerIdsRetriever.start()
       } yield {
         logger.debug(s"Started synchronizer for $psid")(initializationTraceContext)
         ephemeral.markAsRecovered()
@@ -1154,6 +1158,7 @@ class ConnectedSynchronizer(
       SyncCloseable(
         "connected-synchronizer",
         LifeCycle.close(
+          sequencerIdsRetriever,
           journalGarbageCollector,
           acsCommitmentProcessor,
           transactionProcessor,
@@ -1226,6 +1231,7 @@ object ConnectedSynchronizer {
         participantId: ParticipantId,
         engine: Engine,
         parameters: ParticipantNodeParameters,
+        synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncPersistentState,
         ephemeralState: SyncEphemeralState,
@@ -1252,6 +1258,7 @@ object ConnectedSynchronizer {
         participantId: ParticipantId,
         engine: Engine,
         parameters: ParticipantNodeParameters,
+        synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncPersistentState,
         ephemeralState: SyncEphemeralState,
@@ -1357,6 +1364,7 @@ object ConnectedSynchronizer {
           participantId,
           engine,
           parameters,
+          synchronizerConnectionConfigStore,
           participantNodePersistentState,
           persistentState,
           ephemeralState,

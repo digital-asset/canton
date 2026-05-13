@@ -33,8 +33,10 @@ sealed trait JobSchedule {
 }
 
 /** Trait for individual schedule (i.e. non-compound schedule)
+  *
+  * Not sealed, so we can extend it in testing.
   */
-sealed trait IndividualSchedule extends JobSchedule
+trait IndividualSchedule extends JobSchedule
 
 /** Schedule based on a utc-based cron expression and the clock
   */
@@ -110,10 +112,9 @@ sealed trait CronSchedule {
 
 /** Pruning-specific cron schedules come with a pruning retention
   */
-class PruningCronSchedule(
+class CronWindowSchedule(
     override val cron: Cron,
     override val maxDuration: PositiveSeconds,
-    val retention: PositiveSeconds,
     clock: Clock,
     logger: TracedLogger,
 ) extends IndividualSchedule
@@ -123,6 +124,16 @@ class PruningCronSchedule(
   ): Option[NextRun] =
     waitDurationUntilNextRun(result, clock.now, logger).map(NextRun(_, this))
 }
+
+/** Pruning-specific cron schedules come with a pruning retention
+  */
+class PruningCronSchedule(
+    override val cron: Cron,
+    override val maxDuration: PositiveSeconds,
+    val retention: PositiveSeconds,
+    clock: Clock,
+    logger: TracedLogger,
+) extends CronWindowSchedule(cron, maxDuration, clock, logger)
 
 final class ParticipantPruningCronSchedule(
     cron: Cron,
@@ -150,10 +161,10 @@ class BftOrdererPruningCronSchedule(
     clock: Clock,
     logger: TracedLogger,
 ) extends PruningCronSchedule(cron, maxDuration, retention, clock, logger) {
+  // Removes the `protected` access modifier.
   override def determineNextRun(result: ScheduledRunResult)(implicit
       traceContext: TraceContext
-  ): Option[NextRun] =
-    waitDurationUntilNextRun(result, clock.now, logger).map(NextRun(_, this))
+  ): Option[NextRun] = super.determineNextRun(result)
 }
 
 /** Compound schedule allow combining multiple individual schedules into one schedule that

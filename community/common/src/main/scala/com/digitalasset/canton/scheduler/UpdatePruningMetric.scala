@@ -19,8 +19,8 @@ trait UpdatePruningMetric {
       executionContext: ExecutionContext
   ): Future[ScheduledRunResult] =
     schedule match {
-      case _: IntervalSchedule => updateMetric.map(_ => Done)
       case ps: PruningCronSchedule => code(ps)
+      case _ => updateMetric.map(_ => Done)
     }
 
   def withUpdatePruningMetric(
@@ -32,7 +32,7 @@ trait UpdatePruningMetric {
       executionContext: ExecutionContext
   ): FutureUnlessShutdown[ScheduledRunResult] =
     schedule match {
-      case _: IntervalSchedule => updateMetric.map(_ => Done)
       case ps: PruningCronSchedule => code(ps)
+      case _ => updateMetric.map(_ => Done)
     }
 }

@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints.Inv
   *   The last processed sequencer timestamp
   * @param currentRecordTime
   *   The current record time, which should be a lower (inclusive) bound for floating event
-  *   publication This timestamp can be higher than lastSequencerTimestamp (which relates directly
+  *   publication. This timestamp can be higher than lastSequencerTimestamp (which relates directly
   *   to sequenced events), but must be less than the timestamp of the next sequencer counter. In
   *   practice scheduled floating events (events which are not associated with a specific sequencer
   *   counter) can push this timestamp higher than lastSequencerTimestamp, and record order

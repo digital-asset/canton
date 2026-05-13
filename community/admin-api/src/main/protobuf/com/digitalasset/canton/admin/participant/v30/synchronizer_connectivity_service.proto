@@ -27,7 +27,9 @@ service SynchronizerConnectivityService {
   // Reconnect to a registered synchronizer
   rpc ReconnectSynchronizer(ReconnectSynchronizerRequest) returns (ReconnectSynchronizerResponse);
 
-  // Reconfigure a synchronizer connection
+  // Reconfigure an active synchronizer connection
+  // If a logical synchronizer upgrade has been announced, the config for the successor synchronizer
+  // gets updated automatically on the basis of the provided config for the active synchronizer.
   rpc ModifySynchronizer(ModifySynchronizerRequest) returns (ModifySynchronizerResponse);
 
   // Disconnect from a connected synchronizer

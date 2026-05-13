@@ -519,6 +519,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         owners: Seq[InstanceReference],
         threshold: PositiveInt,
         store: TopologyStoreId = TopologyStoreId.Authorized,
+        protocolVersion: Option[ProtocolVersion] = None,
     ): (Namespace, Seq[GenericSignedTopologyTransaction]) = {
       val ownersNE = NonEmpty
         .from(owners)
@@ -566,7 +567,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           DecentralizedNamespaceDefinition,
         ]]((txA, txB) => txA.addSignatures(txB.signatures))
 
-      val ownerNSDs = owners.flatMap(_.topology.transactions.identity_transactions())
+      val ownerNSDs =
+        owners.flatMap(_.topology.transactions.identity_transactions(protocolVersion))
       val foundingTransactions = ownerNSDs :+ decentralizedNamespaceDefinition
 
       owners.foreach(
@@ -692,7 +694,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       val identityTransactions =
         (sequencers ++ mediators ++ synchronizerOwners).flatMap(
-          _.topology.transactions.identity_transactions()
+          _.topology.transactions.identity_transactions(
+            protocolVersion = Some(staticSynchronizerParameters.protocolVersion)
+          )
         )
 
       synchronizerOwners.foreach(
@@ -708,6 +712,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           synchronizerOwners,
           synchronizerThreshold,
           store = tempStoreForBootstrap,
+          protocolVersion = Some(staticSynchronizerParameters.protocolVersion),
         )
 
       val synchronizerGenesisTxs = synchronizerOwners.flatMap(

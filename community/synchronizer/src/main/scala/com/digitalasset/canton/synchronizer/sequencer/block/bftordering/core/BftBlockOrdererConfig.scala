@@ -23,6 +23,7 @@ import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChann
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
+  DefaultAvailabilityDisseminationPatience,
   DefaultAvailabilityMaxNonOrderedBatchesPerNode,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
@@ -79,6 +80,9 @@ import scala.concurrent.duration.*
   *   The maximum number of unordered batches that the availability module will accept from each
   *   peer. The purpose of this limit is to prevent malicious peers from consuming memory and
   *   storage by flooding new batches to correct nodes.
+  * @param availabilityDisseminationPatience
+  *   The amount of time that the availability module waits for a dissemination acknowledgement from
+  *   a peer before re-sending the batch. If `None`, re-sending is disabled.
   * @param maxBatchesPerBlockProposal
   *   The maximum number of batches per block proposal (pre-prepare). Needs to be the same across
   *   the network for the BFT time assumptions to hold.
@@ -150,6 +154,7 @@ import scala.concurrent.duration.*
   *   execution context as the sequencer.
   */
 final case class BftBlockOrdererConfig(
+    segmentLengthForPv34: Option[Long] = None,
     maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
     // TODO(#24184) make a dynamic sequencing parameter
@@ -159,6 +164,8 @@ final case class BftBlockOrdererConfig(
     availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int =
       DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
     availabilityMaxNonOrderedBatchesPerNode: Short = DefaultAvailabilityMaxNonOrderedBatchesPerNode,
+    availabilityDisseminationPatience: Option[FiniteDuration] =
+      DefaultAvailabilityDisseminationPatience,
     availabilityMinProposalCreationDelay: FiniteDuration =
       DefaultAvailabilityMinProposalCreationDelay,
     // TODO(#24184) make a dynamic sequencing parameter
@@ -206,6 +213,7 @@ object BftBlockOrdererConfig {
   val DefaultMaxBatchesPerProposal: Short = 16
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
   val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1000
+  val DefaultAvailabilityDisseminationPatience: Option[FiniteDuration] = Some(5.seconds)
   val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 250.millis
   val DefaultConsensusQueueMaxSize: Int = 10 * 1024
   val DefaultConsensusQueuePerNodeQuota: Int = 1024

@@ -7,12 +7,8 @@ import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.api.{
-  AcsRangeInfo,
-  TransactionFormat,
-  TransactionShape,
-  UpdateFormat,
-}
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.{TransactionFormat, TransactionShape, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   ReassignmentInfo,

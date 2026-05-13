@@ -137,7 +137,7 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
   logger.debug("Registered shutdown-hook.")
   private object Config {
     val multiSuffix = if (cliOptions.multiSync) "-multi-sync" else ""
-    val alphaConfig = Option.when(cliOptions.devProtocol || cliOptions.nuck)(
+    val alphaConfig = Option.when(cliOptions.devProtocol)(
       JarResourceUtils.extractFileFromJar(s"sandbox/alpha$multiSuffix.conf")
     )
     val sandboxConfig = JarResourceUtils.extractFileFromJar(s"sandbox/sandbox$multiSuffix.conf")

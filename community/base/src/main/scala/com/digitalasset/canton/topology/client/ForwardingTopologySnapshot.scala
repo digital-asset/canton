@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.Party
 import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
@@ -172,7 +173,9 @@ class ForwardingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }
 
@@ -482,6 +485,8 @@ class CachingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }

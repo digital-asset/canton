@@ -40,7 +40,6 @@ class JobSchedulerTest
         runs.append(tuple)
         result
       },
-      clock,
       timeouts,
       loggerFactory,
     )

@@ -117,7 +117,7 @@ class TestEngine(
   ): LfHash =
     consume(engine.hashCreateNode(c, identity, method))
 
-  private val valueEnricher = new Enricher(engine)
+  private val valueEnricher = Enricher(engine)
 
   def consume[T](
       initial: Result[T],

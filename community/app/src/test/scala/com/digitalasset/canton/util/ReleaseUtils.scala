@@ -9,7 +9,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.*
-import com.digitalasset.canton.integration.plugins.LAPITTRelease
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.version.{
   ProtocolVersion,
@@ -25,7 +24,6 @@ import scala.concurrent.{ExecutionContext, Future}
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
 object ReleaseUtils {
   final case class TestedRelease(
-      ledgerApiTestTool: LAPITTRelease,
       releaseVersion: ReleaseVersion,
       protocolVersions: NonEmpty[List[ProtocolVersion]],
   )
@@ -64,6 +62,37 @@ object ReleaseUtils {
         left.grouped(itemsPerShard) ++ right.grouped(itemsPerShard + 1)
       }
     sharded.toList
+  }
+
+  /** Lists `canton-open-source-*` releases published in the public S3 bucket.
+    *
+    * Returned versions are deduplicated and parsed as [[ReleaseVersion]]; entries that fail to
+    * parse (e.g. legacy or unrelated objects) are silently ignored.
+    *
+    * @param includeAdHoc:
+    *   default to `false`. If false, ad-hoc releases are excluded
+    * @param includeSnapshot:
+    *   default true. If `false`, snapshot releases are excluded
+    */
+  def listAllReleases(
+      includeAdHoc: Boolean = false,
+      includeSnapshot: Boolean = true,
+  ): Seq[ReleaseVersion] = {
+    import scala.sys.process.*
+    val output =
+      """aws s3api list-objects-v2 --bucket canton-public-releases --prefix releases/canton-open-source- --query 'Contents[].Key' --output text --no-sign-request""".!!
+    output
+      .split("\\s+")
+      .toSeq
+      .filter(_.endsWith(".tar.gz"))
+      .filterNot(_.contains("-protobuf"))
+      .flatMap { key =>
+        ReleaseVersion
+          .create(key.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
+          .toOption
+      }
+      .filter(r => (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot))
+      .distinct
   }
 
   // All previous stable releases minus releases that support only deleted protocol versions
@@ -123,7 +152,7 @@ object ReleaseUtils {
       release: ReleaseVersion
   )(implicit elc: ErrorLoggingContext): String = {
     import scala.sys.process.*
-    val cantonDir = s"tmp/canton-enterprise-$release/bin/canton"
+    val cantonDir = s"tmp/canton-open-source-$release/bin/canton"
     if (Files.exists(Paths.get(cantonDir))) {
       elc.info(s"Release $release already downloaded.")
       cantonDir

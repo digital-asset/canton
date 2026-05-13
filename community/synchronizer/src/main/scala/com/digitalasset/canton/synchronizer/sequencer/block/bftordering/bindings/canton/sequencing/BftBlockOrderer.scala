@@ -418,6 +418,7 @@ final class BftBlockOrderer(
       config.standalone.fold[OrderingTopologyProvider[PekkoEnv]](
         new CantonOrderingTopologyProvider(
           cryptoApi,
+          config,
           loggerFactory,
           metrics,
         )

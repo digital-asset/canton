@@ -6,7 +6,6 @@ module Universal where
 import RollbackException
 import qualified DA.Map as M
 import DA.Exception (ActionThrow(throw))
-import DA.Optional (isSome)
 import DA.ContractKeys (lookupNByKey)
 
 data Kind = Consuming | NonConsuming
@@ -47,12 +46,6 @@ data TxAction
         -- The expected contract ID is not strictly necessary, but it is used to assert that exercises by key exercise
         -- the expected contract.
         , expectedContractId : Int
-        }
-    | LookupByKey
-        { keyId : Int
-        , maintainers : [Party]
-        -- The expected success is not necessary but we assert it as a sanity check.
-        , expectedSuccess : Bool
         }
     | QueryByKey
         { keyId : Int
@@ -198,10 +191,6 @@ interpretTxAction env action =
         UniversalWithKeyContractId cid -> do
           fetch cid
           return env
-    (LookupByKey keyId maintainers expectedSuccess) -> do
-      result <- lookupByKey @UniversalWithKey (keyId, maintainers)
-      assert (isSome result == expectedSuccess)
-      return env
     (QueryByKey keyId maintainers exhaustive expectedContractIds) -> do
       result <- lookupNByKey @UniversalWithKey
                   (length expectedContractIds + if exhaustive then 1 else 0)

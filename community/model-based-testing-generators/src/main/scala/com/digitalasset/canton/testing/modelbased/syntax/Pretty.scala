@@ -81,16 +81,6 @@ object Pretty {
         Tree(s"Fetch $contractId${prettyPackageId(pkgId)}", Nil)
       case FetchByKey(contractId, _, _) =>
         Tree(s"FetchByKey $contractId${prettyPackageId(pkgId)}", Nil)
-      case LookupByKey(contractId, keyId, maintainers) =>
-        contractId match {
-          case Some(cid) =>
-            Tree(s"LookupByKey Success $cid${prettyPackageId(pkgId)}", Nil)
-          case None =>
-            Tree(
-              s"LookupByKey Failure${prettyPackageId(pkgId)} key=($keyId, ${prettyParties(maintainers)})",
-              Nil,
-            )
-        }
       case QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
         if (contractIds.nonEmpty)
           Tree(
@@ -171,11 +161,6 @@ object Pretty {
         Tree(s"Fetch${prettyPackageId(pkgId)}", Nil)
       case FetchByKey() =>
         Tree(s"FetchByKey${prettyPackageId(pkgId)}", Nil)
-      case LookupByKey(successful) =>
-        Tree(
-          s"LookupByKey ${if (successful) "success" else "failure"}${prettyPackageId(pkgId)}",
-          Nil,
-        )
       case QueryByKey(exhaustive) =>
         Tree(
           s"QueryByKey exhaustive=$exhaustive${prettyPackageId(pkgId)}",
@@ -278,13 +263,6 @@ object Pretty {
         Tree(s"Fetch $contractId${prettyPackageId(pkgId)}", Nil)
       case FetchByKey(contractId, keyId, maintainers) =>
         Tree(s"FetchByKey $contractId${prettyPackageId(pkgId)} key=($keyId, $maintainers)", Nil)
-      case LookupByKey(contractId, keyId, maintainers) =>
-        contractId match {
-          case Some(cid) =>
-            Tree(s"LookupByKey success $cid${prettyPackageId(pkgId)}", Nil)
-          case None =>
-            Tree(s"LookupByKey failure${prettyPackageId(pkgId)} key=($keyId, $maintainers)", Nil)
-        }
       case QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
         if (contractIds.elements.nonEmpty)
           Tree(

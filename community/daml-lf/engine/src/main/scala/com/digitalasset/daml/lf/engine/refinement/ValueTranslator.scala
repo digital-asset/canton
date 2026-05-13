@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
@@ -20,8 +20,6 @@ private[lf] final class ValueTranslator(
     forbidLocalContractIds: Boolean,
     shouldCheckDataSerializable: Boolean = true,
 ) {
-
-  import Preprocessor._
 
   @throws[Error.Preprocessing.Error]
   private def labeledRecordToMap(
@@ -65,7 +63,7 @@ private[lf] final class ValueTranslator(
     } else { (_, _) => () }
 
   @throws[Error.Preprocessing.Error]
-  private[preprocessing] def unsafeTranslateCid(
+  private[refinement] def unsafeTranslateCid(
       cid: ContractId,
       extendLocalIdForbiddanceToRelativeV2: Boolean,
   ): SValue.SContractId = {
@@ -76,7 +74,7 @@ private[lf] final class ValueTranslator(
   // For efficient reason we do not produce here the monad Result[SValue] but rather throw
   // exception in case of error or package missing.
   @throws[Error.Preprocessing.Error]
-  private[preprocessing] def unsafeTranslateValue(
+  private[refinement] def unsafeTranslateValue(
       ty: Type,
       value: Value,
       extendLocalIdForbiddanceToRelativeV2: Boolean,

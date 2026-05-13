@@ -307,8 +307,11 @@ private[mediator] class DefaultVerdictSender(
             "MediatorGroup is expected to have at least 1 active member at this point"
           )
         )
+
       // We need aggregation only if the mediator group is truly decentralized
-      Option.when(mediatorGroup.threshold.unwrap > 1)(
+      // With PV35 we do always need to set it as we will be checking the group at
+      // time of delivery and not at time of construction.
+      Option.when(mediatorGroup.threshold.unwrap > 1 || protocolVersion > ProtocolVersion.v34)(
         AggregationRule.activeMediators(
           activeNE,
           mediatorGroup.index,

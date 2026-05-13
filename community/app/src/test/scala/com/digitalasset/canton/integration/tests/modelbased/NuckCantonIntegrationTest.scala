@@ -65,7 +65,7 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    "run a simple scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "run a simple scenario involving key lookups" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       _ =>
         val scenario = Parser.assertParseScenario("""
             |Scenario
@@ -84,7 +84,7 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
         run(scenario)
     }
 
-    "run a complex scenario involving LookupByKey" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+    "run a complex scenario involving key lookups" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
       MultiRootNodeSubmission
     ) in { _ =>
       val scenario = Parser.assertParseScenario("""
@@ -99,7 +99,7 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |      CreateWithKey 2 pkg=0 key=(2, {2}) sigs={1,2} obs={1,3}
           |    Commands participant=1 actAs={1,2,3} disclosures=[]
           |      ExerciseByKey NonConsuming 2 pkg=0 ctl={1} cobs={1,2,3}
-          |        LookupByKey Success 2
+          |        QueryByKey [2] exhaustive=true
           |      ExerciseByKey NonConsuming 1 ctl={3} cobs={2,3}
           |        Exercise Consuming 0 ctl={3} cobs={}
           |          FetchByKey 2
@@ -110,7 +110,7 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |        ExerciseByKey Consuming 2 ctl={3} cobs={1}
           |      CreateWithKey 5 key=(3, {2}) sigs={1,2} obs={2,3}
           |      ExerciseByKey Consuming 5 pkg=0 ctl={3} cobs={1,2}
-          |        LookupByKey Success 3
+          |        QueryByKey [3] exhaustive=true
           |""".stripMargin)
 
       run(scenario)
@@ -161,7 +161,6 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
       run(scenario)
     }
 
-    // TODO(#31527): SPM why does this test take so long (1 min, vs 1 sec for the other tests)
     "return contracts in observed order" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
       MultiRootNodeSubmission
     ) in { _ =>
@@ -251,36 +250,34 @@ final class NuckCantonIntegrationTest extends CommunityIntegrationTest with Shar
           |        Exercise Consuming 2 ctl={1} cobs={3}
           |          QueryByKey [3,1] exhaustive=false
           |          QueryByKey [3,1] exhaustive=true
-          |          LookupByKey Failure key=(1, {1,3})
+          |          QueryByKey [] key=(1, {1,3}) exhaustive=true
           |          Fetch 3
           |          Exercise NonConsuming 3 ctl={1,3} cobs={1}
           |          ExerciseByKey NonConsuming 3 ctl={1,3} cobs={}
           |            FetchByKey 3
           |            Fetch 3
-          |          LookupByKey Success 3""".stripMargin)
+          |          QueryByKey [3] exhaustive=false""".stripMargin)
       run(scenario)
     }
 
     "two QueryByKeys for the same key in the same view" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
       MultiRootNodeSubmission
     ) in { _ =>
-      val scenario = Parser.assertParseScenario(
-        """
-                                                  |Scenario
-                                                  |  Topology
-                                                  |    Participant 0 pkgs={0} parties={1}
-                                                  |  Ledger
-                                                  |    Commands participant=0 actAs={1} disclosures=[]
-                                                  |      Create 0 sigs={1} obs={}
-                                                  |      CreateWithKey 4 key=(0, {1}) sigs={1} obs={}
-                                                  |      CreateWithKey 3 key=(0, {1}) sigs={1} obs={}
-                                                  |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
-                                                  |      CreateWithKey 1 key=(0, {1}) sigs={1} obs={}
-                                                  |    Commands participant=0 actAs={1} disclosures=[]
-                                                  |      Exercise NonConsuming 0 ctl={1} cobs={}
-                                                  |        QueryByKey [1,2] exhaustive=false
-                                                  |        QueryByKey [1,2,3,4] exhaustive=true""".stripMargin
-      )
+      val scenario = Parser.assertParseScenario("""
+          |Scenario
+          |  Topology
+          |    Participant 0 pkgs={0} parties={1}
+          |  Ledger
+          |    Commands participant=0 actAs={1} disclosures=[]
+          |      Create 0 sigs={1} obs={}
+          |      CreateWithKey 4 key=(0, {1}) sigs={1} obs={}
+          |      CreateWithKey 3 key=(0, {1}) sigs={1} obs={}
+          |      CreateWithKey 2 key=(0, {1}) sigs={1} obs={}
+          |      CreateWithKey 1 key=(0, {1}) sigs={1} obs={}
+          |    Commands participant=0 actAs={1} disclosures=[]
+          |      Exercise NonConsuming 0 ctl={1} cobs={}
+          |        QueryByKey [1,2] exhaustive=false
+          |        QueryByKey [1,2,3,4] exhaustive=true""".stripMargin)
       run(scenario)
     }
 

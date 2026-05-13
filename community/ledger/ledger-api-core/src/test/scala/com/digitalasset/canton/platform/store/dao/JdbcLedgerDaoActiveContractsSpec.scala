@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.digitalasset.canton.ledger.api.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.{

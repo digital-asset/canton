@@ -22,6 +22,7 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   def patch: Int
   def optSuffix: Option[String]
   def isSnapshot: Boolean = optSuffix.exists(_.contains("SNAPSHOT"))
+  def isAdHoc: Boolean = optSuffix.exists(_.contains("ad-hoc"))
   def isStable: Boolean = optSuffix.isEmpty
   def fullVersion: String = s"$major.$minor.$patch${optSuffix.map("-" + _).getOrElse("")}"
 

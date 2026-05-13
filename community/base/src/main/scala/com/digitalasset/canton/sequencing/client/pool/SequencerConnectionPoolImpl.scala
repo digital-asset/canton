@@ -9,7 +9,6 @@ import cats.syntax.functorFilter.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -46,6 +45,7 @@ import com.digitalasset.canton.util.{
   SingleUseCell,
 }
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{SequencerAlias, checked}
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.Materializer
 
@@ -761,8 +761,30 @@ class SequencerConnectionPoolImpl private[sequencing] (
       .toMap
   }
 
-  override def getAllConnections()(implicit traceContext: TraceContext): Seq[SequencerConnection] =
-    (lock.exclusive(pool.values.flatten.toSeq))
+  override def getAllConnections: Seq[SequencerConnection] =
+    lock.exclusive(pool.values.flatten.toSeq)
+
+  override def getAllSequencerIds(implicit
+      traceContext: TraceContext
+  ): Map[SequencerAlias, SequencerId] =
+    getAllConnections.mapFilter { connection =>
+      val name = connection.config.name
+
+      // TODO(i31759): The only reason the connection name is not the alias was to support multiple endpoints
+      //  per connection (see `SequencerConnectionPoolConfig.fromSequencerConnections`).
+      //  Remove this when we only have one endpoint per connection.
+      val alias = name.substring(0, name.lastIndexOf('-'))
+
+      SequencerAlias
+        .create(alias)
+        .map { sequencerAlias =>
+          val sequencerId = connection.attributes.sequencerId
+          sequencerAlias -> sequencerId
+        }
+        .leftMap(error => logger.warn(s"Cannot convert connection name to sequencer alias: $error"))
+        .toOption
+    }.toMap
+
 }
 
 object SequencerConnectionPoolImpl {

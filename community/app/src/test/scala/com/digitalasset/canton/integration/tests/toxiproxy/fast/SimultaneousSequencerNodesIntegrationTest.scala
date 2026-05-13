@@ -51,9 +51,7 @@ class SimultaneousSequencerNodesIntegrationTest
   registerPlugin(bftSequencerPlugin)
   registerPlugin(UseSharedStorage.forSequencers("sequencer1", Seq("sequencer2"), loggerFactory))
   val sequencer2DbProxyConfig = SequencerToPostgres("sequencer2-to-postgres", "sequencer2")
-  val toxiproxyPlugin = new UseToxiproxy(
-    ToxiproxyConfig(proxies = Seq(sequencer2DbProxyConfig))
-  )
+  val toxiproxyPlugin = new UseToxiproxy(ToxiproxyConfig(proxies = Seq(sequencer2DbProxyConfig)))
   registerPlugin(toxiproxyPlugin)
   registerPlugin(externalPlugin)
 
@@ -62,8 +60,9 @@ class SimultaneousSequencerNodesIntegrationTest
       .addConfigTransform {
         // use lower timeout so test does not take too long to reach timeout
         val lowerTimeoutConfig =
-          DbLockedConnectionPoolConfig(initialMustRemainActiveConnectionTimeout =
-            PositiveFiniteDuration.ofSeconds(10)
+          DbLockedConnectionPoolConfig(
+            initialMustRemainActiveConnectionTimeout = PositiveFiniteDuration.ofSeconds(10),
+            activeTimeout = PositiveFiniteDuration.ofSeconds(5),
           )
         ConfigTransforms.updateSequencerConfig("sequencer2")(
           _.focus(_.replication)
@@ -167,15 +166,16 @@ class SimultaneousSequencerNodesIntegrationTest
         participant1.health.ping(participant1)
       }
 
+      toxic.remove()
+
       eventually() {
         remoteSequencer2.health.is_running() shouldBe false
         externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
       }
 
-      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it
+      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it crashed
       externalPlugin.crashed(remoteSequencer2.name)
 
-      toxic.remove()
     }
   }
 

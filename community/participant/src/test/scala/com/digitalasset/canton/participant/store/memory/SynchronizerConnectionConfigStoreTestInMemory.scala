@@ -8,7 +8,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
-class SynchronizerConnectionConfigStoreTestInMemory
+final class SynchronizerConnectionConfigStoreTestInMemory
     extends AsyncWordSpec
     with BaseTest
     with SynchronizerConnectionConfigStoreTest

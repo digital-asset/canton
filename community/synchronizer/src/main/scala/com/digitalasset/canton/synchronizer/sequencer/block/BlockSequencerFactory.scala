@@ -131,7 +131,7 @@ abstract class BlockSequencerFactory(
       lsuSequencingBounds: Option[LsuSequencingBounds],
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
-      executionContext: ExecutionContext,
+      executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
   ): BlockSequencer

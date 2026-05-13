@@ -64,6 +64,22 @@ object TopologyMappingChecks {
 }
 
 trait TopologyMappingChecks {
+
+  /** Run mapping-specific semantic checks on a proposed topology mapping.
+    *
+    * @param effective
+    *   The time at which the transaction's changes are intended to take effect.
+    * @param toValidate
+    *   The new signed topology transaction being proposed for the state.
+    * @param inStore
+    *   The currently active transaction for the same mapping (unique key), if any.
+    * @param relaxChecksForBackwardsCompatibility
+    *   Whether to bypass strict validation for legacy or compatibility reasons.
+    * @return
+    *   EitherT wrapping a `TopologyTransactionRejection` if validation fails, or Unit if
+    *   successful.
+    */
+
   def checkTransaction(
       effective: EffectiveTime,
       toValidate: GenericSignedTopologyTransaction,
@@ -158,6 +174,22 @@ class RequiredTopologyMappingChecks(
     executionContext: ExecutionContext
 ) extends TopologyMappingChecksWithStateLookup(stateLookup, loggerFactory) {
 
+  /** Verifies topology invariants and mapping-specific semantic rules.
+    *
+    *   - Validates REPLACE/REMOVE semantics and prevents the removal of critical synchronizer
+    *     parameters.
+    *
+    *   - Enforces topology freeze and validates LSU announcement consistency.
+    *
+    *   - Enforces onboarding restrictions, prevents participant rejoins, and validates
+    *     administrative party allocations.
+    *
+    *   - Ensures members have valid certificates and keys matching synchronizer specs; prevents key
+    *     revocation for active nodes.
+    *
+    *   - Prevents collisions between regular and decentralized namespaces and validates owner-based
+    *     derivation for the latter.
+    */
   def checkTransaction(
       effective: EffectiveTime,
       toValidate: GenericSignedTopologyTransaction,
@@ -984,15 +1016,18 @@ class RequiredTopologyMappingChecks(
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
     for {
       _ <- inStoreO match {
+        // new announcement (store has no existing LsuAnnouncement)
         case None => EitherTUtil.unitUS[TopologyTransactionRejection]
+        // an LsuAnnouncement exists in the store
         case Some(inStore) =>
-          // new announcement
           val psidGreaterThanInStore =
             toValidate.mapping.successorSynchronizerId > inStore.mapping.successorSynchronizerId
-          // existing announcement collecting signatures (we check that the mapping or serial hasn't been updated)
+          // existing authorized announcement collecting post-threshold signatures
+          // (we check that the mapping or serial hasn't been updated)
           val announcementHasNotChanged =
             inStore.mapping == toValidate.mapping && inStore.serial == toValidate.serial
           EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
+            // accept if the mapping content is identical or if the psid of the successor has increased
             psidGreaterThanInStore || announcementHasNotChanged,
             RequiredMappingRejection.InvalidSynchronizerSuccessor(
               toValidate.mapping.successorSynchronizerId,

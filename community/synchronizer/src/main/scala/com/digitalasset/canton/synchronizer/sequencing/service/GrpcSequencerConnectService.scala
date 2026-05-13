@@ -45,7 +45,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -64,6 +64,7 @@ class GrpcSequencerConnectService(
     clock: Clock,
     lsuSequencingBounds: Option[LsuSequencingBounds],
     sanitizePublicErrorMessages: Boolean,
+    disableReleaseVersionHandshakeCheck: Boolean,
     metrics: SequencerMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -145,6 +146,8 @@ class GrpcSequencerConnectService(
           serverProtocolVersion,
           request.clientProtocolVersions,
           request.minimumProtocolVersion,
+          OptionUtil.emptyStringAsNone(request.clientVersion),
+          disableReleaseVersionHandshakeCheck,
         )
         .tap(reportHandshakeStatus)
         .map { _ =>

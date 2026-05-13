@@ -11,16 +11,7 @@ import scala.concurrent.Future
 
 /** Trait for an individual scheduler
   */
-trait Scheduler extends StartStoppable with AutoCloseable {
-  def clearSchedule()(implicit traceContext: TraceContext): Future[Unit]
-
-  def updateCron(cron: Cron)(implicit traceContext: TraceContext): EitherT[Future, String, Unit]
-
-  def updateMaxDuration(maxDuration: PositiveSeconds)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Unit]
-
-}
+trait Scheduler extends StartStoppable with AutoCloseable {}
 
 /** Extends the Scheduler with the concept of retention used for the pruning cut-off
   */
@@ -43,6 +34,13 @@ trait PruningScheduler extends Scheduler {
       traceContext: TraceContext
   ): Future[Option[PruningSchedule]]
 
+  def clearSchedule()(implicit traceContext: TraceContext): Future[Unit]
+
+  def updateMaxDuration(maxDuration: PositiveSeconds)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit]
+
+  def updateCron(cron: Cron)(implicit traceContext: TraceContext): EitherT[Future, String, Unit]
 }
 
 /** Trait to start and stop individual or multiple schedulers

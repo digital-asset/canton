@@ -43,7 +43,7 @@ import com.digitalasset.canton.util.retry.{
   Pause,
   RetryWithDelay,
 }
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.ExecutionContext
@@ -188,6 +188,7 @@ class AuthenticationTokenProvider(
           ChallengeRequest(
             member.toProtoPrimitive,
             supportedProtocolVersions.map(_.toProtoPrimitive),
+            ReleaseVersion.current.toProtoPrimitive,
           )
         ),
         "obtain challenge from sequencer",

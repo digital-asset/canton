@@ -34,7 +34,7 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import io.grpc.{Channel, ClientInterceptors}
 import org.apache.pekko.stream.Materializer
 
@@ -83,7 +83,8 @@ class GrpcSequencerConnectionStub(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, HandshakeResponse] = {
-    val handshakeRequest = HandshakeRequest(clientProtocolVersions, minimumProtocolVersion)
+    val handshakeRequest =
+      HandshakeRequest(clientProtocolVersions, minimumProtocolVersion, ReleaseVersion.current)
 
     for {
       handshakeResponseP <- connection

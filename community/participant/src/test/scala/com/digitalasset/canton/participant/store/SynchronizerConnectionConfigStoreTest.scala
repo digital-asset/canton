@@ -20,6 +20,9 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   InconsistentLogicalSynchronizerIds,
   InconsistentPredecessorLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LsuOngoing,
+  LsuSource,
+  LsuTarget,
   MissingConfigForSynchronizer,
   NoActiveSynchronizer,
   SynchronizerIdAlreadyAdded,
@@ -336,6 +339,39 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           acmeStable,
           daStable,
         )
+      }
+
+      "return an error when registering a synchronizer during an LSU" in {
+        val predecessor = SynchronizerPredecessor(
+          psid = daStable,
+          upgradeTime = CantonTimestamp.now(),
+          isLateUpgrade = false,
+        )
+
+        for {
+          sut <- mk
+
+          _ <- sut.put(config, LsuSource, KnownPhysicalSynchronizerId(daStable), None).value
+          _ <- sut
+            .put(getConfig(daDev), LsuTarget, KnownPhysicalSynchronizerId(daDev), Some(predecessor))
+            .value
+
+          error1 <- sut
+            .put(config, Active, UnknownPhysicalSynchronizerId, None)
+            .value
+
+          error2 <- sut
+            .put(
+              config.focus(_.priority).modify(_ + 1),
+              Active,
+              UnknownPhysicalSynchronizerId,
+              None,
+            )
+            .value
+        } yield {
+          error1.left.value shouldBe LsuOngoing(daStable, daDev)
+          error2.left.value shouldBe LsuOngoing(daStable, daDev)
+        }
       }
 
       "allow to store physical synchronizer id when it is known" in {

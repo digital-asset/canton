@@ -1859,9 +1859,11 @@ final class SequencerClientTest
         traceContext: TraceContext
     ): Map[SequencerId, SequencerConnection] = ???
 
-    override def getAllConnections()(implicit
+    override def getAllConnections: Seq[SequencerConnection] = ???
+
+    override def getAllSequencerIds(implicit
         traceContext: TraceContext
-    ): Seq[SequencerConnection] = ???
+    ): Map[SequencerAlias, SequencerId] = ???
 
     override def contents: Map[SequencerId, Set[SequencerConnection]] = ???
 

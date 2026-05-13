@@ -3,12 +3,12 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.digitalasset.daml.lf.data.{BackStack, ImmArray}
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, SubmittedTransaction}
 
-private[preprocessing] final class TransactionPreprocessor(
+private[refinement] final class TransactionPreprocessor(
     commandPreprocessor: CommandPreprocessor
 ) {
 

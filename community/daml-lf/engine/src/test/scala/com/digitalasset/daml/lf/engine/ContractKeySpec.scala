@@ -71,7 +71,7 @@ class ContractKeySpec
   private[this] val compiledPackages = ConcurrentCompiledPackages(
     suffixLenientEngine.config.getCompilerConfig
   )
-  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
+  private[this] val preprocessor = refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)

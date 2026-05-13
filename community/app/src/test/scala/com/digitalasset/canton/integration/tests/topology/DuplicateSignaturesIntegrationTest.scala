@@ -159,7 +159,7 @@ sealed trait DuplicateSignaturesIntegrationTest
         .create_temporary_topology_store("test", testedProtocolVersion)
 
     participant1.topology.transactions
-      .import_topology_snapshot(readSnapshot, testTempStoreId)
+      .import_topology_snapshotV2(readSnapshot, testTempStoreId)
 
     val importedTx = participant1.topology.transactions
       .list(testTempStoreId, filterMappings = Seq(Code.SynchronizerParametersState))

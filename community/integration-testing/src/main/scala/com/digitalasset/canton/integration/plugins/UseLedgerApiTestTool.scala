@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertions
@@ -76,7 +77,7 @@ class UseLedgerApiTestTool(
     // First ensure we are able to find and invoke java as that is needed to invoke the test tool.
     commandExecutor.exec(cmd = "java --version", errorHint = "Is 'java' not on the path?")
 
-    def tryDownload(testToolRelease: LAPITTRelease): LedgerTestTool.Assembly = {
+    def tryDownload(testToolRelease: ReleaseVersion): LedgerTestTool.Assembly = {
       val otherLfVersions =
         if (LanguageVersion.stableLfVersions.contains(lfVersion))
           LanguageVersion.stableLfVersions.takeWhile(_ < lfVersion)
@@ -87,7 +88,10 @@ class UseLedgerApiTestTool(
         .foldRight(getOrDownloadTestTool(testToolRelease, lfVersion)) { (otherLfVersion, res) =>
           res.recoverWith {
             case error if isMissingArtifact(error) =>
-              logger.info(s"unable to load TestTool $lfVersion trying substitute")
+              logger.info(
+                s"LAPITT for LF $lfVersion is not published for release $testToolRelease. " +
+                  s"Falling back to LF $otherLfVersion. This is NOT a test failure."
+              )
               getOrDownloadTestTool(testToolRelease, otherLfVersion).orElse(Failure(error))
           }
         }
@@ -176,11 +180,11 @@ class UseLedgerApiTestTool(
 
   @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
   private def getOrDownloadTestTool(
-      release: LAPITTRelease,
+      release: ReleaseVersion,
       lfVersion: LanguageVersion,
   ): Try[LedgerTestTool.Assembly] = {
     val testToolName: String = s"ledger-api-test-tool-$lfVersion"
-    val filename = s"$testToolName-${release.version}.jar"
+    val filename = s"$testToolName-${release.fullVersion}.jar"
     val destination =
       File(System.getProperty("user.home")) / ".cache" / testToolName / filename
     // Check if test tool resides in destination. If not, download test tool.
@@ -364,7 +368,7 @@ object UseLedgerApiTestTool {
     case object Latest extends LAPITTVersion
 
     // Run the specified version of the LAPITT.
-    final case class Explicit(version: LAPITTRelease) extends LAPITTVersion
+    final case class Explicit(version: ReleaseVersion) extends LAPITTVersion
 
     // Run the LAPITT from the classpath.
     // Requires running `sbt ledger-test-tool/assembly` first
@@ -379,23 +383,29 @@ object UseLedgerApiTestTool {
   }
 
   // finds all major.minor.patch releases
-  def findAllCoreVersions(toolReleases: Seq[LAPITTRelease]): Seq[String] =
-    toolReleases.flatMap(_.baseVersion).distinct.sorted
+  def findAllCoreVersions(toolReleases: Seq[ReleaseVersion]): Seq[(Int, Int, Int)] =
+    toolReleases.map(_.majorMinorPatch).distinct.sorted
 
-  // finds version of the release given and sorts them by the date produced
+  // finds versions of the release given and sorts them in ascending order
   def findMatchingVersions(
-      toolReleases: Seq[LAPITTRelease],
-      baseVersion: String,
-  ): Seq[LAPITTRelease] =
+      toolReleases: Seq[ReleaseVersion],
+      majorMinorPatch: (Int, Int, Int),
+  ): Seq[ReleaseVersion] =
     toolReleases
-      .filter(_.baseVersion.contains(baseVersion))
-      .sortBy(_.releaseDate)
+      .filter(_.majorMinorPatch == majorMinorPatch)
+      .sorted
 
-  def latestRelease(logger: TracedLogger)(implicit tc: TraceContext): LAPITTRelease = {
-    val toolReleases: Seq[LAPITTRelease] = LAPITTResolver.listAllReleases()
+  def latestRelease(
+      logger: TracedLogger,
+      includeAdHoc: Boolean = true,
+      includeSnapshot: Boolean = true,
+  )(implicit tc: TraceContext): ReleaseVersion = {
+    val toolReleases: Seq[ReleaseVersion] = LAPITTResolver.listAllReleases().filter { r =>
+      (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot)
+    }
     val latestCoreVersion = findAllCoreVersions(toolReleases).lastOption.getOrElse(
       throw new RuntimeException(
-        s"No releases found among the following versions: ${toolReleases.map(_.version)}"
+        s"No releases found among the following versions: ${toolReleases.map(_.fullVersion)}"
       )
     )
 
@@ -403,13 +413,19 @@ object UseLedgerApiTestTool {
     val matchingVersion = matchingVersions.lastOption.getOrElse(
       throw new RuntimeException(s"No matching version found for release $latestCoreVersion")
     )
-    logger.debug(s"found ${matchingVersion.version} as latest version of $latestCoreVersion")
+    logger.debug(s"found ${matchingVersion.fullVersion} as latest version of $latestCoreVersion")
 
     matchingVersion
   }
 
-  def latestReleases(logger: TracedLogger)(implicit tc: TraceContext): Seq[LAPITTRelease] = {
-    val toolVersions = LAPITTResolver.listAllReleases()
+  def latestReleases(
+      logger: TracedLogger,
+      includeAdHoc: Boolean = false,
+      includeSnapshot: Boolean = true,
+  )(implicit tc: TraceContext): Seq[ReleaseVersion] = {
+    val toolVersions = LAPITTResolver.listAllReleases().filter { r =>
+      (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot)
+    }
 
     val coreVersions = findAllCoreVersions(toolVersions)
     val latestReleases = coreVersions.flatMap(findMatchingVersions(toolVersions, _).lastOption)
@@ -417,4 +433,5 @@ object UseLedgerApiTestTool {
 
     latestReleases
   }
+
 }

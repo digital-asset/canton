@@ -24,6 +24,8 @@ message SequencerConnect {
   message HandshakeRequest {
     repeated int32 client_protocol_versions = 1;
     optional int32 minimum_protocol_version = 2;
+    // Version of the binary of the client. Introduced with 3.5 / pv=35.
+    string client_version = 3;
   }
 
   message HandshakeResponse {

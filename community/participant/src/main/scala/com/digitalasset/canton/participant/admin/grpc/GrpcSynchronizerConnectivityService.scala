@@ -41,7 +41,11 @@ import com.digitalasset.canton.participant.synchronizer.{
 }
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.{
+  KnownPhysicalSynchronizerId,
+  PhysicalSynchronizerId,
+  UnknownPhysicalSynchronizerId,
+}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.ShowUtil.*
@@ -384,34 +388,45 @@ class GrpcSynchronizerConnectivityService(
     val v30.GetSynchronizerIdRequest(synchronizerAlias) = request
     val ret = for {
       alias <- parseSynchronizerAlias(synchronizerAlias)
-      connectionConfig <-
+      storedConnectionConfig <-
         EitherT
           .fromEither[FutureUnlessShutdown](
             sync.getSynchronizerConnectionConfigForAlias(alias, onlyActive = true)
           )
           .leftMap(_ => SyncServiceUnknownSynchronizer.Error(alias))
-          .map(_.config)
-      result <-
-        sequencerInfoLoader
-          .loadAndAggregateSequencerEndpoints(
-            connectionConfig.synchronizerAlias,
-            None,
-            connectionConfig.sequencerConnections,
-            SequencerConnectionValidation.Active,
-          )(
-            traceContext,
-            CloseContext(sync),
-          )
-          .leftMap[CantonBaseError](err =>
-            SynchronizerRegistryError.fromSequencerInfoLoaderError(err)
-          )
-      _ <- aliasManager
-        .processHandshake(connectionConfig.synchronizerAlias, result.psid)
-        .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
-        .leftWiden[CantonBaseError]
+
+      psid <- storedConnectionConfig.configuredPsid match {
+        case KnownPhysicalSynchronizerId(psid) =>
+          EitherT.pure[FutureUnlessShutdown, CantonBaseError](psid)
+
+        case UnknownPhysicalSynchronizerId =>
+          val connectionConfig = storedConnectionConfig.config
+
+          for {
+            result <-
+              sequencerInfoLoader
+                .loadAndAggregateSequencerEndpoints(
+                  connectionConfig.synchronizerAlias,
+                  None,
+                  connectionConfig.sequencerConnections,
+                  SequencerConnectionValidation.Active,
+                )(
+                  traceContext,
+                  CloseContext(sync),
+                )
+                .leftMap[CantonBaseError](err =>
+                  SynchronizerRegistryError.fromSequencerInfoLoaderError(err)
+                )
+            _ <- aliasManager
+              .processHandshake(connectionConfig.synchronizerAlias, result.psid)
+              .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
+              .leftWiden[CantonBaseError]
+          } yield result.psid
+      }
+
     } yield v30.GetSynchronizerIdResponse(
-      physicalSynchronizerId = result.psid.toProtoPrimitive,
-      synchronizerId = result.psid.logical.toProtoPrimitive,
+      physicalSynchronizerId = psid.toProtoPrimitive,
+      synchronizerId = psid.logical.toProtoPrimitive,
     )
 
     _mapErrNewEUS(ret)

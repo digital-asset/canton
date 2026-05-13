@@ -10,7 +10,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Ref, Time}
-import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone, Enricher => LfEnricher}
+import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone}
+import com.digitalasset.daml.lf.engine.refinement.{Enricher => LfEnricher}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SResult._
@@ -204,7 +205,7 @@ private[lf] object IdeLedgerRunner {
     def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] = {
       crash(LookupError.MissingPackage.pretty(pkgId, context))
     }
-    val strictEnricher = new LfEnricher(
+    val strictEnricher = LfEnricher(
       compiledPackages = compiledPackages,
       loadPackage = loadPackage,
       addTypeInfo = true,
@@ -213,7 +214,7 @@ private[lf] object IdeLedgerRunner {
       forbidLocalContractIds = true,
       loggerFactory = loggerFactory,
     )
-    val lenientEnricher = new LfEnricher(
+    val lenientEnricher = LfEnricher(
       compiledPackages = compiledPackages,
       loadPackage = loadPackage,
       addTypeInfo = true,
@@ -386,7 +387,8 @@ private[lf] object IdeLedgerRunner {
                   val disclosedInsts =
                     disclosuresByKey.getOrElse(gkey, Vector.empty)
                   for {
-                    globalInsts <- ledger.lookupKey(gkey, committers, readAs)
+                    globalInsts <- ledger
+                      .lookupKey(gkey, committers, readAs)
                       .left
                       .map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
                   } yield disclosedInsts ++ globalInsts.diff(disclosedInsts)
@@ -407,7 +409,7 @@ private[lf] object IdeLedgerRunner {
                     if (result.length == limit)
                       NeedKeyProgression.InProgress(FatContractInstanceVector(rest))
                     else
-                      NeedKeyProgression.Finished
+                      NeedKeyProgression.Finished,
                   )
                   go()
               }

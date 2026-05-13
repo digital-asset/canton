@@ -41,6 +41,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
@@ -704,7 +705,9 @@ trait SynchronizerUpgradeClient {
     */
   def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]]
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ]
 }
 
 trait TopologySnapshot

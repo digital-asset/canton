@@ -57,7 +57,7 @@ import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithIni
 import com.digitalasset.canton.topology.processing.InitialTopologySnapshotValidator
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -522,15 +522,32 @@ object SynchronizerRegistryHelpers {
         .traverse_ { case (predecessor, predecessorSyncState) =>
           for {
             isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized
-            // if topology is not initialized, transfer the topology state from the predecessor,
-            // but only if this is not a late upgrade
-            _ <- MonadUtil.when(!isTopologyInitialized && !predecessor.isLateUpgrade)(
-              persistentState.topologyStore
-                .copyFromPredecessorSynchronizerStore(
-                  predecessorSyncState.topologyStore
+
+            shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
+            _ <-
+              if (shouldCopyTopology) {
+                loggingContext.info(
+                  s"LSU to ${persistentState.psid.suffix}: About to copy topology"
                 )
-                .flatMap(_ => persistentState.connectivityStatusStore.setTopologyInitialized())
-            )
+
+                for {
+                  _ <- persistentState.topologyStore
+                    .copyFromPredecessorSynchronizerStore(
+                      predecessorSyncState.topologyStore
+                    )
+
+                  _ = loggingContext.info(
+                    s"LSU to ${persistentState.psid.suffix}: Done copying topology"
+                  )
+                  _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
+                } yield ()
+              } else {
+                loggingContext.info(
+                  s"LSU to ${persistentState.psid.suffix}: No need to copy topology (isTopologyInitialized=$isTopologyInitialized, isLateUpgrade=${predecessor.isLateUpgrade})"
+                )
+                FutureUnlessShutdown.unit
+              }
+
             _ = metrics.setLsuStatus(
               ParticipantMetrics.LsuStatus.LocalCopyDone,
               persistentState.psid,

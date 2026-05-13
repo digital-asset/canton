@@ -281,6 +281,9 @@ class DbLockedConnectionPool private (
     case _ => false
   }
 
+  def mainConnectionStatus: Either[DbLockedConnectionError, KeepAliveConnection] =
+    mainConnection.get
+
   def isPassive: Boolean = stateRef.get() match {
     case _: State.Active => false
     case State.Passive => true

@@ -15,7 +15,7 @@ import scala.collection.immutable.SortedSet
 import scala.concurrent.ExecutionContext
 
 class InteractiveSubmissionEnricher(engine: Engine, packageResolver: PackageResolver) {
-  private lazy val enricher = new Enricher(
+  private lazy val enricher = Enricher(
     engine,
     // TODO(i21582) Because we do not hash suffixed CIDs, we need to disable validation of suffixed CIDs otherwise enrichment
     // will fail

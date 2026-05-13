@@ -39,6 +39,7 @@ import eu.rekawek.toxiproxy.model.ToxicDirection
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.*
 
 trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest {
@@ -167,8 +168,9 @@ final class CantonNetworkTopologyStateIntegrationTest
           participant1.topology.stores
             .create_temporary_topology_store("test", testedProtocolVersion)
 
-        participant1.topology.transactions
-          .import_topology_snapshot(genesisBytes, testTempStoreId)
+        // The genesis fixture is in the V1 bytestring format, so we use the deprecated import_topology_snapshot here.
+        (participant1.topology.transactions
+          .import_topology_snapshot(genesisBytes, testTempStoreId): @nowarn("cat=deprecation"))
 
         val importedState = participant1.topology.transactions
           .list(testTempStoreId, timeQuery = TimeQuery.Range(None, None), operation = None)

@@ -23,6 +23,13 @@ service ParticipantRepairService {
   rpc ExportAcs(ExportAcsRequest) returns (stream ExportAcsResponse);
 
   // Import an existing export into the participant
+  //
+  //  This operation assumes the provided snapshot
+  //  contains the complete and untampered ACS originating from a trusted source participant.
+  //  Because the target participant cannot independently verify the historical provenance
+  //  of the imported contracts, validation is performed on a best-effort basis,
+  //  even if `contractImportMode` is `Validation`.
+  //  Use only when the provided snapshot comes from a known, trusted authority.
   rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
 
   // Remove the given contracts from the participant

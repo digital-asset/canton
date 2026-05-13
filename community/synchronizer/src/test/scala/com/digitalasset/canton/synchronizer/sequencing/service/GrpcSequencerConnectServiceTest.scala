@@ -62,6 +62,7 @@ class GrpcSequencerConnectServiceTest
         LsuSequencingBounds.unsafeCreate(upgradeTime = ts, lowerBoundSequencingTimeExclusive = ts)
       ),
       sanitizePublicErrorMessages = false,
+      disableReleaseVersionHandshakeCheck = false,
       SequencerTestMetrics,
       loggerFactory,
     )(parallelExecutionContext)

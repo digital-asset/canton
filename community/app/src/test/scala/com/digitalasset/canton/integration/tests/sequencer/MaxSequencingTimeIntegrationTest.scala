@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.sequencer
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -32,7 +31,6 @@ import java.time.Duration
 import scala.concurrent.duration.DurationInt
 
 /** Checks that the config flag max sequencing time is taken into account. */
-@UnstableTest // TODO(#31786) Remove from unstable
 final class MaxSequencingTimeIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
@@ -101,7 +99,7 @@ final class MaxSequencingTimeIntegrationTest
           .assertEventuallyLogsSeq(
             SuppressionRule.Level(Level.INFO) && (SuppressionRule
               .forLogger[BlockUpdateGeneratorImpl] || LoggerNameContains(
-              WritePayloadsFlow.getClass.getSimpleName
+              WritePayloadsFlow.getClass.getSimpleName.dropRight(1) // Drop final $
             ))
           )(
             {

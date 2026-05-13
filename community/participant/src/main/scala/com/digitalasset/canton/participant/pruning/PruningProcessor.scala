@@ -207,25 +207,25 @@ class PruningProcessor(
             .map { firstUnsafeOffset =>
               val result = firstUnsafeOffset
                 .map(_.offset)
-                .flatMap(_.decrement)
-                .map(safeOffset => safeOffset.min(rewoundBoundInclusive))
+                .flatMap(_.decrement) // unsafe -> safe
+                .map(_.min(rewoundBoundInclusive))
 
               logger.debug(
-                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
+                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt, beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
               )
               result
             }
             .value
 
         case None =>
-          FutureUnlessShutdown.pure(
-            Left(LedgerPruningNothingToPrune)
-          ) // nothing to prune, beforeOrAt is too low
+          // nothing to prune, beforeOrAt is too low
+          FutureUnlessShutdown.pure(Left(LedgerPruningNothingToPrune))
       }
   )
 
   /** Purge all data of the specified synchronizer that must be inactive.
     */
+  // TODO(#24716) It should be physical or at least we should check more
   def purgeInactiveSynchronizer(synchronizerId: SynchronizerId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] = for {
@@ -314,9 +314,7 @@ class PruningProcessor(
 
   private def ensurePruningOffsetIsSafe(
       offset: Offset,
-      safeToPruneCommitmentState: Option[
-        SafeToPruneCommitmentState
-      ],
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] =
@@ -381,7 +379,7 @@ class PruningProcessor(
     } yield ()
   }
 
-  // TODO(#24716) Split physical vs logical pruning
+  // TODO(#24716) Split physical vs logical pruning.
   private def purgeSynchronizer(state: SyncPersistentState)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {

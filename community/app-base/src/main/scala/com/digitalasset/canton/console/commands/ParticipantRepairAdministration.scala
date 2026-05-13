@@ -271,7 +271,12 @@ class ParticipantRepairAdministration(
       |the synchronizer where the contract is assigned to, the whole import process
       |fails depending on the value of `contractImportMode`.
       |
-      |By default `contractImportMode` is set to `ContractImportMode.Validation`.
+      |This operation assumes the provided snapshot file (located at `importFilePath`)
+      |contains the complete and untampered ACS originating from a trusted source participant.
+      |Because the target participant cannot independently verify the historical provenance
+      |of the imported contracts, validation is performed on a best-effort basis,
+      |even if `contractImportMode` is `Validation`.
+      |Use only when the provided snapshot file comes from a known, trusted authority.
       |
       |Expert only: As validation of contract IDs may lengthen the import significantly,
       |you have the option to simply accept the contract IDs as they are using the
@@ -518,7 +523,6 @@ class ParticipantRepairAdministration(
       }
     }
 
-  // TODO(#28972) Remove preview flag
   @Help.Summary("Perform a late logical synchronizer upgrade")
   @Help.Description(
     """This command allows to perform an offline logical synchronizer upgrade.
@@ -539,7 +543,7 @@ class ParticipantRepairAdministration(
       announcedUpgradeTime: CantonTimestamp,
       successorConfig: SynchronizerConnectionConfig,
       validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
-  ): Unit = check(FeatureFlag.Preview) {
+  ): Unit =
     check(FeatureFlag.Repair) {
       consoleEnvironment.run {
         runner.adminCommand(
@@ -554,5 +558,4 @@ class ParticipantRepairAdministration(
         )
       }
     }
-  }
 }

@@ -47,7 +47,7 @@ class ReferenceInterpreterTest
           |      CreateWithKey 1 key=(0, {1}) sigs={1} obs={}
           |      Exercise NonConsuming 0 ctl={1} cobs={}
           |        FetchByKey 1
-          |        LookupByKey Success 1
+          |        QueryByKey [1] exhaustive=true
           |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
           |""".stripMargin)
 
@@ -69,7 +69,7 @@ class ReferenceInterpreterTest
           |      Create 0 sigs={1} obs={}
           |    Commands participant=1 actAs={1} disclosures=[]
           |      Exercise NonConsuming 0 ctl={1} cobs={}
-          |        LookupByKey Failure key=(0, {1})
+          |        QueryByKey [] key=(0, {1}) exhaustive=true
           |""".stripMargin)
 
       ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {

@@ -510,7 +510,7 @@ class GrpcPartyManagementService(
       request: ImportPartyAcsRequest
   ): ParsingResult[
     (
-        Synchronizer,
+        SynchronizerId,
         Option[PartyId],
         Option[String],
         ContractImportMode,
@@ -518,9 +518,8 @@ class GrpcPartyManagementService(
     )
   ] =
     for {
-      // TODO(#30096): Swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
-      synchronizer <- ProtoConverter.parseRequired(
-        Synchronizer.fromLogicalOrPhysicalString(_, "synchronizer_id"),
+      synchronizerId <- ProtoConverter.parseRequired(
+        SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"),
         "synchronizer_id",
         request.synchronizerId,
       )
@@ -542,7 +541,7 @@ class GrpcPartyManagementService(
         .flatMap(OptionUtil.emptyStringAsNone)
         .orElse(Some(s"import-${UUID.randomUUID}"))
     } yield (
-      synchronizer,
+      synchronizerId,
       partyIdO,
       workflowIdPrefix,
       contractImportMode,
@@ -556,7 +555,7 @@ class GrpcPartyManagementService(
 
     type ImportContext =
       (
-          Synchronizer,
+          SynchronizerId,
           Option[PartyId],
           Option[String],
           ContractImportMode,
@@ -583,7 +582,7 @@ class GrpcPartyManagementService(
     ) {
       case (
             (
-              synchronizer,
+              synchronizerId,
               partyIdO, // None if not provided by the user (backwards compatibility)
               workflowIdPrefix,
               contractImportMode,
@@ -604,11 +603,9 @@ class GrpcPartyManagementService(
               )
           }
 
-        val synchronizerId = synchronizer.logical
-
         val resultET = for {
           effectiveTimestampO <- partyIdO match {
-            case Some(partyId) => preImportValidation(synchronizer, partyId)
+            case Some(partyId) => preImportValidation(synchronizerId, partyId)
             case None => Right(Option.empty[EffectiveTime]).toEitherT[FutureUnlessShutdown]
           }
 
@@ -664,20 +661,19 @@ class GrpcPartyManagementService(
     * cleanup.
     */
   private def preImportValidation(
-      synchronizer: Synchronizer,
+      synchronizerId: SynchronizerId,
       partyId: PartyId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Option[EffectiveTime]] =
     for {
       // Dependency validation for persisting a pending onboarding clearance operation as part of the import
-      _ <- getPersistentState(synchronizer.logical)
+      _ <- getPersistentState(synchronizerId)
 
-      // TODO(#30096): Swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
       store <- EitherT.fromEither[FutureUnlessShutdown](
-        topologyLookup.topologyStore(synchronizer).leftMap { err =>
+        topologyLookup.topologyStore(synchronizerId).leftMap { err =>
           PartyManagementServiceError.InvalidState
-            .Error(s"Topology store not available for $synchronizer: $err")
+            .Error(s"Topology store not available for $synchronizerId: $err")
         }
       )
 

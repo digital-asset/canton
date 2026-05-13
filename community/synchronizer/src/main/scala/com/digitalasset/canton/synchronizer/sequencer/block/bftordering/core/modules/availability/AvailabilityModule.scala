@@ -25,6 +25,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch.BatchValidityDurationEpochs
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.PatienceAndCurrentTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
   AvailabilityAck,
   BatchId,
@@ -69,7 +70,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
 
-import java.time.Instant
+import java.time.{Duration, Instant}
 import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.jdk.DurationConverters.*
@@ -113,12 +114,16 @@ final class AvailabilityModule[E <: Env[E]](
   import AvailabilityModule.*
 
   private val thisNode = initialMembership.myId
+
+  private lazy val disseminationPatienceO: Option[Duration] =
+    config.availabilityDisseminationPatience.map(_.toJava)
+
   private val nodeShuffler = new BftNodeShuffler(random)
 
   private var lastKnownEpochNumber = initialEpochNumber
-
   private var activeMembership = initialMembership
   private var activeCryptoProvider = initialCryptoProvider
+
   private var topologyChangedSinceLastProposalRequest = false
 
   private var waitingForBatchSince: Option[Instant] = None
@@ -490,10 +495,13 @@ final class AvailabilityModule[E <: Env[E]](
                 s"$actingOnMessageType: will complete re-signing before being disseminated further as needed"
               )
             } else {
-              val nodesToBeSentBatch = progress.sendBatchTo
+              val now = clock.now.toInstant
+              val nodesToBeSentBatch =
+                progress.sendBatchTo(disseminationPatienceO.map(PatienceAndCurrentTime(_, now))).all
               if (nodesToBeSentBatch.isEmpty) {
                 logger.debug(
-                  s"$actingOnMessageType: $batchId has already been sent to all nodes, not disseminating further"
+                  s"$actingOnMessageType: $batchId has already been sent to all nodes that should receive it for now," +
+                    "not disseminating further"
                 )
               } else {
                 logger.debug(
@@ -510,7 +518,7 @@ final class AvailabilityModule[E <: Env[E]](
                 setProgress(
                   actingOnMessageType,
                   batchId,
-                  progress.addSends(nodesToBeSentBatch),
+                  progress.addSends(now, nodesToBeSentBatch),
                 )
               }
             }
@@ -799,8 +807,10 @@ final class AvailabilityModule[E <: Env[E]](
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
   ): Unit = {
-    updateAllDisseminationProgressBasedOnActiveMembership(actingOnMessageType)
+    if (topologyChangedSinceLastProposalRequest)
+      updateAllDisseminationProgressBasedOnActiveMembership(actingOnMessageType)
 
+    val now = clock.now.toInstant
     val batchesThatNeedSigning = mutable.ListBuffer[Traced[BatchId]]()
     val batchesThatNeedMoreDissemination =
       mutable.ListBuffer[(Traced[BatchId], DisseminationStatus.InProgress)]()
@@ -810,10 +820,15 @@ final class AvailabilityModule[E <: Env[E]](
       .map(_._2)
       .foreach { disseminationProgress =>
         val tracedBatchId = disseminationProgress.tracedBatchId
-        if (disseminationProgress.needsSigning) {
+        if (topologyChangedSinceLastProposalRequest && disseminationProgress.needsSigning) {
           batchesThatNeedSigning.addOne(tracedBatchId)
         } else {
-          if (disseminationProgress.sendBatchTo.nonEmpty) {
+          if (
+            disseminationProgress
+              .sendBatchTo(disseminationPatienceO.map(PatienceAndCurrentTime(_, now)))
+              .all
+              .nonEmpty
+          ) {
             batchesThatNeedMoreDissemination
               .addOne(tracedBatchId -> disseminationProgress)
               .discard
@@ -833,7 +848,7 @@ final class AvailabilityModule[E <: Env[E]](
         Availability.LocalDissemination.LocalBatchesStoredSigned(
           batches.zip(batchesThatNeedMoreDissemination.map(_._2)).map {
             case ((batchId, batch), _) =>
-              // "signature = None" will trigger further dissemination without resigning
+              // "signature = None" will trigger further dissemination without re-signing
               Availability.LocalDissemination
                 .LocalBatchStoredSigned(batchId, batch, currentMembership, signature = None)
           }

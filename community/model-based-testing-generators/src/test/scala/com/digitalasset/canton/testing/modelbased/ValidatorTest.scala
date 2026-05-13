@@ -5,8 +5,8 @@ package com.digitalasset.canton.testing.modelbased
 
 import com.digitalasset.canton.testing.modelbased.ast.Concrete.Scenario
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
+import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult.*
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.{KeyMode, ValidityResult}
 import com.digitalasset.canton.testing.modelbased.syntax.Parser
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -17,7 +17,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
     val numParties = scenario.topology.flatMap(_.parties).toSet.size
     val maxPackageId =
       scenario.ledger.flatMap(_.commands.flatMap(_.packageId)).maxOption.getOrElse(0)
-    SymbolicSolver.valid(scenario, maxPackageId, numParties, KeyMode.NonUniqueContractKeys)
+    SymbolicSolver.valid(scenario, maxPackageId, numParties)
   }
 
   "the validator" should {
@@ -33,7 +33,7 @@ class ValidatorTest extends AnyWordSpec with Matchers {
         |      CreateWithKey 1 key=(0, {1}) sigs={1} obs={}
         |      Exercise NonConsuming 0 ctl={1} cobs={}
         |        FetchByKey 1
-        |        LookupByKey Success 1
+        |        QueryByKey [1] exhaustive=true
         |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 

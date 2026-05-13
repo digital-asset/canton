@@ -3,11 +3,10 @@
 
 package com.digitalasset.daml.lf
 package engine
-package preprocessing
+package refinement
 
 import com.daml.nameof.NameOf
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.command.{ApiContractKey, ReplayCommand}
 import com.digitalasset.daml.lf.data.{CostModel, ImmArray, Ref}
@@ -20,8 +19,6 @@ import com.digitalasset.daml.lf.transaction.{
   SubmittedTransaction,
 }
 import com.digitalasset.daml.lf.value.Value
-
-import scala.annotation.tailrec
 
 /** The Command Preprocessor is responsible of the following tasks:
   *  - normalizes value representation (e.g. resolves missing type
@@ -53,10 +50,9 @@ private[engine] final class Preprocessor(
     costModel: CostModel.CostModelImplicits = CostModel.EmptyCostModelImplicits,
     initialInputCost: CostModel.Cost = 0L,
     maxInputCost: CostModel.Cost = Long.MaxValue,
-    override val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging {
+    loggerFactory: NamedLoggerFactory,
+) extends SafePackageResolver(compiledPackages, loadPackage, loggerFactory) {
 
-  import Preprocessor._
   import compiledPackages.pkgInterface
   import costModel._
 
@@ -88,105 +84,13 @@ private[engine] final class Preprocessor(
 
   val transactionPreprocessor = new TransactionPreprocessor(commandPreprocessor)
 
-  @tailrec
-  private[this] def collectNewPackagesFromTypes(
-      types: List[Ast.Type],
-      acc: Map[Ref.PackageId, language.Reference] = Map.empty,
-  )(implicit traceContext: TraceContext): Result[List[(Ref.PackageId, language.Reference)]] =
-    types match {
-      case typ :: rest =>
-        typ match {
-          case Ast.TTyCon(tycon) =>
-            val pkgId = tycon.packageId
-            val newAcc =
-              if (compiledPackages.contains(pkgId) || acc.contains(pkgId))
-                acc
-              else
-                acc.updated(pkgId, language.Reference.DataType(tycon))
-            collectNewPackagesFromTypes(rest, newAcc)
-          case Ast.TApp(tyFun, tyArg) =>
-            collectNewPackagesFromTypes(tyFun :: tyArg :: rest, acc)
-          case Ast.TNat(_) | Ast.TBuiltin(_) | Ast.TVar(_) =>
-            collectNewPackagesFromTypes(rest, acc)
-          case Ast.TSynApp(_, _) | Ast.TForall(_, _) | Ast.TStruct(_) =>
-            // We assume that collectPackages is always given serializable types
-            ResultError(
-              Error.Preprocessing
-                .Internal(
-                  NameOf.qualifiedNameOfCurrentFunc,
-                  s"unserializable type ${typ.pretty}",
-                  None,
-                )
-            )
-        }
-      case Nil =>
-        ResultDone(acc.toList)
-    }
-
-  private[this] def collectNewPackagesFromTemplatesOrInterfaces(
-      pkgResolution: Map[Ref.PackageName, Ref.PackageId],
-      tyRefs: Iterable[Ref.TypeConRef],
-  ): List[(Ref.PackageId, language.Reference)] =
-    tyRefs
-      .foldLeft(Map.empty[Ref.PackageId, language.Reference]) { (acc, tycon) =>
-        val pkgId = tycon.pkg match {
-          case Ref.PackageRef.Name(name) =>
-            pkgResolution.get(name)
-          case Ref.PackageRef.Id(id) =>
-            Some(id)
-        }
-        pkgId match {
-          case Some(id) if !compiledPackages.contains(id) && !acc.contains(id) =>
-            acc.updated(
-              id,
-              language.Reference.TemplateOrInterface(tycon.copy(Ref.PackageRef.Id(id))),
-            )
-          case _ =>
-            acc
-        }
-      }
-      .toList
-
-  private[this] def collectNewPackagesFromTemplatesOrInterfaces(
-      tycons: Iterable[Ref.TypeConId]
-  ): List[(Ref.PackageId, language.Reference)] =
-    tycons
-      .foldLeft(Map.empty[Ref.PackageId, language.Reference]) { (acc, tycon) =>
-        val pkgId = tycon.packageId
-        if (compiledPackages.contains(pkgId) || acc.contains(pkgId))
-          acc
-        else
-          acc.updated(pkgId, language.Reference.TemplateOrInterface(tycon.toRef))
-      }
-      .toList
-
-  private[this] def pullPackages(
-      pkgIds: List[(Ref.PackageId, language.Reference)]
-  ): Result[Unit] =
-    pkgIds match {
-      case (pkgId, context) :: rest =>
-        loadPackage(pkgId, context).flatMap(_ => pullPackages(rest))
-      case Nil =>
-        Result.Unit
-    }
-
-  private[this] def pullTypePackages(typ: Ast.Type)(implicit traceContext: TraceContext): Result[Unit] =
-    collectNewPackagesFromTypes(List(typ)).flatMap(pullPackages)
-
-  private[this] def pullPackage(
-      pkgResolution: Map[Ref.PackageName, Ref.PackageId],
-      tyCons: Iterable[Ref.TypeConRef],
-  ): Result[Unit] =
-    pullPackages(collectNewPackagesFromTemplatesOrInterfaces(pkgResolution, tyCons))
-
-  private[this] def pullPackage(tyCons: Iterable[Ref.TypeConId]): Result[Unit] =
-    pullPackages(collectNewPackagesFromTemplatesOrInterfaces(tyCons))
-
   /** Translates the LF value `v0` of type `ty0` to a speedy value.
     * Fails if the nesting is too deep or if v0 does not match the type `ty0`.
     * Assumes ty0 is a well-formed serializable typ.
     */
-  def translateValue(ty0: Ast.Type, v0: Value)(implicit traceContext: TraceContext): Result[SValue] =
+  def translateValue(ty0: Ast.Type, v0: Value)(implicit
+      traceContext: TraceContext
+  ): Result[SValue] =
     safelyRun(pullTypePackages(ty0)) {
       // this is used only by the value enricher, strict translation is the way to go
       commandPreprocessor.unsafeTranslateValue(
@@ -387,7 +291,10 @@ private[engine] final class Preprocessor(
 
 private[lf] object Preprocessor {
 
-  def forTesting(compilerConfig: speedy.Compiler.Config, loggerFactory: NamedLoggerFactory): Preprocessor =
+  def forTesting(
+      compilerConfig: speedy.Compiler.Config,
+      loggerFactory: NamedLoggerFactory,
+  ): Preprocessor =
     forTesting(new ConcurrentCompiledPackages(compilerConfig), loggerFactory)
 
   def forTesting(pkgs: MutableCompiledPackages, loggerFactory: NamedLoggerFactory): Preprocessor =
@@ -408,38 +315,5 @@ private[lf] object Preprocessor {
         ),
       loggerFactory = loggerFactory,
     )
-
-  @throws[Error.Preprocessing.Error]
-  private[preprocessing] def handleLookup[X](either: Either[LookupError, X]): X = either match {
-    case Right(v) => v
-    case Left(error) => throw Error.Preprocessing.Lookup(error)
-  }
-
-  @inline
-  private[preprocessing] def safelyRun[X](
-      handleMissingPackages: => Result[_]
-  )(unsafeRun: => X): Result[X] = {
-
-    def start(first: Boolean): Result[X] =
-      try {
-        ResultDone(unsafeRun)
-      } catch {
-        case Error.Preprocessing.Lookup(LookupError.MissingPackage(_, _)) if first =>
-          handleMissingPackages.flatMap(_ => start(false))
-        case e: Error.Preprocessing.Error =>
-          ResultError(e)
-      }
-
-    start(first = true)
-  }
-
-  @inline
-  private[preprocessing] def safelyRun[X](unsafeRun: => X): Either[Error.Preprocessing.Error, X] =
-    try {
-      Right(unsafeRun)
-    } catch {
-      case e: Error.Preprocessing.Error =>
-        Left(e)
-    }
 
 }
