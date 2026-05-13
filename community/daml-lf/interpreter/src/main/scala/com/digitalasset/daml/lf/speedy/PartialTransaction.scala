@@ -435,7 +435,7 @@ private[speedy] case class PartialTransaction(
           coid,
           contract.gkeyOpt,
           byKey,
-        ),
+        )
       )
       authorizationChecker.authorizeFetch(optLocation, node.templateId, node.stakeholders)(
         auth
@@ -540,7 +540,7 @@ private[speedy] case class PartialTransaction(
           contract.gkeyOpt,
           byKey,
           consuming,
-        ),
+        )
       )
       authorizationChecker.authorizeExercise(
         optLocation,
@@ -661,7 +661,7 @@ private[speedy] case class PartialTransaction(
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
-      case _ =>
+      case None =>
         // External calls outside of exercise context are not stored
         // (they would be at the root level, which is not supported)
         None
@@ -719,6 +719,10 @@ private[speedy] case class PartialTransaction(
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
+        // Note: external call results are NOT discarded on rollback. The validator
+        // re-executes the code inside rollback scopes and needs the results at the
+        // same call indices. Rolled-back results are kept so submission and validation
+        // produce the same sequence of external call lookups.
         contractState.endRollback match {
           case Right(newState) =>
             Right(

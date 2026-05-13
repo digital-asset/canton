@@ -58,6 +58,10 @@ import com.digitalasset.canton.participant.store.{
   PruningOffsetServiceImpl,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
   ParticipantNodeParameters,
@@ -135,6 +139,7 @@ class LedgerApiServer(
     pruningConfig: ParticipantStoreConfig,
     updateServiceConfig: UpdateServiceConfig,
     val loggerFactory: NamedLoggerFactory,
+    extensionServiceManagerOpt: Option[ExtensionServiceManager] = None,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -427,6 +432,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
+        externalCallHandler = ExtensionServiceExternalCallHandler.create(extensionServiceManagerOpt),
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -592,6 +598,7 @@ object LedgerApiServer {
       pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
       updateServiceConfig: UpdateServiceConfig,
+      extensionServiceManagerOpt: Option[ExtensionServiceManager] = None,
   )(implicit
       actorSystem: ActorSystem,
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -646,6 +653,7 @@ object LedgerApiServer {
       loggerFactory = loggerFactory,
       pruningConfig = pruningConfig,
       updateServiceConfig = updateServiceConfig,
+      extensionServiceManagerOpt = extensionServiceManagerOpt,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

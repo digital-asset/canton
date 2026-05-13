@@ -81,6 +81,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: ExternalCallHandler = ExternalCallHandler.notSupported,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -98,6 +99,8 @@ final class StoreBackedCommandInterpreter(
   ): FutureUnlessShutdown[Either[ErrorCause, CommandInterpretationResult]] = {
     val interpretationTimeNanos = new AtomicLong(0L)
     val start = System.nanoTime()
+    val externalCallSubmissionId =
+      commands.submissionId.map(_.unwrap).getOrElse(commands.commandId.unwrap)
     for {
       ledgerTimeRecordTimeToleranceO <- dynParamGetter
         // TODO(i15313):
@@ -119,6 +122,7 @@ final class StoreBackedCommandInterpreter(
         interpretationTimeNanos,
         commands.commands.ledgerEffectiveTime,
         ledgerTimeRecordTimeToleranceO,
+        externalCallSubmissionId,
       )
 
     } yield submission.flatMap { case (updateTx, meta) =>
@@ -235,6 +239,7 @@ final class StoreBackedCommandInterpreter(
       interpretationTimeNanos: AtomicLong,
       ledgerEffectiveTime: Time.Timestamp,
       ledgerTimeRecordTimeToleranceO: Option[NonNegativeFiniteDuration],
+      externalCallSubmissionId: String,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): FutureUnlessShutdown[Either[ErrorCause, A]] = {
@@ -443,23 +448,24 @@ final class StoreBackedCommandInterpreter(
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
 
-        // TODO(https://github.com/digital-asset/canton/issues/513): Replace this fail-fast once command submission is wired to external calls.
-        case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
-          FutureUnlessShutdown.pure(
-            Left(
-              ErrorCause.DamlLf(
-                Error.Interpretation(
-                  Error.Interpretation.Internal(
-                    "StoreBackedCommandInterpreter",
-                    s"External calls are not supported during ledger-api command submission " +
-                      s"(extensionId=$extensionId, functionId=$functionId)",
-                    None,
-                  ),
-                  None,
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          externalCallHandler
+            .handleExternalCall(
+              extensionId,
+              functionId,
+              configHash,
+              input,
+              "submission",
+              externalCallSubmissionId,
+            )
+            .flatMap { result =>
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(result)),
                 )
               )
-            )
-          )
+            }
       }
 
     resolveStep(result).thereafter { _ =>

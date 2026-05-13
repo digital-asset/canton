@@ -75,6 +75,7 @@ import com.digitalasset.canton.participant.traffic.{
   TrafficCostEstimator,
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.protocol.*
@@ -175,6 +176,7 @@ class ConnectedSynchronizer(
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with FlagCloseableAsync
@@ -269,6 +271,7 @@ class ConnectedSynchronizer(
       engine,
       EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
       loggerFactory,
+      externalCallHandler,
     )
 
   private val transactionProcessor: TransactionProcessor = new TransactionProcessor(
@@ -1249,6 +1252,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallHandler: Option[ExternalCallHandler] = None,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): FutureUnlessShutdown[T]
   }
 
@@ -1276,6 +1280,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallHandler: Option[ExternalCallHandler] = None,
     )(implicit
         ec: ExecutionContext,
         mat: Materializer,
@@ -1387,6 +1392,7 @@ object ConnectedSynchronizer {
           futureSupervisor,
           loggerFactory,
           testingConfig,
+          externalCallHandler,
         )
       }
     }
