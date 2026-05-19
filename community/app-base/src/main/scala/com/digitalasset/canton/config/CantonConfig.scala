@@ -349,6 +349,9 @@ object ThreadingConfig {
   *   properties to be picked up immediately
   * @param threading
   *   Threading configurations
+  * @param failOnUnknownConfigKeys
+  *   If set to true, config parsing fails when unknown keys are read provided that
+  *   non-standard-config is enabled. Default: true. Should not be used in production.
   */
 final case class CantonParameters(
     clock: ClockConfig = ClockConfig.WallClock(),
@@ -369,6 +372,7 @@ final case class CantonParameters(
     enableAlphaStateViaConfig: Boolean = false,
     stateRefreshInterval: Option[config.NonNegativeFiniteDuration] = None,
     threading: ThreadingConfig = ThreadingConfig(),
+    failOnUnknownConfigKeys: Boolean = true,
 ) extends UniformCantonConfigValidation {
   def getStartupParallelism(numThreads: PositiveInt): PositiveInt =
     startupParallelism.getOrElse(numThreads)
@@ -2372,16 +2376,49 @@ object CantonConfig {
     TraceContext.empty,
   )
 
+  /** Load the raw config into a CantonConfig.
+    *
+    * If `canton.parameters.fail-on-unknown-config-keys` is set to false, will remove the unknown
+    * keys and try parsing again.
+    */
   private[config] def loadRawConfig(
       rawConfig: Config
-  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, CantonConfig] =
-    pureconfig.ConfigSource
-      .fromConfig(rawConfig)
+  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, CantonConfig] = {
+    def load(cfg: Config) = pureconfig.ConfigSource
+      .fromConfig(cfg)
       .at("canton")
       .load[CantonConfig]
-      .leftMap(failures =>
-        GenericConfigError.Error(ConfigErrors.getMessage[CantonConfig](failures))
-      )
+
+    load(rawConfig)
+      .leftFlatMap { failures =>
+        val failOnUnknownConfigKeys = Try(
+          rawConfig.getBoolean("canton.parameters.fail-on-unknown-config-keys")
+        ).getOrElse(true)
+
+        val canDiscardUnknownConfigKeys = Try(
+          rawConfig.getBoolean("canton.parameters.non-standard-config")
+        ).getOrElse(false)
+
+        if (failOnUnknownConfigKeys || !canDiscardUnknownConfigKeys) {
+          GenericConfigError.Error(ConfigErrors.getMessage[CantonConfig](failures)).asLeft
+        } else {
+          val paths = failures.toList.collect {
+            case pureconfig.error.ConvertFailure(_: pureconfig.error.UnknownKey, _, path) =>
+              path
+          }
+
+          logger.info(s"Dropping the following keys from the config: $paths")
+
+          val cleanedConfig = paths.foldLeft(rawConfig) { case (config, path) =>
+            config.withoutPath(path)
+          }
+
+          load(cleanedConfig).leftMap(failures =>
+            GenericConfigError.Error(ConfigErrors.getMessage[CantonConfig](failures))
+          )
+        }
+      }
+  }
 
   lazy val defaultConfigRenderer: ConfigRenderOptions =
     ConfigRenderOptions.defaults().setOriginComments(false).setComments(false).setJson(false)
