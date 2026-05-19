@@ -109,6 +109,17 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
   *   - AllProtocolContinuityConformanceTest Tests against all previously published releases.
   *
   *   - LatestProtocolContinuityConformanceTest Tests against the latest published release.
+  *
+  * {{{
+  * | branch       | Latest                              | All                                   |
+  * |--------------|-------------------------------------|---------------------------------------|
+  * | main         | latest snapshot of release-line-3.5 | latest snapshot+stable for (3.5, 3.4) |
+  * | release-3.5  | latest snapshot of 3.5.x            | latest snapshot+stable for (3.5, 3.4) |
+  * | release-3.4  | latest snapshot of 3.4.x            | latest snapshot+stable for (3.4)      |
+  * }}}
+  *
+  * PV used: highest stable PV shared with the current build. Only releases that share at least one
+  * stable PV with the current build are included in the test matrix.
   */
 trait ProtocolContinuityConformanceTest
     extends MultiVersionLedgerApiConformanceBase
@@ -282,6 +293,71 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
   }
 }
 
+/** For a given release R, runs a cross-version ping test against:
+  *   - 1x synchronizer based on the current branch with the highest protocol version supported by
+  *     both the current branch and release R
+  *   - 1x participant based on the current branch
+  *   - 1x participant of release R
+  *
+  * This test ensures that a participant on the current branch and a release-R participant can ping
+  * each other in both directions.
+  */
+trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanceTest {
+  override def disableBinaryVersionEnforcement: Boolean = true
+  private val external = new UseExternalProcess(
+    loggerFactory,
+    externalParticipants = Set("participant2"),
+    fileNameHint = this.getClass.getSimpleName,
+    removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
+  )
+
+  registerPlugin(external)
+
+  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
+    lazy val binDir = ReleaseUtils
+      .retrieve(release)
+      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
+    lazy val pv = protocolVersions.max1
+
+    s"ping between current-branch participant and release $release participant (pv=$pv)" in {
+      implicit env =>
+        import env.*
+
+        val cantonReleaseVersion = RunVersion.Release(binDir)
+
+        sequencer1.start()
+        mediator1.start()
+        mediator1.health.wait_for_ready_for_initialization()
+        sequencer1.health.wait_for_ready_for_initialization()
+
+        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        NetworkBootstrapper(
+          Seq(
+            EnvironmentDefinition.S1M1.copy(staticSynchronizerParameters = staticParams)
+          )
+        ).bootstrap()
+
+        // Local participant on the current branch
+        participant1.start()
+        participant1.health.wait_for_initialized()
+
+        // External participant on release R
+        external.start(remoteParticipant2.name, cantonReleaseVersion)
+        remoteParticipant2.health.wait_for_initialized()
+
+        // Connect both participants to the synchronizer
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+        remoteParticipant2.synchronizers.connect_local(sequencer1, alias = daName)
+
+        // Ping both directions
+        participant1.health.ping(remoteParticipant2)
+        remoteParticipant2.health.ping(participant1)
+
+        external.kill(remoteParticipant2.name)
+    }
+  }
+}
+
 private[continuity] object ProtocolContinuityConformanceTest {
 
   /** Computes the list of previous Canton releases that should be tested against the current
@@ -309,7 +385,9 @@ private[continuity] object ProtocolContinuityConformanceTest {
 
     val latestStableAndNonStablePerMinor = ReleaseUtils
       .listAllReleases()
-      .filter(_ < current)
+      .filter(r =>
+        Ordering[(Int, Int, Int)].lteq(r.majorMinorPatch, current.majorMinorPatch) && r != current
+      )
       .groupBy(_.majorMinor)
       .toSeq
       .flatMap { case (_, versions) =>
@@ -339,6 +417,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
       "monitoring.logging.api.prefix-grpc-addresses",
       "monitoring.sanitize-public-error-messages",
       "parameters.threading",
+      "parameters.fail-on-unknown-config-keys",
     )
     val perParticipant = (1 to 3).flatMap { p =>
       val base = s"participants.participant$p"

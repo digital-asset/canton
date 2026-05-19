@@ -14,6 +14,7 @@ import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, Topo
 import com.digitalasset.canton.admin.api.client.data.topology.*
 import com.digitalasset.canton.admin.api.client.data.{
   DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
+  SequencingParameters,
   TopologyQueueStatus,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -71,6 +72,7 @@ import io.grpc.Context
 import java.net.URI
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.nowarn
 import scala.collection.immutable.SeqMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits.infixOrderingOps
@@ -268,14 +270,11 @@ class TopologyAdministrationGroup(
         |OwnerToKeyMapping.
         """
     )
-    def identity_transactions(
-        protocolVersion: Option[ProtocolVersion] = None
-    ): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    def identity_transactions(): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
       instance.topology.transactions
         .list(
           filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
           filterNamespace = instance.namespace.filterString,
-          protocolVersion = protocolVersion.map(_.toProtoPrimitiveS),
         )
         .result
         .map(_.transaction)
@@ -547,60 +546,63 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary("List all transaction")
+    @nowarn("cat=deprecation")
     def list(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterMappings: Seq[TopologyMapping.Code] = Nil,
-        excludeMappings: Seq[TopologyMapping.Code] = Nil,
+        @deprecated("use filterMappings instead.", since = "3.5") excludeMappings: Seq[
+          TopologyMapping.Code
+        ] = Nil,
         filterAuthorizedKey: Option[Fingerprint] = None,
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
         filterNamespace: String = "",
     ): StoredTopologyTransactions[TopologyChangeOp, TopologyMapping] = {
-      if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
+      val baseQuery = BaseQuery(
+        store,
+        proposals,
+        timeQuery,
+        operation,
+        filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
+        protocolVersion = None,
+      )
+
+      // Use V1 only if the target node is on 3.4 (ListAllV2 doesn't exist there).
+      val nodeVersion = instance.health.status.successOption.map(_.version)
+      val useV1 = nodeVersion.exists(v => (v.major, v.minor) == (3, 4))
+      if (!useV1 && excludeMappings.nonEmpty) {
         consoleEnvironment.run(
-          CommandErrors
-            .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
+          CommandErrors.GenericCommandError(
+            "Should not use excludeMappings anymore, please use filterMappings instead."
+          )
         )
       }
-      // TODO(#32454): TopologyMapping.Code should carry the protocol version it was introduced in
-      // so we can automatically filter the mappings based on the target protocol version without hardcoding this information here.
-      val introducedAfterPv34: Set[TopologyMapping.Code] =
-        Set(
-          TopologyMapping.Code.LsuAnnouncement,
-          TopologyMapping.Code.LsuSequencerConnectionSuccessor,
-        )
-
-      val targetPv = protocolVersion.map(p =>
-        ProtocolVersion
-          .create(p)
-          .valueOr(consoleEnvironment.raiseError)
-      )
-      val safeAll =
-        if (targetPv.exists(_ < ProtocolVersion.v35))
-          TopologyMapping.Code.all.filterNot(introducedAfterPv34)
-        else TopologyMapping.Code.all
-      val excludeMappingsCodes = if (filterMappings.nonEmpty) {
-        safeAll.diff(filterMappings).map(_.code)
-      } else excludeMappings.map(_.code)
 
       consoleEnvironment
         .run {
-          adminCommand(
-            TopologyAdminCommands.Read.ListAll(
-              BaseQuery(
-                store,
-                proposals,
-                timeQuery,
-                operation,
-                filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
-                targetPv,
-              ),
-              excludeMappings = excludeMappingsCodes,
-              filterNamespace = filterNamespace,
+          if (useV1) {
+            // LsuAnnouncement was renamed between 3.4 and 3.5: wire code "sua" -> "lsu".
+            // Translate back to the 3.4 code so the server understands it.
+            def toV34Code(c: TopologyMapping.Code): String =
+              if (c == TopologyMapping.Code.LsuAnnouncement) "sua" else c.code
+            val excludeMappingsCodes =
+              if (filterMappings.nonEmpty)
+                TopologyMapping.Code.all.diff(filterMappings).map(toV34Code)
+              else excludeMappings.map(toV34Code)
+            adminCommand(
+              TopologyAdminCommands.Read.ListAll(baseQuery, excludeMappingsCodes, filterNamespace)
             )
-          )
+          } else {
+            adminCommand(
+              TopologyAdminCommands.Read.ListAllV2(
+                baseQuery,
+                includeMappings = filterMappings.map(_.code),
+                filterNamespace = filterNamespace,
+              )
+            )
+          }
         }
     }
 
@@ -750,6 +752,10 @@ class TopologyAdministrationGroup(
         |- timestamp: If not specified, the max effective time of the latest topology transaction
         |  is used. Otherwise, the given timestamp is used.
         """
+    )
+    @deprecated(
+      "Use genesis_stateV2 instead.",
+      since = "3.5",
     )
     def genesis_state(
         filterSynchronizerStore: Option[TopologyStoreId.Synchronizer] = None,
@@ -1054,7 +1060,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterNamespace: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListDecentralizedNamespaceDefinitionResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListDecentralizedNamespaceDefinition(
@@ -1064,7 +1070,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterNamespace,
         )
@@ -1334,7 +1340,7 @@ class TopologyAdministrationGroup(
         filterNamespace: String = "",
         filterSigningKey: String = "",
         filterTargetKey: Option[Fingerprint] = None,
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListNamespaceDelegationResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListNamespaceDelegation(
@@ -1344,7 +1350,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterNamespace,
           filterTargetKey,
@@ -1367,7 +1373,7 @@ class TopologyAdministrationGroup(
         filterKeyOwnerType: Option[MemberCode] = None,
         filterKeyOwnerUid: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListOwnerToKeyMappingResult] =
       consoleEnvironment.run {
         adminCommand(
@@ -1378,7 +1384,7 @@ class TopologyAdministrationGroup(
               timeQuery,
               operation,
               filterSigningKey,
-              protocolVersion.map(ProtocolVersion.tryCreate),
+              protocolVersion = None,
             ),
             filterKeyOwnerType,
             filterKeyOwnerUid,
@@ -1726,7 +1732,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParty: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListPartyToKeyMappingResult] =
       consoleEnvironment.run {
         adminCommand(
@@ -1737,7 +1743,7 @@ class TopologyAdministrationGroup(
               timeQuery,
               operation,
               filterSigningKey,
-              protocolVersion.map(ProtocolVersion.tryCreate),
+              protocolVersion = None,
             ),
             filterParty,
           )
@@ -2051,7 +2057,7 @@ class TopologyAdministrationGroup(
         |  participant.
         |- filterSigningKey: Filter for transactions that are authorized with a key that starts
         |  with the given filter string.
-        |- protocolVersion: Export the topology transactions in the optional protocol version.
+        |- protocolVersion: This parameter has been deprecated and has no effect anymore.
         """
     )
     def list(
@@ -2062,7 +2068,7 @@ class TopologyAdministrationGroup(
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListPartyToParticipantResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListPartyToParticipant(
@@ -2072,7 +2078,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterParty,
           filterParticipant,
@@ -2215,7 +2221,7 @@ class TopologyAdministrationGroup(
         |- filterParticipant: Filter for participants starting with the given filter string.
         |- filterSigningKey: Filter for transactions that are authorized with a key that starts
         |  with the given filter string.
-        |- protocolVersion: Export the topology transactions in the optional protocol version.
+        |- protocolVersion: This parameter has been deprecated and has no effect anymore.
         """
     )
     def list_from_authorized(
@@ -2225,7 +2231,7 @@ class TopologyAdministrationGroup(
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListPartyToParticipantResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListPartyToParticipant(
@@ -2235,7 +2241,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterParty,
           filterParticipant,
@@ -2263,7 +2269,7 @@ class TopologyAdministrationGroup(
         |- filterParticipant: Filter for participants starting with the given filter string.
         |- filterSigningKey: Filter for transactions that are authorized with a key that starts
         |  with the given filter string.
-        |- protocolVersion: Export the topology transactions in the optional protocol version.
+        |- protocolVersion: This parameter has been deprecated and has no effect anymore.
         """
     )
     def list_from_all(
@@ -2273,7 +2279,7 @@ class TopologyAdministrationGroup(
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListPartyToParticipantResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListPartyToParticipant(
@@ -2283,7 +2289,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterParty,
           filterParticipant,
@@ -2302,7 +2308,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListSynchronizerTrustCertificateResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListSynchronizerTrustCertificate(
@@ -2312,7 +2318,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterUid,
         )
@@ -2519,7 +2525,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListParticipantSynchronizerPermissionResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListParticipantSynchronizerPermission(
@@ -2529,7 +2535,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterUid,
         )
@@ -2585,7 +2591,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListPartyHostingLimitsResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListPartyHostingLimits(
@@ -2595,7 +2601,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterUid,
         )
@@ -2815,7 +2821,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParticipant: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListVettedPackagesResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListVettedPackages(
@@ -2825,7 +2831,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterParticipant,
         )
@@ -2851,7 +2857,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterSynchronizer: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
         group: Option[NonNegativeInt] = None,
     ): Seq[ListMediatorSynchronizerStateResult] = {
       def predicate(res: ListMediatorSynchronizerStateResult): Boolean =
@@ -2867,7 +2873,7 @@ class TopologyAdministrationGroup(
                 timeQuery,
                 operation,
                 filterSigningKey,
-                protocolVersion.map(ProtocolVersion.tryCreate),
+                protocolVersion = None,
               ),
               filterSynchronizer,
             )
@@ -3083,7 +3089,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterSynchronizer: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListSequencerSynchronizerStateResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListSequencerSynchronizerState(
@@ -3093,7 +3099,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterSynchronizer,
         )
@@ -3169,7 +3175,7 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterSynchronizer: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): Seq[ListSynchronizerParametersStateResult] = consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Read.ListSynchronizerParametersState(
@@ -3179,7 +3185,7 @@ class TopologyAdministrationGroup(
             timeQuery,
             operation,
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterSynchronizer,
         )
@@ -3191,7 +3197,7 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId,
         filterSynchronizer: String = "",
         filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
+        @deprecated("Has no effect anymore.", since = "3.5") protocolVersion: Option[String] = None,
     ): ConsoleDynamicSynchronizerParameters = consoleEnvironment.run {
       val commandResult = adminCommand(
         TopologyAdminCommands.Read.ListSynchronizerParametersState(
@@ -3201,7 +3207,7 @@ class TopologyAdministrationGroup(
             TimeQuery.HeadState,
             Some(TopologyChangeOp.Replace),
             filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
+            protocolVersion = None,
           ),
           filterSynchronizer,
         )
@@ -3258,8 +3264,6 @@ class TopologyAdministrationGroup(
         |  If None, the serial will be automatically selected by the node.
         |- synchronize: Synchronize timeout can be used to ensure that the state has been
         |  propagated into the node.
-        |- waitForParticipants: If synchronize is defined, the command will also wait until
-        |  parameters have been propagated to the listed participants.
         |- force: Must be set to true when performing a dangerous operation, such as increasing
         |  the preparationTimeRecordTimeTolerance.
         """
@@ -3302,7 +3306,8 @@ class TopologyAdministrationGroup(
     @Help.Description(
       """Parameters:
         |- synchronizerId: The target synchronizer.
-        |- update: The new dynamic synchronizer parameters to be used on the synchronizer.
+        |- update: Transforms the current dynamic synchronizer parameters into new ones
+        |  to be used on the synchronizer.
         |- mustFullyAuthorize: When set to true, the proposal's previously received signatures and
         |  the signature of this node must be sufficient to fully authorize the topology
         |  transaction. If this is not the case, the request fails.
@@ -3311,8 +3316,6 @@ class TopologyAdministrationGroup(
         |- signedBy: The fingerprint of the key to be used to sign this proposal.
         |- synchronize: Synchronize timeout can be used to ensure that the state has been
         |  propagated into the node.
-        |- waitForParticipants: If synchronize is defined, the command will also wait until the
-        |  update has been propagated to the listed participants.
         |- force: Must be set to true when performing a dangerous operation, such as increasing
         |  the preparationTimeRecordTimeTolerance.
         """
@@ -3549,6 +3552,193 @@ class TopologyAdministrationGroup(
     }
   }
 
+  @Help.Summary("Manage sequencing parameters state")
+  @Help.Group("Sequencing Parameters State")
+  object sequencing_parameters extends Helpful {
+    @Help.Summary("List dynamic parameters")
+    def list(
+        store: TopologyStoreId,
+        proposals: Boolean = false,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
+        filterSynchronizer: String = "",
+        filterSigningKey: String = "",
+        protocolVersion: Option[String] = None,
+    ): Seq[ListSequencingParametersStateResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListSequencingParametersState(
+            BaseQuery(
+              store,
+              proposals,
+              timeQuery,
+              operation,
+              filterSigningKey,
+              protocolVersion.map(ProtocolVersion.tryCreate),
+            ),
+            filterSynchronizer,
+          )
+        )
+      }
+
+    @Help.Summary("Latest sequencing parameters")
+    def latest(
+        store: TopologyStoreId,
+        filterSynchronizer: String = "",
+        filterSigningKey: String = "",
+        protocolVersion: Option[String] = None,
+    ): Option[SequencingParameters] =
+      consoleEnvironment.run {
+        val commandResult = adminCommand(
+          TopologyAdminCommands.Read.ListSequencingParametersState(
+            BaseQuery(
+              store,
+              proposals = false,
+              TimeQuery.HeadState,
+              Some(TopologyChangeOp.Replace),
+              filterSigningKey,
+              protocolVersion.map(ProtocolVersion.tryCreate),
+            ),
+            filterSynchronizer,
+          )
+        )
+        commandResult
+          .map(
+            _.headOption
+              .map(_.item.payload)
+              .map(SequencingParameters(_))
+          )
+      }
+
+    @Help.Summary("Get the configured sequencing parameters")
+    def get_sequencing_parameters(
+        synchronizerId: SynchronizerId
+    ): Option[SequencingParameters] =
+      expectAtMostOneResult(
+        list(
+          store = synchronizerId,
+          proposals = false,
+          timeQuery = TimeQuery.HeadState,
+          operation = Some(TopologyChangeOp.Replace),
+          filterSynchronizer = synchronizerId.filterString,
+        ).map(result => SequencingParameters(result.item.payload))
+      )
+
+    @Help.Summary("Propose changes to sequencing parameters")
+    @Help.Description(
+      """Parameters:
+        |- synchronizerId: The target synchronizer.
+        |- parameters: The new sequencing parameters to be used on the synchronizer.
+        |- store:
+        |  - "Authorized": The topology transaction will be stored in the node's authorized store
+        |  and automatically propagated to connected synchronizers, if applicable.
+        |  - "<synchronizer id>": The topology transaction will be directly submitted to the
+        |  specified synchronizer without storing it locally first. This also means it will _not_
+        |  be synchronized to other synchronizers automatically.
+        |- mustFullyAuthorize: When set to true, the proposal's previously received signatures and
+        |  the signature of this node must be sufficient to fully authorize the topology
+        |  transaction. If this is not the case, the request fails.
+        |  When set to false, the proposal retains the proposal status until enough signatures are
+        |  accumulated to satisfy the mapping's authorization requirements.
+        |- signedBy: The fingerprint of the key to be used to sign this proposal.
+        |- serial: The expected serial this topology transaction should have. Serials must be
+        |  contiguous and start at 1.
+        |  This transaction will be rejected if another fully authorized transaction with the same
+        |  serial already exists, or if there is a gap between this serial and the most recently
+        |  used serial.
+        |  If None, the serial will be automatically selected by the node.
+        |- synchronize: Synchronize timeout can be used to ensure that the state has been
+        |  propagated into the node.
+        |- force: Must be set to true when performing a dangerous operation, such as increasing
+        |  the preparationTimeRecordTimeTolerance.
+        """
+    )
+    def propose(
+        synchronizerId: SynchronizerId,
+        parameters: SequencingParameters,
+        store: Option[TopologyStoreId] = None,
+        mustFullyAuthorize: Boolean = false,
+        signedBy: Option[Fingerprint] = None,
+        serial: Option[PositiveInt] = None,
+        synchronize: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        force: ForceFlags = ForceFlags.none,
+    ): SignedTopologyTransaction[TopologyChangeOp, SequencingParametersState] = { // TODO(#15815): Don't expose internal TopologyMapping and TopologyChangeOp classes
+      val parametersInternal =
+        parameters.toInternal
+          .valueOr(err =>
+            consoleEnvironment.raiseError(s"Cannot convert parameters to internal format: $err")
+          )
+      runAdminCommand(
+        TopologyAdminCommands.Write.Propose(
+          SequencingParametersState(
+            synchronizerId,
+            parametersInternal,
+          ),
+          signedBy.toList,
+          serial = serial,
+          mustFullyAuthorize = mustFullyAuthorize,
+          store = store.getOrElse(synchronizerId),
+          forceChanges = force,
+          waitToBecomeEffective = synchronize,
+        )
+      )
+    }
+
+    @Help.Summary("Propose an update to sequencing parameters")
+    @Help.Description(
+      """Parameters:
+        |- synchronizerId: The target synchronizer.
+        |- update: Transforms the current sequencing parameters into new ones
+        |  to be used on the synchronizer.
+        |- mustFullyAuthorize: When set to true, the proposal's previously received signatures and
+        |  the signature of this node must be sufficient to fully authorize the topology
+        |  transaction. If this is not the case, the request fails.
+        |  When set to false, the proposal retains the proposal status until enough signatures are
+        |  accumulated to satisfy the mapping's authorization requirements.
+        |- signedBy: The fingerprint of the key to be used to sign this proposal.
+        |- synchronize: Synchronize timeout can be used to ensure that the state has been
+        |  propagated into the node.
+        |- force: Must be set to true when performing a dangerous operation, such as increasing
+        |  the preparationTimeRecordTimeTolerance.
+        """
+    )
+    def propose_update(
+        synchronizerId: SynchronizerId,
+        update: SequencingParameters => SequencingParameters,
+        mustFullyAuthorize: Boolean = false,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        force: ForceFlags = ForceFlags.none,
+    ): Unit = {
+      val previousParameters =
+        expectExactlyOneResult(
+          list(
+            store = synchronizerId,
+            filterSynchronizer = synchronizerId.filterString,
+            operation = Some(TopologyChangeOp.Replace),
+          )
+        )
+
+      val newParameters =
+        update(previousParameters.item)
+
+      // Avoid topology manager ALREADY_EXISTS error by not submitting a no-op proposal.
+      if (previousParameters.item != newParameters)
+        propose(
+          synchronizerId,
+          newParameters,
+          mustFullyAuthorize = mustFullyAuthorize,
+          signedBy = signedBy,
+          synchronize = synchronize,
+          force = force,
+        ).discard
+    }
+  }
+
   object lsu extends Helpful {
 
     @Help.Summary("Inspect synchronizer upgrade announcements")
@@ -3570,7 +3760,7 @@ class TopologyAdministrationGroup(
               timeQuery,
               operation,
               filterSigningKey,
-              None,
+              protocolVersion = None,
             ),
             filterSynchronizer,
           )
@@ -3795,7 +3985,7 @@ class TopologyAdministrationGroup(
               timeQuery,
               operation,
               filterSigningKey,
-              None,
+              protocolVersion = None,
             ),
             filterSequencerId = filterSequencerId,
             filterSuccessorPhysicalSynchronizerId = filterSuccessorPhysicalSynchronizerId,

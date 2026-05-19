@@ -244,6 +244,10 @@ object SequencerAdminCommands {
 
   }
 
+  @deprecated(
+    "Use InitializeFromOnboardingStateV2 instead",
+    since = "3.5",
+  )
   final case class InitializeFromOnboardingState(onboardingState: ByteString)
       extends GrpcAdminCommand[
         proto.InitializeSequencerFromOnboardingStateRequest,
@@ -324,6 +328,10 @@ object SequencerAdminCommands {
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
   }
 
+  @deprecated(
+    "Use InitializeFromGenesisStateV2 instead",
+    since = "3.5",
+  )
   final case class InitializeFromGenesisState(
       topologySnapshot: ByteString,
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
@@ -497,6 +505,10 @@ object SequencerAdminCommands {
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
   }
 
+  @deprecated(
+    "Use OnboardingStateV2 instead",
+    since = "3.5",
+  )
   final case class OnboardingState(
       observer: StreamObserver[proto.OnboardingStateResponse],
       sequencerOrTimestamp: Either[SequencerId, CantonTimestamp],

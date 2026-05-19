@@ -101,7 +101,7 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
       .map(_.sequencerId.value)
       .toSet
 
-  "Logical synchronizer upgrade " should {
+  "Logical synchronizer upgrade" should {
     "update metics" when {
       "when LSU is announced" in { implicit env =>
         import env.*

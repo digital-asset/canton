@@ -79,7 +79,7 @@ final class ComplexTopologyAwarePackageSelectionIntegrationTest
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.ledgerApi.topologyAwarePackageSelection.enabled).replace(true)
         ),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

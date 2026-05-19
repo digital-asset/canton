@@ -124,6 +124,7 @@ Canton documentation
   participant/howtos/optimize/caching
   participant/howtos/optimize/batching
   participant/howtos/optimize/session_keys
+  participant/howtos/optimize/achs
 
   participant/howtos/observe/index
   participant/howtos/observe/health

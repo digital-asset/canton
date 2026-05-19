@@ -73,7 +73,7 @@ sealed trait PackageRemovalIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
 
   // Note that CantonTests depends on CantonExamples
   private val cantonTestsPkg = PackageId.assertFromString(Many.PACKAGE_ID)

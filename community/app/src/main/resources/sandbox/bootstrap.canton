@@ -15,7 +15,7 @@ val syncDefs = mediators.local
   .zipWithIndex
   .map { case ((m, s), i) => SyncDef(m, s, s"synchronizer-${i + 1}") }
 
-val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer)
 
 syncDefs.foreach{ syncDef =>
   val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(

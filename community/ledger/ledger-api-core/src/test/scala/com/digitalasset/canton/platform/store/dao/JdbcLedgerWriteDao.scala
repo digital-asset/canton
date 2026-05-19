@@ -70,7 +70,6 @@ private class JdbcLedgerWriteDao(
     lfValueTranslation: LfValueTranslation,
     contractStore: LedgerApiContractStoreImpl,
     achsStateCache: AchsStateCache,
-    pruningOffsetService: PruningOffsetService,
     scheduler: Scheduler,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
@@ -95,7 +94,6 @@ private class JdbcLedgerWriteDao(
     incompleteOffsets = incompleteOffsets,
     contractLoader = contractLoader,
     lfValueTranslation = lfValueTranslation,
-    pruningOffsetService = pruningOffsetService,
     contractStore = contractStore,
     achsStateCache = achsStateCache,
     scheduler = scheduler,
@@ -220,15 +218,13 @@ private class JdbcLedgerWriteDao(
     incompleteReassignmentOffsets,
   )
 
-  override def pruningOffset(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[Offset]] = readDao.pruningOffset
-
   override val updateReader: UpdateReader = readDao.updateReader
 
   override val contractsReader: ContractsReader = readDao.contractsReader
 
   override def eventsReader: LedgerDaoEventsReader = readDao.eventsReader
+
+  override def isPruningInProgress: Boolean = readDao.isPruningInProgress
 
   override val completions: CommandCompletionsReader = readDao.completions
 

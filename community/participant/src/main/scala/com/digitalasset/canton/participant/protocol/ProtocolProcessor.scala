@@ -945,7 +945,7 @@ abstract class ProtocolProcessor[
         snapshot.ipsSnapshot
           .participantsWithSupportedFeature(
             Set(participantId),
-            ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+            ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer,
           )
           .map(_.headOption.nonEmpty)
       )

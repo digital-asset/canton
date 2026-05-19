@@ -17,7 +17,6 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreRaceTests.{
   IndexViewContractsReader,
   assert_sync_vs_async_race_contract,
@@ -505,12 +504,12 @@ private object MutableCacheBackedContractStoreRaceTests {
 
     override def lookupNonUniqueKey(
         key: Key,
-        validAtEventSeqId: CreatedAt,
+        notEarlierThanEventSeqId: CreatedAt,
         nextPageToken: Option[CreatedAt],
         limit: Int,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[ContractStorageBackend.KeysPageResult] =
+    ): Future[(Vector[ContractId], Option[Long])] =
       ??? // not used in this test
   }
 

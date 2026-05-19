@@ -24,7 +24,6 @@ import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   OwnerToKeyMapping,
   TopologyChangeOp,
-  TopologyMapping,
 }
 import com.digitalasset.canton.util.FutureInstances.*
 import org.scalatest.matchers.should.Matchers
@@ -134,9 +133,7 @@ class MediatorGroupChaos(
                 store = daId,
                 proposals = proposals,
                 operation = Some(TopologyChangeOp.Replace),
-                excludeMappings = TopologyMapping.Code.all.diff(
-                  Seq(NamespaceDelegation.code, OwnerToKeyMapping.code)
-                ),
+                filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
                 filterAuthorizedKey = Some(mediatorId.fingerprint),
               )
               .result

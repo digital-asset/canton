@@ -260,7 +260,7 @@ class TopologyStateProcessorImpl private[processing] (
       case PartyHostingLimits(_, _) => Set.empty
       case VettedPackages(_, _) => Set.empty
       case SynchronizerParametersState(_, _) => Set.empty
-      case DynamicSequencingParametersState(_, _) => Set.empty
+      case SequencingParametersState(_, _) => Set.empty
       case MediatorSynchronizerState(_, _, _, active, observers) =>
         (active.forgetNE ++ observers).map(mid => uidKey(Code.OwnerToKeyMapping, mid.uid)).toSet
       case SequencerSynchronizerState(_, _, active, observers) =>

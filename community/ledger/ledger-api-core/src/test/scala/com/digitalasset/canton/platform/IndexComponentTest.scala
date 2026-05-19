@@ -462,7 +462,6 @@ trait IndexComponentTest
             _: LoggingContextWithTrace,
         ) => FutureUnlessShutdown.pure(Left("not used")),
         participantContractStore = participantContractStore,
-        pruningOffsetService = pruningOffsetService,
         materializer = materializer,
         updateServiceConfig = updateServiceConfig,
         scheduler = system.scheduler,

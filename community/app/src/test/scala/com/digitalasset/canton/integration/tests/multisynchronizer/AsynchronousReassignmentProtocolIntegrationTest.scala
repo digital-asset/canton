@@ -70,7 +70,7 @@ final class AsynchronousReassignmentProtocolIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*

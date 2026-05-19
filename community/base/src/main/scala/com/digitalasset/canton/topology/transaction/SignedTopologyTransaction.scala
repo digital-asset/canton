@@ -401,51 +401,6 @@ object SignedTopologyTransaction
     )
   }
 
-  /** @param crypto
-    *   We use a [[com.digitalasset.canton.crypto.BaseCrypto]] because this method serves both the
-    *   synchronizer outbox dispatcher that requires a
-    *   [[com.digitalasset.canton.crypto.SynchronizerCrypto]] and the GRPC topology manager read
-    *   service that uses a [[com.digitalasset.canton.crypto.Crypto]]. This method is only used to
-    *   produce signatures; and it does not verify signatures from untrusted sources.
-    */
-  def asVersion[Op <: TopologyChangeOp, M <: TopologyMapping](
-      signedTx: SignedTopologyTransaction[Op, M],
-      protocolVersion: ProtocolVersion,
-  )(
-      crypto: BaseCrypto
-  )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, String, SignedTopologyTransaction[Op, M]] = {
-    val originTx = signedTx.transaction
-
-    // Convert and resign the transaction if the topology transaction version does not match the expected version
-    if (!originTx.isEquivalentTo(protocolVersion)) {
-      if (signedTx.signatures.sizeIs > 1) {
-        EitherT.leftT(
-          s"Failed to resign topology transaction $originTx with multiple signatures, as only one signature is supported"
-        )
-      } else {
-        val convertedTx = originTx.asVersion(protocolVersion)
-        for {
-          signedTopologyTransaction <- SignedTopologyTransaction
-            .signAndCreate(
-              convertedTx,
-              signedTx.signatures.map(signature => signature.authorizingLongTermKey),
-              signedTx.isProposal,
-              crypto.privateCrypto,
-              protocolVersion,
-            )
-            .leftMap { err =>
-              s"Failed to resign topology transaction $originTx (${originTx.representativeProtocolVersion}) for " +
-                s"synchronizer version $protocolVersion: $err"
-            }
-        } yield signedTopologyTransaction
-      }
-    } else
-      EitherT.rightT(signedTx)
-  }
-
   def fromProtoV30(
       protocolVersionValidation: ProtocolVersionValidation,
       transactionP: v30.SignedTopologyTransaction,

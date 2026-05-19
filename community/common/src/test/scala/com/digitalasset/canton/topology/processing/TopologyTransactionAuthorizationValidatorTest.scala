@@ -11,7 +11,7 @@ import com.digitalasset.canton.crypto.SignatureCheckError.{InvalidSignature, Uns
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey, SynchronizerCryptoPureApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.{DynamicSequencingParameters, DynamicSynchronizerParameters}
+import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SequencingParameters}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant2
 import com.digitalasset.canton.topology.cache.StoreBasedTopologyStateLookupByNamespace
@@ -524,10 +524,10 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           SequencerSynchronizerState
             .create(synchronizerId, PositiveInt.one, active = Seq(SequencerId(uid)), Seq.empty)
             .value,
-          DynamicSequencingParametersState(
+          SequencingParametersState(
             synchronizerId,
-            DynamicSequencingParameters.default(
-              DynamicSequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
+            SequencingParameters.default(
+              SequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
             ),
           ),
           PartyToKeyMapping.tryCreate(partyId, PositiveInt.one, NonEmpty(Seq, key5)),

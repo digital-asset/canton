@@ -7,6 +7,7 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   AcsError,
@@ -27,7 +28,10 @@ import com.digitalasset.daml.lf.data.Ref.PackageId
 import scala.collection.immutable.SortedMap
 import scala.concurrent.ExecutionContext
 
-class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: ExecutionContext)
+class ThrowingAcs[T <: Throwable](
+    mk: String => T,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(override implicit val ec: ExecutionContext)
     extends ActiveContractStore {
   private[this] type M = Checked[AcsError, AcsWarning, Unit]
 

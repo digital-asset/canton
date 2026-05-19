@@ -17,7 +17,6 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.*
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
@@ -91,10 +90,7 @@ class MutableCacheBackedContractStoreSpec
         )
       ).thenReturn(
         Future.successful(
-          ContractStorageBackend.KeysPageResult(
-            internalContractIds = Vector.empty,
-            nextPageToken = None,
-          )
+          (Vector.empty[ContractId], Option.empty[Long])
         )
       )
 
@@ -427,12 +423,12 @@ object MutableCacheBackedContractStoreSpec {
 
     override def lookupNonUniqueKey(
         key: Key,
-        validAtEventSeqId: Long,
+        notEarlierThanEventSeqId: Long,
         nextPageToken: Option[Long],
         limit: Int,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[ContractStorageBackend.KeysPageResult] =
+    ): Future[(Vector[ContractId], Option[Long])] =
       ??? // not used in this test
   }
 

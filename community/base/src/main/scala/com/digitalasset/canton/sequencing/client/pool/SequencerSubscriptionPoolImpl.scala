@@ -140,7 +140,16 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
               val currentSeqIds = current.map(_.connection.attributes.sequencerId)
               val newConnections =
-                pool.getConnections("subscription-pool", nbToRequestAsPosInt, currentSeqIds)
+                pool.getConnections(
+                  "subscription-pool",
+                  nbToRequestAsPosInt,
+                  excluded = currentSeqIds,
+                  // We don't have a topology snapshot at hand to restrict sequencers.
+                  // It is not a problem, because even if we subscribe to an offboarded sequencer, either:
+                  // - the received events will be discarded
+                  // - if the token has expired, obtaining a new one will fail the signature check.
+                  acceptableO = None,
+                )
               logger.debug(
                 s"Received ${newConnections.size} new connection(s): ${newConnections.map(_.name)}"
               )

@@ -89,7 +89,7 @@ sealed trait TickRequestIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => synchronizerTimeTrackerConfig),
         ConfigTransforms.updateTargetTimestampForwardTolerance(Duration.ofHours(1)),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .addConfigTransforms(
         ConfigTransforms.setTopologyTransactionRegistrationTimeout(

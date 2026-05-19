@@ -6,7 +6,7 @@ package com.digitalasset.canton.store
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.store.PrunableByTimeParameters.ControlFactors
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -81,6 +81,7 @@ object PrunableByTimeParameters {
   * finished.
   */
 trait PrunableByTime {
+  self: NamedLogging =>
 
   protected implicit val ec: ExecutionContext
   protected def kind: String
@@ -104,10 +105,9 @@ trait PrunableByTime {
   final def prune(
       limit: CantonTimestamp
   )(implicit
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
       closeContext: CloseContext,
-  ): FutureUnlessShutdown[Unit] = {
-    implicit val traceContext: TraceContext = errorLoggingContext.traceContext
+  ): FutureUnlessShutdown[Unit] =
     for {
       lastTs <- getLastPruningTs
       _ <- advancePruningTimestamp(PruningPhase.Started, limit)
@@ -121,10 +121,9 @@ trait PrunableByTime {
     } yield {
       val num = res.sum
       if (num > 0)
-        errorLoggingContext.debug(s"Pruned $num $kind using ${res.length} intervals")
+        logger.debug(s"Pruned $num $kind using ${res.length} intervals")
       lastTs.foreach(ts => updateBucketSize(res, limit - ts))
     }
-  }
 
   private val stepSizeMillis = new AtomicReference[Long](
     batchingParameters

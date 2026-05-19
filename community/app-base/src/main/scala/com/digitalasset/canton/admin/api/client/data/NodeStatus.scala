@@ -32,6 +32,7 @@ sealed trait NodeStatus[+S <: NodeStatus.Status]
   /** Return the node activeness if it is known or None otherwise.
     */
   def isActive: Option[Boolean]
+  def releaseVersion: Option[ReleaseVersion] = successOption.map(_.version)
 }
 
 object NodeStatus {
@@ -83,6 +84,7 @@ object NodeStatus {
     def ports: Map[String, Port]
     def active: Boolean
     def components: Seq[ComponentStatus]
+    def version: ReleaseVersion
   }
 
   def portsString(ports: Map[String, Port]): String =

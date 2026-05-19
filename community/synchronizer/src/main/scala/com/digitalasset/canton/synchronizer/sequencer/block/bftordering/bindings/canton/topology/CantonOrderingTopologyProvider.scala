@@ -141,13 +141,13 @@ private[canton] final class CantonOrderingTopologyProvider(
 
       maxRequestSize <- getMaxRequestSize(snapshot)
       _ = logger.debug(
-        "Max request size obtained from dynamic synchronizer parameters " +
+        "Max request size obtained from synchronizer parameters " +
           s"queried successfully on snapshot at $snapshotTimestamp: $maxRequestSize"
       )
 
-      sequencingDynamicParameters <- getDynamicSequencingParameters(snapshot.ipsSnapshot)
+      sequencingParameters <- getSequencingParameters(snapshot.ipsSnapshot)
       _ = logger.debug(
-        s"Dynamic sequencing parameters queried successfully on snapshot at $snapshotTimestamp: $sequencingDynamicParameters"
+        s"Sequencing parameters queried successfully on snapshot at $snapshotTimestamp: $sequencingParameters"
       )
     } yield maybeSequencers.map { sequencers =>
       val nodesTopologyInfo = sequencers.view.map { case sequencerId =>
@@ -162,8 +162,8 @@ private[canton] final class CantonOrderingTopologyProvider(
       val topology =
         OrderingTopology(
           nodesTopologyInfo,
-          getEpochLength(sequencingDynamicParameters, sequencers),
-          sequencingDynamicParameters,
+          getEpochLength(sequencingParameters, sequencers),
+          sequencingParameters,
           MaxBytesToDecompress(maxRequestSize),
           TopologyActivationTime(snapshot.ipsSnapshot.timestamp),
           areTherePendingCantonTopologyChanges,
@@ -177,7 +177,7 @@ private[canton] final class CantonOrderingTopologyProvider(
   }
 
   private def getEpochLength(
-      sequencingDynamicParameters: SequencingParameters,
+      sequencingParameters: SequencingParameters,
       sequencers: Seq[SequencerId],
   ): EpochLength = {
     val oldSegmentLength = for {
@@ -186,7 +186,7 @@ private[canton] final class CantonOrderingTopologyProvider(
       segmentLength <- PositiveLong.create(segmentLengthInt).toOption
     } yield SegmentLength(segmentLength)
     oldSegmentLength
-      .getOrElse(sequencingDynamicParameters.segmentLength)
+      .getOrElse(sequencingParameters.segmentLength)
       .epochLength(sequencers.size.toLong)
   }
 
@@ -260,7 +260,6 @@ private[canton] final class CantonOrderingTopologyProvider(
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[Option[Map[BftNodeId, TopologyActivationTime]]] = {
     val future = () => {
-
       val snapshotF = getSnapshot(Some(activationTime))
       for {
         snapshot <- snapshotF
@@ -293,7 +292,7 @@ private[canton] final class CantonOrderingTopologyProvider(
     )
   }
 
-  private def getDynamicSequencingParameters(
+  private def getSequencingParameters(
       snapshot: TopologySnapshot
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[SequencingParameters] =
     for {
@@ -304,15 +303,12 @@ private[canton] final class CantonOrderingTopologyProvider(
         SequencingParameters.fromByteString(synchronizerProtocolVersion, _)
       )
     } yield sequencingParametersO match {
-      case Some(value) =>
-        value match {
-          case Left(error) =>
-            logger.warn(s"Sequencing parameters couldn't be parsed ($error), using default")
-            SequencingParameters.Default
-          case Right(value) => value
-        }
+      case Some(Right(value)) => value
+      case Some(Left(error)) =>
+        logger.warn(s"Sequencing parameters couldn't be parsed ($error), using defaults")
+        SequencingParameters.Default
       case None =>
-        logger.debug("Sequencing parameters not set, using default")
+        logger.debug("Sequencing parameters not set, using defaults")
         SequencingParameters.Default
     }
 }

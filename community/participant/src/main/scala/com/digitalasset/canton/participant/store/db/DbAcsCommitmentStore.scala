@@ -3,15 +3,21 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.Eval
 import cats.syntax.traverse.*
+import cats.{Eval, Monad}
 import com.daml.nameof.NameOf
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FutureUnlessShutdown,
+  LifeCycle,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.{
@@ -72,6 +78,7 @@ class DbAcsCommitmentStore(
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     stringInterningEval: Eval[StringInterning],
+    batchingConfig: BatchingConfig,
 )(implicit val ec: ExecutionContext)
     extends AcsCommitmentStore
     with DbPrunableByTimeSynchronizer[IndexedSynchronizer]
@@ -495,6 +502,7 @@ class DbAcsCommitmentStore(
       timeouts,
       loggerFactory,
       stringInterningEval,
+      batchingConfig,
     )
 
   override val queue: DbCommitmentQueue =
@@ -514,6 +522,7 @@ class DbIncrementalCommitmentStore(
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     stringInterningEval: Eval[StringInterning],
+    batchingConfig: BatchingConfig,
 )(implicit val ec: ExecutionContext)
     extends IncrementalCommitmentStore
     with DbStore {
@@ -530,30 +539,56 @@ class DbIncrementalCommitmentStore(
   private implicit val setParameterPartyIdSortedSet: SetParameter[Vector[Int]] =
     DbParameterUtils.setArrayIntParameterDb(_, _)
 
-  override def get()(implicit
-      traceContext: TraceContext
+  // Type helper for the paginated query in get().
+  private type GetSnapshotQueryRow = (Vector[Int], AcsCommitment.CommitmentType, ByteString)
+
+  override def get(
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[
     (RecordTime, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType])
   ] =
     for {
-      res <- storage.query(
+      (optTsWithTieBreaker, snapshotUS) <- storage.query(
         (for {
           tsWithTieBreaker <-
             sql"""select ts, tie_breaker from par_commitment_checkpoint_snapshot_time where synchronizer_idx = $indexedSynchronizer"""
               .as[(CantonTimestamp, Long)]
               .headOption
-          snapshotWithInternedIds <-
-            sql"""select stakeholders, commitment from par_commitment_checkpoint_snapshot where synchronizer_idx = $indexedSynchronizer"""
-              .as[(Vector[Int], AcsCommitment.CommitmentType)]
-          snapshot = snapshotWithInternedIds.map { case (internedParties, commitmentType) =>
-            SortedSet.from(internedParties) -> commitmentType
+          // Loading all the commitments can take a long time (more than
+          // 60 seconds).  We need some way to interrupt that when we need
+          // disconnect.  Hence, we paginate the query below based on
+          // `stakeholders_hash`, and check `closeContext` in between.
+          pageSize = batchingConfig.maxStakeholderGroupsBatchSize.value
+          snapshotWithInternedIdsUS <- Monad[DbAction.ReadTransactional]
+            .tailRecM(Vector[GetSnapshotQueryRow]()) { acc =>
+              val beginExclusive = acc.lastOption.map(_._3)
+              for {
+                page <- sql"""select stakeholders, commitment, stakeholders_hash
+                              from par_commitment_checkpoint_snapshot
+                              where synchronizer_idx = $indexedSynchronizer
+                              and ($beginExclusive IS NULL OR stakeholders_hash > $beginExclusive)
+                              order by stakeholders_hash
+                              #${storage.limit(pageSize)}"""
+                  .as[GetSnapshotQueryRow]
+              } yield {
+                if (closeContext.context.isClosing) Right(AbortedDueToShutdown)
+                else if (page.isEmpty) Right(Monad[UnlessShutdown].pure(acc))
+                else Left(acc ++ page) // Continue pagination.
+              }
+            }
+          snapshot = snapshotWithInternedIdsUS.map {
+            _.map { case (internedParties, commitmentType, _) =>
+              SortedSet.from(internedParties) -> commitmentType
+            }
           }
         } yield (tsWithTieBreaker, snapshot)).transactionally
           .withTransactionIsolation(Serializable),
         operationName = "commitments: read commitments snapshot",
       )
+      snapshot <- FutureUnlessShutdown.lift(snapshotUS)
     } yield {
-      val (optTsWithTieBreaker, snapshot) = res
       optTsWithTieBreaker.fold(
         RecordTime.MinValue -> Map.empty[SortedSet[InternedPartyId], AcsCommitment.CommitmentType]
       ) { case (ts, tieBreaker) =>

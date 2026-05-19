@@ -138,8 +138,8 @@ private[topology] class AddSequencer(
         )
 
         val onboardingState =
-          sequencerToInitializeFrom.setup.onboarding_state_for_sequencer(sequencerToAdd.id)
-        sequencerToAdd.setup.assign_from_onboarding_state(onboardingState)
+          sequencerToInitializeFrom.setup.onboarding_state_for_sequencerV2(sequencerToAdd.id)
+        sequencerToAdd.setup.assign_from_onboarding_stateV2(onboardingState)
         sequencerToAdd.health.wait_for_initialized()
 
       }

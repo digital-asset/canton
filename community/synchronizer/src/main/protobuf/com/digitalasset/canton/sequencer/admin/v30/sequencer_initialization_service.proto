@@ -16,8 +16,14 @@ service SequencerInitializationService {
   // and will immediately attempt to use it.
   // If the request is received after the sequencer has been successfully initialized it should return successfully
   // if the synchronizer_id matches the synchronizer that the sequencer has been initialized for, otherwise it should fail.
-  rpc InitializeSequencerFromGenesisState(stream InitializeSequencerFromGenesisStateRequest) returns (InitializeSequencerFromGenesisStateResponse);
-  rpc InitializeSequencerFromOnboardingState(stream InitializeSequencerFromOnboardingStateRequest) returns (InitializeSequencerFromOnboardingStateResponse);
+  // Deprecated in favor of InitializeSequencerFromGenesisStateV2
+  rpc InitializeSequencerFromGenesisState(stream InitializeSequencerFromGenesisStateRequest) returns (InitializeSequencerFromGenesisStateResponse) {
+    option deprecated = true;
+  }
+  // Deprecated in favor of InitializeSequencerFromOnboardingStateV2
+  rpc InitializeSequencerFromOnboardingState(stream InitializeSequencerFromOnboardingStateRequest) returns (InitializeSequencerFromOnboardingStateResponse) {
+    option deprecated = true;
+  }
   rpc InitializeSequencerFromLsuPredecessor(stream InitializeSequencerFromLsuPredecessorRequest) returns (InitializeSequencerFromLsuPredecessorResponse);
 
   rpc InitializeSequencerFromGenesisStateV2(stream InitializeSequencerFromGenesisStateV2Request) returns (InitializeSequencerFromGenesisStateV2Response);

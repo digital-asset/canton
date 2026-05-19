@@ -122,7 +122,10 @@ trait DataContinuityTest
         // Inspect the raw error context dumped by Slick into the MDC map
         val slickMsg = mdc.getOrElse("messageFromSlick", "")
         slickMsg should include("RejectedExecutionException")
-        slickMsg should include("Terminated")
+        // These strings originate from java.util.concurrent.ThreadPoolExecutor#toString().
+        // We match only shutdown phases to suppress benign teardown races, while ensuring
+        // actual load-based queue rejections ("Running") remain visible.
+        slickMsg should include regex "Shutting down|Terminated"
       },
       loggerAssertion =
         loggerName => loggerName should startWith("com.digitalasset.canton.resource.DbStorageMulti"),

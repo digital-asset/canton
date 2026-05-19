@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.continuity.latest
 import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
   ProtocolContinuityConformanceTestParticipant,
+  ProtocolContinuityConformanceTestPing,
   ProtocolContinuityConformanceTestSynchronizer,
 }
 import com.digitalasset.canton.util.ReleaseUtils
@@ -37,3 +38,7 @@ class LatestProtocolContinuityConformanceTestParticipant
   override def disableBinaryVersionEnforcement: Boolean = true
 
 }
+
+class LatestProtocolContinuityConformanceTestPing
+    extends ProtocolContinuityConformanceTestPing
+    with LatestProtocolContinuityConformanceTest

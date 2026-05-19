@@ -331,6 +331,13 @@ trait ContractStorageBackend {
   def nonUniqueContractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
       connection: Connection
   ): ContractStorageBackend.KeysPageResult
+
+  def nonUniqueContractKeysPlain(
+      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      validAtEventSeqId: Long,
+  )(
+      connection: Connection
+  ): Seq[ContractStorageBackend.KeysPageResult]
 }
 
 object ContractStorageBackend {

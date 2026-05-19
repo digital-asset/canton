@@ -373,6 +373,38 @@ object TopologyAdminCommands {
           .leftMap(_.toString)
     }
 
+    final case class ListSequencingParametersState(
+        query: BaseQuery,
+        filterSynchronizerId: String,
+    ) extends BaseCommand[
+          v30.ListSequencingParametersStateRequest,
+          v30.ListSequencingParametersStateResponse,
+          Seq[ListSequencingParametersStateResult],
+        ] {
+
+      override protected def createRequest()
+          : Either[String, v30.ListSequencingParametersStateRequest] =
+        Right(
+          v30.ListSequencingParametersStateRequest(
+            baseQuery = Some(query.toProtoV1),
+            filterSynchronizerId = filterSynchronizerId,
+          )
+        )
+
+      override protected def submitRequest(
+          service: TopologyManagerReadServiceStub,
+          request: v30.ListSequencingParametersStateRequest,
+      ): Future[v30.ListSequencingParametersStateResponse] =
+        service.listSequencingParametersState(request)
+
+      override protected def handleResponse(
+          response: v30.ListSequencingParametersStateResponse
+      ): Either[String, Seq[ListSequencingParametersStateResult]] =
+        response.results
+          .traverse(ListSequencingParametersStateResult.fromProtoV30)
+          .leftMap(_.toString)
+    }
+
     final case class ListMediatorSynchronizerState(
         query: BaseQuery,
         filterSynchronizerId: String,
@@ -522,6 +554,7 @@ object TopologyAdminCommands {
         response.storeIds.traverse(TopologyStoreId.fromProtoV30(_, "store_ids")).leftMap(_.message)
     }
 
+    @deprecated("Use ListAllV2 instead", since = "3.5")
     final case class ListAll(
         query: BaseQuery,
         excludeMappings: Seq[String],
@@ -547,6 +580,40 @@ object TopologyAdminCommands {
 
       override protected def handleResponse(
           response: v30.ListAllResponse
+      ): Either[String, GenericStoredTopologyTransactions] =
+        response.result
+          .fold[Either[String, GenericStoredTopologyTransactions]](
+            Right(StoredTopologyTransactions.empty)
+          ) { collection =>
+            StoredTopologyTransactions.fromProtoV30(collection).leftMap(_.toString)
+          }
+    }
+
+    final case class ListAllV2(
+        query: BaseQuery,
+        includeMappings: Seq[String],
+        filterNamespace: String,
+    ) extends BaseCommand[
+          v30.ListAllV2Request,
+          v30.ListAllV2Response,
+          GenericStoredTopologyTransactions,
+        ] {
+      override protected def createRequest(): Either[String, v30.ListAllV2Request] =
+        Right(
+          new v30.ListAllV2Request(
+            baseQuery = Some(query.toProtoV1),
+            includeMappings = includeMappings,
+            filterNamespace = filterNamespace,
+          )
+        )
+
+      override protected def submitRequest(
+          service: TopologyManagerReadServiceStub,
+          request: v30.ListAllV2Request,
+      ): Future[v30.ListAllV2Response] = service.listAllV2(request)
+
+      override protected def handleResponse(
+          response: v30.ListAllV2Response
       ): Either[String, GenericStoredTopologyTransactions] =
         response.result
           .fold[Either[String, GenericStoredTopologyTransactions]](
@@ -632,6 +699,10 @@ object TopologyAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
+    @deprecated(
+      "Use GenesisStateV2 instead",
+      since = "3.5",
+    )
     final case class GenesisState(
         observer: StreamObserver[GenesisStateResponse],
         synchronizerStore: Option[TopologyStoreId.Synchronizer],
