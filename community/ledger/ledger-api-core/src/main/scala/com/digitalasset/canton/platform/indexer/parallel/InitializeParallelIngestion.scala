@@ -95,9 +95,21 @@ private[platform] final case class InitializeParallelIngestion(
       ledgerEnd <- dbDispatcher.executeSql(metrics.index.db.getLedgerEnd)(
         parameterStorageBackend.ledgerEnd
       )
-      _ <- dbDispatcher.executeSql(metrics.indexer.initialization)(
-        ingestionStorageBackend.deletePartiallyIngestedData(ledgerEnd)
-      )
+      _ <- dbDispatcher.executeSql(metrics.indexer.initialization) { connection =>
+        // addContractPruningCandidatesAfter must execute before deletePartiallyIngestedData
+        // addContractPruningCandidatesAfter and deletePartiallyIngestedData must be in one transaction
+        // so that it cannot be intersected with pruning contract candidate cleansing: that might remove candidates
+        // as they are referenced after the ledger-end in corner cases.
+        eventStorageBackend.addContractPruningCandidatesAfter(
+          eventSeqIdExclusive = ledgerEnd
+            .map(_.lastEventSeqId)
+            .getOrElse(-1L) // if no watermark we gather candidates from all events
+        )(
+          connection = connection,
+          traceContext = loggingContext.traceContext,
+        )
+        ingestionStorageBackend.deletePartiallyIngestedData(ledgerEnd)(connection)
+      }
       (postAchsState, postAchsWork) <- initializeAchs(
         achsConfig = achsConfig,
         lastEventSeqId = ledgerEnd.map(_.lastEventSeqId).getOrElse(0L),

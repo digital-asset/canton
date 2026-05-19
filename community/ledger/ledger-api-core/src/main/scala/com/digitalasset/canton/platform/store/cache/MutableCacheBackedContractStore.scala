@@ -85,21 +85,17 @@ private[platform] class MutableCacheBackedContractStore(
       maxLookupLimit
     } else limit
     for {
-      keyPageResult <- contractsReader.lookupNonUniqueKey(
+      (contractIds, nextPageToken) <- contractsReader.lookupNonUniqueKey(
         key = key,
-        validAtEventSeqId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
+        notEarlierThanEventSeqId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
         nextPageToken = pageToken,
         limit = cappedLimit,
       )
-      contractIdLookup <- contractStore.lookupBatchedContractIdsNonReadThrough(
-        keyPageResult.internalContractIds
-      )
-      contractIds = keyPageResult.internalContractIds.flatMap(contractIdLookup.get)
       contracts <- Future.sequence(contractIds.map(contractStore.lookupPersisted))
       filteredContracts = contracts.view.flatten.map(_.inst).filter(visibleFor(readers)).toVector
     } yield ContractKeyPage(
       contracts = filteredContracts,
-      nextPageToken = keyPageResult.nextPageToken,
+      nextPageToken = nextPageToken,
     )
   }
 

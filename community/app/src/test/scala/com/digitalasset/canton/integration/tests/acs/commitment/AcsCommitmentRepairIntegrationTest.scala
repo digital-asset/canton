@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   SynchronizerTimeRange,
   TimeRange,
 }
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
@@ -192,6 +193,10 @@ trait AcsCommitmentRepairIntegrationTest
         TestUtils.waitForTargetTimeOnSequencer(s, ts, logger)
       }
 
+      // Wait a bit until everything quiets down. This ensures that there's a high chance that the reinitialization happens
+      // when no further changes are queued that could move ledger end afterwards (in particular incoming ACS commitments).
+      Threading.sleep(2000)
+
       val reinitCmtsResult =
         participant1.commitments.reinitialize_commitments(
           Seq.empty,
@@ -207,6 +212,11 @@ trait AcsCommitmentRepairIntegrationTest
       )
       forAll(reinitCmtsResult)(_.acsTimestamp.isDefined shouldBe true)
       forAll(reinitCmtsResult)(_.acsTimestamp.value shouldBe >=(ts))
+
+      logger.info("Reconnect participant1 to verify crash fault tolerance")
+      participant1.synchronizers.disconnect(daName)
+      participant1.synchronizers.reconnect(daName)
+
       // exchange commitments again, all should be fine
       createContractsAndCheck(sequencer1, daId)
       val (_, period2a, _) = createContractsAndCheck(sequencer2, acmeId)

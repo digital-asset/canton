@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.plugins
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton
 import com.digitalasset.canton.UniquePortGenerator
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig}
@@ -19,7 +20,6 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.{
 }
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.DynamicSequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
@@ -31,14 +31,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMinRequestsInBatch,
   P2PNetworkConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters as TopologySequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerConfig,
   BlockSequencerStreamInstrumentationConfig,
   SequencerConfig,
 }
-import com.digitalasset.canton.topology.transaction.DynamicSequencingParametersState
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import com.digitalasset.canton.util.SingleUseCell
 import monocle.macros.GenLens
@@ -73,7 +72,7 @@ final class UseBftSequencer(
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
-    dynamicSequencingParameters: Option[SequencingParameters] = None,
+    dynamicSequencingParameters: Option[TopologySequencingParameters] = None,
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
@@ -98,16 +97,9 @@ final class UseBftSequencer(
     dynamicSequencingParameters.foreach { sequencingParameters =>
       val sequencingParametersByteString = sequencingParameters.toByteString
       environment.runOnAllInitializedSynchronizersForAllOwners { case (owner, synchronizer) =>
-        owner.topology.transactions.propose(
-          mapping = DynamicSequencingParametersState(
-            synchronizer.synchronizerId,
-            DynamicSequencingParameters(Option(sequencingParametersByteString))(
-              DynamicSequencingParameters.protocolVersionRepresentativeFor(
-                synchronizer.staticSynchronizerParameters.protocolVersion
-              )
-            ),
-          ),
-          store = synchronizer.synchronizerId,
+        owner.topology.sequencing_parameters.propose(
+          synchronizer.synchronizerId,
+          SequencingParameters(Option(sequencingParametersByteString)),
         )
       }
     }

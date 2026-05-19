@@ -36,7 +36,14 @@ class RollbackTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
   )(e: Expr, party: Party): SubmittedTransaction = {
     val se = pkgs1.compiler.unsafeCompile(e)
     val example = SEApp(se, ArraySeq(SParty(party)))
-    val machine = Speedy.Machine.fromUpdateSExpr(pkgs1, transactionSeed, example, Set(party), MachineLogger())
+    val machine = Speedy.Machine.fromUpdateSExpr(
+      compiledPackages = pkgs1,
+      transactionSeed = transactionSeed,
+      updateSE = example,
+      committers = Set(party),
+      logger = MachineLogger(),
+      interpretationConfig = interpretation.InterpretationConfig.Legacy,
+    )
     SpeedyTestLib
       .buildTransaction(machine)
       .fold(e => fail(Pretty.prettyError(e).render(80)), identity)

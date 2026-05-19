@@ -6,6 +6,8 @@ checksum()
 }
 
 ORB_KEY="$(eval echo "${ORB_KEY}")"
+ORB_KEY="${ORB_KEY//#/_}" # '#' breaks azcopy URLs (treated as fragment delimiter)
+ORB_KEY="${ORB_KEY//%/_}" # '%' breaks azcopy URLs (treated as percent-encoding prefix)
 ORB_CONTAINER="$(circleci env subst "${CONTAINER_URL}")"
 IFS=":" read -r -a array <<< "${ORB_KEY}" # Using : as field seperator when multiple keys are specified
 TEMP_FILE_NAME="compressed_cache.tar.gz"

@@ -121,9 +121,13 @@ class DriverKms(
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, KmsKeyId] =
     for {
+      driverSigningKeySpec <- KmsDriverSpecsConverter
+        .convertToDriverSigningKeySpec(signingKeySpec)
+        .leftMap(err => KmsError.KmsCreateKeyError(err))
+        .toEitherT[FutureUnlessShutdown]
       keyId <- monitor("generate-signing-key", KmsError.KmsCreateKeyError.apply) {
         driver.generateSigningKeyPair(
-          KmsDriverSpecsConverter.convertToDriverSigningKeySpec(signingKeySpec),
+          driverSigningKeySpec,
           name.map(_.unwrap),
         )
       }
@@ -305,11 +309,15 @@ class DriverKms(
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString] =
     for {
+      driverSigningAlgoSpec <- KmsDriverSpecsConverter
+        .convertToDriverSigningAlgoSpec(signingAlgorithmSpec)
+        .leftMap(err => KmsError.KmsSignError(keyId, err))
+        .toEitherT[FutureUnlessShutdown]
       signature <- monitor("sign", KmsError.KmsSignError(keyId, _, _)) {
         driver.sign(
           data.unwrap.toByteArray,
           keyId.unwrap,
-          KmsDriverSpecsConverter.convertToDriverSigningAlgoSpec(signingAlgorithmSpec),
+          driverSigningAlgoSpec,
         )
       }
     } yield ByteString.copyFrom(signature)

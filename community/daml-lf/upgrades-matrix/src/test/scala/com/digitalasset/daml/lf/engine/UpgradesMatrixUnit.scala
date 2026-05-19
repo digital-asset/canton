@@ -9,7 +9,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Error as EE
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.ValueTranslator
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -231,7 +231,8 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = cases.contractIdVersion,
-        contractStateMode = cases.contractStateMode,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = cases.contractStateMode),
         prefetchKeys = Seq.empty,
       )
       .consume(

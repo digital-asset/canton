@@ -9,6 +9,7 @@ import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
@@ -119,8 +120,8 @@ package object protocol {
   type LfChoiceName = Ref.ChoiceName
   val LfChoiceName: Ref.ChoiceName.type = Ref.ChoiceName
 
-  type LfContractStateMode = NextGenContractStateMachine.Mode
-  val LfContractStateMode: NextGenContractStateMachine.Mode.type = NextGenContractStateMachine.Mode
+  type LfInterpretationConfig = InterpretationConfig
+  val LfInterpretationConfig: InterpretationConfig.type = InterpretationConfig
 
   type RequestProcessor[VT <: ViewType, Event] =
     Phase37Processor[RequestAndRootHashMessage[

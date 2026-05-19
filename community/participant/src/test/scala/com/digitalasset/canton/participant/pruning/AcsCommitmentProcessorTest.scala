@@ -828,7 +828,8 @@ sealed trait AcsCommitmentProcessorBaseTest
 class AcsCommitmentProcessorTest
     extends AsyncWordSpec
     with AcsCommitmentProcessorBaseTest
-    with ProtocolVersionChecksAsyncWordSpec {
+    with ProtocolVersionChecksAsyncWordSpec
+    with HasTestCloseContext {
   // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
   // if we want to test whether commitment buffering works
   // Also assumes that all the contracts in the map have the same stakeholders

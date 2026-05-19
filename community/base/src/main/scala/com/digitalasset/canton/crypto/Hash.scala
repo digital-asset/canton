@@ -40,7 +40,8 @@ import slick.jdbc.{GetResult, SetParameter}
   * by increasing the allowed characters for varchar's in the DBs.
   */
 sealed abstract class HashAlgorithm(val name: String, val index: Long, val length: Long)
-    extends PrettyPrinting {
+    extends CryptoSpec
+    with PrettyPrinting {
   def toProtoEnum: v30.HashAlgorithm
 
   override protected def pretty: Pretty[HashAlgorithm] = prettyOfString(_.name)
@@ -60,6 +61,8 @@ object HashAlgorithm {
     override def toProtoEnum: v30.HashAlgorithm = v30.HashAlgorithm.HASH_ALGORITHM_SHA256
 
     override private[crypto] def internalBlockSizeInBytes: Int = 64
+
+    override def experimental: Boolean = false
   }
 
   def lookup(index: Long, length: Long): Either[String, HashAlgorithm] =

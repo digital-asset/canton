@@ -411,6 +411,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
       "monitoring.logging.api.prefix-grpc-addresses",
       "monitoring.sanitize-public-error-messages",
       "parameters.threading",
+      "parameters.fail-on-unknown-config-keys",
     )
     val perParticipant = (1 to 3).flatMap { p =>
       val base = s"participants.participant$p"
@@ -444,6 +445,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer-client.channel-max-inbound-message-size",
         s"$base.sequencer-client.keep-alive-client.idle-timeout",
         s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
+        s"$base.crypto.enable-experimental",
       )
     }
     val perMediator = {
@@ -461,6 +463,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer-client.channel-max-inbound-message-size",
         s"$base.sequencer-client.keep-alive-client.idle-timeout",
         s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
+        s"$base.crypto.enable-experimental",
       )
     }
     val perSequencer = {
@@ -490,6 +493,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer.block.throughput-cap.thresholds",
         s"$base.sequencer.block.throughput-cap.update-every-ms",
         s"$base.parameters.lsu",
+        s"$base.crypto.enable-experimental",
       )
     }
     (topLevel ++ perParticipant ++ perMediator ++ perSequencer)

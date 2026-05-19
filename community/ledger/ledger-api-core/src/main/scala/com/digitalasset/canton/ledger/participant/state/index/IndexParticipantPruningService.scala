@@ -23,4 +23,6 @@ trait IndexParticipantPruningService {
   def indexDbPrunedUpto(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Offset]]
+
+  def isPruningInProgress: Boolean
 }

@@ -12,7 +12,6 @@ import com.daml.ledger.api.v2.update_service.{
   UpdateServiceGrpc,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.integration.TestConsoleEnvironment
@@ -20,6 +19,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommandHelpers
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.util.DelayUtil
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
@@ -105,13 +105,15 @@ final class OngoingStreamAuthIT
           userId = userIdAlice,
           Right(Right.Kind.ParticipantAdmin(Right.ParticipantAdmin())),
         )
-        _ <- Delayed.Future.by((UserManagementCacheExpiryInSeconds + 1).second)(
-          Future(
-            transactionStreamAbortedPromise.tryFailure(
-              new AssertionError("Timed-out waiting while waiting for stream to abort")
+        _ <- DelayUtil
+          .delay((UserManagementCacheExpiryInSeconds + 1).second)
+          .flatMap(_ =>
+            Future(
+              transactionStreamAbortedPromise.tryFailure(
+                new AssertionError("Timed-out waiting while waiting for stream to abort")
+              )
             )
           )
-        )
         t <- transactionStreamAbortedPromise.future
       } yield {
         t match {
@@ -196,13 +198,15 @@ final class OngoingStreamAuthIT
         _ <- submitAndWaitF()
         // Deactivating Alice user:
         _ <- deactivateUserByAdmin(userId = userIdAlice)
-        _ <- Delayed.Future.by((UserManagementCacheExpiryInSeconds + 1).second)(
-          Future(
-            transactionStreamAbortedPromise.tryFailure(
-              new AssertionError("Timed-out waiting while waiting for stream to abort")
+        _ <- DelayUtil
+          .delay((UserManagementCacheExpiryInSeconds + 1).second)
+          .flatMap(_ =>
+            Future(
+              transactionStreamAbortedPromise.tryFailure(
+                new AssertionError("Timed-out waiting while waiting for stream to abort")
+              )
             )
           )
-        )
         t <- transactionStreamAbortedPromise.future
       } yield {
         t match {

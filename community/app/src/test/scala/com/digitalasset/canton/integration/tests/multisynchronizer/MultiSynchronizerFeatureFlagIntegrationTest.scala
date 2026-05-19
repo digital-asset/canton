@@ -38,7 +38,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.slf4j.event.Level
 
-/** We test the Unsafe-Multi-synchronizer topology feature flag.
+/** We test the Alpha-Multi-synchronizer topology feature flag.
   *
   * The topology used:
   *   - P1, P2, P3 are connected to S1

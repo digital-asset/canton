@@ -198,7 +198,7 @@ class DbSequencedEventStore(
       .queryAndUpdate(query, functionFullName)
       .map { nrPruned =>
         logger.info(
-          s"Pruned at least $nrPruned entries from the sequenced event store of physical_synchronizer_idx $partitionKey older or equal to $untilInclusive"
+          s"Pruned at least $nrPruned entries from the sequenced event store of physical_synchronizer_idx ${partitionKey.psid} older or equal to $untilInclusive"
         )
         nrPruned
       }

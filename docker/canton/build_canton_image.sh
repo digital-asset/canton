@@ -24,21 +24,24 @@ oci_release_path="${OCI_REGISTRY:-"local"}/da-images/public/docker/"
 image_types=(base participant sequencer mediator)
 nightly_release="${IS_NIGHTLY_RELEASE:-$1}" # CircleCI parameter nightly_release
 
-if [[ "$release_suffix" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
-    echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
-    exit 0
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  if [[ "$release_suffix" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
+      echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
+      exit 0
+  fi
 fi
 
-if [[ "$release_suffix" == *"snapshot"* || "$release_suffix" == *"ad-hoc"* ]]; then
+if [[ "$release_suffix" == *"-SNAPSHOT" || "$release_suffix" == *"snapshot"* || "$release_suffix" == *"ad-hoc"* ]]; then
     oci_path="${oci_snapshot_path}"
-    echo "Publishing named snapshot release to ${oci_path}"
-
 else
     oci_path="${oci_release_path}"
-    echo "Publishing full release to ${oci_path}"
 fi
 
 staging_suffix="${release_suffix}-pre"
+
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  echo "▶️ Publishing images to ${oci_path}"
+fi
 
 for image_type in "${image_types[@]}"; do
   short_tag="canton-${image_type}:${staging_suffix}"
@@ -50,7 +53,7 @@ for image_type in "${image_types[@]}"; do
 
   stage_target="--tag ${oci_path}${short_tag}"
 
-  if [ "${CIRCLECI:-}" = "true" ]; then
+  if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
     build_flags="--platform linux/amd64,linux/arm64 --push"
   else
     build_flags="--load"
@@ -77,20 +80,22 @@ delete_staging_tags() {
 }
 
 echo "▶️ Running ping test for images (from ./tests/ping)..."
+set +e
 (
-  cd ./tests/ping && OCI_PATH=$oci_path ./run_test.sh $staging_suffix
+  cd ./tests/ping && OCI_PATH=$oci_path ./run_test.sh "$staging_suffix"
 )
 exit_code=$?
+set -e
 if [[ $exit_code -ne 0 ]]; then
   echo "❌ Ping test failed for images (exit code $exit_code). Aborting."
-  if [ "${CIRCLECI:-}" = "true" ]; then
+  if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
     delete_staging_tags
   fi
   exit $exit_code
 fi
 echo "✅ Ping test passed for images!"
 
-if [ "${CIRCLECI:-}" = "true" ]; then
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
   echo "▶️ Promoting staging images to release tags..."
   for image_type in "${image_types[@]}"; do
     docker buildx imagetools create \

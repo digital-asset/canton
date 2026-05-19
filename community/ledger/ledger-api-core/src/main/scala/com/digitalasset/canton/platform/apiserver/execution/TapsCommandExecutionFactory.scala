@@ -35,7 +35,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.{EngineMode, ProtocolVersion}
+import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion}
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion, LfPartyId}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
@@ -128,7 +128,7 @@ private[execution] class TapsCommandExecutionFactory(
         (packagePreferenceSet, protocolVersion) = packagePreferenceSetPV
 
         // TODO(#32356): Engine contract state mode selection for TAPS
-        mode = EngineMode.forProtocolVersion(protocolVersion)
+        interpretationConfig = InterpretationConfig.forProtocolVersion(protocolVersion)
 
         _ = logDebug(
           show"Using package preference set: $packagePreferenceSet, protocol version: $protocolVersion"
@@ -138,7 +138,7 @@ private[execution] class TapsCommandExecutionFactory(
         commandInterpretationResult: Either[ErrorCause, CommandInterpretationResult] <-
           commandInterpreter.interpret(
             commands.copy(packagePreferenceSet = packagePreferenceSet),
-            mode,
+            interpretationConfig,
             submissionSeed,
           )
 

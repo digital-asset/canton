@@ -27,13 +27,13 @@ object MultiSynchronizerFeatureFlag {
         .featureFlags
 
       if (
-        !currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+        !currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer)
       ) {
         p.topology.synchronizer_trust_certificates.propose(
           p.id,
           synchronizerId,
           featureFlags =
-            currentFeatureFlags :+ ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+            currentFeatureFlags :+ ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer,
         )
       } else ()
 
@@ -45,7 +45,7 @@ object MultiSynchronizerFeatureFlag {
           )
           .loneElement
           .item
-          .featureFlags should contain(ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+          .featureFlags should contain(ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer)
       }
     }
 
@@ -63,14 +63,12 @@ object MultiSynchronizerFeatureFlag {
         .item
         .featureFlags
 
-      if (
-        currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
-      )
+      if (currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer))
         p.topology.synchronizer_trust_certificates.propose(
           p.id,
           synchronizerId,
           featureFlags = currentFeatureFlags.filterNot(
-            _ == ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer
+            _ == ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer
           ),
         )
       else ()
@@ -82,7 +80,7 @@ object MultiSynchronizerFeatureFlag {
           )
           .loneElement
           .item
-          .featureFlags should not contain (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+          .featureFlags should not contain (ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer)
       }
     }
 

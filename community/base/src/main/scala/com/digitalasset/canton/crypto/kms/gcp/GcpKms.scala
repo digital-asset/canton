@@ -368,6 +368,8 @@ class GcpKms(
         Right(CryptoKeyVersionAlgorithm.EC_SIGN_P384_SHA384)
       case SigningKeySpec.EcSecp256k1 =>
         Right(CryptoKeyVersionAlgorithm.EC_SIGN_SECP256K1_SHA256)
+      case SigningKeySpec.MlDsa65 =>
+        Right(CryptoKeyVersionAlgorithm.PQ_SIGN_ML_DSA_65)
     }
 
   private def convertToGcpAsymmetricEncryptionSpec(
@@ -398,6 +400,7 @@ class GcpKms(
       case CryptoKeyVersionAlgorithm.EC_SIGN_P256_SHA256 => Right(SigningKeySpec.EcP256)
       case CryptoKeyVersionAlgorithm.EC_SIGN_P384_SHA384 => Right(SigningKeySpec.EcP384)
       case CryptoKeyVersionAlgorithm.EC_SIGN_SECP256K1_SHA256 => Right(SigningKeySpec.EcSecp256k1)
+      case CryptoKeyVersionAlgorithm.PQ_SIGN_ML_DSA_65 => Right(SigningKeySpec.MlDsa65)
       case _ => Left(s"Unsupported signing key type: ${keySpec.toString}")
     }
 
@@ -636,7 +639,7 @@ class GcpKms(
               CryptoKeyVersionAlgorithm.EC_SIGN_SECP256K1_SHA256,
               data.unwrap,
             )
-          case SigningKeySpec.EcP384 | SigningKeySpec.EcCurve25519 =>
+          case SigningKeySpec.EcP384 | SigningKeySpec.EcCurve25519 | SigningKeySpec.MlDsa65 =>
             EitherT.leftT[FutureUnlessShutdown, ByteString](
               KmsError.KmsSignError(
                 keyId,
@@ -656,6 +659,13 @@ class GcpKms(
           keyId,
           keyVersionName,
           CryptoKeyVersionAlgorithm.EC_SIGN_ED25519,
+          data.unwrap,
+        )
+      case SigningAlgorithmSpec.MlDsa65 =>
+        signWithAlgorithm(
+          keyId,
+          keyVersionName,
+          CryptoKeyVersionAlgorithm.PQ_SIGN_ML_DSA_65,
           data.unwrap,
         )
     }
@@ -743,6 +753,7 @@ object GcpKms extends Kms.SupportedSchemes {
       SigningKeySpec.EcP384,
       SigningKeySpec.EcSecp256k1,
       SigningKeySpec.EcCurve25519,
+      SigningKeySpec.MlDsa65,
     )
 
   val supportedSigningAlgoSpecs: NonEmpty[Set[SigningAlgorithmSpec]] =
@@ -751,6 +762,7 @@ object GcpKms extends Kms.SupportedSchemes {
       SigningAlgorithmSpec.EcDsaSha256,
       SigningAlgorithmSpec.EcDsaSha384,
       SigningAlgorithmSpec.Ed25519,
+      SigningAlgorithmSpec.MlDsa65,
     )
 
   val supportedEncryptionKeySpecs: NonEmpty[Set[EncryptionKeySpec]] =

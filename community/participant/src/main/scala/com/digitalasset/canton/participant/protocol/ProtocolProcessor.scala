@@ -945,7 +945,7 @@ abstract class ProtocolProcessor[
         snapshot.ipsSnapshot
           .participantsWithSupportedFeature(
             Set(participantId),
-            ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+            ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer,
           )
           .map(_.headOption.nonEmpty)
       )
@@ -1059,6 +1059,7 @@ abstract class ProtocolProcessor[
     )
 
     val submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
+
     for {
       submissionTopologySnapshotO <- EitherT.right(
         SubmissionTopologyHelper.getSubmissionTopologySnapshot(

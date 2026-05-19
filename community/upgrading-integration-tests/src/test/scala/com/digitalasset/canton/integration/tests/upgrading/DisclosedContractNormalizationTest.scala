@@ -19,13 +19,9 @@ import com.digitalasset.canton.util.{ContractValidator, TestEngine}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.{
-  ContractInstanceCoder,
-  FatContractInstance,
-  NextGenContractStateMachine,
-  Node,
-}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, FatContractInstance, Node}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.Assertion
@@ -133,7 +129,7 @@ class DisclosedContractNormalizationTest
       val commands = testEngine.validateCommand(command, alice, disclosedContracts = Seq(fat))
 
       val result = underTest
-        .interpret(commands, NextGenContractStateMachine.Mode.default, testEngine.randomHash())(
+        .interpret(commands, InterpretationConfig.Default, testEngine.randomHash())(
           LoggingContextWithTrace(loggerFactory),
           ec,
         )

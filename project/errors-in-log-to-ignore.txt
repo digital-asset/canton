@@ -39,4 +39,7 @@ ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.spee
 ERROR c\.d\.d\.lf - LF internal error in com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run: exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 
+# Warning sometimes produced by netty during shutdown
+WARN  i\.g\.n\.s\.i\.n\.c\.ChannelInitializer - Failed to initialize a channel. Closing: \[id: 0x.*, L:/.* - R:/.*\]
+
 # Make sure to have a trailing newline

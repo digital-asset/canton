@@ -9,12 +9,7 @@ import com.digitalasset.canton.common.sequencer.SequencerConnectClient.Error.Tra
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
 import com.digitalasset.canton.common.sequencer.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{
-  CryptoConfig,
-  CryptoProvider,
-  ProcessingTimeout,
-  RequireTypes,
-}
+import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, RequireTypes}
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -135,19 +130,8 @@ trait SequencerConnectServiceIntegrationTest
 
       val fetchedSynchronizerParameters =
         grpcSequencerConnectClient.getSynchronizerParameters().futureValueUS.value
-      val cryptoProvider = CryptoProvider.Jce
 
-      val defaultSynchronizerParametersConfig = SynchronizerParametersConfig(
-        requiredSigningAlgorithmSpecs = Some(cryptoProvider.signingAlgorithms.supported),
-        requiredEncryptionAlgorithmSpecs = Some(cryptoProvider.encryptionAlgorithms.supported),
-        requiredSymmetricKeySchemes = Some(cryptoProvider.symmetric.supported),
-        requiredHashAlgorithms = Some(cryptoProvider.hash.supported),
-        requiredCryptoKeyFormats =
-          Some(cryptoProvider.supportedCryptoKeyFormatsForProtocol(testedProtocolVersion)),
-        requiredSignatureFormats =
-          Some(cryptoProvider.supportedSignatureFormatsForProtocol(testedProtocolVersion)),
-      )
-      val expectedSynchronizerParameters = defaultSynchronizerParametersConfig
+      val expectedSynchronizerParameters = SynchronizerParametersConfig()
         .toStaticSynchronizerParameters(CryptoConfig(), testedProtocolVersion, NonNegativeInt.zero)
         .value
 

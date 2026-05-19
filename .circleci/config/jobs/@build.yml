@@ -33,6 +33,15 @@ static_tests:
   steps:
     - checkout:
         method: blobless
+    - run:
+        name: Check branch name does not contain URL-special characters
+        command: |
+          if [[ "$CIRCLE_BRANCH" == *"#"* || "$CIRCLE_BRANCH" == *"%"* ]]; then
+            echo "ERROR: Branch name '$CIRCLE_BRANCH' contains a URL-special character ('#' or '%')."
+            echo "'#' is treated as a URL fragment delimiter and '%' as a percent-encoding prefix by azcopy, breaking Azure cache operations."
+            echo "Please rename your branch without '#' or '%'."
+            exit 1
+          fi
     - check_pr_skip_ci
     - restore_sbt_cache
     - execute_sbt_command:
@@ -58,7 +67,13 @@ static_tests:
           echo "if this fails, you need to update our build image. have a look at .ci/README.md"
           diff shell.nix /tmp/shell.nix || exit 1
           diff -r nix /tmp/nix || exit 1
-    # run checker last as it will rebase to main to avoid the race condition
+    - slack_red_main_with_volunteer
+
+check_todos:
+  executor: canton-medium-docker
+  steps:
+    - checkout:
+        method: blobless
     - run:
         name: Run the todo checker
         command: |

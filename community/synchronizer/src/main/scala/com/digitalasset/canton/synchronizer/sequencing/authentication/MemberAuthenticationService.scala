@@ -532,8 +532,8 @@ class MemberAuthenticationServiceImpl(
                 _: NamespaceDelegation | // mapping
                 _: DecentralizedNamespaceDefinition | _: OwnerToKeyMapping | _: PartyToKeyMapping |
                 _: PartyToParticipant | _: VettedPackages | _: PartyHostingLimits |
-                _: SynchronizerParametersState | _: DynamicSequencingParametersState |
-                _: LsuAnnouncement | _: LsuSequencerConnectionSuccessor
+                _: SynchronizerParametersState | _: SequencingParametersState | _: LsuAnnouncement |
+                _: LsuSequencerConnectionSuccessor
               ),
             ) =>
           FutureUnlessShutdown.unit

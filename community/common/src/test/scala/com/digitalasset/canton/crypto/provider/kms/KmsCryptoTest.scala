@@ -57,6 +57,7 @@ trait KmsCryptoTest
       ),
       kms = kmsConfig,
       privateKeyStore = PrivateKeyStoreConfig(None),
+      enableExperimental = true,
     )
 
   lazy val cryptoConfig: CryptoConfig =

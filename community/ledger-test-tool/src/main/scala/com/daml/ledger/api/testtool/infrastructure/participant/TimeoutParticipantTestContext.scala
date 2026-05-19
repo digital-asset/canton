@@ -65,11 +65,11 @@ import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, Transact
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, Identifier, Template, Value}
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.AcsDelta
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.util.DelayUtil
 import com.google.protobuf.ByteString
 import io.grpc.health.v1.health.HealthCheckResponse
 
@@ -862,11 +862,13 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   private def withTimeout[T](hint: String, future: => Future[T]): Future[T] =
     Future.firstCompletedOf(
       Seq(
-        Delayed.Future.by(timeoutDuration)(
-          Future.failed(
-            new TimeoutException(s"Operation [$hint] timed out after $timeoutDuration.")
-          )
-        ),
+        DelayUtil
+          .delay(timeoutDuration)
+          .flatMap(_ =>
+            Future.failed(
+              new TimeoutException(s"Operation [$hint] timed out after $timeoutDuration.")
+            )
+          ),
         future,
       )
     )

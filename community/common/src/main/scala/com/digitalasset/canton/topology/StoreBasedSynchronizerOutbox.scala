@@ -243,16 +243,12 @@ class StoreBasedSynchronizerOutbox(
           pendingAndApplicable <- EitherT.right(pendingAndApplicableF)
           (pending, applicable) = pendingAndApplicable
           _ = lastDispatched.set(applicable.lastOption)
-          // Try to convert if necessary the topology transactions for the required protocol version of the synchronizer
-          convertedTxs <- synchronizeWithClosing(functionFullName) {
-            convertTransactions(applicable)
-          }
           // dispatch to synchronizer
-          responses <- dispatch(synchronizerAlias, transactions = convertedTxs)
+          responses <- dispatch(synchronizerAlias, transactions = applicable)
           observed <- EitherT.right(
             // we either receive accepted or failed for all transactions in a submission batch.
             // failed submissions are turned into a Left in dispatch. Therefore, it's safe to await without additional checks.
-            convertedTxs.headOption
+            applicable.headOption
               .map(
                 awaitTransactionObserved(
                   _,

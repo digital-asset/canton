@@ -134,7 +134,7 @@ trait PasswordBasedEncryptionOps { this: EncryptionOps =>
 }
 
 /** Schemes for Password-Based Key Derivation Functions */
-sealed trait PbkdfScheme extends Product with Serializable {
+sealed trait PbkdfScheme extends CryptoSpec with Product with Serializable {
   def name: String
 
   def toProtoEnum: v30.PbkdfScheme
@@ -152,6 +152,8 @@ object PbkdfScheme {
     override def toProtoEnum: v30.PbkdfScheme = v30.PbkdfScheme.PBKDF_SCHEME_ARGON2ID_MODE1
 
     override def defaultSaltLengthInBytes: Int = 16
+
+    override def experimental: Boolean = false
 
     // Recommended parameters: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id
     // NOTE: Do not change those parameters, instead add a new mode as a new PBKDF scheme

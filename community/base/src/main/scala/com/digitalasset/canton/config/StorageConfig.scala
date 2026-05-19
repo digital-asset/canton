@@ -137,6 +137,8 @@ final case class DbParametersConfig(
   *   number of parallel pruning queries to the db. defaults to 2
   * @param topologyCacheAggregator
   *   number of parallel requests for the topology cache read side
+  * @param maxStakeholderGroupsBatchSize
+  *   maximum number of stakeholder groups in a batch when reading commitments from a snapshot
   */
 final case class BatchingConfig(
     maxItemsInBatch: PositiveNumeric[Int] = BatchingConfig.defaultMaxItemsBatch,
@@ -160,6 +162,8 @@ final case class BatchingConfig(
     maxPruningTimeInterval: PositiveFiniteDuration = BatchingConfig.defaultMaxPruningTimeInterval,
     pruningParallelism: PositiveNumeric[Int] = BatchingConfig.defaultPruningParallelism,
     topologyCacheAggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
+    maxStakeholderGroupsBatchSize: PositiveNumeric[Int] =
+      BatchingConfig.defaultMaxStakeholderGroupsBatchSize,
 )
 
 object BatchingConfig {
@@ -183,6 +187,7 @@ object BatchingConfig {
   private val defaultMaxPruningTimeInterval: PositiveFiniteDuration =
     PositiveFiniteDuration.ofMinutes(30)
   private val defaultPruningParallelism: PositiveInt = PositiveNumeric.tryCreate(2)
+  private val defaultMaxStakeholderGroupsBatchSize: PositiveInt = PositiveNumeric.tryCreate(1000)
 }
 
 final case class ConnectionAllocation(

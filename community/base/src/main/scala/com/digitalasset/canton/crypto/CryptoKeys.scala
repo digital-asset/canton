@@ -32,6 +32,7 @@ import io.circe.Encoder
 import org.bouncycastle.asn1.ASN1OctetString
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.annotation.nowarn
@@ -340,6 +341,11 @@ trait EcKeySpec {
 
   /** Standard JCA curve name (e.g., "secp256r1") used for key generation and validation. */
   def jcaCurveName: String
+}
+
+trait MlDsaKeySpec {
+
+  def jcaParameterSpec: MLDSAParameterSpec
 }
 
 sealed trait CryptoKeyFormat extends Product with Serializable with PrettyPrinting {

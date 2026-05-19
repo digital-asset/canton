@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.service
 
 import cats.implicits.*
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -21,7 +20,6 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
 
-@UnstableTest // TODO(#30535)
 class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   def pid(s: String): Member = {
     val id = UniqueIdentifier.fromProtoPrimitive_(s"$s::default").map(ParticipantId(_)).value

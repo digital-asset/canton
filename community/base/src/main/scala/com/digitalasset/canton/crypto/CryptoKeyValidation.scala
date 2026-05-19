@@ -13,7 +13,9 @@ import com.digitalasset.canton.util.{EitherUtil, ThrowableUtil}
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import org.bouncycastle.jcajce.interfaces.{MLDSAPrivateKey, MLDSAPublicKey}
 import org.bouncycastle.jcajce.provider.asymmetric.edec.{BCEdDSAPrivateKey, BCEdDSAPublicKey}
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import org.bouncycastle.math.ec.custom.sec.{SecP256K1Curve, SecP256R1Curve, SecP384R1Curve}
 import org.bouncycastle.math.ec.rfc8032.Ed25519.{SECRET_KEY_SIZE, validatePublicKeyFull}
 
@@ -336,6 +338,40 @@ object CryptoKeyValidation {
     } yield ()
   }
 
+  private def validateMlDsa65PublicKey(jKey: JPublicKey): Either[KeyParseAndValidateError, Unit] =
+    for {
+      mlDsaPublicKey <- jKey match {
+        case k: MLDSAPublicKey =>
+          Right(k)
+        case _ =>
+          Left(KeyParseAndValidateError(s"Public key is not an ML-DSA public key"))
+      }
+      _ <- EitherUtil.condUnit(
+        mlDsaPublicKey.getParameterSpec == MLDSAParameterSpec.ml_dsa_65,
+        KeyParseAndValidateError(
+          s"ML-DSA public key does not have the correct parameter spec for ML-DSA-65"
+        ),
+      )
+    } yield ()
+
+  private def validateMlDsa65PrivateKey(
+      jKey: JPrivateKey
+  ): Either[KeyParseAndValidateError, Unit] =
+    for {
+      mlDsaPrivateKey <- jKey match {
+        case k: MLDSAPrivateKey =>
+          Right(k)
+        case _ =>
+          Left(KeyParseAndValidateError(s"Private key is not an ML-DSA private key"))
+      }
+      _ <- EitherUtil.condUnit(
+        mlDsaPrivateKey.getParameterSpec == MLDSAParameterSpec.ml_dsa_65,
+        KeyParseAndValidateError(
+          s"ML-DSA private key does not have the correct parameter spec for ML-DSA-65"
+        ),
+      )
+    } yield ()
+
   /** Parses and validates a private key. Validates:
     *   - Private key format and serialization
     *   - Elliptic curve private key scalar is within the valid range for the curve
@@ -363,6 +399,7 @@ object CryptoKeyValidation {
             case signKey: SigningPrivateKey =>
               signKey.keySpec match {
                 case SigningKeySpec.EcCurve25519 => validateEd25519PrivateKey(jKey)
+                case SigningKeySpec.MlDsa65 => validateMlDsa65PrivateKey(jKey)
                 case ks: EcKeySpec => validateEcPrivateKey(jKey, ks)
               }
             case _ => Left(KeyParseAndValidateError("Unknown key type"))
@@ -408,7 +445,10 @@ object CryptoKeyValidation {
               }
             case signKey: SigningPublicKey =>
               signKey.keySpec match {
-                case SigningKeySpec.EcCurve25519 => validateEd25519PublicKey(jKey)
+                case SigningKeySpec.EcCurve25519 =>
+                  validateEd25519PublicKey(jKey)
+                case SigningKeySpec.MlDsa65 =>
+                  validateMlDsa65PublicKey(jKey)
                 case ks: EcKeySpec => validateEcPublicKey(jKey, ks)
               }
             case _ => Left(KeyParseAndValidateError("Unknown key type"))
@@ -424,7 +464,9 @@ object CryptoKeyValidation {
     (if (cacheValidation)
        validatedPublicKeys.get(publicKey.id, _ => parseRes)
      else parseRes).leftMap(err =>
-      errFn(s"Failed to deserialize or validate ${publicKey.format} public key: $err")
+      errFn(
+        s"Failed to deserialize or validate ${publicKey.format} public key [${publicKey.id}]: $err"
+      )
     )
   }
 

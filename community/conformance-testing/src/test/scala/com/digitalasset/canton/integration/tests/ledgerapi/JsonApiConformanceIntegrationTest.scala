@@ -182,7 +182,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       .prependConfigTransform(ConfigTransforms.enableHttpLedgerApi)
-      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)

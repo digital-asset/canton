@@ -46,12 +46,6 @@ import scala.math.Ordering.Implicits.*
   * @param participantNodePersistentState
   *   the persistent state of the participant node that is not specific to a synchronizer
   */
-/*
- TODO(#24716) This class should be revisited to check physical <> logical.
- Split physical and logical pruning. In particular, many pruning computations are logical
- (because they relate to contracts) but some of them are not (e.g., because they use the
- sequenced event store).
- */
 class FirstUnsafeOffsetComputation(
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
@@ -120,7 +114,11 @@ class FirstUnsafeOffsetComputation(
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] =
+  ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
+    logger.info(
+      s"Computing unsafe offset with upper bound $pruneUptoInclusive and commitment state $safeToPruneCommitmentState"
+    )
+
     for {
       _ <- EitherT.cond[FutureUnlessShutdown](
         participantNodePersistentState.value.ledgerApiStore
@@ -139,54 +137,57 @@ class FirstUnsafeOffsetComputation(
       // Compute unsafe offsets coming from logical stores (e.g., ACS)
       logicalPersistentStates: Map[SynchronizerId, LogicalSyncPersistentState] =
         syncPersistentStateManager.getAllLogical
-      unsafeLogicalSynchronizerOffsets <- synchronizerIndexes.toSeq
-        .parTraverseFilter { case (lsid, synchronizerIndex) =>
-          for {
-            state <- logicalPersistentStates
-              .get(lsid)
-              .toRight(
-                LedgerPruningInternalError(
-                  s"Could not find logical persistent state for synchronizer $lsid"
-                )
-              )
-              .toEitherT[FutureUnlessShutdown]
 
-            offset <- FirstUnsafeOffsetComputation.firstUnsafeLogicalOffset(
-              state,
-              synchronizerIndex,
-              participantNodePersistentState.value.ledgerApiStore,
-              participantNodePersistentState.value.inFlightSubmissionStore,
-              pruneUptoInclusive,
-              safeToPruneCommitmentState,
+      unsafeLogicalSynchronizerOffsets <- MonadUtil.sequentialTraverseFilter(
+        synchronizerIndexes.toSeq
+      ) { case (lsid, synchronizerIndex) =>
+        for {
+          state <- logicalPersistentStates
+            .get(lsid)
+            .toRight(
+              LedgerPruningInternalError(
+                s"Could not find logical persistent state for synchronizer $lsid"
+              )
             )
-          } yield offset
-        }
+            .toEitherT[FutureUnlessShutdown]
+
+          offset <- FirstUnsafeOffsetComputation.firstUnsafeLogicalOffset(
+            state,
+            synchronizerIndex,
+            participantNodePersistentState.value.ledgerApiStore,
+            participantNodePersistentState.value.inFlightSubmissionStore,
+            pruneUptoInclusive,
+            safeToPruneCommitmentState,
+          )
+        } yield offset
+      }
 
       // Compute unsafe offsets coming from physical stores
       physicalPersistentStates = getPhysicalPersistentStates(allLsids)
 
-      unsafePhysicalSynchronizerOffsets <- physicalPersistentStates.toSeq
-        .parTraverseFilter { physicalSyncPersistentState =>
-          val lsid = physicalSyncPersistentState.psid.logical
+      unsafePhysicalSynchronizerOffsets <- MonadUtil.sequentialTraverseFilter(
+        physicalPersistentStates.toSeq
+      ) { physicalSyncPersistentState =>
+        val lsid = physicalSyncPersistentState.psid.logical
 
-          for {
-            synchronizerIndex <- synchronizerIndexes
-              .get(lsid)
-              .toRight(
-                Pruning.LedgerPruningInternalError(
-                  s"Unable to find synchronizer index for $lsid in the map"
-                )
+        for {
+          synchronizerIndex <- synchronizerIndexes
+            .get(lsid)
+            .toRight(
+              Pruning.LedgerPruningInternalError(
+                s"Unable to find synchronizer index for $lsid in the map"
               )
-              .toEitherT[FutureUnlessShutdown]
+            )
+            .toEitherT[FutureUnlessShutdown]
 
-            offset <-
-              FirstUnsafeOffsetComputation.firstUnsafePhysicalOffset(
-                physicalSyncPersistentState,
-                synchronizerIndex,
-                participantNodePersistentState.value.ledgerApiStore,
-              )
-          } yield offset
-        }
+          offset <-
+            FirstUnsafeOffsetComputation.firstUnsafePhysicalOffset(
+              physicalSyncPersistentState,
+              synchronizerIndex,
+              participantNodePersistentState.value.ledgerApiStore,
+            )
+        } yield offset
+      }
 
       // Other checks
       unsafeIncompleteReassignmentOffsets <- logicalPersistentStates.values.toSeq.parTraverseFilter(
@@ -198,6 +199,7 @@ class FirstUnsafeOffsetComputation(
       unsafeDedupOffset <- EitherT.right(firstUnsafeOffsetPublicationTime())
     } yield (unsafeLogicalSynchronizerOffsets.toList ++ unsafeDedupOffset ++ unsafePhysicalSynchronizerOffsets ++ unsafeIncompleteReassignmentOffsets)
       .minByOption(_.offset)
+  }
 
   /** Computes the list of physical persistent state that need to be used in the computation.
     *
@@ -399,9 +401,7 @@ object FirstUnsafeOffsetComputation {
             ),
           Pruning.LedgerPruningOffsetUnsafeSynchronizer(synchronizerId),
         )
-      _ = errorLoggingContext.debug(
-        s"Safe commitment tick for synchronizer $synchronizerId: $safeCommitmentTick"
-      )
+
       earliestInFlight <- EitherT.right(inFlightSubmissionStore.lookupEarliest(synchronizerId))
 
       unsafeTimestamps = NonEmpty(

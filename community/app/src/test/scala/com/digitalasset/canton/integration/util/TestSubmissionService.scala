@@ -62,6 +62,7 @@ import com.digitalasset.daml.lf.engine.{
   ResultNeedPackage,
   ResultPrefetch,
 }
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
@@ -93,7 +94,7 @@ class TestSubmissionService(
     packageResolver: PackageResolver,
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
-    contractStateMode: LfContractStateMode = LfContractStateMode.default,
+    interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -332,7 +333,7 @@ class TestSubmissionService(
         prefetchKeys = Seq.empty,
         submissionSeed = submissionSeed,
         contractIdVersion = ContractIdVersion.V1,
-        contractStateMode = contractStateMode,
+        interpretationConfig = interpretationConfig,
       )
 
     txOrErr <- resolve(result)
@@ -444,7 +445,7 @@ object TestSubmissionService {
       customKeyResolver: Option[TestKeyResolver] = None,
       checkAuthorization: Boolean = true,
       enableLfDev: Boolean = false,
-      contractStateMode: LfContractStateMode = LfContractStateMode.devDefault,
+      interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
       resolveContractOverride: LfContractId => OptionT[
         Future,
         FatContractInstance,
@@ -492,7 +493,7 @@ object TestSubmissionService {
       packageResolver,
       participantNode.sync,
       mkPackageMap(participantNode)(_),
-      contractStateMode,
+      interpretationConfig,
       loggerFactory,
     )
   }

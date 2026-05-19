@@ -37,6 +37,7 @@ import org.bouncycastle.crypto.DataLengthException
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.params.Argon2Parameters
 import org.bouncycastle.jcajce.provider.asymmetric.edec.{BCEdDSAPrivateKey, BCEdDSAPublicKey}
+import org.bouncycastle.jcajce.provider.asymmetric.mldsa.{BCMLDSAPrivateKey, BCMLDSAPublicKey}
 import org.bouncycastle.jce.spec.IESParameterSpec
 
 import java.security.interfaces.*
@@ -216,7 +217,9 @@ class JcePureCrypto(
                 )
               ),
         )
-        .leftMap(err => errFn(s"Failed to deserialize ${privateKey.format} private key: $err"))
+        .leftMap(err =>
+          errFn(s"Failed to deserialize ${privateKey.format} private key [${privateKey.id}]: $err")
+        )
       // The private key is already validated, including its type, during creation/deserialization,
       // so we can throw an exception here. This type check should never fail, except in case of an internal error.
       checkedPrivateKey <- typeMatcher(javaPrivateKey)
@@ -347,6 +350,13 @@ class JcePureCrypto(
               { case k: ECPrivateKey => Right(k) },
               SigningError.InvalidSigningKey.apply,
             )
+          case SigningAlgorithmSpec.MlDsa65 =>
+            toJavaPrivateKey(
+              signingKey,
+              { case k: BCMLDSAPrivateKey => Right(k) },
+              SigningError.InvalidSigningKey.apply,
+            )
+
         }
         signature <- Either
           .catchOnly[GeneralSecurityException] {
@@ -416,6 +426,12 @@ class JcePureCrypto(
             toJavaPublicKey(
               publicKey,
               { case k: ECPublicKey => Right(k) },
+              SignatureCheckError.InvalidKeyError.apply,
+            )
+          case SigningAlgorithmSpec.MlDsa65 =>
+            toJavaPublicKey(
+              publicKey,
+              { case k: BCMLDSAPublicKey => Right(k) },
               SignatureCheckError.InvalidKeyError.apply,
             )
         }

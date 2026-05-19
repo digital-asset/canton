@@ -251,7 +251,11 @@ object AsymmetricEncrypted extends HasVersionedMessageCompanion[AsymmetricEncryp
 }
 
 /** An encryption key specification. */
-sealed trait EncryptionKeySpec extends Product with Serializable with PrettyPrinting {
+sealed trait EncryptionKeySpec
+    extends CryptoSpec
+    with Product
+    with Serializable
+    with PrettyPrinting {
   def name: String
   def toProtoEnum: v30.EncryptionKeySpec
   override val pretty: Pretty[this.type] = prettyOfString(_.name)
@@ -271,6 +275,7 @@ object EncryptionKeySpec {
       v30.EncryptionKeySpec.ENCRYPTION_KEY_SPEC_EC_P256
     // Name of the elliptic curve as expected by Java's ECGenParameterSpec (JCA standard name)
     override val jcaCurveName: String = "secp256r1"
+    override val experimental: Boolean = false
   }
 
   /** RSA key with 2048 bits */
@@ -280,6 +285,7 @@ object EncryptionKeySpec {
     val keySizeInBits: Int = 2048
     override def toProtoEnum: v30.EncryptionKeySpec =
       v30.EncryptionKeySpec.ENCRYPTION_KEY_SPEC_RSA_2048
+    override val experimental: Boolean = false
   }
 
   def fromProtoEnum(
@@ -332,7 +338,11 @@ object EncryptionKeySpec {
 }
 
 /** Algorithm schemes for asymmetric/hybrid encryption. */
-sealed trait EncryptionAlgorithmSpec extends Product with Serializable with PrettyPrinting {
+sealed trait EncryptionAlgorithmSpec
+    extends CryptoSpec
+    with Product
+    with Serializable
+    with PrettyPrinting {
   def name: String
   def supportDeterministicEncryption: Boolean
   def supportedEncryptionKeySpecs: NonEmpty[Set[EncryptionKeySpec]]
@@ -357,6 +367,7 @@ object EncryptionAlgorithmSpec {
       NonEmpty.mk(Set, EncryptionKeySpec.EcP256)
     override def toProtoEnum: v30.EncryptionAlgorithmSpec =
       v30.EncryptionAlgorithmSpec.ENCRYPTION_ALGORITHM_SPEC_ECIES_HKDF_HMAC_SHA256_AES128CBC
+    override val experimental: Boolean = false
   }
 
   /* This public encryption scheme (https://datatracker.ietf.org/doc/html/rfc8017#section-7.1) is
@@ -371,6 +382,7 @@ object EncryptionAlgorithmSpec {
       NonEmpty.mk(Set, EncryptionKeySpec.Rsa2048)
     override def toProtoEnum: v30.EncryptionAlgorithmSpec =
       v30.EncryptionAlgorithmSpec.ENCRYPTION_ALGORITHM_SPEC_RSA_OAEP_SHA256
+    override val experimental: Boolean = false
   }
 
   def fromProtoEnum(
@@ -446,7 +458,11 @@ object RequiredEncryptionSpecs {
 }
 
 /** Key schemes for symmetric encryption. */
-sealed trait SymmetricKeyScheme extends Product with Serializable with PrettyPrinting {
+sealed trait SymmetricKeyScheme
+    extends CryptoSpec
+    with Product
+    with Serializable
+    with PrettyPrinting {
   def name: String
   def toProtoEnum: v30.SymmetricKeyScheme
   def keySizeInBytes: Int
@@ -464,6 +480,7 @@ object SymmetricKeyScheme {
     override def toProtoEnum: v30.SymmetricKeyScheme =
       v30.SymmetricKeyScheme.SYMMETRIC_KEY_SCHEME_AES128GCM
     override def keySizeInBytes: Int = 16
+    override def experimental: Boolean = false
   }
 
   def fromProtoEnum(

@@ -13,8 +13,8 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.serialization.DeserializationError
@@ -224,7 +224,7 @@ class FixedSyncCryptoApiForSigning(
 
     override def findDynamicSequencingParameters()(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+    ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
       notImplementedUS
 
     override def listDynamicSynchronizerParametersChanges()(implicit

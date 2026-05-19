@@ -4,23 +4,23 @@
 package com.daml.ledger.api.testtool.infrastructure.time
 
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.timer.Delayed
+import com.digitalasset.canton.util.DelayUtil
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 trait DelayMechanism {
-  def delayBy(duration: Duration): Future[Unit]
+  def delayBy(duration: FiniteDuration): Future[Unit]
 }
 
-class TimeDelayMechanism()(implicit ec: ExecutionContext) extends DelayMechanism {
-  override def delayBy(duration: Duration): Future[Unit] = Delayed.by(duration)(())
+class TimeDelayMechanism() extends DelayMechanism {
+  override def delayBy(duration: FiniteDuration): Future[Unit] = DelayUtil.delay(duration)
 }
 
 class StaticTimeDelayMechanism(ledger: ParticipantTestContext)(implicit
     ec: ExecutionContext
 ) extends DelayMechanism {
-  override def delayBy(duration: Duration): Future[Unit] =
+  override def delayBy(duration: FiniteDuration): Future[Unit] =
     ledger
       .time()
       .flatMap { currentTime =>

@@ -114,7 +114,7 @@ final class CommitmentsService(
                   synchronizerId
                 )
             )
-          reinitRecordTime = SyncEphemeralStateFactory.currentRecordTime(synchronizerIndex)
+          reinitRecordTime = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
 
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
             synchronizer.acsCommitmentProcessor.reinitializeCommitments(reinitRecordTime),
@@ -138,7 +138,7 @@ final class CommitmentsService(
           res <- EitherT(
             readCommitmentRepairStatus(
               persistentState,
-              reinitRecordTime,
+              reinitRecordTime.timestamp,
               timeoutSeconds,
             )
           )

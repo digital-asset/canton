@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.security.KeyPairGenerator
@@ -57,7 +58,7 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
             validationRes shouldEqual Either.unit
           else
             validationRes.left.value should include(
-              s"Failed to deserialize or validate $format public key: KeyParseAndValidateError"
+              s"Failed to deserialize or validate $format public key [${publicKey.id}]: KeyParseAndValidateError"
             )
       }
     }
@@ -157,6 +158,23 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
           )
         validationRes.left.value.toString should include(
           s"invalid public key"
+        )
+      }
+
+      "fail if ML-DSA-65 public key is invalid" in {
+        val kpGen = KeyPairGenerator.getInstance("MLDSA", JceSecurityProvider.bouncyCastleProvider)
+        // Generate a ML-DSA-44 key and claim it's a ML-DSA-65 key
+        kpGen.initialize(MLDSAParameterSpec.ml_dsa_44)
+        val invalidPublicKey = ByteString.copyFrom(kpGen.generateKeyPair().getPublic.getEncoded)
+        val validationRes =
+          SigningPublicKey.create(
+            DerX509Spki,
+            invalidPublicKey,
+            SigningKeySpec.MlDsa65,
+            SigningKeyUsage.ProtocolOnly,
+          )
+        validationRes.left.value.toString should include(
+          s"ML-DSA public key does not have the correct parameter spec for ML-DSA-65"
         )
       }
 

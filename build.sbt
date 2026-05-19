@@ -219,7 +219,7 @@ lazy val root = (project in file("."))
     scalacOptions --= HouseRules.scalacOptionsToDisableForTests, // To build test libraries in `compile` scope
     ScalaUnidoc / unidoc / unidocProjectFilter := inAnyProject -- inProjects(
       (
-        Seq(CommunityProjects.`performance-driver`)
+        Seq(CommunityProjects.`performance-driver`, CommunityProjects.microbench)
           ++ testLibraries
           ++ Seq(DamlProjects.`bindings-java`)
           ++ transcodeLibraries // Cannot run scaladoc 2.13 on transcode because written in Scala 3

@@ -1,0 +1,33 @@
+root: index
+subtrees:
+  - hidden: False
+    titlesonly: True
+    entries:
+      - file: faq
+      - file: troubleshooting
+      - file: common-questions
+      - file: multi-hosting
+      - file: debugging-tools
+      - file: admin-api-reference
+      - file: sdks-tools-language-bindings-scala
+      - file: sdks-tools-cli-tools-canton-console
+      - file: global-synchronizer-faq
+      - file: global-synchronizer-troubleshooting
+      - file: global-synchronizer-troubleshooting-guide-troubleshooting-methodology
+      - file: global-synchronizer-troubleshooting-guide-common-questions
+      - file: global-synchronizer-troubleshooting-guide-performance-issues
+      - file: global-synchronizer-troubleshooting-guide-security-issues
+      - file: global-synchronizer-troubleshooting-guide-runbooks
+      - file: global-synchronizer-troubleshooting-guide-transaction-failures
+      - file: global-synchronizer-reference-canton-console-reference
+      - file: global-synchronizer-canton-console-console-overview
+      - file: global-synchronizer-canton-console-essential-commands
+      - file: global-synchronizer-canton-console-debugging-workflows
+      - file: global-synchronizer-canton-console-advanced-operations
+      - file: global-synchronizer-canton-console-scripting
+      - file: global-synchronizer-extension-synchronizers-deployment
+      - file: global-synchronizer-extension-synchronizers-hybrid-synchronizer-pattern
+      - file: global-synchronizer-extension-synchronizers-linking-validator-multi-sync
+      - file: global-synchronizer-extension-synchronizers-private-synchronizers
+      - file: global-synchronizer-extension-synchronizers-private-validators
+      - file: global-synchronizer-production-operations-logging

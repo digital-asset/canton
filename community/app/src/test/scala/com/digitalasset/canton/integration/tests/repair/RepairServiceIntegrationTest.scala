@@ -73,7 +73,7 @@ trait RepairServiceIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
 
   override val defaultParticipant: String = "participant1"
@@ -972,7 +972,7 @@ sealed trait WithMultiSynchronizerSupport extends RepairServiceIntegrationTest {
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(true)
         ),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
 }
 

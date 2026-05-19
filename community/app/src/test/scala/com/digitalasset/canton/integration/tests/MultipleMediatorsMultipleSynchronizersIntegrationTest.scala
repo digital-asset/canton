@@ -46,7 +46,7 @@ final class MultipleMediatorsMultipleSynchronizersIntegrationTest
     ).withManualStart
       .addConfigTransforms(
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

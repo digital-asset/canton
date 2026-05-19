@@ -204,6 +204,26 @@ release_test:
         do_checkout: false # we already did the checkout before restoring the KMS driver
     - slack_red_main_with_volunteer
 
+test_docker_images:
+  executor: canton-large-docker-on-cci
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: false
+        is_manual: false
+    - setup_remote_docker
+    - run:
+        name: Build and test docker images (without publishing)
+        command: ./docker/canton/build_canton_image.sh false
+    - store_artifacts:
+        path: docker/canton/tests/ping/ci-artifacts/compose-logs
+        destination: docker-ping-test-logs
+        when: always
+    - slack_red_main_with_volunteer
+
 protocol_continuity_test_all:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 12 # Should be the same as num_test_buckets below, as we want to run every test once.

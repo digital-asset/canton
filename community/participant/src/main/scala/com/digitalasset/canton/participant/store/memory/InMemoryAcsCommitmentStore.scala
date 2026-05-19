@@ -7,7 +7,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.{
@@ -414,8 +414,10 @@ class InMemoryIncrementalCommitments(
   def checkpointSnapshot: TrieMap[SortedSet[InternedPartyId], AcsCommitment.CommitmentType] =
     checkpointSnap.snapshot()
 
-  override def get()(implicit
-      traceContext: TraceContext
+  override def get(
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[
     (RecordTime, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType])
   ] = {

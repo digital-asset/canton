@@ -48,7 +48,7 @@ class JceCryptoTest
     def jceCrypto(): FutureUnlessShutdown[Crypto] =
       Crypto
         .create(
-          CryptoConfig(provider = Jce),
+          CryptoConfig(provider = Jce, enableExperimental = true),
           CachingConfigs.defaultKmsMetadataCache,
           SessionEncryptionKeyCacheConfig()
             .focus(_.senderCache.expireAfterTimeout)

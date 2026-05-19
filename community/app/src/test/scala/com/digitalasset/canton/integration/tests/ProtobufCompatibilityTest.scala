@@ -167,12 +167,12 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "LogicalUpgradeState" on service "TopologyManagerReadService" was deleted.""",
     ),
     (3, 5) -> Seq(
-      // LSU changes. Fine because not released yet.
-      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed cardinality from "map" to "optional with explicit presence".""",
-      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto:Field "4" with name "sequencer_successors" on message "PerformManualLsuRequest" changed type from "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessorsEntry" to "com.digitalasset.canton.admin.participant.v30.PerformManualLsuRequest.SequencerSuccessors".""",
-      // bft-admin endpoint. Fine because not released yet.
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" moved from outside to inside a oneof.""",
+      // Changed for 3.5.1-rc4
+      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present enum value "5001" on enum "BuiltinFunction" was deleted.""",
+      """com/digitalasset/daml/lf/transaction.proto:Previously present field "1002" with name "external_call_results" on message "Exercise" was deleted.""",
+      // Added ML-DSA support to 3.6, crypto handshake handles missing schemes with 3.5
+      """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "5" on enum "SigningKeySpec" was deleted.""",
+      """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "4" on enum "SigningAlgorithmSpec" was deleted.""",
     ),
   )
 

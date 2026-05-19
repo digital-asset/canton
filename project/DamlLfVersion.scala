@@ -35,14 +35,14 @@ object DamlLfVersion {
     override def toScala: String = "Minor.Dev"
   }
 
-  private val v2_1 = DamlLfVersion(2, Stable(1))
-  private val v2_2 = DamlLfVersion(2, Stable(2))
-  private val v2_3_1 = DamlLfVersion(2, Staging(3, 1))
-  private val v2_3_2 = DamlLfVersion(2, Staging(3, 2))
-  private val v2_3 = DamlLfVersion(2, Stable(3))
-  private val v2_4_1 = DamlLfVersion(2, Staging(4, 1))
-  private val v2_4 = v2_4_1
-  private val v2_dev = DamlLfVersion(2, Dev)
+  val v2_1: DamlLfVersion = DamlLfVersion(2, Stable(1))
+  val v2_2: DamlLfVersion = DamlLfVersion(2, Stable(2))
+  val v2_3_1: DamlLfVersion = DamlLfVersion(2, Staging(3, 1))
+  val v2_3_2: DamlLfVersion = DamlLfVersion(2, Staging(3, 2))
+  val v2_3: DamlLfVersion = DamlLfVersion(2, Stable(3))
+  val v2_4_1: DamlLfVersion = DamlLfVersion(2, Staging(4, 1))
+  val v2_4: DamlLfVersion = v2_4_1
+  val v2_dev: DamlLfVersion = DamlLfVersion(2, Dev)
 
   val explicitVersions: Map[String, DamlLfVersion] = Map(
     "v2_1" -> v2_1,

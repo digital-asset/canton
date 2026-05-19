@@ -694,7 +694,7 @@ object ParallelIndexerSubscription {
 
     val batch = input.iterator.flatMap { case (offset, update) =>
       update match {
-        case _: Update.TransactionAccepted =>
+        case _: Update.TransactionAccepted | _: Update.ReassignmentAccepted =>
           logger.info(
             s"Phase 7: Storing at offset=${offset.unwrap} $update"
           )(update.traceContext)

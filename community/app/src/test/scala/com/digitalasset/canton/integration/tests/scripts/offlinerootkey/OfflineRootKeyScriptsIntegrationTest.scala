@@ -57,6 +57,7 @@ trait OfflineRootKeyScriptsIntegrationTest
     case SigningKeySpec.EcCurve25519 => "ed25519"
     case SigningKeySpec.EcP256 | SigningKeySpec.EcSecp256k1 => "ecdsa256"
     case SigningKeySpec.EcP384 => "ecdsa384"
+    case SigningKeySpec.MlDsa65 => "mldsa65"
   }
 
   "offline root key init" should {

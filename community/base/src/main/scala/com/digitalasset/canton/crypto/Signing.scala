@@ -41,6 +41,7 @@ import org.bouncycastle.asn1.ASN1OctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import slick.jdbc.GetResult
 
 import java.time.Duration
@@ -232,7 +233,8 @@ final case class Signature private (
       val newFormat = signingAlgorithmSpec match {
         case Some(algo) =>
           algo match {
-            case SigningAlgorithmSpec.EcDsaSha256 | SigningAlgorithmSpec.EcDsaSha384 =>
+            case SigningAlgorithmSpec.EcDsaSha256 | SigningAlgorithmSpec.EcDsaSha384 |
+                SigningAlgorithmSpec.MlDsa65 =>
               SignatureFormat.Der
             case SigningAlgorithmSpec.Ed25519 => SignatureFormat.Concat
           }
@@ -666,7 +668,8 @@ object SignatureFormat {
 
   def fromSigningAlgoSpec(signingAlgoSpec: SigningAlgorithmSpec): SignatureFormat =
     signingAlgoSpec match {
-      case SigningAlgorithmSpec.EcDsaSha256 | SigningAlgorithmSpec.EcDsaSha384 =>
+      case SigningAlgorithmSpec.EcDsaSha256 | SigningAlgorithmSpec.EcDsaSha384 |
+          SigningAlgorithmSpec.MlDsa65 =>
         SignatureFormat.Der
       case SigningAlgorithmSpec.Ed25519 => SignatureFormat.Concat
     }
@@ -888,7 +891,7 @@ object SigningKeyUsage {
 }
 
 /** A signing key specification. */
-sealed trait SigningKeySpec extends Product with Serializable with PrettyPrinting {
+sealed trait SigningKeySpec extends CryptoSpec with Product with Serializable with PrettyPrinting {
   def name: String
   def toProtoEnum: v30.SigningKeySpec
   override val pretty: Pretty[this.type] = prettyOfString(_.name)
@@ -907,6 +910,7 @@ object SigningKeySpec {
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_CURVE25519
     // Name of the elliptic curve as expected by Java's ECGenParameterSpec (JCA standard name)
     override val jcaCurveName: String = "Ed25519"
+    override val experimental: Boolean = false
   }
 
   /** Elliptic Curve Key from the P-256 curve (aka secp256r1) as defined in
@@ -917,6 +921,7 @@ object SigningKeySpec {
     override def toProtoEnum: v30.SigningKeySpec =
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P256
     override val jcaCurveName: String = "secp256r1"
+    override val experimental: Boolean = false
   }
 
   /** Elliptic Curve Key from the P-384 curve (aka secp384r1) as defined in
@@ -927,6 +932,7 @@ object SigningKeySpec {
     override def toProtoEnum: v30.SigningKeySpec =
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P384
     override val jcaCurveName: String = "secp384r1"
+    override val experimental: Boolean = false
   }
 
   /** Elliptic Curve Key from SECG P256k1 curve (aka secp256k1) commonly used in bitcoin and
@@ -937,6 +943,20 @@ object SigningKeySpec {
     override def toProtoEnum: v30.SigningKeySpec =
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1
     override val jcaCurveName: String = "secp256k1"
+    override val experimental: Boolean = false
+  }
+
+  /** PQC Signing key spec for ML-DSA-65 as defined in https://doi.org/10.6028/NIST.FIPS.204
+    *
+    * Considered experimental until we have more confidence in the security of the scheme and its
+    * implementation.
+    */
+  case object MlDsa65 extends SigningKeySpec with MlDsaKeySpec {
+    override val name: String = "ML-DSA-65"
+    override def toProtoEnum: v30.SigningKeySpec =
+      v30.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65
+    override def jcaParameterSpec: MLDSAParameterSpec = MLDSAParameterSpec.ml_dsa_65
+    override val experimental: Boolean = true
   }
 
   def fromProtoEnum(
@@ -956,6 +976,8 @@ object SigningKeySpec {
         Right(SigningKeySpec.EcP384)
       case v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1 =>
         Right(SigningKeySpec.EcSecp256k1)
+      case v30.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65 =>
+        Right(SigningKeySpec.MlDsa65)
     }
 
   /** If keySpec is unspecified, use the old SigningKeyScheme from the key */
@@ -997,7 +1019,11 @@ object SigningKeySpec {
 }
 
 /** Algorithm schemes for signing. */
-sealed trait SigningAlgorithmSpec extends Product with Serializable with PrettyPrinting {
+sealed trait SigningAlgorithmSpec
+    extends CryptoSpec
+    with Product
+    with Serializable
+    with PrettyPrinting {
   def name: String
   def supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]]
   def supportedSignatureFormats: NonEmpty[Set[SignatureFormat]]
@@ -1010,6 +1036,7 @@ sealed trait SigningAlgorithmSpec extends Product with Serializable with PrettyP
 
   /** Name of the signing algorithm as expected by Java's getInstance (JCA standard name) */
   def jcaAlgorithmName: String
+
   override val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
@@ -1030,6 +1057,7 @@ object SigningAlgorithmSpec {
       v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519
     override def approximateSignatureSize: Int = 64
     override def jcaAlgorithmName: String = "Ed25519"
+    override def experimental: Boolean = false
   }
 
   /** Elliptic Curve Digital Signature Algorithm with SHA256 as defined in
@@ -1045,6 +1073,7 @@ object SigningAlgorithmSpec {
       v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_256
     override def approximateSignatureSize: Int = 64
     override def jcaAlgorithmName: String = "SHA256withECDSA"
+    override def experimental: Boolean = false
   }
 
   /** Elliptic Curve Digital Signature Algorithm with SHA384 as defined in
@@ -1060,6 +1089,25 @@ object SigningAlgorithmSpec {
       v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384
     override def approximateSignatureSize: Int = 96
     override def jcaAlgorithmName: String = "SHA384withECDSA"
+    override def experimental: Boolean = false
+  }
+
+  /** PQC Signing algorithm spec for ML-DSA-65 as defined in https://doi.org/10.6028/NIST.FIPS.204
+    *
+    * Considered experimental until we have more confidence in the security of the scheme and its
+    * implementation.
+    */
+  case object MlDsa65 extends SigningAlgorithmSpec {
+    override val name: String = "ML-DSA-65"
+    override val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
+      NonEmpty.mk(Set, SigningKeySpec.MlDsa65)
+    override val supportedSignatureFormats: NonEmpty[Set[SignatureFormat]] =
+      NonEmpty.mk(Set, SignatureFormat.Der)
+    override def toProtoEnum: v30.SigningAlgorithmSpec =
+      v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ML_DSA_65
+    override def approximateSignatureSize: Int = 3309
+    override def jcaAlgorithmName: String = "ML-DSA-65"
+    override def experimental: Boolean = true
   }
 
   def toProtoEnumOption(
@@ -1087,6 +1135,8 @@ object SigningAlgorithmSpec {
         Right(Some(SigningAlgorithmSpec.EcDsaSha256))
       case v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384 =>
         Right(Some(SigningAlgorithmSpec.EcDsaSha384))
+      case v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ML_DSA_65 =>
+        Right(Some(SigningAlgorithmSpec.MlDsa65))
     }
 
   def fromProtoEnum(
@@ -1104,6 +1154,8 @@ object SigningAlgorithmSpec {
         Right(SigningAlgorithmSpec.EcDsaSha256)
       case v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384 =>
         Right(SigningAlgorithmSpec.EcDsaSha384)
+      case v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ML_DSA_65 =>
+        Right(SigningAlgorithmSpec.MlDsa65)
     }
 }
 
@@ -1334,7 +1386,8 @@ final case class SigningPublicKey private (
         mkNewKeyO(ByteString.copyFrom(subjectPublicKeyInfo))
 
       case (SigningKeySpec.EcP256, CryptoKeyFormat.Der) |
-          (SigningKeySpec.EcP384, CryptoKeyFormat.Der) =>
+          (SigningKeySpec.EcP384, CryptoKeyFormat.Der) |
+          (SigningKeySpec.MlDsa65, CryptoKeyFormat.Der) =>
         mkNewKeyO(key)
 
       case _ => Right(None)
@@ -1360,7 +1413,8 @@ final case class SigningPublicKey private (
         )
 
       case (SigningKeySpec.EcP256, CryptoKeyFormat.DerX509Spki) |
-          (SigningKeySpec.EcP384, CryptoKeyFormat.DerX509Spki) =>
+          (SigningKeySpec.EcP384, CryptoKeyFormat.DerX509Spki) |
+          (SigningKeySpec.MlDsa65, CryptoKeyFormat.DerX509Spki) =>
         Some(
           SigningPublicKey(CryptoKeyFormat.Der, key, keySpec, usage, dataForFingerprintO = None)()
         )
@@ -1553,7 +1607,8 @@ final case class SigningPrivateKey private (
         // Encode the private key with a PKCS#8 DER-encoded PrivateKeyInfo structure
         JcePrivateCrypto.encodeEd25519PrivateKey(key).map(mkNewKeyO)
       case (SigningKeySpec.EcP256, CryptoKeyFormat.Der) |
-          (SigningKeySpec.EcP384, CryptoKeyFormat.Der) =>
+          (SigningKeySpec.EcP384, CryptoKeyFormat.Der) |
+          (SigningKeySpec.MlDsa65, CryptoKeyFormat.Der) =>
         Right(mkNewKeyO(key))
 
       case _ => Right(None)
@@ -1580,7 +1635,8 @@ final case class SigningPrivateKey private (
         )
 
       case (SigningKeySpec.EcP256, CryptoKeyFormat.DerPkcs8Pki) |
-          (SigningKeySpec.EcP384, CryptoKeyFormat.DerPkcs8Pki) =>
+          (SigningKeySpec.EcP384, CryptoKeyFormat.DerPkcs8Pki) |
+          (SigningKeySpec.MlDsa65, CryptoKeyFormat.DerPkcs8Pki) =>
         Some(
           SigningPrivateKey(id, CryptoKeyFormat.Der, key, keySpec, usage)()
         )

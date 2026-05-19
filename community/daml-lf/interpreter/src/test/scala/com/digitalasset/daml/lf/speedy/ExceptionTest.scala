@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
@@ -20,7 +20,7 @@ import com.digitalasset.daml.lf.testing.parser
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, GlobalKeyWithMaintainers, SerializationVersion, NextGenContractStateMachine as ContractStateMachine}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, GlobalKeyWithMaintainers, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -97,7 +97,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         committers = Set(alice),
         // we test only with contract key mode,
         // the state machine should no have any impact for this test.
-        mode = ContractStateMachine.Mode.NUCK,
+        interpretationConfig = InterpretationConfig.Key,
         logger = MachineLogger(),
       )
     SpeedyTestLib
@@ -689,7 +689,8 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
             applyToParty(pkgs, expr, alice),
             Set(alice),
             packageResolution = Map(pkg.pkgName -> defaultParserParameters.defaultPackageId),
-            logger = MachineLogger()
+            logger = MachineLogger(),
+            interpretationConfig = InterpretationConfig.Legacy,
           )
           .run()
         if (description.contains("can be caught"))
@@ -721,6 +722,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
           applyToParty(pkgs, example, party),
           Set(party),
           logger = MachineLogger(),
+          interpretationConfig = InterpretationConfig.Legacy,
         )
         .run()
       inside(res) { case SResultFinal(SUnit) =>

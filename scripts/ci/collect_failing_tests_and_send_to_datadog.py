@@ -183,6 +183,7 @@ def report_issue(issue: str):
     project_item_id = None
     release_line = None
     is_archived = False
+    has_assignee = False
 
     # search issues by title. also returns partial matches
     result = run_gh_with_retries(["api", "graphql", "-F", "query=@scripts/ci/findIssueByTitle.graphql", "-f", f"searchstr=repo:DACH-NY/canton in:title {title}"])
@@ -194,6 +195,7 @@ def report_issue(issue: str):
         if result["title"] == title:
             idx = str(result["number"])
             body = result["body"]
+            has_assignee = result["assignees"]["totalCount"] > 0
             # look at the projects the issue is linked to
             for project_relation in result["projectItems"]["nodes"]:
 
@@ -229,7 +231,11 @@ def report_issue(issue: str):
                 gh_assign_release_line(idx, project_item_id)
 
         # update the description and reopen if needed
-        return update_issue(idx, title, body)
+        streak = update_issue(idx, title, body)
+        if has_assignee and streak is not None:
+            print(f"Issue #{idx} has an assignee; skipping Slack notification.")
+            return None
+        return streak
 
     else:
         create_issue(title)
@@ -356,7 +362,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
             "text": {"type": "mrkdwn", "text": "*Affected tests:*\n" + "\n".join(issue_lines)},
         },
     ]
-    payload = json.dumps({"channel": channel, "blocks": blocks, "icon_emoji": ":this-is-fine-fire:"}).encode("utf-8")
+    payload = json.dumps({"channel": channel, "blocks": blocks, "icon_emoji": ":fire:"}).encode("utf-8")
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
         data=payload,
@@ -369,6 +375,9 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
     try:
         with urllib.request.urlopen(req) as resp:
             result = json.loads(resp.read().decode("utf-8"))
+            warnings = result.get("response_metadata", {}).get("warnings", [])
+            if warnings:
+                print(f"Slack response warnings: {warnings}")
             if not result.get("ok"):
                 print(f"Slack API error: {result.get('error', 'unknown')}")
             else:
@@ -426,6 +435,7 @@ def self_test():
     test_update_issue_old_format()
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info()
+    test_report_issue_skips_slack_if_assignee()
     print("All self-checks passed")
 
 def test_gh_flags():
@@ -573,6 +583,57 @@ def test_update_issue_returns_consecutive_streak_info():
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None when job is unstable_test"
 
+
+def test_report_issue_skips_slack_if_assignee():
+    title = format_issue_title("SomeFlakyTest")
+    commits = [format(i, '040x') for i in range(CONSECUTIVE_FAILURES_THRESHOLD)]
+    current = commits[-1]
+    prior = commits[:-1]
+    rows = "\n".join(
+        f"| 2026-04-{20 + i} | test | 1 | [{i}](url) | [{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) |"
+        for i, c in enumerate(prior)
+    )
+    body_with_history = (
+        "This issue was created automatically.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n" + rows
+    )
+    consecutive_pairs = set(zip(commits, commits[1:]))
+    env = {
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    def make_search_response(total_count):
+        return json.dumps({"data": {"search": {"nodes": [{
+            "title": title,
+            "number": 99,
+            "body": body_with_history,
+            "assignees": {"totalCount": total_count},
+            "projectItems": {"nodes": []},
+        }]}}})
+
+    # assigned issue: body is updated but Slack is suppressed
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit, \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
+         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+        mock_gh.return_value.returncode = 0
+        mock_gh.return_value.stdout = make_search_response(total_count=1)
+        result = report_issue("SomeFlakyTest")
+        assert result is None, "Expected None when issue has an assignee (no Slack notification)"
+        mock_edit.assert_called_once()
+
+    # unassigned issue with same streak: Slack is not suppressed
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
+         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+        mock_gh.return_value.returncode = 0
+        mock_gh.return_value.stdout = make_search_response(total_count=0)
+        result = report_issue("SomeFlakyTest")
+        assert result is not None, "Expected streak result when issue has no assignee"
 
 def test_compute_single_log_failure():
     # Logs

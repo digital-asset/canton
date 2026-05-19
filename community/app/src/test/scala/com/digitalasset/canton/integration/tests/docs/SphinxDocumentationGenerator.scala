@@ -655,7 +655,7 @@ class SynchronizerInstallationManual
  */
 private object DocsGenerationSynchronization {
   private val finished: AtomicInteger = new AtomicInteger(0)
-  private val expectedCalls: Int = 4
+  private val expectedCalls: Int = 17
   private val darsSymLink = File("dars")
   private val darsDir = File("community/common/target/scala-2.13/classes")
 
@@ -1031,3 +1031,531 @@ class ExportKeysSnippetGeneratorTest
         "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
       ),
     )
+
+// ─── Canton Network documentation snippet tests ────────────────────────────
+// These test classes cover console command examples from docs.canton.network.
+// RST files in docs-open/src/sphinx/docs-cn/ serve as test harnesses — they
+// are never rendered as documentation pages.
+
+class DocsCantonNetworkFaqTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/faq.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-appdev_faq_max_connections.conf"
+      ),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkTroubleshootingTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/troubleshooting.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-appdev_troubleshooting_batching.conf"
+      ),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkMultiHostingTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/multi-hosting.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkAdminApiReferenceTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/admin-api-reference.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkDebuggingToolsTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/debugging-tools.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkCommonQuestionsTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/common-questions.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerFaqTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-faq.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-appdev_faq_max_connections.conf"
+      ),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-appdev_troubleshooting_batching.conf"
+      ),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerCantonConsoleAdvancedOperationsTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-canton-console-advanced-operations.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_advanced_operations.conf"
+      ),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerCantonConsoleOverviewTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-canton-console-console-overview.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerCantonConsoleDebuggingWorkflowsTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-canton-console-debugging-workflows.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File("community/app/src/test/resources/documentation-snippets/with-testing-commands.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerCantonConsoleEssentialCommandsTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-canton-console-essential-commands.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File("community/app/src/test/resources/documentation-snippets/with-testing-commands.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerCantonConsoleScriptingTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-canton-console-scripting.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersDeploymentTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-extension-synchronizers-deployment.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersHybridSynchronizerPatternTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-extension-synchronizers-hybrid-synchronizer-pattern.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersLinkingValidatorMultiSyncTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-extension-synchronizers-linking-validator-multi-sync.rst"
+      ),
+      File(
+        "community/app/src/test/resources/examples/02-multiple-sequencers-and-mediators/multiple-sequencers-and-mediators.conf"
+      ),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersPrivateSynchronizersTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-extension-synchronizers-private-synchronizers.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersPrivateValidatorsTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-extension-synchronizers-private-validators.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerProductionOperationsLoggingTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-production-operations-logging.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerReferenceCantonConsoleReferenceTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-reference-canton-console-reference.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuideCommonQuestionsTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-common-questions.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuidePerformanceIssuesTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-performance-issues.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File(
+        "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_troubleshooting-guide-performance-issues.conf"
+      ),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuideRunbooksTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-runbooks.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuideSecurityIssuesTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-security-issues.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuideTransactionFailuresTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-transaction-failures.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerTroubleshootingGuideTroubleshootingMethodologyTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/docs-cn/global-synchronizer-troubleshooting-guide-troubleshooting-methodology.rst"
+      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    )
+
+class DocsCantonNetworkSdksToolsCliToolsCantonConsoleTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/sdks-tools-cli-tools-canton-console.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+class DocsCantonNetworkSdksToolsLanguageBindingsScalaTest
+    extends SnippetGenerator(
+      File("docs-open/src/sphinx/docs-cn/sdks-tools-language-bindings-scala.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+    ) {
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
+}
+
+// Configuration tests
+
+class DocsCantonNetworkConfigurationReferenceScalaTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition = {
+
+    System.setProperty("POSTGRES_USER", "test_user")
+    System.setProperty("POSTGRES_PASSWORD", "test_pass")
+
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-appdev_configuration_reference.conf"
+        )
+      )
+  }
+
+  override protected def afterAll(): Unit = {
+    System.clearProperty("POSTGRES_USER")
+    System.clearProperty("POSTGRES_PASSWORD")
+    super.afterAll()
+  }
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}
+
+class DocsCantonNetworkScriptingConfigScalaTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_scripting.conf"
+        )
+      )
+      .focus(_.testingConfig.participantsWithoutLapiVerification)
+      .modify(_ + "myparticipant")
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}
+
+class DocsCantonNetworkConfigurationConfigScalaTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition = {
+
+    System.setProperty("canton.participants.participant.crypto.kms.project-id", "my-gcp-project-id")
+    System.setProperty("canton.participants.participant.crypto.kms.location-id", "europe-west1")
+    System.setProperty("canton.participants.participant.crypto.kms.key-ring-id", "canton-key-ring")
+
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_configuration.conf"
+        )
+      )
+      .focus(_.testingConfig.participantsWithoutLapiVerification)
+      .modify(_ + "participant")
+      .withManualStart
+  }
+
+  override protected def afterAll(): Unit = {
+    System.clearProperty("canton.participants.participant.crypto.kms.project-id")
+    System.clearProperty("canton.participants.participant.crypto.kms.location-id")
+    System.clearProperty("canton.participants.participant.crypto.kms.key-ring-id")
+    super.afterAll()
+  }
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}
+
+class DocsCantonNetworkPerformanceOptimizationConfigScalaTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition = {
+
+    System.setProperty("canton.participants.participant.storage.type", "memory")
+
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_performance_optimization.conf"
+        )
+      )
+      .focus(_.testingConfig.participantsWithoutLapiVerification)
+      .modify(_ + "participant")
+  }
+
+  override protected def afterAll(): Unit = {
+    System.clearProperty("canton.participants.participant.storage.type")
+    super.afterAll()
+  }
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerReferenceCantonConsoleReferenceConfigTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_canton_console_reference.conf"
+        )
+      )
+      .focus(_.testingConfig.participantsWithoutLapiVerification)
+      .modify(_ + "participant")
+      .withManualStart
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}
+
+class DocsCantonNetworkGlobalSynchronizerReferenceCantonConsoleCLIConfigTest
+    extends CommunityIntegrationTest
+    with IsolatedEnvironments {
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition
+      .fromFiles(
+        File(
+          "community/app/src/test/resources/documentation-snippets/docs-cn-global-synchronizer_cli_tools_canton_console.conf"
+        )
+      )
+      .focus(_.testingConfig.participantsWithoutLapiVerification)
+      .modify(_ + "participant")
+      .withManualStart
+
+  "Configuration Reference" should {
+    "parse and boot successfully without any pureconfig errors" in { _ =>
+      succeed
+    }
+  }
+}

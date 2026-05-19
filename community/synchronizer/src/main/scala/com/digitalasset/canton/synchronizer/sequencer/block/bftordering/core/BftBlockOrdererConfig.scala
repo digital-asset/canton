@@ -157,7 +157,7 @@ final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
     maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
-    // TODO(#24184) make a dynamic sequencing parameter
+    // TODO(#24184) make a sequencing parameter
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
@@ -168,7 +168,7 @@ final case class BftBlockOrdererConfig(
       DefaultAvailabilityDisseminationPatience,
     availabilityMinProposalCreationDelay: FiniteDuration =
       DefaultAvailabilityMinProposalCreationDelay,
-    // TODO(#24184) make a dynamic sequencing parameter
+    // TODO(#24184) make a sequencing parameter
     maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     consensusQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
     consensusQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,

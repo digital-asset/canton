@@ -5,11 +5,11 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
-import com.daml.timer.Delayed
 import com.digitalasset.canton.auth.AuthorizationChecksErrors.AccessTokenExpired
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommand
+import com.digitalasset.canton.util.DelayUtil
 import io.grpc.Status
 import io.grpc.stub.StreamObserver
 
@@ -77,7 +77,7 @@ trait ExpiringStreamServiceCallAuthTests[T]
 //      import env.*
 //      val mainActorId = getMainActorId
 //      val _ = submitAndWaitAsMainActor(mainActorId)
-//      val _ = Delayed.Future.by(10.seconds)(submitAndWaitAsMainActor(mainActorId))
+//      val _ = DelayUtil.delay(10.seconds).flatMap(_ => submitAndWaitAsMainActor(mainActorId))
 //      expectExpiration(canReadAsMainActorExpiresInFiveSeconds, mainActorId)
 //        .map(_ => succeed)
 //        .futureValue
@@ -90,7 +90,7 @@ trait ExpiringStreamServiceCallAuthTests[T]
       import env.*
       val mainActorId = getMainActorId
       val _ = submitAndWaitAsMainActor(mainActorId)
-      val _ = Delayed.Future.by(10.seconds)(submitAndWaitAsMainActor(mainActorId))
+      val _ = DelayUtil.delay(10.seconds).flatMap(_ => submitAndWaitAsMainActor(mainActorId))
       expectExpiration(canActAsMainActorExpiresInFiveSeconds, mainActorId)
         .map(_ => succeed)
         .futureValue

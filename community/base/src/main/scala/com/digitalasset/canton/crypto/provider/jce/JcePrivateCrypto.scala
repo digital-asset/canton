@@ -14,12 +14,15 @@ import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherUtil
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.DEROctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.jcajce.interfaces.MLDSAPrivateKey
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import org.bouncycastle.jce.ECNamedCurveTable
 import org.bouncycastle.jce.spec.ECNamedCurveSpec
 
@@ -192,6 +195,20 @@ object JcePrivateCrypto {
             keySpec = keySpec,
             usage = usage,
           )
+          .leftMap(SigningKeyGenerationError.KeyCreationError.apply)
+      } yield keyPair
+
+    case SigningKeySpec.MlDsa65 =>
+      for {
+        javaKeyPair <- Either
+          .catchOnly[GeneralSecurityException] {
+            val kpg =
+              KeyPairGenerator.getInstance("MLDSA", JceSecurityProvider.bouncyCastleProvider)
+            kpg.initialize(MLDSAParameterSpec.ml_dsa_65)
+            kpg.generateKeyPair()
+          }
+          .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError.apply)
+        keyPair <- fromJavaSigningKeyPair(javaKeyPair, SigningKeySpec.MlDsa65, usage)
           .leftMap(SigningKeyGenerationError.KeyCreationError.apply)
       } yield keyPair
 
@@ -370,6 +387,31 @@ object JcePrivateCrypto {
           .leftMap(err => s"Failed to derive RSA public key: $err")
       } yield ByteString.copyFrom(derivedPublicKey)
 
+    /* ML-DSA does not derive public keys from a scalar like EC, it's stored alongside the private
+     * key, but we validate that the parameters match and extract it in a consistent way to prevent
+     * any mismatch between the public and private key.
+     */
+    def deriveMlDsaPublicKey(
+        expectedSpec: MLDSAParameterSpec,
+        privateKey: PrivateKey,
+    ): Either[String, ByteString] =
+      for {
+        jKey <- JceJavaKeyConverter.toJava(privateKey).leftMap(_.toString)
+        mlDsaPrivateKey <- jKey match {
+          case mlDsaPrivateKey: MLDSAPrivateKey =>
+            Right(mlDsaPrivateKey)
+          case _ => Left(s"Invalid ML-DSA key [${privateKey.id}]")
+        }
+        mlDsaPrivateKeySpec = mlDsaPrivateKey.getParameterSpec
+        _ <- EitherUtil.condUnit(
+          mlDsaPrivateKeySpec == expectedSpec,
+          s"ML-DSA private key [${privateKey.id}] spec $mlDsaPrivateKeySpec does not match expected value $expectedSpec",
+        )
+        derivedPublicKey <- Either
+          .catchNonFatal(mlDsaPrivateKey.getPublicKey.getEncoded)
+          .leftMap(err => s"Failed to derive ML-DSA public key: $err")
+      } yield ByteString.copyFrom(derivedPublicKey)
+
     (privateKey: @unchecked) match {
       case SigningPrivateKey(_, Symbolic, _, _, _) | EncryptionPrivateKey(_, Symbolic, _, _) =>
         // we cannot derive a public key when using symbolic keys
@@ -389,6 +431,8 @@ object JcePrivateCrypto {
             deriveEcPublicKey(SigningKeySpec.EcP384.jcaCurveName, signingPrivateKey)
           case SigningKeySpec.EcSecp256k1 =>
             deriveEcPublicKey(SigningKeySpec.EcSecp256k1.jcaCurveName, signingPrivateKey)
+          case SigningKeySpec.MlDsa65 =>
+            deriveMlDsaPublicKey(SigningKeySpec.MlDsa65.jcaParameterSpec, signingPrivateKey)
         }
         signingPublicKeyE.flatMap(derivedPublicKey =>
           SigningPublicKey

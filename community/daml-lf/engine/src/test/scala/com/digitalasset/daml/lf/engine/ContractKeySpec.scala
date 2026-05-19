@@ -17,6 +17,7 @@ import com.digitalasset.daml.lf.data.Ref.{
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error.{Interpretation => IErr}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
 import com.digitalasset.daml.lf.transaction.{
@@ -210,7 +211,7 @@ class ContractKeySpec
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.devDefault,
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
       result shouldBe a[Right[_, _]]
@@ -241,7 +242,7 @@ class ContractKeySpec
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.devDefault,
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
       result shouldBe a[Left[_, _]]
@@ -275,7 +276,7 @@ class ContractKeySpec
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          contractStateMode = ContractStateMachine.Mode.devDefault,
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
 
@@ -371,7 +372,7 @@ class ContractKeySpec
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
-            contractStateMode = contractStateMode,
+            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
           )
           .consume(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey)
       }

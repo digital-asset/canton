@@ -246,6 +246,7 @@ class AcsCommitmentProcessor private (
     commitmentReduceParallelism: NonNegativeInt,
     stringInterning: StringInterning,
     // disableCommitmentProcessor: Boolean = false,
+    initializationFlagCloseable: FlagCloseable,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
@@ -2514,14 +2515,15 @@ class AcsCommitmentProcessor private (
     *
     * Returns false if a reinitialization is already enqueued or executing, true otherwise.
     */
-  def reinitializeCommitments(timestamp: CantonTimestamp)(implicit
+  def reinitializeCommitments(toc: TimeOfChange)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Boolean =
     if (reinitializationEnqueued.compareAndSet(false, true)) {
+      val timestamp = toc.timestamp
+
       def forgetAndPersist(
-          snapshot: CommitmentSnapshot[InternedPartyId],
-          timestamp: CantonTimestamp,
+          snapshot: CommitmentSnapshot[InternedPartyId]
       ): FutureUnlessShutdown[Unit] =
         for {
           // Forget the running commitments before reinitializing them to purge all stakeholder groups
@@ -2538,13 +2540,12 @@ class AcsCommitmentProcessor private (
             (rc, _) <- computeRunningCommitmentsFromAcs(
               activeContractStore,
               contractStore,
-              TimeOfChange(timestamp, Some(RepairCounter.MaxValue)),
+              toc,
               batchingConfig,
             )
-
             snapshot = rc.snapshot()
             _ <- checkpointQueue.executeUS(
-              forgetAndPersist(snapshot, timestamp),
+              forgetAndPersist(snapshot),
               s"persist running commitments for checkpointing as a result of reinitialization at time $timestamp",
             )
             _ = { lastCheckpointTs = timestamp }
@@ -2580,7 +2581,7 @@ class AcsCommitmentProcessor private (
     } else false
 
   override protected def onClosed(): Unit =
-    LifeCycle.close(dbQueue, publishQueue, checkpointQueue)(logger)
+    LifeCycle.close(initializationFlagCloseable, dbQueue, publishQueue, checkpointQueue)(logger)
 
   @VisibleForTesting
   private[pruning] def flush(): FutureUnlessShutdown[Unit] =
@@ -2887,6 +2888,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
     implicit val loggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
 
+    val initializationFlagCloseable =
+      FlagCloseable.withCloseContext(loggingContext.tracedLogger, timeouts)
+
     def loadInitialState(): FutureUnlessShutdown[
       (Option[CantonTimestampSecond], FutureUnlessShutdown[InternalizedRunningCommitments])
     ] = for {
@@ -2894,14 +2898,16 @@ object AcsCommitmentProcessor extends HasLoggerName {
       _ = endOfLastProcessedPeriod.foreach { ts =>
         loggingContext.info(s"Last computed and sent timestamp: $ts")
       }
-      runningCommitmentsAsync = initRunningCommitments(store, stringInterning).map {
-        runningCommitments =>
-          // we have no cached commitments for the first computation after recovery
-          val snapshot = runningCommitments.snapshot()
-          loggingContext.info(
-            s"Initialized from stored snapshot at ${runningCommitments.watermark} (might be incomplete) with $snapshot"
-          )
-          runningCommitments
+      runningCommitmentsAsync = initRunningCommitments(
+        store,
+        stringInterning,
+      )(ec, initializationFlagCloseable.closeContext).map { runningCommitments =>
+        // we have no cached commitments for the first computation after recovery
+        val snapshot = runningCommitments.snapshot()
+        loggingContext.info(
+          s"Initialized from stored snapshot at ${runningCommitments.watermark} (might be incomplete) with $snapshot"
+        )
+        runningCommitments
       }
       // TODO(#28164) Remove asynchronous loading again when it's no longer needed
       runningCommitments <-
@@ -2945,6 +2951,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
         commitmentReduceParallelism,
         stringInterning,
+        initializationFlagCloseable,
       )
       // We trigger the processing of the buffered commitments, but we do not wait for it to complete here,
       // because, if processing buffered required topology updates that go through the same queue, we'd create a deadlock.
@@ -2974,8 +2981,11 @@ object AcsCommitmentProcessor extends HasLoggerName {
   private[pruning] def initRunningCommitments(
       store: AcsCommitmentStore,
       stringInterning: StringInterning,
-  )(implicit ec: ExecutionContext): FutureUnlessShutdown[InternalizedRunningCommitments] =
-    store.runningCommitments.get()(TraceContext.empty).map { case (rt, snapshot) =>
+  )(implicit
+      ec: ExecutionContext,
+      closeContext: CloseContext,
+  ): FutureUnlessShutdown[InternalizedRunningCommitments] =
+    store.runningCommitments.get()(TraceContext.empty, closeContext).map { case (rt, snapshot) =>
       new InternalizedRunningCommitments(
         rt,
         snapshot.view.map { case (parties, bytes) =>

@@ -12,9 +12,9 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.protocol.LfContractStateMode
+import com.digitalasset.canton.protocol.LfInterpretationConfig
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
-import com.digitalasset.canton.version.EngineMode
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.daml.lf.crypto.Hash
 
 import scala.concurrent.ExecutionContext
@@ -82,16 +82,16 @@ private[execution] class DefaultCommandExecutor(
 ) extends NamedLogging
     with CommandExecutor {
 
-  private def establishMode(
+  private def deriveInterpretationConfig(
       synchronizerId: Option[SynchronizerId],
       candidateSynchronizers: Set[PhysicalSynchronizerId],
-  ): LfContractStateMode =
+  ): LfInterpretationConfig =
     synchronizerId
       .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
       .map(_.protocolVersion)
       .maxOption
-      .map(pv => EngineMode.forProtocolVersion(pv))
-      .getOrElse(LfContractStateMode.default)
+      .map(pv => InterpretationConfig.forProtocolVersion(pv))
+      .getOrElse(LfInterpretationConfig.Default)
 
   override def execute(
       commands: Commands,
@@ -108,7 +108,7 @@ private[execution] class DefaultCommandExecutor(
       )
     }
 
-    val mode: LfContractStateMode = establishMode(
+    val interpretConfig: LfInterpretationConfig = deriveInterpretationConfig(
       commands.synchronizerId,
       routingSynchronizerState.topologySnapshots.keySet,
     )
@@ -116,7 +116,7 @@ private[execution] class DefaultCommandExecutor(
     for {
 
       commandInterpretationResult <- EitherT(
-        commandInterpreter.interpret(commands, mode, submissionSeed)
+        commandInterpreter.interpret(commands, interpretConfig, submissionSeed)
       )
       synchronizerRank <- syncService
         .selectRoutingSynchronizer(

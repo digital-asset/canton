@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, TypeConId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.interpretation.{Error => IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
@@ -481,7 +481,9 @@ class UpgradeTest
       sexprToEval,
       Set(alice, bob),
       MachineLogger(),
-      mode = ContractStateMachine.Mode.NUCK
+      interpretationConfig = InterpretationConfig.Default.copy(
+        contractStateMode = ContractStateMachine.Mode.NUCK
+      )
     )
 
     val contract = TransactionBuilder
@@ -525,7 +527,7 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       packageResolution = packageResolution,
-      mode = ContractStateMachine.Mode.NUCK,
+      interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
     )
   }
 

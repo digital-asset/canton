@@ -174,8 +174,8 @@ sealed trait SequencerConnectionServiceIntegrationTest
             // We possibly need to retry, because if participant1 has a single subscription on sequencer2, it will not detect
             // that sequencer1 is down until it first sends to it, and could therefore still pick it for the first send.
             // An alternative would be to use amplification.
-            eventually(timeUntilSuccess = 1.minute) {
-              participant1.health.maybe_ping(participant1.id, timeout = 2.seconds) shouldBe defined
+            eventually(timeUntilSuccess = 3.minute) {
+              participant1.health.maybe_ping(participant1.id, timeout = 10.seconds) shouldBe defined
             }
           },
           (

@@ -121,6 +121,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
   "Fail signature verification with disallowed synchronizer schemes" in {
     // unsupported signing algorithm specifications
     (CryptoProvider.Jce.signingAlgorithms.supported
+      -- Set(SigningAlgorithmSpec.MlDsa65) // Exclude experimental PQC specs
       -- restrictedStaticSynchronizerParameters.requiredSigningSpecs.algorithms)
       .foreach { unsupported =>
         val unsupportedSignature = Signature.create(
@@ -150,6 +151,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
 
     // unsupported signing key specifications
     (CryptoProvider.Jce.signingKeys.supported
+      -- Set(SigningKeySpec.MlDsa65) // Exclude experimental PQC specs
       -- restrictedStaticSynchronizerParameters.requiredSigningSpecs.keys)
       .foreach { unsupported =>
         val signingKey = p1.crypto.privateCrypto

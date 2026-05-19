@@ -116,7 +116,7 @@ class RecipientsValidator[I](
 
       actualWrongRecipients <- {
         if (errors.isEmpty) {
-          // The recipients check reported no error.
+          // The recipients check reported no error, wrongRecipients is Seq.empty.
           FutureUnlessShutdown.pure(wrongRecipients)
         } else if (errors.mayBeDueToTopologyChange) {
           // The recipients check reported only errors that may be due to a topology change.

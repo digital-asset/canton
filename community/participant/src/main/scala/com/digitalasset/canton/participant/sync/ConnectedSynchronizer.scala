@@ -120,7 +120,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.{
-  EngineMode,
+  InterpretationConfig,
   ParticipantProtocolFeatureFlags,
   ProtocolVersion,
 }
@@ -267,7 +267,7 @@ class ConnectedSynchronizer(
       participantId,
       packageResolver,
       engine,
-      EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
+      InterpretationConfig.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
       loggerFactory,
     )
 

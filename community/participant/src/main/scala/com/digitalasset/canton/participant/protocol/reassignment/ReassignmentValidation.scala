@@ -98,7 +98,7 @@ object ReassignmentValidation {
         participantWithMultiSynchronizerEnabled <- EitherT.right(
           topologySnapshot.participantsWithSupportedFeature(
             participants,
-            feature = ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+            feature = ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer,
           )
         )
         _ <- EitherT.fromEither[FutureUnlessShutdown](

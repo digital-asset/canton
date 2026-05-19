@@ -697,8 +697,11 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
     }
 
     "wait at teardown for submitted task to finish for only gracefulAwaitTerminationMillis and then it should interrupt the threads, and wait for the thread to finish" in {
-      val interruptedPromise = Promise[Unit]()
+
       val testPromise = Promise[Unit]()
+      val taskLock = new ReentrantLock()
+      taskLock.lock()
+      val interruptedPromise = Promise[Unit]()
       val resource = for {
         executor <- Factories
           .forExecutorService(
@@ -709,11 +712,10 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
       } yield {
         executor.submit { () =>
           try {
-            Thread.sleep(100)
+            blocking({ taskLock.lockInterruptibly() })
           } catch {
             case _: InterruptedException =>
               interruptedPromise.success(())
-              Thread.sleep(100)
           }
           testPromise.success(())
         }
@@ -725,9 +727,11 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
         _ = testPromise.isCompleted shouldBe false
         _ = interruptedPromise.isCompleted shouldBe false
         _ <- resource.release()
+        _ <- interruptedPromise.future
+        _ <- testPromise.future
       } yield {
-        testPromise.isCompleted shouldBe true
-        interruptedPromise.isCompleted shouldBe true
+        taskLock.unlock()
+        succeed
       }
     }
 

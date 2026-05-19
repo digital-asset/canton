@@ -13,7 +13,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -49,6 +49,7 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import java.io.OutputStream
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class BaseQuery(
@@ -112,7 +113,6 @@ object BaseQuery {
 class GrpcTopologyManagerReadService(
     member: Member,
     stores: => Seq[topology.store.TopologyStore[topology.store.TopologyStoreId]],
-    crypto: Crypto,
     topologyClientLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
     timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
     physicalSynchronizerIdLookup: PsidLookup,
@@ -288,41 +288,24 @@ class GrpcTopologyManagerReadService(
           idFilter = idFilter,
           namespaceFilter = namespaceFilter,
         )
-        .flatMap { col =>
+        .map { col =>
           col.result
             .filter(
               baseQuery.filterSigningKey.isEmpty || _.transaction.signatures
                 .exists(_.authorizingLongTermKey.unwrap.startsWith(baseQuery.filterSigningKey))
             )
-            .parTraverse { tx =>
-              val resultE = for {
-                // Re-create the signed topology transaction if necessary
-                signedTx <- baseQuery.protocolVersion
-                  .map { protocolVersion =>
-                    SignedTopologyTransaction
-                      .asVersion(tx.transaction, protocolVersion)(crypto)
-                      .leftMap[Throwable](err =>
-                        new IllegalStateException(s"Failed to convert topology transaction: $err")
-                      )
-                  }
-                  .getOrElse {
-                    // Keep the original transaction in its existing protocol version if no desired protocol version is specified
-                    EitherT.rightT[FutureUnlessShutdown, Throwable](tx.transaction)
-                  }
-
-                result = TransactionSearchResult(
-                  TopologyStoreId.fromInternal(storeId),
-                  tx.sequenced,
-                  tx.validFrom,
-                  tx.validUntil,
-                  signedTx.operation,
-                  signedTx.transaction.hash.hash.getCryptographicEvidence,
-                  signedTx.transaction.serial,
-                  signedTx.signatures.map(_.authorizingLongTermKey),
-                )
-              } yield (result, tx.transaction.transaction.mapping)
-
-              EitherTUtil.toFutureUnlessShutdown(resultE)
+            .map { tx =>
+              val result = TransactionSearchResult(
+                TopologyStoreId.fromInternal(storeId),
+                tx.sequenced,
+                tx.validFrom,
+                tx.validUntil,
+                tx.operation,
+                tx.hash.hash.getCryptographicEvidence,
+                tx.serial,
+                tx.transaction.signatures.map(_.authorizingLongTermKey),
+              )
+              (result, tx.mapping)
             }
         }
     }
@@ -612,6 +595,31 @@ class GrpcTopologyManagerReadService(
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
+  override def listSequencingParametersState(
+      request: adminProto.ListSequencingParametersStateRequest
+  ): Future[adminProto.ListSequencingParametersStateResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStoresByFilterString(
+        request.baseQuery,
+        SequencingParametersState.code,
+        request.filterSynchronizerId,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: SequencingParametersState) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListSequencingParametersStateResponse.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.parameters.toProtoV30),
+          )
+        }
+
+      adminProto.ListSequencingParametersStateResponse(results = results)
+    }
+    CantonGrpcUtil.mapErrNewEUS(ret)
+  }
+
   override def listMediatorSynchronizerState(
       request: adminProto.ListMediatorSynchronizerStateRequest
   ): Future[adminProto.ListMediatorSynchronizerStateResponse] = {
@@ -670,6 +678,7 @@ class GrpcTopologyManagerReadService(
     )
   )
 
+  @nowarn("cat=deprecation")
   override def listAll(request: adminProto.ListAllRequest): Future[adminProto.ListAllResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
@@ -685,6 +694,29 @@ class GrpcTopologyManagerReadService(
       )
     } yield {
       adminProto.ListAllResponse(result = Some(storedTopologyTransactions.toProtoV30))
+    }
+    CantonGrpcUtil.mapErrNewEUS(res)
+  }
+
+  override def listAllV2(
+      request: adminProto.ListAllV2Request
+  ): Future[adminProto.ListAllV2Response] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
+      includeTopologyMappings <- wrapErrUS(
+        request.includeMappings.traverse(TopologyMapping.Code.fromString)
+      )
+      types =
+        if (includeTopologyMappings.isEmpty) TopologyMapping.Code.all
+        else includeTopologyMappings
+      storedTopologyTransactions <- listAllStoredTopologyTransactions(
+        baseQuery,
+        types,
+        request.filterNamespace,
+      )
+    } yield {
+      adminProto.ListAllV2Response(result = Some(storedTopologyTransactions.toProtoV30))
     }
     CantonGrpcUtil.mapErrNewEUS(res)
   }

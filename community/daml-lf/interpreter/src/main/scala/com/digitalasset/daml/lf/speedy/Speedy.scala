@@ -28,7 +28,6 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   IncompleteTransaction => IncompleteTx,
   NeedKeyProgression,
-  NextGenContractStateMachine => ContractStateMachine,
   Node,
   NodeId,
   SerializationVersion,
@@ -222,7 +221,7 @@ private[lf] object Speedy {
       val packageResolution: Map[Ref.PackageName, Ref.PackageId],
       val validating: Boolean, // TODO: Better: Mode = SubmissionMode | ValidationMode
       val preparationTime: Time.Timestamp,
-      val contractKeyUniqueness: ContractStateMachine.Mode,
+      val interpretationConfig: interpretation.InterpretationConfig,
       val contractIdVersion: ContractIdVersion,
       /* The current partial transaction */
       private[speedy] var ptx: PartialTransaction,
@@ -718,7 +717,7 @@ private[lf] object Speedy {
         iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         validating: Boolean = false,
-        contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoKey,
+        interpretationConfig: interpretation.InterpretationConfig = interpretation.InterpretationConfig.Default,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
         commitLocation: Option[Location] = None,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
@@ -735,7 +734,7 @@ private[lf] object Speedy {
         preparationTime = preparationTime,
         ptx = PartialTransaction
           .initial(
-            contractStateMode,
+            interpretationConfig.contractStateMode,
             initialSeeding,
             committers,
             authorizationChecker,
@@ -743,7 +742,7 @@ private[lf] object Speedy {
         committers = committers,
         readAs = readAs,
         commitLocation = commitLocation,
-        contractKeyUniqueness = contractStateMode,
+        interpretationConfig = interpretationConfig,
         contractIdVersion = contractIdVersion,
         limits = limits,
         profile = new Profile(),
@@ -1319,7 +1318,7 @@ private[lf] object Speedy {
         readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-        mode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoKey,
+        interpretationConfig: interpretation.InterpretationConfig = interpretation.InterpretationConfig.Default,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
     ): UpdateMachine = {
       UpdateMachine(
@@ -1333,7 +1332,7 @@ private[lf] object Speedy {
         limits = limits,
         authorizationChecker = authorizationChecker,
         iterationsBetweenInterruptions = 10000,
-        contractStateMode = mode,
+        interpretationConfig = interpretationConfig,
         logger = logger,
       )
     }

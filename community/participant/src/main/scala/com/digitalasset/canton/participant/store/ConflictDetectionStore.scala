@@ -4,13 +4,17 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.participant.util.StateChange
 import com.digitalasset.canton.store.{PrunableByTime, Purgeable}
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Common interface for stores used by conflict detection */
-trait ConflictDetectionStore[K, A <: PrettyPrinting] extends PrunableByTime with Purgeable {
+trait ConflictDetectionStore[K, A <: PrettyPrinting]
+    extends PrunableByTime
+    with Purgeable
+    with NamedLogging {
 
   /** Fetches the latest states for the given identifiers from the store.
     * @return

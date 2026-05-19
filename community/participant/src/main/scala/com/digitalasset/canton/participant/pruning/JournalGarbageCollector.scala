@@ -23,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Canton synchronisation journals garbage collectors
   *
-  * The difference between the normal ledger pruning feature and the journal garbage collector is
+  * The difference between the normal (ledger) pruning feature and the journal garbage collector is
   * that the ledger pruning is configured and invoked by the user, whereas the journal garbage
   * collector runs periodically in the background, where the retention period is generally not
   * configurable.
@@ -96,7 +96,7 @@ private[pruning] object JournalGarbageCollector {
 
     /** Manage internal state of the collector
       *
-      * @param request
+      * @param requested
       *   if true, then the acs commitment processor completed a commitment period and suggested to
       *   kick off pruning
       * @param locks
@@ -123,25 +123,6 @@ private[pruning] object JournalGarbageCollector {
       // set request flag and kick off pruning if flag was not already set
       if (!state.getAndUpdate(_.copy(requested = true)).requested)
         doFlush()(traceContext)
-
-    /** Temporarily turn off journal pruning (in order to download an ACS)
-      *
-      * This will add one lock. The lock will be removed when [[removeOneLock]] is called. Journal
-      * cleaning will resume once all locks are removed
-      */
-    def addOneLock()(implicit traceContext: TraceContext): Future[Unit] = {
-      val old = state.getAndUpdate(_.incrementLock)
-      logger.debug(s"Journal garbage collection is now blocked with ${old.locks + 1} locks")
-      old.running.map(_.future).getOrElse(Future.unit)
-    }
-
-    def removeOneLock()(implicit traceContext: TraceContext): Unit = {
-      val old = state.getAndUpdate(_.decrementLock)
-      logger.debug(s"Journal garbage collection has now ${old.locks - 1} locks")
-      if (old.locks == 1) {
-        doFlush()
-      }
-    }
 
     private def doFlush()(implicit traceContext: TraceContext): Unit =
       // if we are not closing and not running, then we can start a new prune

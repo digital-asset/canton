@@ -190,7 +190,7 @@ class DeclarativeParticipantApi(
         participantId,
         synchronizerId,
         featureFlags =
-          (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer +: oldFeatureFlags),
+          (ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer +: oldFeatureFlags),
       )
       queryAdminApi(
         TopologyAdminCommands.Write.Propose(
@@ -211,7 +211,7 @@ class DeclarativeParticipantApi(
               current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
               currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Seq.empty)
               shouldUpdate = !currentFeatureFlags.contains(
-                ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer
+                ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer
               )
               done <-
                 if (shouldUpdate) {

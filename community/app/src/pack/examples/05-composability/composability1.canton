@@ -41,7 +41,7 @@ participant2.synchronizers.connect_local(paint_sequencer, alias = paintAlias)
 participant3.synchronizers.connect_local(paint_sequencer, alias = paintAlias)
 
 // enable multi-synchronizer topology feature flag for all participants for both synchronizers
-val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer)
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer)
 participant1.topology.synchronizer_trust_certificates.propose(participant1, iouId, featureFlags = featureFlag)
 participant2.topology.synchronizer_trust_certificates.propose(participant2, iouId, featureFlags = featureFlag)
 participant3.topology.synchronizer_trust_certificates.propose(participant3, iouId, featureFlags = featureFlag)

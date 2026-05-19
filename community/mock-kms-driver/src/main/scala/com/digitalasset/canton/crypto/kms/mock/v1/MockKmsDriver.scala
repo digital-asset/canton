@@ -262,10 +262,9 @@ class MockKmsDriver(
                   .convertToDriverEncryptionKeySpec(keySpec)
               )
             case SigningPublicKey(_, _, keySpec, _, _) =>
-              EitherT.rightT[FutureUnlessShutdown, String](
-                KmsDriverSpecsConverter
-                  .convertToDriverSigningKeySpec(keySpec)
-              )
+              KmsDriverSpecsConverter
+                .convertToDriverSigningKeySpec(keySpec)
+                .toEitherT[FutureUnlessShutdown]
             case _ =>
               EitherT.leftT[FutureUnlessShutdown, KeySpec](
                 s"Unsupported public key type: $publicKey"
@@ -309,10 +308,21 @@ object MockKmsDriver extends Kms.SupportedSchemes {
     SigningKeySpec,
   }
 
-  // The Mock KMS driver supports all schemes supported by JCE
-  val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] = Jce.signingKeys.supported
+  // The Mock KMS driver supports all schemes supported by JCE except for ML-DSA-65 which is not supported by the KMS Driver v1
+  val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
+    // ML-DSA-65 is not supported by the KMS Driver v1
+    NonEmpty
+      .from(Jce.signingKeys.supported - SigningKeySpec.MlDsa65)
+      .getOrElse(
+        throw new RuntimeException("MockKmsDriver must support at least one signing key spec")
+      )
   val supportedSigningAlgoSpecs: NonEmpty[Set[SigningAlgorithmSpec]] =
-    Jce.signingAlgorithms.supported
+    // ML-DSA-65 is not supported by the KMS Driver v1
+    NonEmpty
+      .from(Jce.signingAlgorithms.supported - SigningAlgorithmSpec.MlDsa65)
+      .getOrElse(
+        throw new RuntimeException("MockKmsDriver must support at least one signing algo spec")
+      )
   val supportedEncryptionKeySpecs: NonEmpty[Set[EncryptionKeySpec]] = Jce.encryptionKeys.supported
   val supportedEncryptionAlgoSpecs: NonEmpty[Set[EncryptionAlgorithmSpec]] =
     Jce.encryptionAlgorithms.supported

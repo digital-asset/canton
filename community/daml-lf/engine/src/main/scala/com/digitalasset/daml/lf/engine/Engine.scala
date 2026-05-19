@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.archive.Dar
 import com.digitalasset.daml.lf.command._
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
 import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{Error => IError}
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error => IError}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language._
 import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
@@ -23,7 +23,6 @@ import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachine}
 import com.digitalasset.daml.lf.speedy._
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   NeedKeyProgression,
@@ -133,7 +132,7 @@ class Engine(
       participantId: ParticipantId,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       prefetchKeys: Seq[ApiContractKey],
   )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] = {
     val preparationTime = cmds.ledgerEffectiveTime
@@ -158,7 +157,7 @@ class Engine(
           preparationTime = preparationTime,
           seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
           contractIdVersion = contractIdVersion,
-          contractStateMode = contractStateMode,
+          interpretationConfig = interpretationConfig,
           packageResolution = pkgResolution,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
           metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
@@ -190,7 +189,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       ledgerEffectiveTime: Time.Timestamp,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
   )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] =
     for {
@@ -209,7 +208,7 @@ class Engine(
         preparationTime = preparationTime,
         seeding = InitialSeeding.RootNodeSeeds(ImmArray(nodeSeed)),
         contractIdVersion = contractIdVersion,
-        contractStateMode = contractStateMode,
+        interpretationConfig = interpretationConfig,
         packageResolution = packageResolution,
         submissionInfo = None,
       )
@@ -224,7 +223,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
   )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] =
     replayAndCollectMetrics(
@@ -235,7 +234,7 @@ class Engine(
       preparationTime,
       submissionSeed,
       contractIdVersion,
-      contractStateMode,
+      interpretationConfig,
       packageResolution,
     ).map { case (tx, meta, _) => (tx, meta) }
 
@@ -247,7 +246,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
   )(implicit
@@ -264,7 +263,7 @@ class Engine(
         preparationTime = preparationTime,
         seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
         contractIdVersion = contractIdVersion,
-        contractStateMode = contractStateMode,
+        interpretationConfig = interpretationConfig,
         packageResolution = packageResolution,
         submissionInfo = None,
         metricPlugins = metricPlugins,
@@ -293,7 +292,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
   )(implicit traceContext: TraceContext): Result[Unit] = {
     validateAndCollectMetrics(
@@ -304,7 +303,7 @@ class Engine(
       preparationTime,
       submissionSeed,
       contractIdVersion,
-      contractStateMode,
+      interpretationConfig,
       metricPlugins,
     ).map(_ => ())
   }
@@ -317,7 +316,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
   )(implicit traceContext: TraceContext): Result[Speedy.Metrics] = {
     // reinterpret
@@ -330,7 +329,7 @@ class Engine(
         preparationTime,
         submissionSeed,
         contractIdVersion,
-        contractStateMode,
+        interpretationConfig,
         metricPlugins = metricPlugins,
       )
       (rtx, _, metrics) = result
@@ -398,7 +397,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       seeding: speedy.InitialSeeding,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
@@ -419,7 +418,7 @@ class Engine(
         preparationTime,
         seeding,
         contractIdVersion,
-        contractStateMode,
+        interpretationConfig,
         packageResolution,
         submissionInfo,
         metricPlugins,
@@ -443,7 +442,7 @@ class Engine(
       preparationTime: Time.Timestamp,
       seeding: speedy.InitialSeeding,
       contractIdVersion: ContractIdVersion,
-      contractStateMode: ContractStateMachine.Mode,
+      interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       submissionInfo: Option[Engine.SubmissionInfo] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
@@ -460,7 +459,7 @@ class Engine(
       readAs = readAs,
       authorizationChecker = config.authorizationChecker,
       validating = validating,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpretationConfig,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
       limits = config.limits,
@@ -525,13 +524,7 @@ class Engine(
     }
 
     def checkAllowedDeps(deps: Set[PackageId]): Result[Unit] = {
-      val allowedLangVersions = machine.contractKeyUniqueness match {
-        case ContractStateMachine.Mode.NUCK =>
-          config.allowedLanguageVersions
-        case ContractStateMachine.Mode.NoKey =>
-          config.allowedLanguageVersions.filter(_ < LanguageVersion.featureContractKeys.versionRange.min)
-      }
-
+      val allowedLangVersions = machine.interpretationConfig.allowedLanguageVersions
       val disallowedPackages =
         deps.view
           .map(pkgId => (pkgId, compiledPackages.signatures(pkgId).languageVersion))

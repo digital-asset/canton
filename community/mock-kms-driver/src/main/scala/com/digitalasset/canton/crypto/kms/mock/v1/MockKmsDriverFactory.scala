@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto.kms.mock.v1
 
 import cats.syntax.either.*
+import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
@@ -69,6 +70,12 @@ class MockKmsDriverFactory extends KmsDriverFactory {
   ): Set[DS] =
     supported.forgetNE.toList.map(convertFn(_)).toSet
 
+  private def convertSpecEither[CS, DS](
+      supported: NonEmpty[Set[CS]],
+      convertFn: CS => Either[String, DS],
+  ): Set[DS] =
+    supported.forgetNE.toList.mapFilter(convertFn(_).toOption).toSet
+
   override def create(
       config: MockKmsDriverConfig,
       loggerFactory: Class[?] => Logger,
@@ -107,12 +114,12 @@ class MockKmsDriverFactory extends KmsDriverFactory {
           namedLoggerFactory,
         )
       // The Mock KMS driver supports all schemes supported by JCE
-      supportedSigningKeySpecs = convertSpec(
+      supportedSigningKeySpecs = convertSpecEither(
         CryptoProvider.Jce.signingKeys.supported,
         KmsDriverSpecsConverter.convertToDriverSigningKeySpec,
       )
 
-      supportedSigningAlgoSpecs = convertSpec(
+      supportedSigningAlgoSpecs = convertSpecEither(
         CryptoProvider.Jce.signingAlgorithms.supported,
         KmsDriverSpecsConverter.convertToDriverSigningAlgoSpec,
       )

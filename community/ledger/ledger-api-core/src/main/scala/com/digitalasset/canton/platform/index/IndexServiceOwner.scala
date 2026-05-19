@@ -37,11 +37,7 @@ import com.digitalasset.canton.platform.store.dao.{
   LedgerReadDao,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.platform.store.{
-  DbSupport,
-  LedgerApiContractStore,
-  PruningOffsetService,
-}
+import com.digitalasset.canton.platform.store.{DbSupport, LedgerApiContractStore}
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
@@ -73,7 +69,6 @@ final class IndexServiceOwner(
     queryExecutionContext: ExecutionContextExecutorService,
     commandExecutionContext: ExecutionContextExecutorService,
     participantContractStore: LedgerApiContractStore,
-    pruningOffsetService: PruningOffsetService,
     materializer: Materializer,
     updateServiceConfig: UpdateServiceConfig,
     scheduler: Scheduler,
@@ -89,7 +84,6 @@ final class IndexServiceOwner(
       stringInterning = inMemoryState.stringInterningView,
       contractLoader = contractLoader,
       lfValueTranslation = lfValueTranslation,
-      pruningOffsetService = pruningOffsetService,
       queryExecutionContext = queryExecutionContext,
       commandExecutionContext = commandExecutionContext,
     )
@@ -138,7 +132,6 @@ final class IndexServiceOwner(
         getPreferredPackages = getPackagePreference,
         materializer = materializer,
         executionContext = commandExecutionContext,
-        pruningOffsetService = pruningOffsetService,
         updateServiceConfig = updateServiceConfig,
       )
     } yield new TimedIndexService(indexService, metrics)
@@ -212,7 +205,6 @@ final class IndexServiceOwner(
       achsStateCache: AchsStateCache,
       stringInterning: StringInterning,
       contractLoader: ContractLoader,
-      pruningOffsetService: PruningOffsetService,
       lfValueTranslation: LfValueTranslation,
       queryExecutionContext: ExecutionContextExecutorService,
       commandExecutionContext: ExecutionContextExecutorService,
@@ -237,7 +229,6 @@ final class IndexServiceOwner(
       incompleteOffsets = incompleteOffsets,
       contractLoader = contractLoader,
       lfValueTranslation = lfValueTranslation,
-      pruningOffsetService = pruningOffsetService,
       contractStore = participantContractStore,
       achsStateCache = achsStateCache,
       contractPruningMaxRetries = config.contractPruningMaxRetries,

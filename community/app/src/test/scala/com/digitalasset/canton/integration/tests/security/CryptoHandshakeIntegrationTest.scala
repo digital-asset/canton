@@ -26,18 +26,74 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import monocle.macros.syntax.lens.*
 
-trait CryptoHandshakeIntegrationTest
-    extends CommunityIntegrationTest
-    with SharedEnvironment
-    with SecurityTestSuite {
+trait CryptoHandshakeIntegrationTestBase {
+  self: CommunityIntegrationTest with SharedEnvironment with SecurityTestSuite =>
 
   protected val securityAsset: SecurityTest =
     SecurityTest(property = SecureConfiguration, asset = "participant node")
+
   protected def attack(threat: String): Attack = Attack(
     actor = "A network participant that can reach the public api",
     threat,
     mitigation = "Refuse to connect the participant to the synchronizer",
   )
+
+  protected def testConnectAndPing(
+      participantName: String,
+      pingParticipantName: String,
+      compatibleSequencerName: String,
+      compatibleSynchronizerName: String,
+      happyCase: String,
+  ): Unit =
+    s"connect to a compatible synchronizer and ping $pingParticipantName" taggedAs securityAsset
+      .setHappyCase(happyCase) in { implicit env =>
+      import env.*
+
+      p(participantName).synchronizers
+        .connect_local(s(compatibleSequencerName), alias = compatibleSynchronizerName)
+
+      val compatibleSynchronizerId = eventually() {
+        withClue("synchronizer should be connected after restart") {
+          val compatibleSynchronizer = p(participantName).synchronizers
+            .list_connected()
+            .find(_.synchronizerAlias.unwrap == compatibleSynchronizerName)
+          compatibleSynchronizer should not be empty
+          compatibleSynchronizer.value.physicalSynchronizerId
+        }
+      }
+
+      p(participantName).health
+        .ping(p(pingParticipantName).id, synchronizerId = Some(compatibleSynchronizerId))
+    }
+
+  protected def failConnectAndPing(
+      participantName: String,
+      incompatibleSequencerName: String,
+      incompatibleSynchronizerName: String,
+      attack: Attack,
+  ): Unit =
+    "not connect to an incompatible synchronizer" taggedAs securityAsset.setAttack(attack) in {
+      implicit env =>
+        import env.*
+
+        assertThrowsAndLogsCommandFailures(
+          p(participantName).synchronizers
+            .connect_local(s(incompatibleSequencerName), alias = incompatibleSynchronizerName),
+          out => {
+            out.commandFailureMessage should (include("Required schemes") and include(
+              "are not supported/allowed"
+            ) or include("scheme is not a required scheme"))
+          },
+        )
+    }
+
+}
+
+trait CryptoHandshakeIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with SecurityTestSuite
+    with CryptoHandshakeIntegrationTestBase {
 
   private val sync1: String = "synchronizer1"
   private val sync2: String = "synchronizer2"
@@ -84,6 +140,7 @@ trait CryptoHandshakeIntegrationTest
       ),
     )
   )
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .P4_S1M1_S1M1_S1M1(
@@ -130,54 +187,6 @@ trait CryptoHandshakeIntegrationTest
           case (_, config) => config
         },
       )
-
-  protected def testConnectAndPing(
-      participantName: String,
-      pingParticipantName: String,
-      compatibleSequencerName: String,
-      compatibleSynchronizerName: String,
-      happyCase: String,
-  ): Unit =
-    s"connect to a compatible synchronizer and ping $pingParticipantName" taggedAs securityAsset
-      .setHappyCase(happyCase) in { implicit env =>
-      import env.*
-
-      p(participantName).synchronizers
-        .connect_local(s(compatibleSequencerName), alias = compatibleSynchronizerName)
-
-      val compatibleSynchronizerId = eventually() {
-        withClue("synchronizer should be connected after restart") {
-          val compatibleSynchronizer = p(participantName).synchronizers
-            .list_connected()
-            .find(_.synchronizerAlias.unwrap == compatibleSynchronizerName)
-          compatibleSynchronizer should not be empty
-          compatibleSynchronizer.value.physicalSynchronizerId
-        }
-      }
-
-      p(participantName).health
-        .ping(p(pingParticipantName).id, synchronizerId = Some(compatibleSynchronizerId))
-    }
-
-  protected def failConnectAndPing(
-      participantName: String,
-      incompatibleSequencerName: String,
-      incompatibleSynchronizerName: String,
-      attack: Attack,
-  ): Unit =
-    "not connect to an incompatible synchronizer" taggedAs securityAsset.setAttack(attack) in {
-      implicit env =>
-        import env.*
-
-        assertThrowsAndLogsCommandFailures(
-          p(participantName).synchronizers
-            .connect_local(s(incompatibleSequencerName), alias = incompatibleSynchronizerName),
-          out => {
-            out.commandFailureMessage should include("Required schemes")
-            out.commandFailureMessage should include("are not supported/allowed")
-          },
-        )
-    }
 
   s"Participant $part1 with synchronizer $sync1" can {
     testConnectAndPing(

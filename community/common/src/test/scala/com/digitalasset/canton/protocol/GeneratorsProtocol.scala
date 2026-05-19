@@ -151,13 +151,13 @@ final class GeneratorsProtocol(
       )
     )
 
-  implicit val dynamicSequencingParametersArb: Arbitrary[DynamicSequencingParameters] = Arbitrary(
+  implicit val dynamicSequencingParametersArb: Arbitrary[SequencingParameters] = Arbitrary(
     for {
       payload <- Arbitrary.arbitrary[Option[ByteString]]
-      representativePV = DynamicSequencingParameters.protocolVersionRepresentativeFor(
+      representativePV = SequencingParameters.protocolVersionRepresentativeFor(
         protocolVersion
       )
-      dynamicSequencingParameters = DynamicSequencingParameters(payload)(representativePV)
+      dynamicSequencingParameters = SequencingParameters(payload)(representativePV)
     } yield dynamicSequencingParameters
   )
 

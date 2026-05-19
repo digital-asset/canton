@@ -24,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestContractHasher.SyncContractHasher
 import com.digitalasset.canton.util.TestEngine.{InMemoryPackageStore, TxAndMeta}
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.command.ReplayCommand
@@ -53,7 +54,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    contractStateMode: LfContractStateMode = LfContractStateMode.NoKey,
+    interpretationConfig: LfInterpretationConfig = InterpretationConfig.Legacy,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {
@@ -208,7 +209,7 @@ class TestEngine(
       readAs = Set.empty,
       prefetchKeys = Seq.empty,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpretationConfig,
     )
 
     val contractMap = contracts.map(c => c.contractId -> c).toMap
@@ -282,7 +283,7 @@ class TestEngine(
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       preparationTime: Time.Timestamp = testTimestamp,
       ledgerEffectiveTime: Time.Timestamp = testTimestamp,
-      contractStateMode: LfContractStateMode,
+      interpreationConfig: LfInterpretationConfig,
   )(implicit traceContext: TraceContext): TxAndMeta = {
 
     val result = engine.reinterpret(
@@ -293,7 +294,7 @@ class TestEngine(
       ledgerEffectiveTime = ledgerEffectiveTime,
       packageResolution = packageResolution,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpreationConfig,
     )
     consume(result, contracts)
   }
@@ -304,7 +305,7 @@ class TestEngine(
       meta: Transaction.Metadata,
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       ledgerTime: Time.Timestamp = testTimestamp,
-      contractStateMode: LfContractStateMode,
+      contractStateMode: LfInterpretationConfig,
   )(implicit traceContext: TraceContext): (SubmittedTransaction, Transaction.Metadata) = {
 
     val nodeSeeds = Map.from(meta.nodeSeeds.toList)
@@ -329,7 +330,7 @@ class TestEngine(
       packageResolution = packageResolution,
       preparationTime = meta.preparationTime,
       ledgerEffectiveTime = ledgerTime,
-      contractStateMode = contractStateMode,
+      interpreationConfig = contractStateMode,
     )
   }
 
