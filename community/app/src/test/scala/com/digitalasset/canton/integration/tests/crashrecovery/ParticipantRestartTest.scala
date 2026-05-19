@@ -94,8 +94,10 @@ import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.{RequestJournal, TransactionProcessor}
 import com.digitalasset.canton.participant.pruning.PruningProcessor
+import com.digitalasset.canton.participant.store.db.DbParticipantPruningStore
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
+  ParticipantPruningStore,
   StoredSynchronizerConnectionConfig,
   SynchronizerConnectionConfigStore,
 }
@@ -609,7 +611,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
     EnvironmentDefinition.P4S2M2_Manual
       .addConfigTransforms(
         ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
@@ -974,7 +976,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
         ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
       )
 
@@ -2356,7 +2358,6 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   }
 }
 
-@UnstableTest // TODO(#21107)
 class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
   private val reconciliationInterval = PositiveSeconds.tryOfSeconds(2)
   private val transactionTolerance = reconciliationInterval.unwrap
@@ -2476,8 +2477,6 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       .value
       .updateId
 
-    val contractCountBeforePruning = stateInspection.contractCount.futureValueUS
-
     // Make sure that the first update can be queried before pruning
     participant1.ledger_api.updates
       .update_by_id(firstUpdateId, updateFormat) should not be empty
@@ -2485,6 +2484,14 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     // Make sure that the last update can be queried before pruning
     participant1.ledger_api.updates
       .update_by_id(lastUpdateId, updateFormat) should not be empty
+
+    val pruningStoreForPolling = new DbParticipantPruningStore(
+      name = ParticipantPruningStore.dbStoreName,
+      storage = storageP1,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+    )
+    val statusBeforePruning = pruningStoreForPolling.pruningStatus().futureValueUS
 
     logger.info(s"Pruning at $pruneOffset ...")
 
@@ -2495,11 +2502,14 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       _.commandFailureMessage should include("UNAVAILABLE/Network closed for unknown reason"),
     )
 
-    // Wait until we are sure that pruning has started
+    // Wait until we are sure that ledger-level pruning has started
     eventually(maxPollInterval = 2.millis) { // low poll interval so that we don't flake because of exponential backoff and missing the prune
       logger.info(s"Checking if we can interrupt pruning now ${CantonTimestamp.now()}")
-      val contractCount = stateInspection.contractCount.futureValueUS
-      contractCount should be < contractCountBeforePruning
+      val status = pruningStoreForPolling.pruningStatus().futureValueUS
+      status.startedO should be > statusBeforePruning.startedO withClue
+        "Ledger-level pruning should have advanced beyond its initial state"
+      status.completedO.forall(_ < Offset.tryFromLong(pruneOffset)) shouldBe true withClue
+        "Ledger-level pruning should not have fully completed yet"
     }
 
     // Restart
@@ -2543,38 +2553,33 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     stateInspection.contractCount.futureValueUS should be > 0 withClue
       s"The new first offset is not smaller than pruning offset $pruneOffset. Did we miss restarting the participant before prune finished?"
 
-    // Make sure that the first update can not be queried, as pruning had started before the restart
+    // Make sure that the first update can still be queried, as the ledger api server index
+    // has not been pruned (only canton stores were partially pruned before the restart)
     participant1.ledger_api.updates
-      .update_by_id(firstUpdateId, updateFormat) shouldBe empty withClue
-      "Since we have interrupted pruning and ledger api server index should be aware and first transaction must not be readable"
+      .update_by_id(firstUpdateId, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, first transaction must still be readable"
 
     participant1.ledger_api.updates
-      .update_by_offset(firstTx.transaction.offset, updateFormat) shouldBe empty withClue
-      "Since we have interrupted pruning and ledger api server index should be aware and first transaction must not be readable"
+      .update_by_offset(firstTx.transaction.offset, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, first transaction must still be readable"
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.event_query
-        .by_contract_id(firstContractId, Seq(participant1.adminParty.toLf)),
-      _.commandFailureMessage should include("Contract events not found, or not visible."),
-    )
+    participant1.ledger_api.event_query
+      .by_contract_id(firstContractId, Seq(participant1.adminParty.toLf))
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.updates
-        .updates(
-          updateFormat = updateFormat,
-          completeAfter = PositiveInt.tryCreate(1000000),
-          endOffsetInclusive = Some(pruneOffset),
-        ),
-      _.commandFailureMessage should include regex
-        s"FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Transactions request from 1 to $pruneOffset precedes pruned offset",
-    )
+    participant1.ledger_api.updates
+      .updates(
+        updateFormat = updateFormat,
+        completeAfter = PositiveInt.tryCreate(1000000),
+        endOffsetInclusive = Some(pruneOffset),
+      )
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.state.acs
-        .of_party(participant1.adminParty.toLf, activeAtOffsetO = Some(firstTx.transaction.offset)),
-      _.commandFailureMessage should include regex
-        s"FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Active contracts request at offset ${firstTx.transaction.offset} precedes pruned offset",
-    )
+    participant1.ledger_api.state.acs
+      .of_party(participant1.adminParty.toLf, activeAtOffsetO = Some(firstTx.transaction.offset))
+
+    // Make sure also that the last update can still be queried
+    participant1.ledger_api.updates
+      .update_by_id(lastUpdateId, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, last transaction must still be readable"
 
     // Make sure the participant is still functional despite partial pruning
     assertPingSucceeds(participant1, participant1)

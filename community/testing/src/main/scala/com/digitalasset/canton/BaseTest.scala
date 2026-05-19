@@ -639,8 +639,9 @@ object BaseTest {
     case object CommandTracking extends UnsupportedExternalPartyTest
     // TODO(i30256): Synchronizer routing for external parties
     case object MultiSynchronizerParties extends UnsupportedExternalPartyTest
-    // TODO(i32169): NUCK Support for external parties
-    case object NuckSupport extends UnsupportedExternalPartyTest
+    // TODO(i32963): Support malicious nodes for external parties
+    case object UsesMaliciousNode extends UnsupportedExternalPartyTest
+
   }
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer

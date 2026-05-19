@@ -13,6 +13,7 @@ import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command.ReplayCommand
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -96,7 +97,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
         time,
         time,
         contractIdVersion,
-        contractStateMode,
+        InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
       )
       .consume(pcs = defaultContracts, pkgs = allPackages)
     res match {
@@ -219,7 +220,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
           time,
           time,
           contractIdVersion,
-          contractStateMode,
+          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
         .consume(pkgs = trackPackageQueries)
       pkgIds.toSet shouldBe queriedPackageIds

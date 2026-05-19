@@ -67,7 +67,7 @@ message Enums {
     // in model conformance in PV 33
     PARTICIPANT_FEATURE_FLAG_PV33_EXTERNAL_SIGNING_LOCAL_CONTRACT_IN_SUBVIEW = 1;
     // This flag indicates that the participant supports reassignments between synchronizers.
-    PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER = 2;
+    PARTICIPANT_FEATURE_FLAG_ENABLE_ALPHA_MULTI_SYNCHRONIZER = 2;
   }
 }
 

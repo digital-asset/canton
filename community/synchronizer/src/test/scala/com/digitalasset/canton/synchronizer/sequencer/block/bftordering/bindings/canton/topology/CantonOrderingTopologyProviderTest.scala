@@ -16,18 +16,18 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParameters,
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParameters,
+  SequencingParametersWithValidity,
 }
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
   DefaultSegmentLength,
   SegmentLength,
@@ -77,7 +77,7 @@ class CantonOrderingTopologyProviderTest
           Table(
             ("segmentLength in config", "segmentLength in dynamic", "segmentLength used)"),
             // In pv=34 we use value in config if exists or default
-            // In pv>34 we use value from dynamic sequencing parameters if exists or default
+            // In pv>34 we use value from sequencing parameters if exists or default
             (None, None, DefaultSegmentLength),
             (
               None,
@@ -288,16 +288,16 @@ object CantonOrderingTopologyProviderTest {
   private def mkSegmentLength(length: Long): SegmentLength = SegmentLength(
     PositiveLong.tryCreate(length)
   )
-  private def sequencingParameters(segmentLength: Long): SequencingParameters =
-    SequencingParameters.create(
-      SequencingParameters.DefaultPbftViewChangeTimeout,
+  private def sequencingParameters(segmentLength: Long): topology.SequencingParameters =
+    topology.SequencingParameters.create(
+      topology.SequencingParameters.DefaultPbftViewChangeTimeout,
       mkSegmentLength(segmentLength),
-      SequencingParameters.DefaultLeaderSelectionPolicyConfig,
+      topology.SequencingParameters.DefaultLeaderSelectionPolicyConfig,
     )(testedProtocolVersion)
   private def someDynamicSequencingParameters(segmentLength: Option[Long]) =
-    DynamicSequencingParametersWithValidity(
-      DynamicSequencingParameters(segmentLength.map(sequencingParameters(_).toByteString))(
-        DynamicSequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
+    SequencingParametersWithValidity(
+      SequencingParameters(segmentLength.map(sequencingParameters(_).toByteString))(
+        SequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
       ),
       validFrom = aTimestamp,
       validUntil = None,

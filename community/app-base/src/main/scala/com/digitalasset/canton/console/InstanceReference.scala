@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console
 
+import cats.syntax.either.*
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.admin.api.client.commands.*
 import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.FindPruningTimestampCommand
@@ -46,10 +47,13 @@ import com.digitalasset.canton.synchronizer.mediator.{
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
   OrderingTopology,
   PeerNetworkStatus,
+  SequencingParameters,
   WriteReadiness,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology as topologydata
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   RemoteSequencerConfig,
   SequencerNodeConfig,
@@ -1370,6 +1374,26 @@ abstract class SequencerReference(
       consoleEnvironment.run {
         runner.adminCommand(SequencerBftAdminCommands.GetOrderingTopology())
       }
+
+    @Help.Summary("Parse the sequencing parameters payload as DABFT parameters")
+    def parse_sequencing_parameters(payload: ByteString): SequencingParameters =
+      SequencingParameters(
+        topologydata.SequencingParameters
+          .fromByteString(physical_synchronizer_id.protocolVersion, payload)
+          .valueOr(err => consoleEnvironment.raiseError(s"Cannot parse parameters as DABFT: $err"))
+      )
+
+    @Help.Summary("Serialize the DABFT parameters as sequencing parameters payload")
+    // Sequencing parameters are intentionally opaque, as they are specific to the sequencer being used
+    @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
+    def serialize_sequencing_parameters(sequencingParameters: SequencingParameters): ByteString =
+      topologydata.SequencingParameters
+        .create(
+          sequencingParameters.pbftViewChangeTimeout,
+          SegmentLength(sequencingParameters.segmentLength),
+          sequencingParameters.blacklistLeaderSelectionPolicyConfig,
+        )(physical_synchronizer_id.protocolVersion)
+        .toByteString
 
     @Help.Summary("Enable BFT ordering performance metrics")
     def enable_performance_metrics(): Unit =

@@ -87,7 +87,7 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
           }
 
           // fetch the onboarding state and write it to a file
-          val onboardingState = sequencer1.setup.onboarding_state_for_sequencer(sequencer3.id)
+          val onboardingState = sequencer1.setup.onboarding_state_for_sequencerV2(sequencer3.id)
           utils.write_to_file(onboardingState, onboardingStateFile)
         }
 
@@ -96,7 +96,8 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
         // * initialize the third sequencer with the onboarding state
         {
           val onboardingState = utils.read_byte_string_from_file(onboardingStateFile)
-          sequencer3.setup.assign_from_onboarding_state(onboardingState)
+          sequencer3.setup.assign_from_onboarding_stateV2(onboardingState)
+
           sequencer3.health.initialized() shouldBe true
         }
 

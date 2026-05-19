@@ -74,7 +74,7 @@ class DAMLeTest
         validationPhaseLogging = EngineLoggingConfig(),
         loggerFactory = loggerFactory,
       ),
-      contractStateMode = LfContractStateMode.default,
+      interpretationConfig = LfInterpretationConfig.Default,
       loggerFactory = loggerFactory,
     )
 

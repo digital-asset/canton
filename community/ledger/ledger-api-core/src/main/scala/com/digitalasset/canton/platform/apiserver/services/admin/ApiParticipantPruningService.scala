@@ -40,7 +40,6 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.protobuf.StatusProto
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiParticipantPruningService private (
@@ -54,8 +53,6 @@ final class ApiParticipantPruningService private (
     with GrpcApiService
     with NamedLogging {
 
-  private val inProgress: AtomicBoolean = new AtomicBoolean(false)
-
   override def bindService(): ServerServiceDefinition =
     ParticipantPruningServiceGrpc.bindService(this, executionContext)
 
@@ -65,7 +62,7 @@ final class ApiParticipantPruningService private (
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
-    ensurePruningIsNotInProgress { () =>
+    checkPruningIsNotInProgress { () =>
       logger.info(s"Pruning up to ${request.pruneUpTo}.")
       (for {
         pruneUpTo <- validateRequest(request)
@@ -193,13 +190,13 @@ final class ApiParticipantPruningService private (
           )
     } yield pruneUpTo
 
-  private def ensurePruningIsNotInProgress[T](f: () => Future[T])(implicit
+  // Fast-path check to reject early if pruning is already in progress.
+  // The actual serialization guard lives in JdbcLedgerDao.ensurePruningIsNotInProgress.
+  private def checkPruningIsNotInProgress[T](f: () => Future[T])(implicit
       errorLogger: ErrorLoggingContext
   ): Future[T] =
-    if (!inProgress.getAndSet(true)) {
-      val result = f()
-      result.onComplete(_ => inProgress.set(false))
-      result
+    if (!readBackend.isPruningInProgress) {
+      f()
     } else {
       Future.failed(
         RequestValidationErrors.ParticipantPruningInProgress.Reject().asGrpcError

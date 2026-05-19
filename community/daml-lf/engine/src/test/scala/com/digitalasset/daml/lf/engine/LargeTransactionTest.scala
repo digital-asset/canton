@@ -10,10 +10,10 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.script.IdeLedger
 import com.digitalasset.daml.lf.transaction.{
   CommittedTransaction,
-  NextGenContractStateMachine => ContractStateMachine,
   FatContractInstance,
   Node,
   SubmittedTransaction,
@@ -303,7 +303,7 @@ class LargeTransactionTest(
         participantId = participant,
         submissionSeed = seed,
         contractIdVersion = contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.devDefault,
+        interpretationConfig = InterpretationConfig.Default,
         prefetchKeys = Seq.empty,
       )
       .consume(

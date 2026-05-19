@@ -56,7 +56,6 @@ import com.digitalasset.canton.platform.store.{
   FlywayMigrations,
   LedgerApiContractStore,
   LedgerApiContractStoreImpl,
-  PruningOffsetService,
 }
 import com.digitalasset.canton.platform.{
   InMemoryState,
@@ -77,7 +76,7 @@ import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.{SimClock, WallClock}
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
+import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{JarResourceUtils, MonadUtil}
@@ -308,11 +307,6 @@ trait IndexComponentTest
     new Engine(EngineConfig(LanguageVersion.stableLfVersions), loggerFactory)
   private lazy val participantId =
     Ref.ParticipantId.assertFromString("index-component-test-participant-id")
-  protected lazy val pruningOffsetService = new PruningOffsetService {
-    override def pruningOffset(implicit
-        traceContext: TraceContext
-    ): Future[Option[Offset]] = index.indexDbPrunedUpto
-  }
 
   private def jdbcIndexerResourceOwner(
       config: IndexerConfig,
@@ -464,7 +458,6 @@ trait IndexComponentTest
             _: LoggingContextWithTrace,
         ) => FutureUnlessShutdown.pure(Left("not used")),
         participantContractStore = participantContractStore,
-        pruningOffsetService = pruningOffsetService,
         materializer = materializer,
         updateServiceConfig = updateServiceConfig,
         scheduler = system.scheduler,

@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import anorm.SqlParser.long
+import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
@@ -553,4 +556,158 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(updateLedgerEnd(ledgerEnd(lastOffset + 1, lastEventSeqId + 1)))
     checkContentsAfter()
   }
+
+  behavior of "addContractPruningCandidatesAfter"
+
+  it should "populate candidates correctly during initialization" in {
+    // baseline: there should be no candidates
+    contractCandidates() shouldBe Vector.empty
+
+    val ledgerEnd = 1000L
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(
+      ingest(
+        Vector(
+          // before ledgerEnd1
+          dtosCreate(
+            event_offset = 100L,
+            event_sequential_id = 100L,
+            internal_contract_id = 50,
+          )(),
+          dtosWitnessedCreate(
+            event_offset = 1000L,
+            event_sequential_id = 1000L,
+            internal_contract_id = 51,
+          )(),
+          // between  ledgerEnd1 and ledgerEnd2
+
+          // check activated
+          // will be added + lower bound check
+          dtosCreate(
+            event_offset = 1001L,
+            event_sequential_id = 1001L,
+            internal_contract_id = 100,
+          )(),
+          // will be added second
+          dtosCreate(
+            event_offset = 1002L,
+            event_sequential_id = 1002L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: has before activate
+          dtosCreate(
+            event_offset = 1003L,
+            event_sequential_id = 1003L,
+            internal_contract_id = 50,
+          )(),
+          // won't be added: has before witnessed
+          dtosCreate(
+            event_offset = 1004L,
+            event_sequential_id = 1004L,
+            internal_contract_id = 51,
+          )(),
+          // won't be added: already there
+          dtosCreate(
+            event_offset = 1005L,
+            event_sequential_id = 1005L,
+            internal_contract_id = 1,
+          )(),
+          // won't be added: duplicate activate
+          dtosCreate(
+            event_offset = 1006L,
+            event_sequential_id = 1006L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: duplicate witnessed
+          dtosCreate(
+            event_offset = 1007L,
+            event_sequential_id = 1007L,
+            internal_contract_id = 104,
+          )(),
+
+          // check witnessed
+          // will be added
+          dtosWitnessedCreate(
+            event_offset = 1008L,
+            event_sequential_id = 1008L,
+            internal_contract_id = 103,
+          )(),
+          // will be added second
+          dtosWitnessedCreate(
+            event_offset = 1009L,
+            event_sequential_id = 1009L,
+            internal_contract_id = 104,
+          )(),
+          // won't be added: has before activate
+          dtosWitnessedCreate(
+            event_offset = 1010L,
+            event_sequential_id = 1010L,
+            internal_contract_id = 50,
+          )(),
+          // won't be added: has before witnessed
+          dtosWitnessedCreate(
+            event_offset = 1011L,
+            event_sequential_id = 1011L,
+            internal_contract_id = 51,
+          )(),
+          // won't be added: already there
+          dtosWitnessedCreate(
+            event_offset = 1012L,
+            event_sequential_id = 1012L,
+            internal_contract_id = 2,
+          )(),
+          // won't be added: duplicate activate
+          dtosWitnessedCreate(
+            event_offset = 1013L,
+            event_sequential_id = 1013L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: duplicate witnessed
+          dtosWitnessedCreate(
+            event_offset = 1014L,
+            event_sequential_id = 1014L,
+            internal_contract_id = 104,
+          )(),
+
+          // won't be there, no deactivation is selected
+          dtosConsumingExercise(
+            event_offset = 1015L,
+            event_sequential_id = 1015L,
+            internal_contract_id = Some(3),
+          ),
+        ).flatten,
+        _,
+      )
+    )
+
+    manuallyAddContractCandidates(Vector(1, 2))
+    contractCandidates() shouldBe Vector(1, 2)
+
+    executeSql { connection =>
+      // non-auto commit is enforced by the PG locking mechanism used inside
+      connection.setAutoCommit(false)
+      backend.event.addContractPruningCandidatesAfter(ledgerEnd)(connection, implicitly)
+      connection.commit()
+    }
+    contractCandidates() shouldBe Vector(1, 2, 100, 101, 103, 104)
+  }
+
+  private def contractCandidates(): Vector[Long] =
+    executeSql(
+      SQL"""
+            select internal_contract_id
+            from lapi_pruning_contract_candidate
+            order by internal_contract_id
+      """.asVectorOf(long("internal_contract_id"))(_)
+    )
+
+  private def manuallyAddContractCandidates(internalContractIds: Vector[Long]): Unit =
+    executeSql(
+      SQL"""
+            insert into lapi_pruning_contract_candidate(internal_contract_id)
+            values #${internalContractIds.map(id => s"($id)").mkString(", ")}
+      """.executeUpdate()(_)
+    ) shouldBe internalContractIds.size
+
 }

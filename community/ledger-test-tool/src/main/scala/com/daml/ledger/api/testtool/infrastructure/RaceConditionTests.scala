@@ -6,8 +6,8 @@ package com.daml.ledger.api.testtool.infrastructure
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.daml.timer.Delayed
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
+import com.digitalasset.canton.util.DelayUtil
 
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
@@ -40,14 +40,14 @@ private[testtool] object RaceConditionTests {
   private def scheduleWithRandomDelay[T](upTo: FiniteDuration)(f: Unit => Future[T])(implicit
       ec: ExecutionContext
   ): Future[T] =
-    Delayed.by(randomDurationUpTo(upTo))(()).flatMap(f)
+    DelayUtil.delay(randomDurationUpTo(upTo)).flatMap(f)
 
   def transactions(
       ledger: ParticipantTestContext,
       party: Party,
       waitBefore: FiniteDuration = WaitBeforeGettingTransactions,
   )(implicit ec: ExecutionContext): Future[Vector[Transaction]] =
-    Delayed.by(waitBefore)(()).flatMap(_ => ledger.transactions(LedgerEffects, party))
+    DelayUtil.delay(waitBefore).flatMap(_ => ledger.transactions(LedgerEffects, party))
 
   def assertTransactionOrder(
       expectedFirst: Transaction,

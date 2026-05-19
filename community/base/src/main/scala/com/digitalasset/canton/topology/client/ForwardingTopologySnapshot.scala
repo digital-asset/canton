@@ -13,8 +13,8 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
@@ -139,7 +139,7 @@ class ForwardingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     parent.findDynamicSequencingParameters()
 
   /** List all the dynamic synchronizer parameters (past and current) */
@@ -294,7 +294,7 @@ class CachingTopologySnapshot(
 
   private val sequencingDynamicParametersCache =
     new AtomicReference[
-      Option[FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]]]
+      Option[FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]]]
     ](
       None
     )
@@ -456,7 +456,7 @@ class CachingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     getAndCache(sequencingDynamicParametersCache, parent.findDynamicSequencingParameters())
 
   /** List all the dynamic synchronizer parameters (past and current) */

@@ -25,8 +25,8 @@ import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.{
   CantonContractIdVersion,
-  LfContractStateMode,
   LfFatContractInst,
+  LfInterpretationConfig,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
@@ -58,7 +58,7 @@ private[apiserver] trait CommandInterpreter {
 
   def interpret(
       commands: api.Commands,
-      mode: LfContractStateMode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -90,7 +90,7 @@ final class StoreBackedCommandInterpreter(
 
   override def interpret(
       commands: api.Commands,
-      mode: LfContractStateMode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -110,7 +110,12 @@ final class StoreBackedCommandInterpreter(
         }
         .value
         .map(_.toOption)
-      submissionResult <- submitToEngine(commands, mode, submissionSeed, interpretationTimeNanos)
+      submissionResult <- submitToEngine(
+        commands,
+        interpretationConfig,
+        submissionSeed,
+        interpretationTimeNanos,
+      )
       submission <- consume(
         commands.actAs,
         commands.readAs,
@@ -195,7 +200,7 @@ final class StoreBackedCommandInterpreter(
 
   private def submitToEngine(
       commands: api.Commands,
-      mode: LfContractStateMode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
       interpretationTimeNanos: AtomicLong,
   )(implicit
@@ -221,7 +226,7 @@ final class StoreBackedCommandInterpreter(
           submissionSeed = submissionSeed,
           prefetchKeys = commands.prefetchKeys,
           contractIdVersion = ContractIdVersion.V1,
-          contractStateMode = mode,
+          interpretationConfig = interpretationConfig,
         )
       })),
     )

@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.repair
 import better.files.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
@@ -16,9 +17,11 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.{ReassignmentCounter, RepairCounter}
 import monocle.Monocle.toAppliedFocusOps
 
 trait ImportContractsIntegrationTestBase
@@ -39,7 +42,7 @@ trait ImportContractsIntegrationTestBase
           _.focus(_.parameters.alphaMultiSynchronizerSupport)
             .replace(enableAlphaMultiSynchronizerSupport)
         ),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -152,7 +155,7 @@ trait ImportContractsIntegrationTestBase
       * mandatory parameter.
       *
       * The ACS import will simply drop contracts that are associated to a different synchronizer;
-      * and logs that face once.
+      * and logs that fact once.
       */
     s"import a multi-synchronizer ACS snapshot (multi-synchronizer-support=$enableAlphaMultiSynchronizerSupport)" in {
       implicit env =>
@@ -191,6 +194,143 @@ trait ImportContractsIntegrationTestBase
           withClue("Contracts from both daId and acmeId should be imported") {
             importedContracts should contain allElementsOf (
               cidsDa.map(_.coid) ++ cidsAcme.map(_.coid)
+            )
+          }
+        }
+    }
+
+    // Scenario: Mid-crash recovery of `repair.import_acs` for a reassigned contract.
+    //
+    // Simulates a crash after internal storage persistence but before Ledger API indexing
+    // completes (mechanics detailed in `OfflinePartyReplicationAcsImportMidCrashIntegrationTest`).
+    //
+    // As opposed to the offline party replication ACS import mid-crash test:
+    //   1. Non-zero reassignment counter in recovered contract
+    //   2. Imports contract using Assign/Unassign events
+    //   3. Recovery retains pre-existing active contracts
+    s"recover successfully ACS import mid-crash for a reassigned contract preserving pre-existing state (multi-synchronizer-support=$enableAlphaMultiSynchronizerSupport)" in {
+      implicit env =>
+        import env.*
+
+        val contract = IouSyntax.createIou(participant1, synchronizerId = Some(daId))(charlie, bob)
+        val contractIdStr = contract.id.contractId
+        val cid = LfContractId.assertFromString(contractIdStr)
+
+        participant1.ledger_api.commands.submit_reassign(
+          charlie,
+          Seq(cid),
+          source = daId,
+          target = acmeId,
+          submissionId = "reassign-charlie-da-to-acme",
+        )
+        participant1.ledger_api.commands.submit_reassign(
+          charlie,
+          Seq(cid),
+          source = acmeId,
+          target = daId,
+          submissionId = "reassign-charlie-acme-to-da",
+        )
+
+        // Ensure participant1 finishes processing in-flight operations
+        participant1.health.ping(participant1, synchronizerId = Some(daId))
+
+        File.usingTemporaryFile() { file =>
+          participant1.repair.export_acs(
+            parties = Set(charlie),
+            exportFilePath = file.canonicalPath,
+            synchronizerId = Some(daId),
+            ledgerOffset = participant1.ledger_api.state.end(),
+          )
+
+          participant3.synchronizers.disconnect_all()
+
+          if (enableAlphaMultiSynchronizerSupport) {
+            val contractInstance =
+              participant1.underlying.value.sync.participantNodePersistentState.value.contractStore
+                .lookup(cid)
+                .value
+                .futureValueUS
+                .value
+
+            // Capture pre-existing active contracts established during the preceding sequential test cases
+            val preexistingCids = participant3.ledger_api.state.acs
+              .active_contracts_of_party(charlie)
+              .map(c => LfContractId.assertFromString(c.getCreatedEvent.contractId))
+
+            // Simulate crash via direct persistence injection
+            val targetStores =
+              participant3.underlying.value.sync.participantNodePersistentState.value
+            val targetAcsStore = participant3.underlying.value.sync.stateInspection
+              .getAcsInspection(daId)
+              .value
+              .activeContractStore
+
+            clue("Inject dirty records preserving reassignment counter 2") {
+              targetStores.contractStore.storeContracts(Seq(contractInstance)).futureValueUS
+
+              val dirtyRepairCounter = RepairCounter.Genesis.increment.value
+              val dirtyReassignmentCounter =
+                ReassignmentCounter.Genesis.increment.value.increment.value
+              val dirtyToc = TimeOfChange(CantonTimestamp.now(), Some(dirtyRepairCounter))
+
+              targetAcsStore
+                .markContractsAdded(Seq((cid, dirtyReassignmentCounter, dirtyToc)))
+                .value
+                .futureValueUS
+            }
+
+            clue(
+              "Verify simulated mid-crash state: Internal store has the contract, Ledger API lacks it"
+            ) {
+              val internalStates = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
+              internalStates.get(cid) shouldBe defined
+
+              participant3.ledger_api.state.acs
+                .of_party(charlie)
+                .map(_.contractId) shouldNot contain(cid.coid)
+            }
+
+            clue("Execute post-crash recovery retry via repair.import_acs") {
+              participant3.repair.import_acs(daId, file.canonicalPath)
+            }
+
+            eventually() {
+              val postRecoveryLedgerCids = participant3.ledger_api.state.acs
+                .of_party(charlie)
+                .map(_.contractId)
+
+              // Recovered contract is visible on the Ledger API
+              postRecoveryLedgerCids should contain(cid.coid)
+
+              // Pre-existing contracts remain visible on the Ledger API
+              postRecoveryLedgerCids should contain allElementsOf preexistingCids.map(_.coid)
+
+              // Internal store contains both recovered and pre-existing contract records
+              val internalStatesTarget = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
+              internalStatesTarget.get(cid) shouldBe defined
+
+              // Filter pre-existing CIDs down to those associated with daId to verify their internal store records
+              val preexistingDaCids = preexistingCids.filter(postRecoveryLedgerCids.contains)
+              if (preexistingDaCids.nonEmpty) {
+                val internalStatesPreexisting =
+                  targetAcsStore.fetchStates(preexistingDaCids).futureValueUS
+                preexistingDaCids.foreach { pCid =>
+                  internalStatesPreexisting.get(pCid) shouldBe defined
+                }
+              }
+
+              val reassignedContract = participant3.ledger_api.state.acs
+                .active_contracts_of_party(charlie)
+                .filter(_.getCreatedEvent.contractId == cid.coid)
+                .loneElement
+
+              reassignedContract.reassignmentCounter shouldBe 2
+            }
+
+          } else {
+            assertThrowsAndLogsCommandFailures(
+              participant3.repair.import_acs(daId, file.canonicalPath),
+              _.errorMessage should include("with a non-zero reassignment counter"),
             )
           }
         }

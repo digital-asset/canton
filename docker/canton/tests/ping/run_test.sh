@@ -10,6 +10,8 @@ export RELEASE_SUFFIX="$release_suffix"
 export OCI_PATH="$oci_path"
 # Where to dump logs if the test fails
 LOG_DIR="ci-artifacts/compose-logs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_WARNINGS_TO_IGNORE="$SCRIPT_DIR/log-warnings-to-ignore.txt"
 
 # --- helpers -----------------------------------------------------------------
 collect_logs() {
@@ -29,6 +31,40 @@ collect_logs() {
   docker compose config > "$LOG_DIR/resolved-compose.yml" 2>/dev/null || true
 }
 
+check_service_logs() {
+  local found=0
+  local scanned=0
+
+  for service in participant sequencer mediator synchronizer; do
+    local log="$LOG_DIR/$service.log"
+    [[ -f "$log" ]] || continue
+    scanned=$((scanned + 1))
+
+    local problems
+    local _ignore
+    _ignore=$(rg -v '^\s*(#|$)' "$LOG_WARNINGS_TO_IGNORE" 2>/dev/null || true)
+    if [[ -n "$_ignore" ]]; then
+      problems=$(rg '"level":"(WARN|ERROR)"' "$log" \
+                 | rg -v -f <(printf '%s\n' "$_ignore") || true)
+    else
+      problems=$(rg '"level":"(WARN|ERROR)"' "$log" || true)
+    fi
+
+    if [[ -n "$problems" ]]; then
+      echo "⚠️  Unexpected WARN/ERROR in $service:"
+      echo "$problems"
+      found=1
+    fi
+  done
+
+  if (( scanned == 0 )); then
+    echo "❌ check_service_logs: no service log files found under $LOG_DIR" >&2
+    return 1
+  fi
+
+  return $found
+}
+
 down_stack() {
   echo "🧹 Cleaning up docker compose..."
   docker compose down -v || true
@@ -44,11 +80,18 @@ docker compose up --build --abort-on-container-exit --exit-code-from test test
 rc=$?
 set -e
 
+# Always collect logs so check_service_logs can scan them
+collect_logs
+
 if [[ $rc -ne 0 ]]; then
   echo "❌ Test container failed (exit code $rc)."
-  collect_logs
-else
-  echo "✅ Test container passed."
+  exit $rc
 fi
+echo "✅ Test container passed."
 
-exit $rc
+echo "🔍 Checking service logs for unexpected WARN/ERROR..."
+if ! check_service_logs; then
+  echo "❌ Unexpected log warnings found; see above."
+  exit 1
+fi
+echo "✅ No unexpected log warnings."

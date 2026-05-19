@@ -245,7 +245,7 @@ import sttp.tapir.{DecodeResult, Endpoint}
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipInputStream
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 import scala.util.Using
@@ -298,6 +298,7 @@ private final class LedgerServicesJson(
         .apply(mat.system)
         .withMaxConnections(16)
         .withMaxOpenRequests(256)
+        .withResponseEntitySubscriptionTimeout(5.seconds)
     ),
     customizeRequest = { request =>
       logger.debug(s"JSON Request ${request.method} ${request.uri}")

@@ -85,7 +85,6 @@ import com.daml.ledger.api.v2.{crypto as lapicrypto, value as v1}
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, ExerciseByKeyCommand, Identifier, Template, Value}
 import com.daml.logging.LoggingContext
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.TransactionShape
@@ -93,7 +92,7 @@ import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffe
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.util.{DelayUtil, MonadUtil, OptionUtil}
 import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse}
@@ -1616,7 +1615,7 @@ final class SingleParticipantTestContext private[participant] (
       }
       .flatMap {
         case Left(_) => // If we are retrying a single time, back off first for one second.
-          Delayed.Future.by(1.second)(submitAndWaitGeneric(this))
+          DelayUtil.delay(1.second).flatMap(_ => submitAndWaitGeneric(this))
         case Right(firstCallResult) => firstCallResult.fold(Future.failed, Future.successful)
       }
 

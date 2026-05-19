@@ -132,6 +132,7 @@ subtrees:
                       - file: howtos/optimize/caching
                       - file: howtos/optimize/batching
                       - file: howtos/optimize/session_keys
+                      - file: howtos/optimize/achs
 
               - title: "Observe"
                 file: howtos/observe/index

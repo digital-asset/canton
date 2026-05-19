@@ -37,7 +37,7 @@ build_and_publish_docker_base_image:
     - setup_qemu_and_buildx
     - run:
         name: Build and publish docker base image
-        command: ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
+        command: PUBLISH_IMAGES=true ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
 
 
 setup_qemu_and_buildx:

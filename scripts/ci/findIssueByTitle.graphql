@@ -5,6 +5,9 @@ search(query: $searchstr, type: ISSUE, first: 10) {
             number
             title
             body
+            assignees(first: 0) {
+                totalCount
+            }
             projectItems(first:10, includeArchived:true) {
                 nodes {
                     id

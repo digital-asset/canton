@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.acs.commitment
 
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeProportion}
@@ -849,7 +848,6 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#18820)
 class AcsCommitmentProcessorReferenceIntegrationTestPostgres
     extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

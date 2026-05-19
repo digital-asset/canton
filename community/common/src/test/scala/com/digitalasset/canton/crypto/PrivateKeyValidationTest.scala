@@ -8,6 +8,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.CryptoKeyFormat.DerPkcs8Pki
 import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider
 import com.google.protobuf.ByteString
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.security.KeyPairGenerator
@@ -127,6 +128,25 @@ trait PrivateKeyValidationTest extends BaseTest with CryptoTestHelper { this: As
             s"size ${EncryptionKeySpec.Rsa2048.keySizeInBits}"
         )
       }
+
+      "fail if ML-DSA-65 private key is invalid" in {
+        val kpGen = KeyPairGenerator.getInstance("MLDSA", JceSecurityProvider.bouncyCastleProvider)
+        // Generate a ML-DSA-44 key and claim it's a ML-DSA-65 key
+        kpGen.initialize(MLDSAParameterSpec.ml_dsa_44)
+        val invalidPrivateKey = ByteString.copyFrom(kpGen.generateKeyPair().getPrivate.getEncoded)
+        val validationRes =
+          SigningPrivateKey.create(
+            Fingerprint.tryFromString("test_mldsa"),
+            DerPkcs8Pki,
+            invalidPrivateKey,
+            SigningKeySpec.MlDsa65,
+            SigningKeyUsage.ProtocolOnly,
+          )
+        validationRes.left.value.toString should include(
+          s"ML-DSA private key does not have the correct parameter spec for ML-DSA-65"
+        )
+      }
+
     }
 
 }

@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.tests.multisynchronizer.AsynchronousReassignmentProtocolIntegrationTest.DelayFirstConfirmationResponsePolicy
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -29,22 +30,24 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendDecision,
   SendPolicyWithoutTraceContext,
 }
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
 
-import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
 import scala.concurrent.Promise
 
-/** This test checks that the reassignment protocol processing run asynchronously: For both the
-  * unassignment and assignment:
+/** This test checks that the reassignment protocol processing runs asynchronously: if two
+  * (un)assignments are sent consecutively and if the confirmation response of the first one is
+  * blocked, then the processing of the second one can be done.
+  *
+  * For both the unassignment and assignment:
   *   - we create two different Iou contracts
   *   - we submit asynchronously the unassignment/assignments of the two contracts
   *   - we hold back the first confirmation response from Alice to delay the first
   *     unassignment/assignment
   *   - we check on the reassignment store that the second unassignment/assignment is processed
   *     before the first one
+  *   - we allow the first confirmation request to go through
   */
 final class AsynchronousReassignmentProtocolIntegrationTest
     extends CommunityIntegrationTest
@@ -70,7 +73,7 @@ final class AsynchronousReassignmentProtocolIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*
@@ -118,12 +121,11 @@ final class AsynchronousReassignmentProtocolIntegrationTest
     val aliceId = "alice".toPartyId(participant1)
     val bobId = "bob".toPartyId(participant1)
 
-    val iou1 = IouSyntax.createIou(participant1, Some(daId))(aliceId, bobId)
-    val iou2 = IouSyntax.createIou(participant1, Some(daId))(aliceId, bobId)
-    val until: Promise[Unit] = Promise[Unit]()
-    programmableSequencers(daName).setPolicy_("delay confirmation response from alice")(
-      delayConfirmationResponse(participant1, new AtomicLong(0), until)
-    )
+    val iou1 = IouSyntax.createIou(participant1, Some(daId))(aliceId, bobId, 1.0)
+    val iou2 = IouSyntax.createIou(participant1, Some(daId))(aliceId, bobId, 1.0)
+
+    val policy = new DelayFirstConfirmationResponsePolicy()
+    programmableSequencers(daName).setPolicy_("delay first confirmation response")(policy.policy)
 
     val ledgerEnd = participant1.ledger_api.state.end()
 
@@ -134,6 +136,8 @@ final class AsynchronousReassignmentProtocolIntegrationTest
         daId,
         acmeId,
       )
+
+    policy.firstConfirmationRequestSent.future.futureValue
 
     participant1.ledger_api.commands
       .submit_unassign_async(
@@ -157,9 +161,8 @@ final class AsynchronousReassignmentProtocolIntegrationTest
       entries.loneElement.unassignmentData.map(_.submitterMetadata.submitter) should contain(
         bobId.toLf
       )
-
     }
-    until.trySuccess(())
+    policy.deliverConfirmationRequestSent.trySuccess(())
 
     // the entries are still published following sequencer order
     val bobOffset = participant1.ledger_api.completions.list(bobId, 1, ledgerEnd).map(_.offset)
@@ -191,10 +194,8 @@ final class AsynchronousReassignmentProtocolIntegrationTest
       .submit_unassign(bobId, Seq(LfContractId.assertFromString(iou2.id.contractId)), daId, acmeId)
       .reassignmentId
 
-    val until: Promise[Unit] = Promise[Unit]()
-    programmableSequencers(acmeName).setPolicy_("delay confirmation response from alice")(
-      delayConfirmationResponse(participant1, new AtomicLong(0), until)
-    )
+    val policy = new DelayFirstConfirmationResponsePolicy()
+    programmableSequencers(acmeName).setPolicy_("delay first confirmation response")(policy.policy)
 
     participant1.ledger_api.commands
       .submit_assign_async(
@@ -203,6 +204,8 @@ final class AsynchronousReassignmentProtocolIntegrationTest
         daId,
         acmeId,
       )
+
+    policy.firstConfirmationRequestSent.future.futureValue
 
     participant1.ledger_api.commands
       .submit_assign_async(
@@ -230,7 +233,7 @@ final class AsynchronousReassignmentProtocolIntegrationTest
       aliceEntry.assignmentTs shouldBe empty
     }
 
-    until.trySuccess(())
+    policy.deliverConfirmationRequestSent.trySuccess(())
     eventually() {
       val aliceEntry =
         reassignmentStore.findReassignmentEntry(aliceReassignmentId).futureValueUS.value
@@ -238,22 +241,26 @@ final class AsynchronousReassignmentProtocolIntegrationTest
     }
 
   }
+}
 
-  private def delayConfirmationResponse(
-      from: ParticipantId,
-      counter: AtomicLong,
-      until: Promise[Unit],
-  ): SendPolicyWithoutTraceContext =
-    submissionRequest =>
-      submissionRequest.sender match {
-        case p: ParticipantId if p == from && isConfirmationResponse(submissionRequest) =>
-          val newConfirmationResponsesCount = counter.incrementAndGet()
-          if (newConfirmationResponsesCount == 1)
-            SendDecision.HoldBack(until.future)
-          else
-            SendDecision.Process
+object AsynchronousReassignmentProtocolIntegrationTest {
+  class DelayFirstConfirmationResponsePolicy() {
+    /*
+     Completes when the first confirmation request is sent by P1.
+     Allows to not submit the second (un)assignment too early
+     */
+    val firstConfirmationRequestSent: Promise[Unit] = Promise[Unit]()
+    // is completed when the first confirmation request should be delivered
+    val deliverConfirmationRequestSent: Promise[Unit] = Promise[Unit]()
 
-        case _ => SendDecision.Process
-      }
+    val policy: SendPolicyWithoutTraceContext = { submissionRequest =>
+      if (isConfirmationResponse(submissionRequest)) {
+        if (!firstConfirmationRequestSent.isCompleted) {
+          firstConfirmationRequestSent.trySuccess(())
+          SendDecision.HoldBack(deliverConfirmationRequestSent.future)
+        } else SendDecision.Process
 
+      } else SendDecision.Process
+    }
+  }
 }

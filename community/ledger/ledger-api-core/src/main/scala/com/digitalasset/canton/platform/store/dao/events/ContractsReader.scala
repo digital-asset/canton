@@ -75,28 +75,49 @@ private[dao] sealed class ContractsReader(
       contractLoader.contracts.load(contractId -> notEarlierThanEventSeqId),
     )
 
+  /** Looks up active contracts for a given key.
+    *
+    * Due to batching of several requests, we may return newer information than at the provided
+    * offset, but never older information.
+    *
+    * @param key
+    *   the contract key to query
+    * @param notEarlierThanEventSeqId
+    *   the offset threshold to resolve the key state (state can be newer, but not older)
+    * @param nextPageToken
+    *   pagination token for fetching subsequent pages
+    * @param limit
+    *   maximum number of contract IDs to return
+    * @return
+    *   a vector of active contract IDs and an optional next page token
+    */
   override def lookupNonUniqueKey(
       key: Key,
-      validAtEventSeqId: Long,
+      notEarlierThanEventSeqId: Long,
       nextPageToken: Option[Long],
       limit: Int,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[ContractStorageBackend.KeysPageResult] =
+  ): Future[(Vector[ContractId], Option[Long])] =
     Timed.future(
       metrics.index.db.lookupNonUniqueKey,
-      dispatcher.executeSql(
-        metrics.index.db.lookupNonUniqueContractByKeyDbMetrics
-      )(
-        storageBackend.nonUniqueContractKey(
+      contractLoader.nonUniqueKeys
+        .load(
           KeysPageQuery(
             key = key,
             limit = limit,
             nextPageToken = nextPageToken,
-            validAtEventSeqId = validAtEventSeqId,
+            validAtEventSeqId = notEarlierThanEventSeqId,
           )
         )
-      ),
+        .map {
+          case Some(result) => result
+          case None =>
+            logger.error(
+              s"Non-unique key lookup for $key resulted in an invalid empty load"
+            )(loggingContext.traceContext)
+            (Vector.empty, None)
+        },
     )
 }
 

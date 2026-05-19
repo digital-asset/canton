@@ -7,7 +7,7 @@ package speedy
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, PackageId, PackageName, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.ledger.{Authorize, FailedAuthorization}
@@ -259,9 +259,11 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
         logger = recordingLogger,
         readAs = readAs,
         authorizationChecker= new AuthorizationCheckerLogger(recordingLogger),
-        mode =
-          if (withKey) ContractStateMachine.Mode.NUCK
-          else ContractStateMachine.Mode.NoKey,
+        interpretationConfig = InterpretationConfig.Default.copy(
+          contractStateMode =
+            if (withKey) ContractStateMachine.Mode.NUCK
+            else ContractStateMachine.Mode.NoKey,
+        ),
         packageResolution = packageResolution,
       )
     val res = Try(

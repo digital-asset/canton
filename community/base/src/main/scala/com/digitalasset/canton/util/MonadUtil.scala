@@ -185,6 +185,21 @@ object MonadUtil {
       parTraverseWithLimit(parallelism)(xs)(processElement)
     )(_.flatten)
 
+  /** Equivalent to sequential `traverseFilter`
+    */
+  def sequentialTraverseFilter[M[_], A, B](
+      xs: Seq[A]
+  )(step: A => M[Option[B]])(implicit monad: Monad[M]): M[Seq[B]] = {
+    val r = foldLeftM[M, Seq[B], A](Seq.empty: Seq[B], xs) { case (acc, x) =>
+      monad.map(step(x)) {
+        case None => acc
+        case Some(b) => b +: acc
+      }
+    }
+
+    monad.map(r)(_.reverse)
+  }
+
   /** Conceptually equivalent to `sequentialTraverse(xs)(step).map(monoid.combineAll)`.
     */
   def sequentialTraverseMonoid[M[_], A, B](

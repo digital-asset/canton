@@ -35,7 +35,7 @@ object CryptoSchemes {
     * signature or perform asymmetric encryption. The driver's private cryptography does not need to
     * support them.
     */
-  private def selectKmsScheme[S](
+  private def selectKmsScheme[S <: CryptoSpec](
       cryptoScheme: CryptoScheme[S],
       kmsSupported: Set[S],
       description: String,
@@ -114,11 +114,29 @@ object CryptoSchemes {
 
   def fromConfig(config: CryptoConfig): Either[String, CryptoSchemes] =
     for {
-      symmetricKeySchemes <- CryptoScheme.create(config.symmetric, config.provider.symmetric)
-      hashAlgorithms <- CryptoScheme.create(config.hash, config.provider.hash)
-      pbkdfSchemesO <- config.provider.pbkdf.traverse(CryptoScheme.create(config.pbkdf, _))
-      signingCryptoSchemes <- SigningCryptoSchemes.create(config.signing, config.provider)
-      encryptionCryptoSchemes <- EncryptionCryptoSchemes.create(config.encryption, config.provider)
+      symmetricKeySchemes <- CryptoScheme.create(
+        config.symmetric,
+        config.provider.symmetric,
+        allowExperimental = config.enableExperimental,
+      )
+      hashAlgorithms <- CryptoScheme.create(
+        config.hash,
+        config.provider.hash,
+        allowExperimental = config.enableExperimental,
+      )
+      pbkdfSchemesO <- config.provider.pbkdf.traverse(
+        CryptoScheme.create(config.pbkdf, _, allowExperimental = config.enableExperimental)
+      )
+      signingCryptoSchemes <- SigningCryptoSchemes.create(
+        config.signing,
+        config.provider,
+        allowExperimental = config.enableExperimental,
+      )
+      encryptionCryptoSchemes <- EncryptionCryptoSchemes.create(
+        config.encryption,
+        config.provider,
+        allowExperimental = config.enableExperimental,
+      )
     } yield CryptoSchemes(
       signingCryptoSchemes,
       encryptionCryptoSchemes,
@@ -155,15 +173,18 @@ object SigningCryptoSchemes {
   def create(
       signingSchemeConfig: SigningSchemeConfig,
       cryptoProvider: CryptoProvider,
+      allowExperimental: Boolean,
   ): Either[String, SigningCryptoSchemes] =
     for {
       keySpecs <- CryptoScheme.create(
         signingSchemeConfig.keys,
         cryptoProvider.signingKeys,
+        allowExperimental,
       )
       algoSpecs <- CryptoScheme.create(
         signingSchemeConfig.algorithms,
         cryptoProvider.signingAlgorithms,
+        allowExperimental,
       )
       signingCryptoSchemes <- create(keySpecs, algoSpecs)
     } yield signingCryptoSchemes
@@ -202,15 +223,18 @@ object EncryptionCryptoSchemes {
   def create(
       encryptionSchemeConfig: EncryptionSchemeConfig,
       cryptoProvider: CryptoProvider,
+      allowExperimental: Boolean,
   ): Either[String, EncryptionCryptoSchemes] =
     for {
       keySpecs <- CryptoScheme.create(
         encryptionSchemeConfig.keys,
         cryptoProvider.encryptionKeys,
+        allowExperimental,
       )
       algoSpecs <- CryptoScheme.create(
         encryptionSchemeConfig.algorithms,
         cryptoProvider.encryptionAlgorithms,
+        allowExperimental,
       )
       encryptionCryptoSchemes <- create(keySpecs, algoSpecs)
     } yield encryptionCryptoSchemes
@@ -223,7 +247,14 @@ object EncryptionCryptoSchemes {
   }
 }
 
-final case class CryptoScheme[S] private (default: S, allowed: NonEmpty[Set[S]])
+/** Common trait for all cryptographic schemes and specs */
+trait CryptoSpec {
+
+  /** Indicate if the spec is experimental and should not be used in production */
+  def experimental: Boolean
+}
+
+final case class CryptoScheme[S <: CryptoSpec] private (default: S, allowed: NonEmpty[Set[S]])
 
 object CryptoScheme {
 
@@ -233,38 +264,46 @@ object CryptoScheme {
     * schemes are either explicitly configured and must be supported by the provider, or all
     * supported schemes by the provider.
     */
-  def create[S](
+  def create[S <: CryptoSpec](
       configured: CryptoSchemeConfig[S],
       provider: CryptoProviderScheme[S],
-  ): Either[String, CryptoScheme[S]] = {
-    val supported = provider.supported
+      allowExperimental: Boolean,
+  ): Either[String, CryptoScheme[S]] = for {
+    // Filter out any experimental schemes unless allowExperimental is true.
+    supported <-
+      NonEmpty
+        .from(provider.supported.filter(scheme => allowExperimental || !scheme.experimental))
+        .toRight(
+          s"No supported schemes available after filtering out experimental schemes"
+        )
 
     // If no allowed schemes are configured, all supported schemes are allowed.
-    val allowed = configured.allowed.getOrElse(supported)
+    allowed = configured.allowed.getOrElse(supported)
 
     // If no scheme is configured, use the default scheme of the provider
-    val default = configured.default.getOrElse(provider.default)
+    default = configured.default.getOrElse(provider.default)
 
     // The allowed schemes that are not in the supported set
-    val unsupported = allowed.diff(supported)
+    unsupported = allowed.diff(supported)
 
-    for {
-      _ <- EitherUtil.condUnit(
-        unsupported.isEmpty,
-        s"Allowed schemes $unsupported are not supported",
-      )
-      scheme <- CryptoScheme.create(default, allowed)
-    } yield scheme
-  }
+    _ <- EitherUtil.condUnit(
+      unsupported.isEmpty,
+      s"Allowed schemes $unsupported are not supported",
+    )
+    scheme <- CryptoScheme.create(default, allowed)
+  } yield scheme
 
-  def create[S](default: S, allowed: NonEmpty[Set[S]]): Either[String, CryptoScheme[S]] =
+  def create[S <: CryptoSpec](
+      default: S,
+      allowed: NonEmpty[Set[S]],
+  ): Either[String, CryptoScheme[S]] =
     Either.cond(
       allowed.contains(default),
       CryptoScheme(default, allowed),
       s"Scheme $default is not allowed: $allowed",
     )
 
-  private[crypto] def tryCreate[S](
+  private[crypto] def tryCreate[S <: CryptoSpec](
       default: S,
       allowed: NonEmpty[Set[S]],
   ): CryptoScheme[S] = create(default, allowed).valueOr { err =>

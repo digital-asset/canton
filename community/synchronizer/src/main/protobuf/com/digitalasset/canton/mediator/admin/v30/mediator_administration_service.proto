@@ -14,11 +14,6 @@ service MediatorAdministrationService {
   rpc Prune(MediatorPruning.PruneRequest) returns (MediatorPruning.PruneResponse);
 
   // Enable automatic pruning using the specified schedule parameters
-  // The following errors may occur on the SetSchedule or Update commands:
-  // - ``INVALID_ARGUMENT``: if a parameter is missing or an invalid cron expression
-  //   or duration.
-  // - ``FAILED_PRECONDITION``: if automatic background pruning has not been enabled
-  //   or if invoked on a participant running the Community Edition.
   rpc SetSchedule(com.digitalasset.canton.admin.pruning.v30.SetScheduleRequest) returns (com.digitalasset.canton.admin.pruning.v30.SetScheduleResponse);
 
   // Modify individual pruning schedule parameters.

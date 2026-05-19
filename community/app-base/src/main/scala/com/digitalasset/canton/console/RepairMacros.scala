@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, TextFileUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec
 import scala.util.{Failure, Success, Try}
@@ -129,7 +130,7 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
 
         if (node.id.member.code == SequencerId.Code) { // The sequencer needs to know more than just its own identity
 
-          // Initial synchronizer state, needed for the sequencer to open the init service offering `assign_from_genesis_state`
+          // Initial synchronizer state, needed for the sequencer to open the init service offering `assign_from_genesis_stateV2`
           val synchronizerGenesisTransactions = node.topology.transactions
             .list(
               store = synchronizerId,
@@ -264,11 +265,24 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
                 synchronizerGenesisFile
               )
 
+            val out = ByteString.newOutput()
+            synchronizerGenesisTransactions
+              .collectOfType[TopologyChangeOp.Replace]
+              .result
+              .foreach { stored =>
+                stored
+                  .writeDelimitedTo(staticSynchronizerParameters.protocolVersion, out)
+                  .left
+                  .foreach(err =>
+                    ErrorUtil.invalidState(
+                      s"Unable to serialize genesis topology transaction: $err"
+                    )
+                  )
+              }
+
             sequencer.setup
-              .assign_from_genesis_state(
-                synchronizerGenesisTransactions
-                  .collectOfType[TopologyChangeOp.Replace]
-                  .toByteString(staticSynchronizerParameters.protocolVersion),
+              .assign_from_genesis_stateV2(
+                out.toByteString,
                 staticSynchronizerParameters,
               )
               .discard

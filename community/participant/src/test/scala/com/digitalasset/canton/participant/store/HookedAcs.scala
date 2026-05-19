@@ -7,6 +7,7 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   AcsError,
@@ -29,7 +30,10 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedMap
 import scala.concurrent.ExecutionContext
 
-private[participant] class HookedAcs(private val acs: ActiveContractStore)(implicit
+private[participant] class HookedAcs(
+    private val acs: ActiveContractStore,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit
     val ec: ExecutionContext
 ) extends ActiveContractStore {
   import HookedAcs.{noArchivePurgeAction, noCreateAddAction, noReassignmentAction}

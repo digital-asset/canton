@@ -5,9 +5,9 @@ package com.digitalasset.canton.platform.store.interfaces
 
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.Future
@@ -56,12 +56,28 @@ private[platform] trait LedgerDaoContractsReader {
       loggingContext: LoggingContextWithTrace
   ): Future[Map[GlobalKey, Long]]
 
+  /** Looks up active contracts for a given key.
+    *
+    * Due to batching of several requests, we may return newer information than at the provided
+    * offset, but never older information.
+    *
+    * @param key
+    *   the contract key to query
+    * @param notEarlierThanEventSeqId
+    *   the offset threshold to resolve the key state (state can be newer, but not older)
+    * @param nextPageToken
+    *   pagination token for fetching subsequent pages
+    * @param limit
+    *   maximum number of contract IDs to return
+    * @return
+    *   a vector of active contract IDs and an optional next page token
+    */
   def lookupNonUniqueKey(
       key: GlobalKey,
-      validAtEventSeqId: Long,
+      notEarlierThanEventSeqId: Long,
       nextPageToken: Option[Long],
       limit: Int,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractStorageBackend.KeysPageResult]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[(Vector[ContractId], Option[Long])]
 
 }
 

@@ -32,13 +32,13 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
   GlobalKey,
   NeedKeyProgression,
-  NextGenContractStateMachine,
   Node as LfNode,
 }
 import com.digitalasset.daml.lf.value.Value
@@ -130,7 +130,7 @@ class StoreBackedCommandInterpreterSpec
     )
   )
 
-  private val mode = NextGenContractStateMachine.Mode.default
+  private val interpretationConfig = InterpretationConfig.Default
 
   private val submissionSeed = Hash.hashPrivateKey("a key")
 
@@ -159,7 +159,7 @@ class StoreBackedCommandInterpreterSpec
       val sut = mkSut(testEngine.engine, tolerance = NonNegativeFiniteDuration.Zero)
 
       sut
-        .interpret(createCycleApiCommand, mode, submissionSeed)(
+        .interpret(createCycleApiCommand, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -179,7 +179,7 @@ class StoreBackedCommandInterpreterSpec
       val commands =
         createCycleApiCommand.focus(_.commands.ledgerEffectiveTime).replace(Time.Timestamp.now())
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -195,7 +195,7 @@ class StoreBackedCommandInterpreterSpec
       val commands = createCycleApiCommand.focus(_.commands.ledgerEffectiveTime).replace(let)
       val sut = mkSut(testEngine.engine, tolerance = tolerance)
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -317,7 +317,7 @@ class StoreBackedCommandInterpreterSpec
 
       val sut = mkSut(testEngine.engine, contractStore = contractStore)
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -364,7 +364,7 @@ class StoreBackedCommandInterpreterSpec
         )
 
         sut
-          .interpret(commands, mode, submissionSeed)(
+          .interpret(commands, interpretationConfig, submissionSeed)(
             LoggingContextWithTrace(loggerFactory),
             executionContext,
           )
@@ -408,7 +408,7 @@ class StoreBackedCommandInterpreterSpec
         )
 
         sut
-          .interpret(commands, mode, submissionSeed)(
+          .interpret(commands, interpretationConfig, submissionSeed)(
             LoggingContextWithTrace(loggerFactory),
             executionContext,
           )

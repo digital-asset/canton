@@ -8,6 +8,7 @@ import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.UsesMaliciousNode
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -166,7 +167,9 @@ class ProtocolVettingChecksIntegrationTest
               "submits a command yielding a transaction that references an unvetted package that does not appear in an action node (in PV34 or lower)",
             mitigation = "confirming participant rejects the command",
           )
-        ) onlyRunWithOrLessThan ProtocolVersion.v34 in { implicit env =>
+        ) onlyRunWhen (testedProtocolVersion <= ProtocolVersion.v34 && onlyLocalParty(
+        UsesMaliciousNode
+      )) in { implicit env =>
         import env.*
 
         // Setup vetted Main with unvetted Dep dependency for participant2
@@ -198,7 +201,7 @@ class ProtocolVettingChecksIntegrationTest
             "submits a command yielding a transaction that references an unvetted package in an action node",
           mitigation = "confirming participant rejects the command",
         )
-      ) in { implicit env =>
+      ) onlyRunWhen onlyLocalParty(UsesMaliciousNode) in { implicit env =>
         import env.*
 
         // Upload and vet the main DAR to ensure create is accepted on both PV 34 and 35

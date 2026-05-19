@@ -49,11 +49,6 @@ object DamlLfFeature {
     }
   }
 
-  private val v2_1 = DamlLfVersion(2, Stable(1))
-  private val v2_2 = DamlLfVersion(2, Stable(2))
-  private val v2_3_1 = DamlLfVersion(2, Staging(3, 1))
-  private val v2_dev = DamlLfVersion(2, Dev)
-
   val featureUnstable = DamlLfFeature(
     name = "Unstable, experimental features",
     cppFlag = "DAML_UNSTABLE",
@@ -154,6 +149,18 @@ object DamlLfFeature {
     name = "Extended crypto primitives",
     cppFlag = "DAML_ExtendedCryptoPrimitives",
     versionRange = VersionRange.From(v2_3_1),
+  )
+
+  val featurePV34 = DamlLfFeature(
+    name = "LF versions supported by PV34",
+    cppFlag = "DAML_PV34",
+    versionRange = VersionRange.Inclusive(v2_1, v2_2),
+  )
+
+  val featurePV35 = DamlLfFeature(
+    name = "LF versions supported by PV35",
+    cppFlag = "DAML_PV35",
+    versionRange = VersionRange.Inclusive(v2_3, v2_3),
   )
 
   val allFeatures: Map[String, DamlLfFeature] = Map(

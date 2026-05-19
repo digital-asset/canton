@@ -26,12 +26,9 @@ import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  NeedKeyProgression,
-  NextGenContractStateMachine as ContractStateMachine,
-}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, NeedKeyProgression}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
 import java.nio.file.Path
@@ -162,7 +159,7 @@ class DAMLe(
     participantId: ParticipantId,
     resolvePackage: PackageResolver,
     engine: Engine,
-    contractStateMode: ContractStateMachine.Mode,
+    interpretationConfig: InterpretationConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -283,7 +280,7 @@ class DAMLe(
       ledgerEffectiveTime = ledgerTime.toLf,
       packageResolution = packageResolution,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpretationConfig,
     )
 
     for {

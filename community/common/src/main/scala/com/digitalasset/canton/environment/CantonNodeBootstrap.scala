@@ -1017,7 +1017,6 @@ abstract class CantonNodeBootstrapImpl[
                   new GrpcTopologyManagerReadService(
                     member(nodeId),
                     temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
-                    crypto,
                     topologyClientLookup = lookupTopologyClient,
                     lookupSynchronizerTimeTracker,
                     lookupActivePsid,

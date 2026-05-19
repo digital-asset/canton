@@ -9,7 +9,7 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 
 object CryptoHandshakeValidator {
 
-  private def validateScheme[S](
+  private def validateScheme[S <: CryptoSpec](
       required: NonEmpty[Set[S]],
       scheme: CryptoScheme[S],
   ): Either[String, Unit] = {

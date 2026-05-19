@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
-import com.daml.timer.Delayed
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig.StreamConfig
 import com.digitalasset.canton.ledger.api.benchtool.metrics.{
   BenchmarkResult,
@@ -16,10 +15,11 @@ import com.digitalasset.canton.ledger.api.benchtool.metrics.{
 }
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.util.ObserverWithResult
+import com.digitalasset.canton.util.DelayUtil
 import org.apache.pekko.actor.typed.{ActorSystem, SpawnProtocol}
 import org.slf4j.LoggerFactory
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 object Benchmark {
@@ -127,12 +127,10 @@ object Benchmark {
         )
       }
 
-  def scheduleCancelStreamTask(timeoutDuration: Duration, observer: ObserverWithResult[?, ?])(
+  def scheduleCancelStreamTask(timeoutDuration: FiniteDuration, observer: ObserverWithResult[?, ?])(
       implicit ec: ExecutionContext
   ): Unit = {
-    val _ = Delayed.by(t = timeoutDuration)(
-      observer.cancel()
-    )
+    val _ = DelayUtil.delay(timeoutDuration).map(_ => observer.cancel())
   }
 
   private def delaySubscriptionIfConfigured(

@@ -166,4 +166,12 @@ class ContractStorageBackendTemplate(
         .flatten,
     )
   }
+
+  override def nonUniqueContractKeysPlain(
+      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      validAtEventSeqId: Long,
+  )(connection: Connection): Seq[ContractStorageBackend.KeysPageResult] =
+    keyPageQueries.map(query =>
+      nonUniqueContractKey(query.copy(validAtEventSeqId = validAtEventSeqId))(connection)
+    )
 }

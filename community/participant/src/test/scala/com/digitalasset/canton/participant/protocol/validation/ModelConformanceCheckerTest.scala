@@ -50,7 +50,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractHasher, ContractValidator, RoseTree, TestEngine}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -101,11 +101,7 @@ class ModelConformanceCheckerTest
   )
   private val testEngine = new TestEngine(
     packagePaths = Seq(CantonExamplesPath, modelConformanceExamplesPath),
-    contractStateMode = if (testedProtocolVersion <= ProtocolVersion.v34) {
-      NextGenContractStateMachine.Mode.NoKey
-    } else {
-      NextGenContractStateMachine.Mode.NUCK
-    },
+    interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
     loggerFactory = loggerFactory,
   )
 
@@ -177,7 +173,7 @@ class ModelConformanceCheckerTest
     val damlE: DAMLe = new DAMLe(
       resolvePackage = testEngine.packageResolver,
       engine = testEngine.engine,
-      contractStateMode = NextGenContractStateMachine.Mode.default,
+      interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
       participantId = participantId,
       loggerFactory = loggerFactory,
     )

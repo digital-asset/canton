@@ -94,7 +94,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
 
       val firstPage = index.updatesPage(request).futureValue
       index
-        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .prune(index.latestPrunedOffset().futureValue, Vector(), pruneTo, Vector())
         .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
@@ -135,7 +135,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
 
       val firstPage = index.updatesPage(request).futureValue
       index
-        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .prune(index.latestPrunedOffset().futureValue, Vector(), pruneTo, Vector())
         .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
@@ -179,7 +179,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
 
       val firstPage = index.updatesPage(request).futureValue
       index
-        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .prune(index.latestPrunedOffset().futureValue, Vector(), pruneTo, Vector())
         .futureValue
       eventually() {
         index.indexDbPrunedUpto.futureValue shouldEqual Some(pruneTo)
@@ -220,7 +220,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
 
       val firstPage = index.updatesPage(request).futureValue
       index
-        .prune(pruningOffsetService.pruningOffset.futureValue, Vector(), pruneTo, Vector())
+        .prune(index.latestPrunedOffset().futureValue, Vector(), pruneTo, Vector())
         .futureValue
       val exception = index
         .updatesPage(

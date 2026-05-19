@@ -124,6 +124,7 @@ Canton documentation
   participant/howtos/optimize/caching
   participant/howtos/optimize/batching
   participant/howtos/optimize/session_keys
+  participant/howtos/optimize/achs
 
   participant/howtos/observe/index
   participant/howtos/observe/health
@@ -184,6 +185,46 @@ Canton documentation
   participant/reference/versioning
   participant/reference/crypto_schemes
   participant/reference/automatic_pruning
+
+.. toctree::
+  :maxdepth: 2
+  :caption: Canton Network docs (snippet wrapper for main docs)
+
+  docs-cn/index
+
+  docs-cn/faq
+  docs-cn/troubleshooting
+  docs-cn/common-questions
+  docs-cn/multi-hosting
+  docs-cn/debugging-tools
+  docs-cn/admin-api-reference
+
+  docs-cn/sdks-tools-language-bindings-scala
+  docs-cn/sdks-tools-cli-tools-canton-console
+
+  docs-cn/global-synchronizer-faq
+  docs-cn/global-synchronizer-troubleshooting
+  docs-cn/global-synchronizer-troubleshooting-guide-troubleshooting-methodology
+  docs-cn/global-synchronizer-troubleshooting-guide-common-questions
+  docs-cn/global-synchronizer-troubleshooting-guide-performance-issues
+  docs-cn/global-synchronizer-troubleshooting-guide-security-issues
+  docs-cn/global-synchronizer-troubleshooting-guide-runbooks
+  docs-cn/global-synchronizer-troubleshooting-guide-transaction-failures
+
+  docs-cn/global-synchronizer-reference-canton-console-reference
+  docs-cn/global-synchronizer-canton-console-console-overview
+  docs-cn/global-synchronizer-canton-console-essential-commands
+  docs-cn/global-synchronizer-canton-console-debugging-workflows
+  docs-cn/global-synchronizer-canton-console-advanced-operations
+  docs-cn/global-synchronizer-canton-console-scripting
+
+  docs-cn/global-synchronizer-extension-synchronizers-deployment
+  docs-cn/global-synchronizer-extension-synchronizers-hybrid-synchronizer-pattern
+  docs-cn/global-synchronizer-extension-synchronizers-linking-validator-multi-sync
+  docs-cn/global-synchronizer-extension-synchronizers-private-synchronizers
+  docs-cn/global-synchronizer-extension-synchronizers-private-validators
+
+  docs-cn/global-synchronizer-production-operations-logging
 
 .. toctree::
   :maxdepth: 2

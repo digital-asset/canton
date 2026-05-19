@@ -40,7 +40,6 @@ object Dependencies {
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.44.3"
   lazy val better_files_version = "3.9.2"
-  lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.9.0"
@@ -50,12 +49,12 @@ object Dependencies {
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "10.22.0"
-  // From https://github.com/googleapis/java-cloud-bom/tree/v26.50.0
-  // kms 2.55.0 and storage 2.43.2 are within the same compatibility matrix
+  // From https://github.com/googleapis/java-cloud-bom/tree/v26.58.0
+  // kms 2.63.0 and storage 2.50.0 are within the same compatibility matrix
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val gcp_kms_version = "2.55.0"
-  lazy val gcp_storage_version = "2.43.2"
+  lazy val gcp_kms_version = "2.63.0"
+  lazy val gcp_storage_version = "2.50.0"
   lazy val zstd_version = "1.5.5-5"
   lazy val gson_version = "2.9.1"
   lazy val gson_fire_version = "1.9.0"
@@ -317,12 +316,6 @@ object Dependencies {
     "org.testcontainers" % "testcontainers-postgresql" % testcontainers_version
 
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
-
-  // demo dependencies (you also need to update demo.sc)
-  lazy val scalafx = "org.scalafx" %% "scalafx" % scalafx_version
-  lazy val javafx_all = Seq("controls", "base", "fxml", "media", "web", "graphics").map { x =>
-    "org.openjfx" % s"javafx-$x" % scalafx_all_version
-  }
 
   lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % toxiproxy_java_version
 

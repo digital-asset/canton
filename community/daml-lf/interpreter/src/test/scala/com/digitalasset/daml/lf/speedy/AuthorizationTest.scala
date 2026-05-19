@@ -7,7 +7,7 @@ package speedy
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.ledger.FailedAuthorization
@@ -34,21 +34,19 @@ import scala.collection.immutable.ArraySeq
 import scala.util.{Success, Try}
 import com.digitalasset.canton.logging.SuppressingLogging
 
-class AuthorizationTest_V2Dev
-    extends AuthorizationTest(LanguageVersion.v2_dev, withKey = true)
-class AuthorizationTest_V23
-    extends AuthorizationTest(LanguageVersion.v2_3, withKey = true)
+class AuthorizationTest_V2Dev extends AuthorizationTest(LanguageVersion.v2_dev, withKey = true)
+class AuthorizationTest_V23 extends AuthorizationTest(LanguageVersion.v2_3, withKey = true)
 
-/** Tests for authorization failure evaluation ordering.
+/** Tests for authorization failure.
   *
-  * These tests were extracted from EvaluationOrderTest where they were removed
-  * when the AuthorizationCheckerLogger (a dummy that always succeeds) was introduced.
-  * Here we use the DefaultAuthorizationChecker (the real authorization checker) so that
-  * actual FailedAuthorization errors are produced.
+  * These tests were extracted from EvaluationOrderTest where they were removed when the
+  * AuthorizationCheckerLogger (a dummy that always succeeds) was introduced. Here we use the
+  * DefaultAuthorizationChecker (the real authorization checker) so that actual FailedAuthorization
+  * errors are produced.
   *
-  * NOTE: Many values and helpers are duplicated from EvaluationOrderTest because
-  * the originals are private[this] and cannot be accessed from a separate file.
-  * Do NOT modify EvaluationOrderTest to change visibility.
+  * NOTE: Many values and helpers are duplicated from EvaluationOrderTest because the originals are
+  * private[this] and cannot be accessed from a separate file. Do NOT modify EvaluationOrderTest to
+  * change visibility.
   */
 abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Boolean)
     extends AnyFreeSpec
@@ -57,7 +55,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
     with SuppressingLogging {
 
   private val testPkg = new TestPkg(withKey, languageVersion)
-  import testPkg._
+  import testPkg.*
 
   private[this] val Helper: TypeConId = t"Test:Helper" match {
     case TTyCon(tycon) => tycon
@@ -66,6 +64,18 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
   private[this] val cId: Value.ContractId =
     Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
+
+  private[this] val cId2: Value.ContractId =
+    Value.ContractId.V1(crypto.Hash.hashPrivateKey("test2"))
+
+  private[this] val cId3: Value.ContractId =
+    Value.ContractId.V1(crypto.Hash.hashPrivateKey("test3"))
+
+  private[this] val cId4: Value.ContractId =
+    Value.ContractId.V1(crypto.Hash.hashPrivateKey("test4"))
+
+  private[this] val cId5: Value.ContractId =
+    Value.ContractId.V1(crypto.Hash.hashPrivateKey("test5"))
 
   private[this] val helperCId: Value.ContractId =
     Value.ContractId.V1(crypto.Hash.hashPrivateKey("Helper"))
@@ -130,8 +140,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
               templateId = T,
               packageName = pkg.pkgName,
               key = normalizedKeyValue,
-              keyHash =
-                SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+              keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
             ),
           Set(alice),
         )
@@ -195,6 +204,17 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
     ) -> Vector(cId)
   )
 
+  private[this] val cIds = Vector(cId, cId2, cId3, cId4, cId5)
+
+  private[this] def getKeysWithNContracts(n: Int) = Map(
+    GlobalKey.assertBuild(
+      templateId = T,
+      packageName = pkg.pkgName,
+      key = keyValue,
+      keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+    ) -> cIds.take(n)
+  )
+
   private[this] val seed = crypto.Hash.hashPrivateKey("seed")
 
   private def evalUpdateApp(
@@ -216,9 +236,10 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
         committers = parties,
         logger = MachineLogger(),
         readAs = readAs,
-        mode =
-          if (withKey) ContractStateMachine.Mode.NUCK
+        interpretationConfig = InterpretationConfig.Default.copy(
+          contractStateMode = if (withKey) ContractStateMachine.Mode.NUCK
           else ContractStateMachine.Mode.NoKey,
+        ),
         packageResolution = packageResolution,
       )
     Try(
@@ -233,6 +254,14 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
   private def mapKeys[K, V, R](getKeys: Map[K, Vector[V]], getContract: V => R): Map[K, Vector[R]] =
     getKeys.view.mapValues(_.map(getContract)).toMap
 
+//  private[this] val getContract = { val c = buildContract(bob, cId); Map(c.contractId -> c) }
+  private[this] def contractsToMap(contracts: Seq[FatContractInstance]) =
+    contracts.map(c => c.contractId -> c).toMap
+  private[this] val contracts =
+    Seq(cId, cId2, cId3, cId4, cId5).map(buildContract(bob, _))
+  private[this] def getContracts(n: Int) = contractsToMap(contracts.take(n))
+//  private[this] val getIfaceContract = Map(iface_contract.contractId -> iface_contract)
+
   // ---------------------------------------------------------------------------
   // Authorization failure tests
   // ---------------------------------------------------------------------------
@@ -241,7 +270,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
     "create" - {
 
-      // TEST_EVIDENCE: Integrity: Evaluation order of create with authorization failure
+      // TEST_EVIDENCE: Integrity: Authorization failure of create
       "authorization failure" in {
         val res = evalUpdateApp(
           pkgs,
@@ -270,7 +299,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
     "create_interface" - {
 
-      // TEST_EVIDENCE: Integrity: Evaluation order of create_interface with authorization failure
+      // TEST_EVIDENCE: Integrity: Authorization failure of create_interface
       "authorization failure" in {
         val res = evalUpdateApp(
           pkgs,
@@ -301,7 +330,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a non-cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise of a non-cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise of a non-cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -336,7 +365,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise of cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise of cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -373,7 +402,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a local contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise of a local contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise of a local contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -415,7 +444,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a non-cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise_by_key of a non-cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise_by_key of a non-cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -451,7 +480,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise_by_key of cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise_by_key of cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -489,7 +518,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a local contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of exercise_by_key of a local contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise_by_key of a local contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -527,12 +556,11 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
     }
 
     List("exercise_interface", "exercise_interface_with_guard").foreach { testCase =>
-
       testCase - {
 
         "a non-cached global contract" - {
 
-          // TEST_EVIDENCE: Integrity: Evaluation order of exercise_interface of a non-cached global contract with failed authorization
+          // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a non-cached global contract
           "authorization failure" in {
             val res = evalUpdateApp(
               pkgs = pkgs,
@@ -569,7 +597,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
         "a cached global contract" - {
 
-          // TEST_EVIDENCE: Integrity: Evaluation order of exercise by interface of cached global contract with failed authorization
+          // TEST_EVIDENCE: Integrity: Authorization failure of exercise by interface of cached global contract
           "authorization failure" in {
             val res = evalUpdateApp(
               pkgs,
@@ -606,7 +634,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
         "a local contract" - {
 
-          // TEST_EVIDENCE: Integrity: Evaluation order of exercise_interface of a local contract with failed authorization
+          // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a local contract
           "authorization failure" in {
             val res = evalUpdateApp(
               pkgs,
@@ -647,7 +675,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a non-cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch of a non-cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch of a non-cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -676,7 +704,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch of cached global contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch of cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -707,7 +735,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a local contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch of a local contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch of a local contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -741,7 +769,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a non-cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch_by_key of a non-cached global contract with authorization failure
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch_by_key of a non-cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs = pkgs,
@@ -771,7 +799,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch_by_key of a cached global contract with authorization failure
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch_by_key of a cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -802,7 +830,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a local contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of fetch_by_key of a local contract with authorization failure
+        // TEST_EVIDENCE: Integrity: Authorization failure of fetch_by_key of a local contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs = pkgs,
@@ -836,7 +864,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a non-cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of a non-cached global contract with authorization failure
+        // TEST_EVIDENCE: Integrity: Authorization failure of lookup_by_key of a non-cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -865,7 +893,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a cached global contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of a cached global contract with authorization failure
+        // TEST_EVIDENCE: Integrity: Authorization failure of lookup_by_key of a cached global contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -896,7 +924,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
 
       "a local contract" - {
 
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of a local contract with failure authorization
+        // TEST_EVIDENCE: Integrity: Authorization failure of lookup_by_key of a local contract
         "authorization failure" in {
           val res = evalUpdateApp(
             pkgs,
@@ -920,6 +948,146 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
                 ) =>
               authorizingParties shouldBe Set(charlie)
               maintainers shouldBe Set(alice)
+          }
+        }
+      }
+    }
+
+    if (withKey) "query_n_by_key" - {
+      "a non-cached global contract" - {
+
+        // TEST_EVIDENCE: Integrity: Authorization failure of query_n_by_key of a non-cached global contract
+        "authorization failure" - {
+          for (n <- Seq(1, 2, 5)) {
+            s"n=$n" in {
+              val res = evalUpdateApp(
+                pkgs,
+                e"""\(lookingParty:Party) (sig: Party) ->
+                   Test:query_n_by_key $n lookingParty (Test:someParty sig) Test:noCid 0""",
+                ArraySeq(SParty(charlie), SParty(alice)),
+                Set(alice, charlie),
+                getContract = getContracts(n),
+                getKeys = mapKeys(getKeysWithNContracts(n), getContracts(n)),
+              )
+              inside(res) {
+                case Success(
+                      Left(
+                        SErrorDamlException(
+                          IE.FailedAuthorization(
+                            _,
+                            LookupByKeyMissingAuthorization(T, _, maintainers, authorizingParties),
+                          )
+                        )
+                      )
+                    ) =>
+                  authorizingParties shouldBe Set(charlie)
+                  maintainers shouldBe Set(alice)
+              }
+            }
+          }
+        }
+
+        // TEST_EVIDENCE: Integrity: Authorization failure of query_n_by_key of a non-cached global contract
+        "authorization failure -- empty getKeys" in {
+          val res = evalUpdateApp(
+            pkgs,
+            e"""\(lookingParty:Party) (sig: Party) ->
+               Test:query_n_by_key 5 lookingParty (Test:someParty sig) Test:noCid 0""",
+            ArraySeq(SParty(charlie), SParty(alice)),
+            Set(alice, charlie),
+            getContract = getContracts(5),
+            getKeys = Map.empty,
+          )
+          inside(res) {
+            case Success(
+                  Left(
+                    SErrorDamlException(
+                      IE.FailedAuthorization(
+                        _,
+                        LookupByKeyMissingAuthorization(T, _, maintainers, authorizingParties),
+                      )
+                    )
+                  )
+                ) =>
+              authorizingParties shouldBe Set(charlie)
+              maintainers shouldBe Set(alice)
+          }
+        }
+      }
+
+      "a cached global contract" - {
+
+        // TEST_EVIDENCE: Integrity: Authorization failure of query_n_by_key of a cached global contract
+        "authorization failure" - {
+          for (n <- Seq(1, 2, 5)) {
+            s"n=$n" in {
+              val res = evalUpdateApp(
+                pkgs,
+                e"""\(lookingParty:Party) (sig: Party) (cId: ContractId M:T) ->
+                    ubind x: M:T <- fetch_template @M:T cId
+                    in Test:query_n_by_key $n lookingParty (Test:someParty sig) Test:noCid 0""",
+                ArraySeq(SParty(charlie), SParty(alice), SContractId(cId)),
+                Set(alice, charlie),
+                getContract = getContracts(n),
+                getKeys = mapKeys(getKeysWithNContracts(n), getContracts(n)),
+              )
+              inside(res) {
+                case Success(
+                      Left(
+                        SErrorDamlException(
+                          IE.FailedAuthorization(
+                            _,
+                            LookupByKeyMissingAuthorization(T, _, maintainers, authorizingParties),
+                          )
+                        )
+                      )
+                    ) =>
+                  authorizingParties shouldBe Set(charlie)
+                  maintainers shouldBe Set(alice)
+              }
+            }
+          }
+        }
+      }
+
+      "a local contract" - {
+
+        // TEST_EVIDENCE: Integrity: Authorization failure of query_n_by_key of a local contract
+        "authorization failure" - {
+          for (n <- Seq(1, 2, 5)) {
+            s"n=$n" in {
+              val res = evalUpdateApp(
+                pkgs,
+                e"""\(sig: Party) (obs : Party) (lookingParty: Party) ->
+                      ubind cId: ContractId M:T <- create @M:T M:T
+                        { signatory = sig,
+                          observer = obs,
+                          precondition = True,
+                          key = M:toKey sig,
+                          nested = M:buildNested 0
+                        }
+                     in Test:query_n_by_key $n lookingParty (Test:someParty sig) Test:noCid 0""",
+                ArraySeq(SParty(alice), SParty(bob), SParty(charlie)),
+                Set(alice, charlie),
+                getContract = getContracts(n),
+                getKeys = mapKeys(getKeysWithNContracts(n), getContracts(n)),
+              )
+
+              inside(res) {
+                case Success(
+                      Left(
+                        SErrorDamlException(
+                          IE.FailedAuthorization(
+                            _,
+                            LookupByKeyMissingAuthorization(T, _, maintainers, authorizingParties),
+                          )
+                        )
+                      )
+                    ) =>
+                  authorizingParties shouldBe Set(charlie)
+                  maintainers shouldBe Set(alice)
+              }
+            }
           }
         }
       }

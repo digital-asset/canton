@@ -290,6 +290,8 @@ class AwsKms(
         Right(aws.KeySpec.ECC_NIST_P384)
       case SigningKeySpec.EcSecp256k1 =>
         Right(aws.KeySpec.ECC_SECG_P256_K1)
+      case SigningKeySpec.MlDsa65 =>
+        Right(aws.KeySpec.ML_DSA_65)
     }
 
   private def convertToAwsAlgoSpec(
@@ -302,6 +304,8 @@ class AwsKms(
         Right(aws.SigningAlgorithmSpec.ECDSA_SHA_256)
       case SigningAlgorithmSpec.EcDsaSha384 =>
         Right(aws.SigningAlgorithmSpec.ECDSA_SHA_384)
+      case SigningAlgorithmSpec.MlDsa65 =>
+        Right(aws.SigningAlgorithmSpec.ML_DSA_SHAKE_256)
     }
 
   private def convertToAwsAsymmetricKeyEncryptionSpec(
@@ -329,6 +333,7 @@ class AwsKms(
       case aws.KeySpec.ECC_NIST_P256 => Right(SigningKeySpec.EcP256)
       case aws.KeySpec.ECC_NIST_P384 => Right(SigningKeySpec.EcP384)
       case aws.KeySpec.ECC_SECG_P256_K1 => Right(SigningKeySpec.EcSecp256k1)
+      case aws.KeySpec.ML_DSA_65 => Right(SigningKeySpec.MlDsa65)
       case _ => Left(s"Unsupported signing key type: ${keySpec.toString}")
     }
 
@@ -581,10 +586,21 @@ class AwsKms(
 object AwsKms extends Kms.SupportedSchemes {
 
   val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
-    NonEmpty.mk(Set, SigningKeySpec.EcP256, SigningKeySpec.EcP384, SigningKeySpec.EcSecp256k1)
+    NonEmpty.mk(
+      Set,
+      SigningKeySpec.EcP256,
+      SigningKeySpec.EcP384,
+      SigningKeySpec.EcSecp256k1,
+      SigningKeySpec.MlDsa65,
+    )
 
   val supportedSigningAlgoSpecs: NonEmpty[Set[SigningAlgorithmSpec]] =
-    NonEmpty.mk(Set, SigningAlgorithmSpec.EcDsaSha256, SigningAlgorithmSpec.EcDsaSha384)
+    NonEmpty.mk(
+      Set,
+      SigningAlgorithmSpec.EcDsaSha256,
+      SigningAlgorithmSpec.EcDsaSha384,
+      SigningAlgorithmSpec.MlDsa65,
+    )
 
   val supportedEncryptionKeySpecs: NonEmpty[Set[EncryptionKeySpec]] =
     NonEmpty.mk(Set, EncryptionKeySpec.Rsa2048)

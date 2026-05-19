@@ -50,6 +50,8 @@ object LedgerApiCryptoConversions {
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P384
     case v2.crypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1 =>
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1
+    case v2.crypto.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65 =>
+      v30.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65
     case v2.crypto.SigningKeySpec.Unrecognized(x) => v30.SigningKeySpec.Unrecognized(x)
   }
 
@@ -65,6 +67,8 @@ object LedgerApiCryptoConversions {
       v2.crypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_P384
     case v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1 =>
       v2.crypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1
+    case v30.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65 =>
+      v2.crypto.SigningKeySpec.SIGNING_KEY_SPEC_ML_DSA_65
     case v30.SigningKeySpec.Unrecognized(x) => v2.crypto.SigningKeySpec.Unrecognized(x)
   }
 

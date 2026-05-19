@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.command
 
 import cats.data.EitherT
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
@@ -31,6 +30,7 @@ import com.digitalasset.canton.platform.apiserver.execution.{
 }
 import com.digitalasset.canton.platform.apiserver.services.{RejectionGenerators, logging}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.command.ApiCommand
@@ -192,7 +192,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
           logger.info(s"Delaying submission by $submissionDelay")
           metrics.commands.delayedSubmissions.mark()
           val scalaDelay = scala.concurrent.duration.Duration.fromNanos(submissionDelay.toNanos)
-          Delayed.Future.by(scalaDelay)(submitTransaction(commandExecutionResult))
+          DelayUtil.delay(scalaDelay).flatMap(_ => submitTransaction(commandExecutionResult))
         }
       case TimeProviderType.Static =>
         // In static time mode, record time is always equal to ledger time

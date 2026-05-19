@@ -93,7 +93,9 @@ final class RetryStrategy private (
               s"Gave up trying after $attempts attempts and ${timeTaken.toUnit(SECONDS)} seconds."
             Future.failed(TooManyAttemptsException(attempt, timeTaken, message, throwable))
           } else if (predicate.lift(throwable).getOrElse(false)) {
-            Delayed.Future.by(wait)(go(attempt + 1, clip(progression(wait))))
+            val task = new PromiseTask(go(attempt + 1, clip(progression(wait))))
+            Timer.schedule(task, wait.toMillis)
+            task.future
           } else {
             val timeTaken = Duration.fromNanos(System.nanoTime() - startTime)
             val message =

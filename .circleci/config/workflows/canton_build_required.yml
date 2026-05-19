@@ -37,6 +37,22 @@ jobs:
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
 
+  - test_docker_images:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/
+      requires:
+        - package_community
+
 ##### Static analysis
   - verify_circleci_config_and_compliance_label:
       filters:
@@ -58,6 +74,18 @@ jobs:
         branches:
           ignore:
             - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
+  - check_todos:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        branches:
+          ignore:
+            - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
+            - main # we run the todo checker nightly on main to avoid race conditions between concurrent PRs
   - protobuf_continuity:
       context:
         - datadog

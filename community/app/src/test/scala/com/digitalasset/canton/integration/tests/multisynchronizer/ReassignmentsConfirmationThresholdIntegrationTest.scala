@@ -71,7 +71,7 @@ Reassigning participants:
 - For Alice: P1, P2, P3
 - For Bob: P1
  */
-sealed trait ReassignmentsConfirmationThresholdIntegrationTest
+final class ReassignmentsConfirmationThresholdIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with AcsInspection
@@ -79,6 +79,19 @@ sealed trait ReassignmentsConfirmationThresholdIntegrationTest
     with HasCommandRunnersHelpers
     with HasProgrammableSequencer
     with EntitySyntax {
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer(
+        Seq(Set("sequencer1"), Set("sequencer2"))
+          .map(_.map(InstanceName.tryCreate))
+      ),
+    )
+  )
+  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   private var alice: PartyId = _
   private var bob: PartyId = _
@@ -91,7 +104,7 @@ sealed trait ReassignmentsConfirmationThresholdIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateTargetTimestampForwardTolerance(10.minutes),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -375,24 +388,45 @@ sealed trait ReassignmentsConfirmationThresholdIntegrationTest
         import env.*
 
         programmableSequencers(daName).setPolicy_("da policy")(
-          dropConfirmationResponsesFromPolicy(Set(participant3))
+          dropConfirmationResponsesFromPolicy(denied = Set(participant3))
         )
         programmableSequencers(acmeName).setPolicy_("acme policy")(
-          dropConfirmationResponsesFromPolicy(Set(participant3))
+          dropConfirmationResponsesFromPolicy(denied = Set(participant3))
         )
 
         val aliceIou = participant1.ledger_api.javaapi.state.acs
           .await(Iou.COMPANION)(alice, synchronizerFilter = Some(daId))
 
-        val reassignmentId =
-          participant1.ledger_api.commands
-            .submit_unassign(alice, Seq(aliceIou.id.toLf), daId, acmeId)
-            .reassignmentId
+        loggerFactory.assertLogsUnordered(
+          {
+            val reassignmentId =
+              participant1.ledger_api.commands
+                .submit_unassign(alice, Seq(aliceIou.id.toLf), daId, acmeId)
+                .reassignmentId
 
-        participant1.ledger_api.commands.submit_assign(alice, reassignmentId, daId, acmeId)
+            participant1.ledger_api.commands.submit_assign(alice, reassignmentId, daId, acmeId)
 
-        programmableSequencers(daName).resetPolicy()
-        programmableSequencers(acmeName).resetPolicy()
+            programmableSequencers(daName).resetPolicy()
+            programmableSequencers(acmeName).resetPolicy()
+
+            /*
+            Progress time to the decision timeout so that P3 emits warning about the dropped
+            confirmation requests.
+             */
+            val decisionTimeout = Seq(
+              sequencer1.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(daId),
+              sequencer2.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(
+                acmeId
+              ),
+            ).map(_.decisionTimeout).max
+
+            environment.simClock.value.advance(decisionTimeout.asJava)
+
+            participant3.testing.fetch_synchronizer_times()
+          },
+          _.warningMessage should include regex "Response message for request .* timed out",
+          _.warningMessage should include regex "Response message for request .* timed out",
+        )
     }
 
     "sufficiently many unavailable participants block unassignment" in { implicit env =>
@@ -506,20 +540,4 @@ sealed trait ReassignmentsConfirmationThresholdIntegrationTest
 
     }
   }
-}
-
-class ReassignmentsConfirmationThresholdIntegrationTestPostgres
-    extends ReassignmentsConfirmationThresholdIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      sequencerGroups = MultiSynchronizer(
-        Seq(Set("sequencer1"), Set("sequencer2"))
-          .map(_.map(InstanceName.tryCreate))
-      ),
-    )
-  )
-  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

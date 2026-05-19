@@ -8,6 +8,10 @@ _Write summary of release_
 
 ## What’s New
 
+### Post Quantum Cryptography
+
+Added experimental support for ML-DSA. Currently only ML-DSA-65 is supported. Experimental algorithms need to be explicitly enabled via a node's crypto configuration in `<node>.crypto.enable-experimental = true`.
+
 ### Topic A
 Template for a bigger topic
 #### Background
@@ -30,11 +34,16 @@ Template for a bigger topic
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
+
+- When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
+  `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
+  This allows early termination of this initialization if the node is shutting down.
 
 ### (YY-nnn, Severity): Title
 
@@ -69,7 +78,3 @@ Canton has been tested against the following versions of its dependencies:
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
 
-
-## What's Coming
-
-We are currently working on

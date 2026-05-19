@@ -49,7 +49,6 @@ import com.digitalasset.canton.pekkostreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.platform.config.UpdateServiceConfig
 import com.digitalasset.canton.platform.index.IndexServiceImpl.*
 import com.digitalasset.canton.platform.index.IndexServiceOwner.GetPackagePreferenceForViewsUpgrading
-import com.digitalasset.canton.platform.store.PruningOffsetService
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.{
@@ -99,7 +98,6 @@ private[index] class IndexServiceImpl(
     override protected val loggerFactory: NamedLoggerFactory,
     materializer: Materializer,
     executionContext: ExecutionContext,
-    pruningOffsetService: PruningOffsetService,
     updateServiceConfig: UpdateServiceConfig,
 ) extends IndexService
     with NamedLogging {
@@ -428,6 +426,8 @@ private[index] class IndexServiceImpl(
   ): Future[Option[Offset]] =
     ledgerDao.indexDbPrunedUpTo
 
+  override def isPruningInProgress: Boolean = ledgerDao.isPruningInProgress
+
   override def currentLedgerEnd(): Future[Option[Offset]] =
     Future.successful(ledgerEnd())
 
@@ -485,7 +485,7 @@ private[index] class IndexServiceImpl(
   override def latestPrunedOffset()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Offset]] =
-    ledgerDao.pruningOffset
+    ledgerDao.indexDbPrunedUpTo
 
   private def updatesPageAscendingOrder(getUpdatesPageRequest: GetUpdatesPageRequest)(implicit
       loggingContext: LoggingContextWithTrace
@@ -507,7 +507,7 @@ private[index] class IndexServiceImpl(
         .map(_.decrement)
         .orElse(getUpdatesPageRequest.startExclusive) match {
         case Some(beginExclOffset) => Future.successful(beginExclOffset)
-        case None => pruningOffsetService.pruningOffset // Dynamic bound and first page
+        case None => ledgerDao.indexDbPrunedUpTo // Dynamic bound and first page
       }
       calculatedEndInclusive: Option[Offset] = getUpdatesPageRequest.endInclusive.orElse(
         ledgerEndBeforeFetch
@@ -520,7 +520,7 @@ private[index] class IndexServiceImpl(
           calculatedEndInclusive = calculatedEndInclusive,
           skipPruningChecks = isFirstPageOfAscendingDynamicLowerBound,
         )
-      pruningOffsetAfterFetch <- pruningOffsetService.pruningOffset
+      pruningOffsetAfterFetch <- ledgerDao.indexDbPrunedUpTo
     } yield {
       processAscendingPageData(
         getUpdatesPageRequest = getUpdatesPageRequest,
@@ -545,7 +545,7 @@ private[index] class IndexServiceImpl(
 
     implicit val ec: ExecutionContext = executionContext
     for {
-      pruningOffsetBeforeFetch <- pruningOffsetService.pruningOffset
+      pruningOffsetBeforeFetch <- ledgerDao.indexDbPrunedUpTo
       ledgerEndBeforeFetch = ledgerEnd()
       calculatedBeginExclusive: Option[Offset] = getUpdatesPageRequest.startExclusive.getOrElse(
         pruningOffsetBeforeFetch
@@ -561,7 +561,7 @@ private[index] class IndexServiceImpl(
         skipPruningChecks =
           getUpdatesPageRequest.startExclusive.isEmpty, // With  strict bound we'll fail inside this function when interfering with pruning
       )
-      pruningOffsetAfterFetch <- pruningOffsetService.pruningOffset
+      pruningOffsetAfterFetch <- ledgerDao.indexDbPrunedUpTo
     } yield {
       val trimmedTransactions =
         (getUpdatesPageRequest.startExclusive, pruningOffsetAfterFetch) match {

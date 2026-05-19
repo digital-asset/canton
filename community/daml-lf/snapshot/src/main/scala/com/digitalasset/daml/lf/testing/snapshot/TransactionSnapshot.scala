@@ -9,6 +9,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, TransactionCoder as TxCoder}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.Speedy
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
@@ -69,7 +70,8 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.default,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)
@@ -85,7 +87,8 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.default,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)

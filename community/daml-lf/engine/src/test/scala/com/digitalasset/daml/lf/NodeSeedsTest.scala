@@ -7,6 +7,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -89,7 +90,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
         participantId = Ref.ParticipantId.assertFromString("participant"),
         submissionSeed = crypto.Hash.hashPrivateKey(getClass.getName + time.toString),
         contractIdVersion = contractIdVersion,
-        contractStateMode = contractStateMode,
+        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         prefetchKeys = Seq.empty,
       )
       .consume(pcs = contracts, pkgs = packages)
@@ -162,7 +163,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
           time,
           time,
           contractIdVersion = contractIdVersion,
-          contractStateMode = contractStateMode,
+          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
         .consume(pcs = contracts, pkgs = packages)
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet

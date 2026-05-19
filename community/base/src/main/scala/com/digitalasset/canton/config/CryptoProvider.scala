@@ -59,6 +59,7 @@ object CryptoProvider {
           SigningAlgorithmSpec.Ed25519,
           SigningAlgorithmSpec.EcDsaSha256,
           SigningAlgorithmSpec.EcDsaSha384,
+          SigningAlgorithmSpec.MlDsa65,
         ),
       )
 
@@ -71,6 +72,7 @@ object CryptoProvider {
           SigningKeySpec.EcP256,
           SigningKeySpec.EcP384,
           SigningKeySpec.EcSecp256k1,
+          SigningKeySpec.MlDsa65,
         ),
       )
 
@@ -165,6 +167,7 @@ object CryptoProvider {
           SigningAlgorithmSpec.Ed25519,
           SigningAlgorithmSpec.EcDsaSha256,
           SigningAlgorithmSpec.EcDsaSha384,
+          SigningAlgorithmSpec.MlDsa65,
         ),
       )
 
@@ -177,6 +180,7 @@ object CryptoProvider {
           SigningKeySpec.EcP256,
           SigningKeySpec.EcP384,
           SigningKeySpec.EcSecp256k1,
+          SigningKeySpec.MlDsa65,
         ),
       )
 

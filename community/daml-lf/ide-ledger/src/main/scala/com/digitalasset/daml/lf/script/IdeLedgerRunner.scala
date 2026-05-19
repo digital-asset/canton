@@ -319,7 +319,7 @@ private[lf] object IdeLedgerRunner {
       readAs = readAs,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
-      contractStateMode = ledger.csmMode,
+      interpretationConfig = interpretation.InterpretationConfig.Default.copy(contractStateMode = ledger.csmMode),
       logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter

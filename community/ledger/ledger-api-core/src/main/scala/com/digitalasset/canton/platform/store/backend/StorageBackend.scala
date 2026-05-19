@@ -331,6 +331,13 @@ trait ContractStorageBackend {
   def nonUniqueContractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
       connection: Connection
   ): ContractStorageBackend.KeysPageResult
+
+  def nonUniqueContractKeysPlain(
+      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      validAtEventSeqId: Long,
+  )(
+      connection: Connection
+  ): Seq[ContractStorageBackend.KeysPageResult]
 }
 
 object ContractStorageBackend {
@@ -393,6 +400,18 @@ trait EventStorageBackend {
     * eligible for pruning.
     */
   def cleanPruningCandidates()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit
+
+  /** Adds contracts to contract pruning candidates lapi_pruning_contract_candidate after the
+    * defined exclusive bound. This function intended for indexer crash recovery, where during
+    * initialization before the events getting cleaned after ledger-end watermark, the related new
+    * contracts are marked for pruning. This function is not pruning the contracts, only adds them
+    * as candidates, which will be validated and potentially pruned as part of the next pruning
+    * Index DB pruning.
+    */
+  def addContractPruningCandidatesAfter(eventSeqIdExclusive: Long)(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit

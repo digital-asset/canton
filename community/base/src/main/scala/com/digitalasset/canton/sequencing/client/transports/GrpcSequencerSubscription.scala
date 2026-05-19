@@ -244,6 +244,10 @@ abstract class ConsumesCancellableGrpcStreamObserver[
 
       override def onError(t: Throwable): Unit = {
         import TraceContext.Implicits.Empty.*
+
+        // Cancel the ongoing onNext
+        currentAwaitOnNext.get.trySuccess(Outcome(Right(()))).discard
+
         FutureUtil.doNotAwait(
           // re-sync on onNext processing but proceed even if the handler threw an exception
           currentProcessing
@@ -299,6 +303,9 @@ abstract class ConsumesCancellableGrpcStreamObserver[
 
       override def onCompleted(): Unit = {
         import TraceContext.Implicits.Empty.*
+        // Cancel the ongoing onNext
+        currentAwaitOnNext.get.trySuccess(Outcome(Right(()))).discard
+
         FutureUtil.doNotAwait(
           // re-sync on onNext processing but proceed even if the handler threw an exception
           currentProcessing.get().thereafter { _ =>

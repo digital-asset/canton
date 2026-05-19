@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.admin.inspection
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   LtHash16,
@@ -148,6 +149,7 @@ sealed trait SyncStateInspectionTest
       timeouts,
       loggerFactory,
       Eval.now(mockStringInterning),
+      BatchingConfig(),
     )
 
     when(syncStateInspection.syncPersistentStateManager.acsCommitmentStore(synchronizerId))

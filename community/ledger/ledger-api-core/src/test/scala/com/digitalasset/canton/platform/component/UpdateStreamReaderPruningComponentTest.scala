@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.component
 
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.platform.store.PruningOffsetService
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import com.digitalasset.canton.platform.store.dao.events.{
@@ -12,7 +13,10 @@ import com.digitalasset.canton.platform.store.dao.events.{
   QueryValidRange,
   UpdatesStreamReader,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.flatspec.AnyFlatSpec
+
+import scala.concurrent.Future
 
 class UpdateStreamReaderPruningComponentTest
     extends AnyFlatSpec
@@ -40,6 +44,11 @@ class UpdateStreamReaderPruningComponentTest
     ingestUpdates(create2)
     ingestUpdates(create3)
     upd4 = ingestUpdates(create4)
+  }
+
+  private val pruningOffsetService: PruningOffsetService = new PruningOffsetService {
+    override def pruningOffset(implicit traceContext: TraceContext): Future[Option[Offset]] =
+      index.indexDbPrunedUpto
   }
 
   private def readUpdates =
