@@ -28,7 +28,12 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.metrics.MetricValue
 import com.digitalasset.canton.metrics.MetricValue.LongPoint
-import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  Member,
+  ParticipantId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
@@ -394,6 +399,8 @@ object LsuBase {
         newSerial,
         topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,
       )
+
+    val lsid: SynchronizerId = currentPsid.logical
 
     val newPsid: PhysicalSynchronizerId =
       overridePsid.getOrElse(

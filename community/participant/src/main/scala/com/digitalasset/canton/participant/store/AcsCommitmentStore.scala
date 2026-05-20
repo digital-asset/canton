@@ -6,7 +6,8 @@ package com.digitalasset.canton.participant.store
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ReinitializationStatus
 import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.CommitmentPeriodStateInOutstanding
@@ -29,7 +30,11 @@ import scala.util.control.Breaks.*
 /** Read and write interface for ACS commitments. Apart from pruning, should only be used by the ACS
   * commitment processor
   */
-trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with AutoCloseable {
+trait AcsCommitmentStore
+    extends AcsCommitmentLookup
+    with PrunableByTime
+    with AutoCloseable
+    with NamedLogging {
 
   override protected def kind: String = "acs commitments"
 
@@ -255,7 +260,8 @@ trait IncrementalCommitmentStore {
     * added yet.
     */
   def get()(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[
     (RecordTime, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType])
   ]

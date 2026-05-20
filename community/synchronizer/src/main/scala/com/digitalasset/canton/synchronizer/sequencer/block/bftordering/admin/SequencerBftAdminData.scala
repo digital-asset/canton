@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin
 import cats.implicits.*
 import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
+import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port, PositiveLong}
 import com.digitalasset.canton.config.{PemFile, PemString}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyNameOnlyCase, PrettyPrinting}
 import com.digitalasset.canton.sequencer.admin.v30.GetOrderingTopologyResponse.DynamicSequencingParameters
@@ -31,7 +31,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.SequencerId
 
 import scala.util.{Failure, Success, Try}
@@ -368,7 +370,7 @@ object SequencerBftAdminData {
   final case class OrderingTopology(
       currentEpoch: Long,
       sequencerIds: Seq[SequencerId],
-      sequencingParameters: SequencingParameters,
+      sequencingParameters: topology.SequencingParameters,
   ) {
 
     def toProto: GetOrderingTopologyResponse =
@@ -394,11 +396,32 @@ object SequencerBftAdminData {
         case DynamicSequencingParameters.Empty =>
           Left(FieldNotSet("dynamicSequencingParameters"))
         case DynamicSequencingParameters.DynamicSequencingParametersPayload(value) =>
-          SequencingParameters.fromProto30(value)
+          topology.SequencingParameters.fromProto30(value)
         case DynamicSequencingParameters.DynamicSequencingParametersPayload31(value) =>
-          SequencingParameters.fromProto31(value)
+          topology.SequencingParameters.fromProto31(value)
       }
       parameters <- parsedParameters.leftMap(_.toString)
     } yield OrderingTopology(response.currentEpoch, sequencers, parameters)
+  }
+
+  final case class SequencingParameters(
+      pbftViewChangeTimeout: PositiveFiniteDuration,
+      segmentLength: PositiveLong,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+  ) extends PrettyPrinting {
+    override protected def pretty: Pretty[SequencingParameters] =
+      prettyOfClass(
+        param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
+        param("segmentLength", _.segmentLength),
+        param("blacklistLeaderSelectionPolicyConfig", _.blacklistLeaderSelectionPolicyConfig),
+      )
+  }
+  object SequencingParameters {
+    def apply(topologySequencingParameters: topology.SequencingParameters): SequencingParameters =
+      SequencingParameters(
+        topologySequencingParameters.pbftViewChangeTimeout,
+        topologySequencingParameters.segmentLength.length,
+        topologySequencingParameters.blacklistLeaderSelectionPolicyConfig,
+      )
   }
 }

@@ -368,6 +368,17 @@ object SyncEphemeralStateFactory {
       .map(_.recordTime)
       .getOrElse(CantonTimestamp.MinValue)
 
+  def currentTimeOfChange(synchronizerIndexO: Option[SynchronizerIndex]): TimeOfChange =
+    synchronizerIndexO
+      .map { si =>
+        val recordTime = si.recordTime
+        val repairCounterO = si.repairIndex
+          .filter(ri => ri.timestamp == recordTime)
+          .map(_.counter)
+        TimeOfChange(recordTime, repairCounterO)
+      }
+      .getOrElse(TimeOfChange(CantonTimestamp.MinValue))
+
   def nextRepairCounter(synchronizerIndexO: Option[SynchronizerIndex]): RepairCounter =
     synchronizerIndexO
       .flatMap(si =>
@@ -395,7 +406,11 @@ object SyncEphemeralStateFactory {
       ts = currentRecordTime(synchronizerIndexO),
       counterO = Some(nextRepairCounter(synchronizerIndexO)),
     )
-    logger.debug("Deleting dirty requests")
+
+    logger.info(
+      s"Cleaning up persistent state since sequencer timestamp $nextSequencerTimestamp and ACS watermark $nextTimeOfChange"
+    )
+
     for {
       _ <- persistentState.requestJournalStore.deleteSinceRequestTimestamp(
         // The nextSequencerTimestamp is a lower bound (smaller or equal than to) for the requestTimestamp for the nextSequencerCounter

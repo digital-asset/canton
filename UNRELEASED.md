@@ -120,13 +120,13 @@ As part of this release DA BFT is ready in beta form for early access testing, b
 Multi-synchronizer support is available in early access and has to be enabled explicitly.
 This feature should only be used in test environments.
 
-To enable contract reassignment across synchronizers, the flag `PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER`  must be activated on all participants hosting a stakeholder of the contract on both the source and target synchronizers. For a synchronizer, it can be done as follows:
+To enable contract reassignment across synchronizers, the flag `PARTICIPANT_FEATURE_FLAG_ENABLE_ALPHA_MULTI_SYNCHRONIZER`  must be activated on all participants hosting a stakeholder of the contract on both the source and target synchronizers. For a synchronizer, it can be done as follows:
 
 ```
 participant.topology.synchronizer_trust_certificates.propose(
   p.id,
   synchronizerId,
-  featureFlags = Seq(ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer),
+  featureFlags = Seq(ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer),
 )
 ```
 
@@ -251,6 +251,11 @@ If detailed diagnostics are required in a non-production environment, sanitizati
 ```
 canton.monitoring.sanitize-public-error-messages = false
 ```
+
+### Ignoring of offboarded sequencers for submission requests
+
+In the case where sequencers are offboarded but remain online and kept in the connectivity configuration, it was still possible that members pick them as the target for submission requests. The submission would fail, but the member would incur a delay as it requires retrying.
+This has now changed, and offboarded sequencers are ignored when sending submission requests.
 
 #### API Changes
 
@@ -483,6 +488,13 @@ Deprecated usage of `PartyToKeyMapping`. The functionality provided by `PartyToK
 Please use `PartyToParticipant` for new transactions. `PartyToKeyMapping` is still fully supported in this version (including existing and new transactions).
 In future version, creation of new `PartyToKeyMapping` transactions may be disallowed.
 
+Deprecated `TopologyManagerReadService.ListAll` in favor of `ListAllV2`, which uses an inclusion
+list (`include_mappings`) instead of an exclusion list (`exclude_mappings`). This avoids sending
+mapping codes unknown to older servers. The console method `topology.transactions.list` now calls
+`ListAllV2` by default and only falls back to `ListAll` when targeting a 3.4 node. The
+`excludeMappings` and `protocolVersion` parameters of `topology.transactions.list` are deprecated;
+use `filterMappings` instead.
+
 Deprecated `TopologyManagerReadService.ExportTopologySnapshot` and `TopologyManagerWriteService.ImportTopologySnapshot`,
 along with their console counterparts `topology.transactions.export_topology_snapshot`,
 `topology.transactions.import_topology_snapshot`, `topology.transactions.import_topology_snapshot_from`,
@@ -490,6 +502,20 @@ and `topology.transactions.export_identity_transactions`.
 Please use the corresponding `V2` variants (`ExportTopologySnapshotV2` / `ImportTopologySnapshotV2`,
 `export_topology_snapshotV2`, `import_topology_snapshotV2`, `import_topology_snapshot_fromV2`,
 `export_identity_transactionsV2`) instead, which use an updated internal bytestring format.
+
+Deprecated `SequencerInitializationService.InitializeSequencerFromGenesisState`,
+`SequencerInitializationService.InitializeSequencerFromOnboardingState`,
+`SequencerAdministrationService.OnboardingState`, and
+`TopologyManagerReadService.GenesisState`, along with their console counterparts
+`setup.assign_from_genesis_state`, `setup.assign_from_onboarding_state`,
+`setup.onboarding_state_for_sequencer`, `setup.onboarding_state_at_timestamp`,
+and `topology.transactions.genesis_state`.
+Please use the corresponding `V2` variants (`InitializeSequencerFromGenesisStateV2`,
+`InitializeSequencerFromOnboardingStateV2`, `OnboardingStateV2`, `GenesisStateV2`,
+`assign_from_genesis_stateV2`, `assign_from_onboarding_stateV2`,
+`onboarding_state_for_sequencerV2`, `onboarding_state_at_timestampV2`,
+`genesis_stateV2`) instead, which use an updated internal bytestring format
+that enables streaming ingestion, making snapshot export and import significantly less memory-intensive.
 
 ### Minor Performance Improvements
 
@@ -715,13 +741,27 @@ In turn, two new endpoints are implemented to provide the same functionality:
 - `v2/package-vetting/update` accepts a POST request with the same body as the deprecated POST endpoint `v2/package-vetting` and returns the updated vetting state of the package in the same format.
 
 
+### Protocol version parameter in topology list commands
+
+The `protocolVersion` parameter in all `<node>.topology.<mapping>.list` console commands has been deprecated and will be removed in a future version.
+
 ## Minor Improvements
 
 ### Bugfixes
 
+- Fixed a mid-crash recovery issue for offline party replication and repair ACS imports. Previously, if an ACS import
+  was interrupted (for example by a participant node restart or crash), a subsequent recovery attempt could result in
+  missing contracts on the Ledger API. The recovery process now properly rolls back uncommitted partial states upon
+  retrying the ACS import, ensuring recovered contracts are completely synchronized across both internal storage
+  and the Ledger API.
 - Fixed a bug where the Ledger API `PackageService.ListVettedPackages` used to return a potentially not yet
   effective state of the vetted packages. Now it returns the state of vetted packages effective at the time of the request.
 - Sequencer health status used to incorrectly return the synchronizer uid instead of the sequencer uid.
+- Prevent Ledger API crashes after running `ParticipantRepairService.PurgeContracts` admin command.
+  Fixes a critical issue where using the `ParticipantRepairService.PurgeContracts` command (when multi-synchronizer support is disabled) generated malformed
+  Daml values for the choice argument and choice result of the `Archive` choice of the purge contract events in the Ledger API event store.
+  This previously caused the Ledger API streams reading the generated `Archive` events to crash.
+  The repair command now generates correct Daml values for the corresponding entries, that can be safely delivered by the Ledger API.
 
 ### Ledger API Multi-Synchronizer Events Alpha Support
 
@@ -778,6 +818,9 @@ Offline root namespace key scripts:
   This value defaults to 50 and can be changed at the following config path: `canton.participants.<participant_name>.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party`
 - Added a new configuration parameter `canton.participants.<participant_name>.ledger-api.index-service.max-lookup-limit` that caps the maximum number of contracts returned by a contract key lookup per request.
     The default value is 1000.
+- When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
+  `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
+  This allows early termination of this initialization if the node is shutting down.
 
 ## Compatibility
 

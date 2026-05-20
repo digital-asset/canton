@@ -80,7 +80,11 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
   }
 
   private val supportedHashingSchemeVersions =
-    HashingSchemeVersion.MinimumProtocolVersionToHashingVersion(testedProtocolVersion)
+    // TODO(i32856): Remove the get / flatMap when PV Dev has a matching supported scheme
+    HashingSchemeVersion.MinimumProtocolVersionToHashingVersion
+      .get(testedProtocolVersion)
+      .toList
+      .flatMap(_.forgetNE)
 
   supportedHashingSchemeVersions.foreach(testExternalSubmissionDemo)
 

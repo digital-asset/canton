@@ -52,11 +52,7 @@ import com.digitalasset.canton.participant.config.{
   ParticipantStoreConfig,
   TestingTimeServiceConfig,
 }
-import com.digitalasset.canton.participant.store.{
-  ParticipantNodePersistentState,
-  ParticipantPruningStore,
-  PruningOffsetServiceImpl,
-}
+import com.digitalasset.canton.participant.store.ParticipantNodePersistentState
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
@@ -122,7 +118,6 @@ class LedgerApiServer(
     testingTimeService: Option[TimeServiceBackend],
     adminTokenDispenser: CantonAdminTokenDispenser,
     participantContractStore: Eval[LedgerApiContractStore],
-    participantPruningStore: Eval[ParticipantPruningStore],
     enableCommandInspection: Boolean,
     tracerProvider: TracerProvider,
     grpcApiMetrics: LedgerApiServerMetrics,
@@ -280,8 +275,6 @@ class LedgerApiServer(
               loggingContext.traceContext
             ),
         participantContractStore = participantContractStore.value,
-        pruningOffsetService =
-          PruningOffsetServiceImpl(participantPruningStore.value, loggerFactory),
         materializer = implicitly[Materializer],
         updateServiceConfig = updateServiceConfig,
         scheduler = actorSystem.scheduler,
@@ -627,7 +620,6 @@ object LedgerApiServer {
       participantContractStore = participantNodePersistentState.map(state =>
         LedgerApiContractStoreImpl(state.contractStore, loggerFactory, metrics)
       ),
-      participantPruningStore = participantNodePersistentState.map(_.pruningStore),
       enableCommandInspection = config.ledgerApi.enableCommandInspection,
       tracerProvider = tracerProvider,
       grpcApiMetrics = metrics,

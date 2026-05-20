@@ -224,15 +224,29 @@ private[mediator] class Mediator(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Unit = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
     // Update the in memory clean pre-head
-    cleanPreheadTimestamp.set(newPrehead.timestamp)
-    // Advance the in-memory watermark and unblock any inspection service streams waiting on it.
-    recordOrderTimeAwaiter.notifyAwaitedFutures(newPrehead.timestamp)
-    FutureUtil.doNotAwait(
-      synchronizeWithClosing("prune mediator deduplication store")(
-        state.deduplicationStore.prune(newPrehead.timestamp)
-      ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown")),
-      "pruning the mediator deduplication store failed",
+    val newCleanPreheadTimestamp = cleanPreheadTimestamp.updateAndGet {
+      /* From the perspective of this handler, it can be called with out-of-order pre-head timestamps
+       * due to concurrent future execution, so take the max out of both new and current.
+       * See [[com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker]]
+       */
+      _.max(newPrehead.timestamp)
+    }
+
+    logger.debug(
+      s"Advanced cached clean prehead timestamp for verdicts watermark to $newCleanPreheadTimestamp (received newPrehead was ${newPrehead.timestamp})"
     )
+
+    // We only need to run this if the prehead was in fact updated to a newer timestamp
+    if (newCleanPreheadTimestamp == newPrehead.timestamp) {
+      // Advance the in-memory watermark and unblock any inspection service streams waiting on it.
+      recordOrderTimeAwaiter.notifyAwaitedFutures(newPrehead.timestamp)
+      FutureUtil.doNotAwait(
+        synchronizeWithClosing("prune mediator deduplication store")(
+          state.deduplicationStore.prune(newPrehead.timestamp)
+        ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown")),
+        "pruning the mediator deduplication store failed",
+      )
+    }
   }
 
   /** Prune all unnecessary data from the mediator state and sequenced events store. Will validate

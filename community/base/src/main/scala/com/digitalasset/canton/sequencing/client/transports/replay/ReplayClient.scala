@@ -172,7 +172,8 @@ class ReplayClientImpl(
       .getConnections(
         requester,
         PositiveInt.one,
-        exclusions = Set.empty,
+        excluded = Set.empty,
+        acceptableO = None,
       )
       .headOption
       .toRight("No connection available")

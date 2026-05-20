@@ -717,17 +717,21 @@ class SequencerConnectionPoolImpl private[sequencing] (
   override def getConnections(
       requester: String,
       requestedNumber: PositiveInt,
-      exclusions: Set[SequencerId],
+      excluded: Set[SequencerId],
+      acceptableO: Option[Set[SequencerId]],
   )(implicit traceContext: TraceContext): Set[SequencerConnection] =
     // Always return connections randomly for now
     lock.exclusive {
+      val allowedMsg =
+        acceptableO.fold("")(acceptable => s" allowing only ${acceptable.map(_.uid.identifier)}")
       logger.debug(
-        s"[$requester] requesting $requestedNumber connection(s) excluding ${exclusions.map(_.uid.identifier)}"
+        s"[$requester] requesting $requestedNumber connection(s) excluding ${excluded
+            .map(_.uid.identifier)}$allowedMsg"
       )
 
-      // Pick up to `requestedNumber` non-excluded sequencer IDs from the pool
+      // Pick up to `requestedNumber` allowed and non-excluded sequencer IDs from the pool
       val randomSeqIds = SeqUtil.randomSubsetShuffle(
-        pool.keySet.diff(exclusions).toIndexedSeq,
+        acceptableO.fold(pool.keySet)(_.intersect(pool.keySet)).diff(excluded).toIndexedSeq,
         requestedNumber.unwrap,
         random,
       )
@@ -750,13 +754,16 @@ class SequencerConnectionPoolImpl private[sequencing] (
       pickedConnections
     }
 
-  override def getOneConnectionPerSequencer(requester: String)(implicit
+  override def getOneConnectionPerSequencer(
+      requester: String,
+      acceptableO: Option[Set[SequencerId]],
+  )(implicit
       traceContext: TraceContext
   ): Map[SequencerId, SequencerConnection] = {
     logger.debug(s"[$requester] requesting one connection per sequencer")
     // Upper bound on number of connections. Note: `checked` because `connections` is `NonEmpty`.
     val nb = checked(PositiveInt.tryCreate(config.connections.size))
-    getConnections(requester, nb, exclusions = Set.empty)
+    getConnections(requester, nb, excluded = Set.empty, acceptableO = acceptableO)
       .map(c => c.attributes.sequencerId -> c)
       .toMap
   }

@@ -23,9 +23,9 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -658,7 +658,7 @@ trait SynchronizerGovernanceSnapshotClient {
 
   def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]]
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]]
 
   /** List all the dynamic synchronizer parameters (past and current) */
   @deprecated(

@@ -95,8 +95,10 @@ class BftTopologyForInitDownloaderTest
           request = testRequest,
           loggerFactory = loggerFactory,
           getBftInitTopologyStateHash =
-            _ => EitherT.pure[FutureUnlessShutdown, String](invalidHash),
-          downloadSnapshot = _ => EitherT.pure[FutureUnlessShutdown, String](testDownloadResponse),
+            (_, _) => EitherT.pure[FutureUnlessShutdown, String](invalidHash),
+          downloadSnapshot =
+            (_, _) => EitherT.pure[FutureUnlessShutdown, String](testDownloadResponse),
+          acceptableSequencersO = None,
         )
         .futureValueUS
         .leftOrFail("Expected a hash disagreement")
@@ -113,8 +115,11 @@ class BftTopologyForInitDownloaderTest
           retryDelay = 1.second,
           request = testRequest,
           loggerFactory = loggerFactory,
-          getBftInitTopologyStateHash = _ => EitherT.pure[FutureUnlessShutdown, String](validHash),
-          downloadSnapshot = _ => EitherT.pure[FutureUnlessShutdown, String](testDownloadResponse),
+          getBftInitTopologyStateHash =
+            (_, _) => EitherT.pure[FutureUnlessShutdown, String](validHash),
+          downloadSnapshot =
+            (_, _) => EitherT.pure[FutureUnlessShutdown, String](testDownloadResponse),
+          acceptableSequencersO = None,
         )
         .futureValueUS
         .valueOrFail("Expected a successful download")

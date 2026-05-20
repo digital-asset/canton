@@ -114,10 +114,10 @@ final class CommitmentsService(
                   synchronizerId
                 )
             )
-          reinitRecordTime = SyncEphemeralStateFactory.currentRecordTime(synchronizerIndex)
+          reinitTimeOfChange = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
 
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            synchronizer.acsCommitmentProcessor.reinitializeCommitments(reinitRecordTime),
+            synchronizer.acsCommitmentProcessor.reinitializeCommitments(reinitTimeOfChange),
             s"Reinitialization is already scheduled or in progress for ${synchronizer.psid}.",
           )
 
@@ -138,7 +138,7 @@ final class CommitmentsService(
           res <- EitherT(
             readCommitmentRepairStatus(
               persistentState,
-              reinitRecordTime,
+              reinitTimeOfChange.timestamp,
               timeoutSeconds,
             )
           )

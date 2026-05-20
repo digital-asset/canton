@@ -101,7 +101,7 @@ trait AcsCommitmentToolingIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
         ConfigTransforms.updateTargetTimestampForwardTolerance(24.hours),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

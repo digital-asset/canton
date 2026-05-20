@@ -15,8 +15,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
@@ -517,7 +517,7 @@ class ValidatingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     verify("findDynamicSequencingParameters")(_.findDynamicSequencingParameters())
 
   @nowarn("cat=deprecation")

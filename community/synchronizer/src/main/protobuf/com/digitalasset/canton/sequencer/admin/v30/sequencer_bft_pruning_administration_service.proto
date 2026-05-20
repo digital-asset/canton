@@ -15,8 +15,6 @@ service SequencerBftPruningAdministrationService {
   rpc BftPrune(BftPruneRequest) returns (BftPruneResponse);
 
   // Enable automatic pruning using the specified schedule parameters
-  // The following errors may occur on the SetSchedule or Update commands:
-  // - ``INVALID_ARGUMENT``: if a parameter is missing or an invalid cron expression or duration is passed.
   rpc SetSchedule(com.digitalasset.canton.admin.pruning.v30.SetScheduleRequest) returns (com.digitalasset.canton.admin.pruning.v30.SetScheduleResponse);
 
   // Enable automatic pruning with bft-orderer-specific schedule parameters.

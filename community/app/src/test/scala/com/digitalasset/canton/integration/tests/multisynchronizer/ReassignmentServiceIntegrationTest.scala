@@ -92,7 +92,7 @@ abstract class ReassignmentServiceIntegrationTest
       .addConfigTransforms(
         // Ensure reassignments are not tripped up by some participants being a little behind.
         ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

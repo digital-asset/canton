@@ -151,6 +151,8 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
   ): Future[Option[Offset]] =
     delegate.indexDbPrunedUpto
 
+  override def isPruningInProgress: Boolean = delegate.isPruningInProgress
+
   override def currentHealth(): HealthStatus =
     delegate.currentHealth()
 

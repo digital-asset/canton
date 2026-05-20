@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStoreTest,
@@ -45,6 +46,7 @@ trait DbAcsCommitmentStoreTest extends AcsCommitmentStoreTest { this: DbTest =>
         timeouts,
         loggerFactory,
         Eval.now(mockStringInterning),
+        BatchingConfig(),
       )(ec)
     )
   }
@@ -72,6 +74,7 @@ trait DbIncrementalCommitmentStoreTest extends IncrementalCommitmentStoreTest { 
         timeouts,
         loggerFactory,
         Eval.now(mockStringInterning),
+        BatchingConfig(),
       )(ec)
     )
   }

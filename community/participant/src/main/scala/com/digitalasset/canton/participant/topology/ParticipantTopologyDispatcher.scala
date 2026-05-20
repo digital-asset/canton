@@ -396,13 +396,7 @@ private class SynchronizerOnboardingOutbox(
         synchronizeWithClosing(functionFullName)(onlyApplicable(candidates))
       )
       _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicable))
-      // Try to convert if necessary the topology transactions for the required protocol version of the synchronizer
-      convertedTxs <- synchronizeWithClosing(functionFullName) {
-        convertTransactions(applicable).leftMap[SynchronizerRegistryError](
-          SynchronizerRegistryError.TopologyConversionError.Error(_)
-        )
-      }
-    } yield convertedTxs
+    } yield applicable
 
   private def dispatch(transactions: Seq[GenericSignedTopologyTransaction])(implicit
       traceContext: TraceContext

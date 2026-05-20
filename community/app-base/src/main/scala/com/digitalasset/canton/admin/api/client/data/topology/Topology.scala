@@ -6,8 +6,8 @@ package com.digitalasset.canton.admin.api.client.data.topology
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.RefinedDurationConversionError
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{ProtoDeserializationError, protocol}
 
 import java.time.Instant
 
@@ -312,11 +313,30 @@ object ListSynchronizerParametersStateResult {
       value: v30.ListSynchronizerParametersStateResponse.Result
   ): ParsingResult[ListSynchronizerParametersStateResult] =
     for {
+      context <- ProtoConverter.parseRequired(BaseResult.fromProtoV30, "context", value.context)
+      item <- ProtoConverter.parseRequired(
+        DynamicSynchronizerParameters.fromProtoV30,
+        "item",
+        value.item,
+      )
+    } yield ListSynchronizerParametersStateResult(context, item)
+}
+
+final case class ListSequencingParametersStateResult(
+    context: BaseResult,
+    item: SequencingParameters,
+)
+
+object ListSequencingParametersStateResult {
+  def fromProtoV30(
+      value: v30.ListSequencingParametersStateResponse.Result
+  ): ParsingResult[ListSequencingParametersStateResult] =
+    for {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
       itemProto <- ProtoConverter.required("item", value.item)
-      item <- DynamicSynchronizerParameters.fromProtoV30(itemProto)
-    } yield ListSynchronizerParametersStateResult(context, item)
+      item <- protocol.SequencingParameters.fromProtoV30(itemProto)
+    } yield ListSequencingParametersStateResult(context, SequencingParameters(item.payload))
 }
 
 final case class ListMediatorSynchronizerStateResult(
