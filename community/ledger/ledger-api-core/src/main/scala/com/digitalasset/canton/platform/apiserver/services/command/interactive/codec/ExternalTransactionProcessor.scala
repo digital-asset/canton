@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive.
 import cats.data.EitherT
 import cats.syntax.either.*
 
-import scala.annotation.unused
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PreparedTransaction
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -227,7 +226,7 @@ class ExternalTransactionProcessor(
       contractLookupParallelism: PositiveInt,
       hashTracer: HashTracer,
       maxRecordTime: Option[LfTimestamp],
-      @unused hashingSchemeVersion: HashingSchemeVersion, // Reserved for future use; currently computed from tx version
+      hashingSchemeVersion: HashingSchemeVersion,
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -256,11 +255,11 @@ class ExternalTransactionProcessor(
       // Use V3 for VDev transactions (required for externalCall support)
       hashVersionAndHash <- {
         val protocolVersion = commandExecutionResult.synchronizerRank.synchronizerId.protocolVersion
-        // Use the transaction's serialization version to select hashing scheme
+        // VDev transactions require V3; otherwise honor the client-requested scheme.
         val txVersion = enriched.transaction.version
         val hashVersion: HashingSchemeVersion =
           if (txVersion == SerializationVersion.VDev) HashingSchemeVersion.V3
-          else HashingSchemeVersion.V2
+          else hashingSchemeVersion
         EitherT
           .fromEither[FutureUnlessShutdown](
             enriched
