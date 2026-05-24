@@ -82,6 +82,7 @@ private[interactive] sealed trait EnrichedTransactionData {
   def computeHash(
       hashVersion: HashingSchemeVersion,
       protocolVersion: ProtocolVersion,
+      physicalSynchronizerId: PhysicalSynchronizerId,
       hashTracer: HashTracer = HashTracer.NoOp,
   ): Either[InteractiveSubmission.HashError, Hash] = {
     val metadataForHashing = TransactionMetadataForHashing.create(
@@ -89,7 +90,7 @@ private[interactive] sealed trait EnrichedTransactionData {
       commandId = submitterInfo.commandId,
       transactionUUID = transactionUUID,
       mediatorGroup = mediatorGroup,
-      synchronizer = synchronizer,
+      synchronizer = physicalSynchronizerId.forExternalTransactionHashing,
       timeBoundaries = transactionMeta.timeBoundaries,
       preparationTime = transactionMeta.preparationTime,
       maxRecordTime = maxRecordTime,
@@ -186,6 +187,7 @@ final case class ExecuteTransactionData(
           computeHash(
             externallySignedSubmission.version,
             protocolVersion,
+            physicalSynchronizerId,
           )
             .leftMap(_.message)
         )

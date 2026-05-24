@@ -4,16 +4,19 @@
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
 import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data.Node.NodeType
+import com.digitalasset.canton.data.DeduplicationPeriod
+import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.PreparedTransactionCodec.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.{
   PreparedTransactionDecoder,
   PreparedTransactionEncoder,
 }
-import com.digitalasset.canton.topology.GeneratorsTopology
+import com.digitalasset.canton.topology.{GeneratorsTopology, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{BaseTest, GeneratorsLf, HasExecutionContext}
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{
   Node,
   NodeId,
@@ -25,6 +28,8 @@ import org.scalacheck.Arbitrary
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+
+import java.time.Duration
 
 class PreparedTransactionCodecV1Spec
     extends AnyWordSpec
@@ -130,6 +135,52 @@ class PreparedTransactionCodecV1Spec
         }
 
         timeouts.default.await_("Round trip")(result)
+      }
+    }
+
+    "compute the same prepare and execute hashes for a physical synchronizer" in {
+      forAll(minSuccessful(100)) {
+        (prepareTransactionData: PrepareTransactionData, psid: PhysicalSynchronizerId) =>
+          val prepareDataWithPhysicalSynchronizer =
+            prepareTransactionData.copy(synchronizer = psid)
+          val protocolVersion = psid.protocolVersion
+          val hashVersion =
+            if (prepareDataWithPhysicalSynchronizer.transaction.version == LfSerializationVersion.VDev)
+              HashingSchemeVersion.V3
+            else HashingSchemeVersion.V2
+          val prepareHash = prepareDataWithPhysicalSynchronizer
+            .computeHash(hashVersion, protocolVersion, psid)
+            .value
+
+          val result = for {
+            preparedTransaction <- encoder.encode(prepareDataWithPhysicalSynchronizer)
+            executeTransactionData <- decoder.decode(
+              ExecuteRequest(
+                userId = Ref.UserId.assertFromString("interactive-test-user"),
+                submissionId = Ref.SubmissionId.assertFromString("interactive-test-submission"),
+                deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+                signatures = Map.empty,
+                preparedTransaction = preparedTransaction,
+                serializationVersion = hashVersion,
+                tentativeLedgerEffectiveTime = Time.Timestamp.Epoch,
+              )
+            )
+          } yield {
+            val executeHash = executeTransactionData
+              .computeHash(hashVersion, protocolVersion, psid)
+              .value
+
+            preparedTransaction.metadata.value.synchronizerId shouldEqual psid.logical.toProtoPrimitive
+            SynchronizerId
+              .fromProtoPrimitive(
+                preparedTransaction.metadata.value.synchronizerId,
+                "synchronizer_id",
+              )
+              .value shouldEqual psid.logical
+            executeHash shouldEqual prepareHash
+          }
+
+          timeouts.default.await_("Compute matching prepare and execute hashes")(result)
       }
     }
   }

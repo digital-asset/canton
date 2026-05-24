@@ -119,7 +119,7 @@ final class PreparedTransactionEncoder(
   private implicit val timestampTransformer: Transformer[lf.data.Time.Timestamp, Long] = _.micros
 
   private implicit val synchronizerTransformer: Transformer[Synchronizer, String] =
-    _.toProtoPrimitive
+    _.logical.toProtoPrimitive
 
   private implicit val nodeIdHashTransformer: Transformer[
     (lf.transaction.NodeId, lf.crypto.Hash),

@@ -264,7 +264,12 @@ class ExternalTransactionProcessor(
         EitherT
           .fromEither[FutureUnlessShutdown](
             enriched
-              .computeHash(hashVersion, protocolVersion, hashTracer)
+              .computeHash(
+                hashVersion,
+                protocolVersion,
+                commandExecutionResult.synchronizerRank.synchronizerId,
+                hashTracer,
+              )
               .leftMap(error => InteractiveSubmissionPreparationError.Reject(error.message))
           )
           .map(hash => (hashVersion, hash): (HashingSchemeVersion, Hash))
