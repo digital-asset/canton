@@ -25,6 +25,11 @@ trait LeaderSelectionPolicy[E <: Env[E]] {
       epochNumber: EpochNumber,
   ): Seq[BftNodeId]
 
+  def getBlacklistedNodes(
+      orderingTopology: OrderingTopology,
+      epochNumber: EpochNumber,
+  ): Seq[BftNodeId]
+
   def addBlock(
       epochNumber: EpochNumber,
       orderedBlockNumber: BlockNumber,

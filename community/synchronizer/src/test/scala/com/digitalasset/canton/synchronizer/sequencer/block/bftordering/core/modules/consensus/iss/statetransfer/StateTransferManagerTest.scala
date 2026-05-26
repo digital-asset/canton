@@ -330,12 +330,14 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       StateTransferMessage.BlockTransferResponse.create(Some(commitCert), from = otherId)
     val topologyInfo = OrderingTopologyInfo(
       myId,
-      aMembershipBeforeOnboarding.orderingTopology,
-      ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-      aMembershipBeforeOnboarding.leaders,
+      currentTopology = aMembershipBeforeOnboarding.orderingTopology,
+      currentCryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+      currentLeaders = aMembershipBeforeOnboarding.leaders,
+      currentBlacklistedNodes = Seq.empty,
       previousTopology = aMembershipBeforeOnboarding.orderingTopology,
       previousCryptoProvider = failingCryptoProvider,
-      aMembershipBeforeOnboarding.leaders,
+      previousLeaders = aMembershipBeforeOnboarding.leaders,
+      previousBlacklistedNodes = Seq.empty,
     )
     stateTransferManager.handleStateTransferMessage(
       VerifiedStateTransferMessage(blockTransferResponse),
@@ -547,17 +549,20 @@ object StateTransferManagerTest {
           Option(SequencingParameters.Default),
           epochLength = EpochLength(1),
         ),
-      Seq(otherId),
+      leaders = Seq(otherId),
+      blacklistedNodes = Seq.empty,
     )
   private def aTopologyInfo(implicit pv: ProtocolVersion) =
     OrderingTopologyInfo[ProgrammableUnitTestEnv](
       myId,
-      aMembership.orderingTopology,
-      ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-      aMembership.leaders,
+      currentTopology = aMembership.orderingTopology,
+      currentCryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+      currentLeaders = aMembership.leaders,
+      currentBlacklistedNodes = Seq.empty,
       previousTopology = aMembership.orderingTopology,
       previousCryptoProvider = failingCryptoProvider,
-      aMembership.leaders,
+      previousLeaders = aMembership.leaders,
+      previousBlacklistedNodes = Seq.empty,
     )
   private val aBootstrapEpoch = bootstrapEpoch(TestBootstrapTopologyActivationTime)
 }

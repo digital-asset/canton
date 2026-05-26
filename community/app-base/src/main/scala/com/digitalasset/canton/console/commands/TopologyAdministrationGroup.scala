@@ -570,8 +570,9 @@ class TopologyAdministrationGroup(
       )
 
       // Use V1 only if the target node is on 3.4 (ListAllV2 doesn't exist there).
-      val nodeVersion = instance.health.status.successOption.map(_.version)
-      val useV1 = nodeVersion.exists(v => (v.major, v.minor) == (3, 4))
+      // As the version is not set in status.notInitialized in 3.4, we treat it as 3.4 and use ListAllV1.
+      val nodeVersion = instance.health.status.releaseVersion
+      val useV1 = nodeVersion.forall(v => (v.major, v.minor) == (3, 4))
       if (!useV1 && excludeMappings.nonEmpty) {
         consoleEnvironment.run(
           CommandErrors.GenericCommandError(

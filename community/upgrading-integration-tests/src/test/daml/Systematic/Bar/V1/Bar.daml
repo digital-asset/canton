@@ -12,7 +12,7 @@ template Bar
     observer obs
 
     interface instance IBar for Bar where
-      view = EmptyView
+      view = IBarView
       owner = owner
       choiceBody informee =
         do

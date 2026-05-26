@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -19,7 +20,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.validation.ExampleTransactionConformanceTest.HashReInterpretationCounter
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
-import com.digitalasset.canton.participant.store.ReplayContractLookup
+import com.digitalasset.canton.participant.store.{ContractLookup, ReplayContractLookup}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.{
   HasReinterpret,
@@ -202,6 +203,9 @@ class ExampleTransactionConformanceTest
         submittingParticipant,
         ContractValidator.AllowAll,
         packageResolver,
+        mock[ContractLookup],
+        PositiveInt.tryCreate(100),
+        validateLegacyContractsV11 = true,
         pureCrypto,
         loggerFactory,
       )

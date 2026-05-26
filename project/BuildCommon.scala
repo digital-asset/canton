@@ -1109,10 +1109,9 @@ object BuildCommon {
         blake2b,
         `community-base`,
         `wartremover-annotations`,
-        `community-testing` % "test->test",
+        `community-testing` % Test,
         `wartremover-extension` % "test->test",
-        `mock-kms-driver` % "test->test",
-        DamlProjects.`bindings-java`,
+        `mock-kms-driver` % Test,
         `scalatest-addon` % Test,
       )
       .settings(
@@ -1288,10 +1287,11 @@ object BuildCommon {
     lazy val `community-testing` = project
       .in(file("community/testing"))
       .dependsOn(
-        DamlProjects.`observability-metrics` % "compile->test",
+        DamlProjects.`observability-metrics`,
+        DamlProjects.`testing-utils`,
         `community-base`,
-        `magnolify-addon` % "compile->test",
-        `util-observability` % "compile->test",
+        `magnolify-addon`,
+        `util-observability`,
       )
       .settings(
         sharedCommunitySettings,
@@ -1307,7 +1307,7 @@ object BuildCommon {
           testcontainers,
           testcontainers_postgresql,
         ),
-
+        enablePublishLibrary,
         // This library contains a lot of testing helpers that previously existing in testing scope
         // As such, in order to minimize the diff when creating this library, the same rules that
         // applied to `test` scope are used here. This can be reviewed in the future.
@@ -1482,9 +1482,8 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          scalatest
-        ),
+        libraryDependencies ++= Seq(scalatest),
+        enablePublishLibrary,
         // TODO(i19491): Move to non-uber JAR
         UberLibrary.assemblySettings("kms-driver-testing-lib"),
         // when building the fat jar, we need to properly merge our artefacts
@@ -1985,6 +1984,7 @@ object BuildCommon {
         `daml-adjustable-clock` % "test->test",
         `ledger-common-dars` % Test,
       )
+      .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonCommunitySettings,
         Compile / PB.targets := Seq(
@@ -2004,8 +2004,16 @@ object BuildCommon {
         enablePublishLibrary,
         Test / parallelExecution := true,
         Test / fork := false,
+        Test / damlBuild := (Test / damlBuild)
+          .dependsOn(Def.task {
+            ComponentTestDamlGenerator
+              .generateProjectForComponentTest((Test / sourceManaged).value / "damlForTests")
+          })
+          .value,
+        Test / damlSourceDirectory := (Test / sourceManaged).value / "damlForTests",
         Test / testGrouping := separateRevocationTest((Test / definedTests).value),
         coverageEnabled := false,
+        Compile / damlDarLfVersions := Seq("2.2"),
       )
 
     lazy val `ledger-json-api` =
@@ -2556,7 +2564,6 @@ object BuildCommon {
       `nonempty-cats`,
       `rs-grpc-bridge`,
       `rs-grpc-pekko`,
-      `rs-grpc-pekko-test`,
       `logging-entries`,
       `contextualized-logging`,
       `daml-resources`,
@@ -2665,30 +2672,6 @@ object BuildCommon {
           scalatest_shouldmatchers % Test,
         ),
         enablePublishLibrary,
-      )
-
-    lazy val `rs-grpc-pekko-test` = project
-      .in(file("base/rs-grpc-pekko-test"))
-      .disablePlugins(WartRemover)
-      .dependsOn(
-        `rs-grpc-bridge` % "test->test;test->compile",
-        `rs-grpc-pekko`,
-        `testing-utils` % "test->test;test->compile",
-      )
-      .settings(
-        libsScalaSettings,
-        libraryDependencies ++= Seq(
-          grpc_api,
-          grpc_stub,
-          pekko_actor,
-          pekko_stream,
-          reactivestreams,
-          scalatest % Test,
-          scalatest_wordspec % Test,
-          scalatest_shouldmatchers % Test,
-          awaitility % Test,
-          pekko_slf4j % Test,
-        ),
       )
 
     lazy val `logging-entries` = project
@@ -2837,14 +2820,16 @@ object BuildCommon {
       .disablePlugins(WartRemover)
       .dependsOn(
         `contextualized-logging`,
-        `ledger-resources`,
         `daml-resources`,
+        `ledger-resources`,
+        `observability-metrics`,
         `resources-grpc`,
         `resources-pekko`,
         `rs-grpc-bridge`,
         `rs-grpc-pekko`,
         CommunityProjects.`base-errors`,
         CommunityProjects.`util-external`,
+        CommunityProjects.`util-observability`,
       )
       .settings(
         sharedCommunitySettings,
@@ -2853,11 +2838,19 @@ object BuildCommon {
           grpc_api,
           grpc_inprocess,
           grpc_netty_shaded,
+          grpc_stub,
           guava,
+          pekko_actor,
+          pekko_stream,
+          reactivestreams,
           scalapb_runtime,
           scalatest,
           slf4j_api,
           typesafe_config,
+          scalatest_wordspec % Test,
+          scalatest_shouldmatchers % Test,
+          awaitility % Test,
+          pekko_slf4j % Test,
         ),
         enablePublishLibrary,
         Compile / bufLintCheck := {},
@@ -2956,11 +2949,7 @@ object BuildCommon {
 
     lazy val `observability-metrics` = project
       .in(file("base/observability/metrics"))
-      .dependsOn(
-        `rs-grpc-pekko-test` % "test->test",
-        `testing-utils` % Test,
-        `scala-utils`,
-      )
+      .dependsOn(`scala-utils`)
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
@@ -3426,6 +3415,7 @@ object BuildCommon {
           google_common_protos % "protobuf",
           google_protobuf_java,
           google_protobuf_java % Test,
+          monocle_macro,
           pureconfig_core,
           pureconfig_generic,
           scalacheck % Test,
@@ -3767,9 +3757,9 @@ object BuildCommon {
         crypto,
         nameof,
         `scala-utils`,
+        `testing-utils` % Test,
         CommunityProjects.`util-observability`,
         `daml-lf-transaction-test-lib` % "test->test",
-        CommunityProjects.`util-observability` % "test->test",
       )
 
     lazy val `daml-lf-interpreter-bench` = project
@@ -3845,7 +3835,7 @@ object BuildCommon {
         `daml-lf-parser` % Test,
         `daml-lf-encoder` % Test,
         `daml-lf-tests` % Test,
-        CommunityProjects.`util-observability` % "test->test",
+        `testing-utils` % Test,
       )
 
     lazy val `daml-lf-upgrades-matrix` = project
@@ -3890,7 +3880,7 @@ object BuildCommon {
         `daml-lf-parser`,
         `daml-lf-encoder`,
         `daml-lf-tests`,
-        CommunityProjects.`util-observability` % "test->test",
+        `testing-utils` % Test,
       )
 
     lazy val `daml-lf-api-type-signature` = project

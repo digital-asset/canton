@@ -5,6 +5,7 @@ services:
       context: ./db
       dockerfile: Dockerfile
     container_name: canton-postgres
+    command: postgres -c max_connections=500
     environment:
       POSTGRES_USER: cnadmin
       POSTGRES_PASSWORD: cnadmin
@@ -35,12 +36,6 @@ services:
       - "5002:5002"
       - "7575:7575"
       - "10013:10013"
-    healthcheck:
-      test: ["CMD", "grpcurl", "-plaintext", "localhost:5061", "grpc.health.v1.Health/Check"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 10m
     depends_on:
       - db
 
@@ -68,7 +63,6 @@ services:
     depends_on:
       - db
 
-
   synchronizer:
     build:
       context: ./synchronizer
@@ -89,10 +83,16 @@ services:
       context: ./test
     image: "canton-smoketest:${RELEASE_SUFFIX:-local}"
     depends_on:
-      - participant
-      - sequencer
-      - synchronizer
-      - mediator
+      db:
+        condition: service_healthy
+      participant:
+        condition: service_healthy
+      sequencer:
+        condition: service_started
+      synchronizer:
+        condition: service_started
+      mediator:
+        condition: service_started
     environment:
       # These are consumed by test/run.sh
       RELEASE_SUFFIX: "${RELEASE_SUFFIX:-local}"

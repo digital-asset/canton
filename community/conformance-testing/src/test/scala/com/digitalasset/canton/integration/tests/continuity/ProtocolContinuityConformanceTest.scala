@@ -441,6 +441,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.parameters.caching.sequencer-catchup-payload-cache",
         s"$base.parameters.commit-after-failed-activeness-check",
         s"$base.parameters.commitment-use-db-snapshot-for-participant-lookup",
+        s"$base.parameters.validate-legacy-contracts-v-11",
         s"$base.parameters.ledger-api-server.indexer.achs-config",
         s"$base.parameters.ledger-api-server.indexer.postgres-data-source",
         s"$base.parameters.ledger-api-server.indexer.submission-batch-insertion-size",

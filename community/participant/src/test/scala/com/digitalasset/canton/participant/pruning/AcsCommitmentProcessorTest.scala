@@ -2159,6 +2159,33 @@ class AcsCommitmentProcessorTest
       snap3.groupCountDelta shouldBe 0L
     }
 
+    "releaseMemory clears the commitments aggressively (removes data faster upon close)" in {
+      val rc =
+        new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)
+
+      val ch = AcsChange(
+        activations = Map(
+          coid(0, 0) ->
+            ContractStakeholdersAndReassignmentCounter(
+              Set(alice, bob),
+              initialReassignmentCounter,
+            ),
+          coid(0, 1) ->
+            ContractStakeholdersAndReassignmentCounter(
+              Set(bob, carol),
+              initialReassignmentCounter,
+            ),
+        ),
+        deactivations = Map.empty,
+      )
+      rc.update(rt(1, 0), ch)
+      rc.size shouldBe 2
+
+      rc.releaseMemory()
+
+      rc.size shouldBe 0
+    }
+
     "contracts differing by reassignment counter result in different commitments if the PV support reassignment counters" in {
       val rc1 =
         new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)

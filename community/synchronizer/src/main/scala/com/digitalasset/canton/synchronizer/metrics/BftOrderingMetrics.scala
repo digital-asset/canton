@@ -474,6 +474,7 @@ class BftOrderingMetrics private[metrics] (
           case object RequestTooBig extends OutcomeValue
           case object InvalidTag extends OutcomeValue
           case object P2PNotReady extends OutcomeValue
+          case object BlackListed extends OutcomeValue
         }
       }
     }

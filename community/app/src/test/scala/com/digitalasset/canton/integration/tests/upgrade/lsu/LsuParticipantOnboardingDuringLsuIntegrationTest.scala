@@ -61,7 +61,7 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         participant2.synchronizers.connect(sequencer2, daName),
         _.errorMessage should include(
-          s"Onboarding is possible only after $upgradeTime. Aborting..."
+          s"Onboarding is possible only after $upgradeTime"
         ),
       )
 
@@ -70,10 +70,11 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       eventually() {
         environment.simClock.value.advance(Duration.ofSeconds(1))
         participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
-
-        // P2 can now join
-        participant2.synchronizers.connect(sequencer2, daName)
       }
+
+      waitForTargetTimeOnSequencer(sequencer2, environment.now, logger)
+      // P2 can now join
+      participant2.synchronizers.connect(sequencer2, daName)
 
       oldSynchronizerNodes.all.stop()
       waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)

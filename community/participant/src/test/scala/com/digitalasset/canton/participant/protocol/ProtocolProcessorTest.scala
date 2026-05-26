@@ -1035,6 +1035,62 @@ class ProtocolProcessorTest
         case _ => fail(s"Bad information in in-flight submission tracker:\n$sub")
       }
     }
+
+    "log a warning for future topology timestamps and replace them with request timestamps" in {
+      val (sut, _persistent, ephemeral, _) = testProcessingSteps()
+
+      val submissionTopologyTimestamp = CantonTimestamp.MaxValue
+
+      val maliciousRootHashMessage = RootHashMessage(
+        rootHash,
+        DefaultTestIdentities.physicalSynchronizerId,
+        TestViewType,
+        submissionTopologyTimestamp, // Crafted submission timestamp (far) in the future
+        SerializedRootHashMessagePayload.empty,
+      )
+
+      val maliciousBatch = RequestAndRootHashMessage(
+        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
+        maliciousRootHashMessage,
+        MediatorGroupRecipient(MediatorGroupIndex.zero),
+        isReceipt = false,
+      )
+
+      val asyncResult = loggerFactory
+        .assertLogs(
+          sut
+            .processRequest(
+              CantonTimestamp.Epoch,
+              rc,
+              requestSc,
+              maliciousBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail()),
+          _.shouldBeCantonError(
+            SubmissionTopologyHelper.SubmissionTopologyErrors.TopologyAlarm,
+            _ shouldBe s"Received future-dated submission timestamp $submissionTopologyTimestamp. Falling back to request timestamp ${CantonTimestamp.Epoch}.",
+          ),
+        )
+        .futureValue
+      // This awaits the full asynchronous completion of the request processing.
+      // If the future timestamp was not being replaced, this call would hang indefinitely.
+      waitForAsyncResult(asyncResult)
+
+      // BeforeHead confirms the TaskScheduler has successfully processed the event and advanced the queue pointer
+      ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
+        requestSc
+      ) shouldBe BeforeHead
+
+      // Verify the request transitioned to the Pending state.
+      ephemeral.requestJournal
+        .query(rc)
+        .value
+        .futureValueUS
+        .value
+        .state shouldBe RequestState.Pending
+    }
   }
 
   "perform result processing" should {

@@ -821,6 +821,10 @@ abstract class EventStorageBackendTemplate(
       connection: Connection,
       traceContext: TraceContext,
   ): Unit = {
+    logger.info("Lock contract pruning processing table for serialized pruning")
+    lockExclusivelyContractPruningProcessingTable(connection)
+    logger.info("Locked contract pruning processing table for serialized pruning")
+
     // Please note: these queries are deliberately not constraint by the ledger end watermark, as the actively
     // inserted events must be also considered for pruning.
     logger.info(s"Start removing pruning contract candidates")
@@ -849,6 +853,81 @@ abstract class EventStorageBackendTemplate(
     logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
     logger.info("Analyze lapi_pruning_contract_candidate table")
     SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+  }
+
+  override def addContractPruningCandidatesAfter(eventSeqIdExclusive: Long)(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit = {
+    logger.info("Lock contract pruning processing table for serialized pruning")
+    lockExclusivelyContractPruningProcessingTable(connection)
+    logger.info("Locked contract pruning processing table for serialized pruning")
+
+    val addedFromActivate = SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_activate_contract.internal_contract_id
+      FROM lapi_events_activate_contract
+      WHERE
+        lapi_events_activate_contract.event_sequential_id > $eventSeqIdExclusive
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+        -- only if no other activation event defines it before or at eventSeqIdExclusive
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id <= $eventSeqIdExclusive
+          AND activates.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id <= $eventSeqIdExclusive
+          AND witnessed.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+      """.executeUpdate()
+    logger.info(
+      s"Added $addedFromActivate contract pruning candidates from lapi_events_activate_contract - for activate events"
+    )
+    val addedFromWitnessed = SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_various_witnessed.internal_contract_id
+      FROM lapi_events_various_witnessed
+      WHERE
+        lapi_events_various_witnessed.event_sequential_id > $eventSeqIdExclusive
+        AND lapi_events_various_witnessed.internal_contract_id IS NOT NULL
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other activation event defines it before or at eventSeqIdExclusive
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id <= $eventSeqIdExclusive
+          AND activates.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id <= $eventSeqIdExclusive
+          AND witnessed.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+      """.executeUpdate()
+    logger.info(
+      s"Added $addedFromWitnessed contract pruning candidates from lapi_events_various_witnessed - for witnessed events"
+    )
+    SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+    logger.info("Analyzed lapi_pruning_contract_candidate table")
   }
 
   private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(implicit

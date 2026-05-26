@@ -627,12 +627,14 @@ object StateTransferBehaviorTest {
   private def aTopologyInfo(implicit pv: ProtocolVersion) =
     OrderingTopologyInfo[ProgrammableUnitTestEnv](
       myId,
-      anOrderingTopology,
-      aFakeCryptoProviderInstance,
-      aMembership.leaders,
+      currentTopology = anOrderingTopology,
+      currentCryptoProvider = aFakeCryptoProviderInstance,
+      currentLeaders = aMembership.leaders,
+      currentBlacklistedNodes = Seq.empty,
       previousTopology = anOrderingTopology, // Not relevant
-      aFakeCryptoProviderInstance,
-      aMembership.leaders,
+      previousCryptoProvider = aFakeCryptoProviderInstance,
+      previousLeaders = aMembership.leaders,
+      previousBlacklistedNodes = Seq.empty,
     )
 
   private def aCommitCert(implicit synchronizerProtocolVersion: ProtocolVersion) =

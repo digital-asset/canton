@@ -241,7 +241,11 @@ final class DbStorageMulti private (
       action: All[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[A] =
     runIfSessionIsOpen("writing", operationName, maxRetries)(
       FutureUnlessShutdown.outcomeF(writeDb.run(action))
     )

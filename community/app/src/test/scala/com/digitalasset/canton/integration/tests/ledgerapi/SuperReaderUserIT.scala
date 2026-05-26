@@ -22,6 +22,7 @@ import com.daml.ledger.javaapi.data.Transaction
 import com.digitalasset.canton.damltests.java.divulgence.DivulgeIouByExercise
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.ValueConversions.*
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{CantonFixture, CreatesParties}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
@@ -90,10 +91,13 @@ sealed trait SuperReaderUserIT extends CantonFixture with CreatesParties with Te
   val partyHintA = "partyA"
   val partyHintB = "partyB"
 
-  override def beforeAll(): Unit = {
-    super.beforeAll()
-    createPrerequisiteParties(asAdmin.token, List(partyHintA, partyHintB))(directExecutionContext)
-  }
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      // TODO (i#32650): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+      //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+      super.beforeAll()
+      createPrerequisiteParties(asAdmin.token, List(partyHintA, partyHintB))(directExecutionContext)
+    }
 
   "SuperReader" should {
     "get the completions for all parties" in { env =>

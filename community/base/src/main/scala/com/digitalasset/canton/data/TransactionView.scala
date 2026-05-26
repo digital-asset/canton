@@ -446,7 +446,7 @@ object TransactionView
       )
       participantData <- MerkleTree.fromProtoOptionV30(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(expectedProtocolVersion, hashOps),
+        ViewParticipantData.fromByteString(expectedProtocolVersion, context),
       )
       subViews <- TransactionSubviews.fromProtoV30(context, protoView.subviews)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))

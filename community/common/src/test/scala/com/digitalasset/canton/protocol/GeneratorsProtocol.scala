@@ -291,28 +291,40 @@ final class GeneratorsProtocol(
         )
     }
 
-  def serializableContractArb(
-      canHaveEmptyKey: Boolean
-  ): Arbitrary[SerializableContract] = Arbitrary(
+  val serializableContractArb: Arbitrary[SerializableContract] = Arbitrary(
     for {
-      metadata <- contractMetadataArb(canHaveEmptyKey).arbitrary
+      metadata <- contractMetadataArb.arbitrary
       contract <- serializableContractArb(metadata).arbitrary
     } yield contract
   )
 
   def contractInstanceArb[Time <: CreationTime](
-      canHaveEmptyKey: Boolean,
       genTime: Gen[Time],
+      mustHaveKey: Boolean = false,
       overrideContractId: Option[LfContractId] = None,
   ): Arbitrary[GenContractInstance { type InstCreatedAtTime <: Time }] = Arbitrary(
     for {
-      metadata <- contractMetadataArb(canHaveEmptyKey).arbitrary
+
+      byKey <- byKeyArb.arbitrary
+
+      maybeKeyWithMaintainers <-
+        if (mustHaveKey || byKey)
+          Gen.some(globalKeyWithMaintainersArb.arbitrary)
+        else Gen.const(None)
+
+      maintainers = maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.unversioned.maintainers)
+      nonMaintainerSignatories <- nonEmptySetGen[LfPartyId]
+      observers <- boundedSetGen[LfPartyId]
+
+      signatories = maintainers ++ nonMaintainerSignatories
+      stakeholders = signatories ++ observers
+
       createdAt <- genTime
     } yield ExampleContractFactory.build[Time](
       createdAt = createdAt,
-      signatories = metadata.signatories,
-      stakeholders = metadata.stakeholders,
-      keyOpt = metadata.maybeKeyWithMaintainers,
+      signatories = signatories,
+      stakeholders = stakeholders,
+      keyOpt = maybeKeyWithMaintainers.map(_.unversioned),
       overrideContractId = overrideContractId,
     )
   )
@@ -356,11 +368,19 @@ final class GeneratorsProtocol(
       )
     )
 
-  def contractMetadataArb(canHaveEmptyKey: Boolean): Arbitrary[ContractMetadata] = Arbitrary(
+  val byKeyArb: Arbitrary[Boolean] =
+    Arbitrary(
+      if (protocolVersion >= ProtocolVersion.v35) Gen.oneOf(true, false) else Gen.const(false)
+    )
+
+  val contractMetadataArb: Arbitrary[ContractMetadata] = Arbitrary(
     for {
+      byKey <- byKeyArb.arbitrary
+
       maybeKeyWithMaintainers <-
-        if (canHaveEmptyKey) Gen.option(globalKeyWithMaintainersArb.arbitrary)
-        else Gen.some(globalKeyWithMaintainersArb.arbitrary)
+        if (byKey) Gen.some(globalKeyWithMaintainersArb.arbitrary)
+        else Gen.const(None)
+
       maintainers = maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.unversioned.maintainers)
 
       signatories <- nonEmptySetGen[LfPartyId]
@@ -395,8 +415,7 @@ final class GeneratorsProtocol(
   implicit val createdContractArb: Arbitrary[CreatedContract] = Arbitrary(
     for {
       contract <- contractInstanceArb(
-        canHaveEmptyKey = true,
-        genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+        genTime = Arbitrary.arbitrary[CreationTime.CreatedAt]
       ).arbitrary
       consumedInCore <- Gen.oneOf(true, false)
       rolledBack <- Gen.oneOf(true, false)
@@ -417,7 +436,7 @@ final class GeneratorsProtocol(
 
     Arbitrary(
       for {
-        metadata <- contractMetadataArb(canHaveEmptyKey = true).arbitrary
+        metadata <- contractMetadataArb.arbitrary
         contractCounters <- nonEmptyListGen(tuple(metadata))
       } yield ContractsReassignmentBatch.create(contractCounters).value
     )

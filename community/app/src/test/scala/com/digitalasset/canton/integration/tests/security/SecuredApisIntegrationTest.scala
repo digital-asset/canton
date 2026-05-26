@@ -28,6 +28,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -57,6 +58,13 @@ trait SecuredApisIntegrationTest
     with SharedEnvironment
     with SecurityTestSuite
     with AccessTestScenario {
+
+  // TODO (i#32650): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   private val mySecret = NonEmptyString.tryCreate("pyjama")
 

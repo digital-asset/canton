@@ -22,7 +22,9 @@ import java.nio.file.Files
 import scala.sys.process.ProcessLogger
 
 private object ProtobufCompatibilityTest {
+
   import Assertions.*
+
   val protobufImageFileName: String = "protobuf_image.bin.gz"
   val pvAnnotatedProtos = "protocol_version_annotated_protobufs.json"
 
@@ -166,7 +168,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSynchronizerUpgradeAnnouncement" on service "TopologyManagerReadService" was deleted.""",
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "LogicalUpgradeState" on service "TopologyManagerReadService" was deleted.""",
     ),
-    (3, 5) -> Seq(),
+    (3, 5) -> Seq(
+      // Expose the release version in NotInitialized, is going to be added to 3.5.1-rc4+
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted."""
+    ),
   )
 
   "protobuf" should {

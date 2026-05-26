@@ -188,8 +188,8 @@ class NodeHashTest extends BaseNodeHashTest {
                                                           |'322e31' # 2.1 (string)
                                                           |# Root Nodes
                                                           |'00000002' # 2 (int)
-                                                          |'$createNodeHash' # (Hashed Inner Node)
-                                                          |'$rollbackNodeHash' # (Hashed Inner Node)
+                                                          |'$createNodeHash' # (Hashed Root Node)
+                                                          |'$rollbackNodeHash' # (Hashed Root Node)
                                                           |""".stripMargin
   override protected val transactionHash: String =
     "154f334d24a8a5e4d0ce51ac87d93821b3256f885f21d3f779a1640abf481983"

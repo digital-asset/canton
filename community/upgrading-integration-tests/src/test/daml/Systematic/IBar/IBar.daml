@@ -1,10 +1,10 @@
 module IBar where
 
-data EmptyView = EmptyView {}
+data IBarView = IBarView {}
 
 interface IBar
   where
-    viewtype EmptyView
+    viewtype IBarView
 
     owner: Party
     choiceBody: Party -> Update ()

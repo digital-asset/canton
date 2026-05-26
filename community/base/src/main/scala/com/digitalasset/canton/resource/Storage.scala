@@ -301,7 +301,11 @@ trait DbStorage extends Storage { self: NamedLogging =>
       action: DbAction.All[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A]
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[A]
 
   def query[A](
       action: DbAction.ReadTransactional[A],
@@ -331,17 +335,25 @@ trait DbStorage extends Storage { self: NamedLogging =>
       action: DBIOAction[A, NoStream, Effect.Write with Effect.Transactional],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
   /** Write-only action, possibly transactional The action must be idempotent because it may be
     * retried multiple times.
     */
-  def update_(
-      action: DBIOAction[?, NoStream, Effect.Write with Effect.Transactional],
+  def update_[A](
+      action: DBIOAction[A, NoStream, Effect.Write with Effect.Transactional],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[Unit] =
     runWrite(action, operationName, maxRetries).map(_ => ())
 
   /** Query and update in a single action.
@@ -358,13 +370,32 @@ trait DbStorage extends Storage { self: NamedLogging =>
       action: DBIOAction[A, NoStream, Effect.All],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+      rowsAltered: DbStorage.RowsAltered[A],
+  ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
   def runJdbcWrite[T](traceContext: TraceContext, body: Connection => T): FutureUnlessShutdown[T]
 }
 
 object DbStorage {
+  // Type class for return types that allows us know whether any rows were altered,
+  // i.e. updated, inserted or deleted.
+  trait RowsAltered[A] { def apply(a: A): Boolean }
+
+  object RowsAltered {
+    implicit val ofInt: RowsAltered[Int] = _ > 0
+    implicit val ofUnit: RowsAltered[Unit] = (_ => false)
+
+    implicit def ofSeq[A](implicit r: RowsAltered[A]): RowsAltered[Seq[A]] = _.exists(r(_))
+    implicit def ofArray[A](implicit r: RowsAltered[A]): RowsAltered[Array[A]] = _.exists(r(_))
+
+    implicit def ofEither[Err, A](implicit r: RowsAltered[A]): RowsAltered[Either[Err, A]] =
+      _.fold(_ => false, r(_))
+  }
+
   val healthName: String = "db-storage"
 
   // sql prepared statement have a limit of 65535 parameters

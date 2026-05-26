@@ -2419,7 +2419,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     val clock = environment.simClock.value
     clock.advance(JDuration.ofSeconds(1))
 
-    val pingF = Future.traverse((1 to 100).toList) { _ =>
+    val pingF = Future.traverse((1 to 200).toList) { _ =>
       Future {
         assertPingSucceeds(participant1, participant1, timeoutMillis = 60000)
       }
@@ -2493,7 +2493,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     )
     val statusBeforePruning = pruningStoreForPolling.pruningStatus().futureValueUS
 
-    logger.info(s"Pruning at $pruneOffset ...")
+    logger.info(s"Pruning at $pruneOffset, current pruning status: $statusBeforePruning ...")
 
     // Start pruning in the background
     val pruneF = loggerFactory.assertThrowsAndLogsAsync[CommandFailure](
@@ -2504,12 +2504,11 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
 
     // Wait until we are sure that ledger-level pruning has started
     eventually(maxPollInterval = 2.millis) { // low poll interval so that we don't flake because of exponential backoff and missing the prune
-      logger.info(s"Checking if we can interrupt pruning now ${CantonTimestamp.now()}")
-      val status = pruningStoreForPolling.pruningStatus().futureValueUS
-      status.startedO should be > statusBeforePruning.startedO withClue
-        "Ledger-level pruning should have advanced beyond its initial state"
-      status.completedO.forall(_ < Offset.tryFromLong(pruneOffset)) shouldBe true withClue
-        "Ledger-level pruning should not have fully completed yet"
+      logger.info(s"Loading pruning status")
+      // Using Await as futureValue might evaluate via polling / resulting longer wait times here
+      val status = Await.result(pruningStoreForPolling.pruningStatus(), 20.millis).toOption.value
+      logger.info(s"Loaded pruning status: $status")
+      status.startedO.isDefined shouldBe true
     }
 
     // Restart

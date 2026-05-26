@@ -463,9 +463,6 @@ class MainIndexDBMetrics(
   val lookupContractByKeyDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_contract_by_key"
   )
-  val lookupNonUniqueContractByKeyDbMetrics: DatabaseMetrics = createDbMetrics(
-    "lookup_non_unique_contract_by_key"
-  )
   val lookupLastActivationsDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_last_activations"
   )

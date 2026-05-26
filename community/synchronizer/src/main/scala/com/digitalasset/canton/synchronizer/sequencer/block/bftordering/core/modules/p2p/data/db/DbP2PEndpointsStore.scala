@@ -187,12 +187,18 @@ final class DbP2PEndpointsStore(
   private def updateUnlessShutdown[X](
       action: DBIOAction[X, NoStream, Effect.Write & Effect.Transactional],
       actionName: String,
-  )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[X] =
+  )(implicit
+      traceContext: TraceContext,
+      rowsAltered: DbStorage.RowsAltered[X],
+  ): PekkoFutureUnlessShutdown[X] =
     PekkoFutureUnlessShutdown(actionName, () => storage.update(action, actionName))
 
-  private def updateUnlessShutdown_(
-      action: DBIOAction[?, NoStream, Effect.Write & Effect.Transactional],
+  private def updateUnlessShutdown_[X](
+      action: DBIOAction[X, NoStream, Effect.Write & Effect.Transactional],
       actionName: String,
-  )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Unit] =
+  )(implicit
+      traceContext: TraceContext,
+      rowsAltered: DbStorage.RowsAltered[X],
+  ): PekkoFutureUnlessShutdown[Unit] =
     updateUnlessShutdown(action, actionName).map(_ => ())
 }

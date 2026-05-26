@@ -200,7 +200,7 @@ class SequencerConnectionServiceIntegrationTestDefault
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      dynamicSequencingParameters = Some(
+      sequencingParameters = Some(
         SequencingParameters.create(
           pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
           segmentLength = SequencingParameters.DefaultSegmentLength,

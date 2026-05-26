@@ -59,7 +59,7 @@ import monocle.macros.syntax.lens.*
 final case class EnvironmentDefinition(
     baseConfig: CantonConfig,
     testingConfig: TestingConfigInternal =
-      TestingConfigInternal(warnOnAcsCommitmentDegradation = false),
+      TestingConfigInternal(warnOnAcsCommitmentDegradation = false, warnOnJwtScopeUsage = false),
     setups: List[TestConsoleEnvironment => Unit] = Nil,
     teardown: Unit => Unit = _ => (),
     configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,

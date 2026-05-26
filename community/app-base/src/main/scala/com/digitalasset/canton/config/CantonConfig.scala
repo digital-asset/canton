@@ -99,6 +99,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AsyncWriterConfig,
   LsuRepair,
@@ -517,6 +518,7 @@ final case class CantonConfig(
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
         alphaMultiSynchronizerSupport = participantParameters.alphaMultiSynchronizerSupport,
         commitAfterFailedActivenessCheck = participantParameters.commitAfterFailedActivenessCheck,
+        validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
       )
     }
 
@@ -1184,6 +1186,23 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneNetworkConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigReader
+        : ConfigReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearConfigReader
+        : ConfigReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistNoBlacklistingConfigReader
+        : ConfigReader[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type
+        ] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowManyCanWeBlacklistConfigReader
+        : ConfigReader[BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist] =
+      deriveEnumerationReader[BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyConfigReader
+        : ConfigReader[BlacklistLeaderSelectionPolicyConfig] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig]
     lazy implicit val bftBlockOrdererConfigReader: ConfigReader[BftBlockOrdererConfig] =
       deriveReader[BftBlockOrdererConfig]
     lazy implicit val sequencerConfigBftSequencerReader
@@ -1987,6 +2006,23 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftP2PConnectionManagementConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig] =
       deriveWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigWriter
+        : ConfigWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearConfigWriter
+        : ConfigWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistNoBlacklistingConfigWriter
+        : ConfigWriter[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type
+        ] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowManyCanWeBlacklistConfigWriter
+        : ConfigWriter[BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist] =
+      deriveEnumerationWriter[BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyConfigWriter
+        : ConfigWriter[BlacklistLeaderSelectionPolicyConfig] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig]
     lazy implicit val bftBlockOrdererConfigWriter: ConfigWriter[BftBlockOrdererConfig] =
       deriveWriter[BftBlockOrdererConfig]
 

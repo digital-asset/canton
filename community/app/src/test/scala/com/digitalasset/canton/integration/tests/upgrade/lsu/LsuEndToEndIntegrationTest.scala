@@ -38,7 +38,7 @@ sealed trait LsuEndToEndIntegrationTest extends LsuBase {
   override protected lazy val upgradeTime: CantonTimestamp = if (useStaticTime) {
     CantonTimestamp.Epoch.plusSeconds(30)
   } else {
-    CantonTimestamp.now().plusSeconds(5)
+    CantonTimestamp.now().plusSeconds(15)
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

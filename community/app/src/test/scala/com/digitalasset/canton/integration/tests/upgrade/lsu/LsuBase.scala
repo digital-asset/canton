@@ -24,7 +24,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{DefaultNewPV, Fixture}
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.metrics.MetricValue
 import com.digitalasset.canton.metrics.MetricValue.LongPoint
@@ -234,7 +234,7 @@ private[lsu] trait LsuBase
       newSynchronizerNodes = newSynchronizerNodes,
       newOldNodesResolution = newOldNodesResolution,
       oldSynchronizerOwners = env.synchronizerOwners1,
-      newPV = newPVOverride.getOrElse(ProtocolVersion.dev),
+      newPV = newPVOverride.getOrElse(DefaultNewPV),
       // increasing the serial as well, so that the test also works when running with PV=dev
       newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.toNonNegative),
     )
@@ -322,6 +322,8 @@ private[lsu] trait LsuBase
 object LsuBase {
   import org.scalatest.OptionValues.*
   import org.scalatest.EitherValues.*
+
+  val DefaultNewPV: ProtocolVersion = ProtocolVersion.dev
 
   // Returns the number of received messages per sender
   def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] =

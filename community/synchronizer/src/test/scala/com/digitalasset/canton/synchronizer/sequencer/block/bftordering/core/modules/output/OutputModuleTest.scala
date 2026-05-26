@@ -1147,7 +1147,7 @@ class OutputModuleTest
             verify(consensusRef, times(1)).asyncSend(
               Consensus.NewEpochTopology(
                 secondEpochNumber,
-                Membership(BftNodeId("node1"), newOrderingTopology, Seq.empty),
+                Membership.forTesting(BftNodeId("node1"), newOrderingTopology),
                 any[CryptoProvider[ProgrammableUnitTestEnv]],
               )
             )(any[TraceContext], any[MetricsContext])

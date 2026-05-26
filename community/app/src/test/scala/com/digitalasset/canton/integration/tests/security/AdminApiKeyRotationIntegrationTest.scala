@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.{AuthServiceConfig, PositiveFiniteDuration
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -27,6 +28,13 @@ trait AdminApiKeyRotationIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with SecurityTestSuite {
+
+  // TODO (i#32650): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   private val jwtSecret = NonEmptyString.tryCreate("pyjama")
   private val adminToken = CantonAdminToken.create(new SymbolicPureCrypto())

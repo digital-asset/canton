@@ -56,6 +56,7 @@ import com.digitalasset.canton.{BaseTest, ReassignmentCounter, config}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder
+import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateSerializationVersion
 import com.digitalasset.daml.lf.transaction.{CreationTime, SerializationVersion}
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
@@ -215,6 +216,7 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
       signatories = Set(signatory.toLf),
       observers = Set(observer.toLf),
       packageName = packageName,
+      version = CreateSerializationVersion.Version(LfSerializationVersion.V1),
     )
 
     val contractSalt = ContractSalt.createV1(pureCrypto)(

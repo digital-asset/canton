@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
@@ -94,7 +95,7 @@ final case class ViewParticipantData private (
     with HasProtocolVersionedWrapper[ViewParticipantData]
     with ProtocolVersionedMemoizedEvidence {
   {
-    def requireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
+    def tryRequireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
       val set = scala.collection.mutable.Set[A]()
       vals.foreach { v =>
         if (set(v)) throw InvalidViewParticipantData(message(v))
@@ -103,7 +104,7 @@ final case class ViewParticipantData private (
     }
 
     val createdIds = createdCore.map(_.contract.contractId)
-    requireDistinct(createdIds) { id =>
+    tryRequireDistinct(createdIds) { id =>
       val indices = createdIds.zipWithIndex.collect {
         case (createdId, idx) if createdId == id => idx
       }
@@ -143,7 +144,7 @@ final case class ViewParticipantData private (
     }
   }
 
-  private def checkLegacyResolutionsReferenceInputContracts(): Unit = {
+  private def tryCheckLegacyResolutionsReferenceInputContracts(): Unit = {
     val keyInconsistencies = keyResolution.filter(legacyIsAssignedKeyInconsistent)
     if (keyInconsistencies.nonEmpty) {
       throw InvalidViewParticipantData(
@@ -157,7 +158,7 @@ final case class ViewParticipantData private (
       ProtocolVersion.v34
     )
   ) {
-    checkLegacyResolutionsReferenceInputContracts()
+    tryCheckLegacyResolutionsReferenceInputContracts()
   }
 
   val rootAction: RootAction =
@@ -353,16 +354,22 @@ final case class ViewParticipantData private (
 }
 
 object ViewParticipantData
-    extends VersioningCompanionContextMemoization[ViewParticipantData, HashOps] {
+    extends VersioningCompanionContextMemoization[ViewParticipantData, (HashOps, ProtocolVersion)] {
   override val name: String = "ViewParticipantData"
+
+  // Inline context helper
+  private def ic[C1, C2, P, R](f: (C1, C2, P) => R)(c: (C1, C2), p: P): R = {
+    val (c1, c2) = c
+    f(c1, c2, p)
+  }
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ViewParticipantData)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoized(_)(ic(fromProtoV30)),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.ViewParticipantData)(
-      supportedProtoVersionMemoized(_)(fromProtoV31),
+      supportedProtoVersionMemoized(_)(ic(fromProtoV31)),
       _.toProtoV31,
     ),
   )
@@ -384,29 +391,64 @@ object ViewParticipantData
     *   [[com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription]] or
     *   [[com.digitalasset.canton.data.ActionDescription.FetchActionDescription]] and the input
     *   contract is not in [[ViewParticipantData.coreInputs]]
+    *
     * @throws com.digitalasset.canton.serialization.SerializationCheckFailed
     *   if this instance cannot be serialized
+    *
+    * @throws InvalidSerializationVersion
+    *   if a contract serialization version is not supported by the protocol version
     */
+  @throws[InvalidViewParticipantData]
   @throws[SerializationCheckFailed[com.digitalasset.daml.lf.value.ValueCoder.EncodeError]]
-  def tryCreate(hashOps: HashOps)(
+  @throws[InvalidSerializationVersion]
+  def tryCreate(
       coreInputs: Map[LfContractId, InputContract],
       createdCore: Seq[CreatedContract],
       createdInSubviewArchivedInCore: Set[LfContractId],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
       rollbackContext: RollbackContext,
       salt: Salt,
+  )(
+      hashOps: HashOps,
       protocolVersion: ProtocolVersion,
-  ): ViewParticipantData =
+      deserializedFrom: Option[ByteString],
+  ): ViewParticipantData = {
+
+    tryCheckMaxSerializationVersion(protocolVersion, coreInputs, createdCore)
+
     ViewParticipantData(
       coreInputs,
       createdCore,
       createdInSubviewArchivedInCore,
-      resolvedKeys,
+      keyResolution,
       actionDescription,
       rollbackContext,
       salt,
-    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
+    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), deserializedFrom)
+  }
+
+  @throws[InvalidSerializationVersion]
+  private def tryCheckMaxSerializationVersion(
+      protocolVersion: ProtocolVersion,
+      coreInputs: Map[LfContractId, InputContract],
+      createdCore: Seq[CreatedContract],
+  ): Unit = {
+    val contracts = coreInputs.values.map(_.contract) ++ createdCore.map(_.contract)
+    val maxSerializationVersion =
+      com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions
+        .maxSerializationVersionForProtocolVersion(protocolVersion)
+    val map = contracts
+      .filter(_.inst.version > maxSerializationVersion)
+      .map(c => c.contractId -> c.inst.version)
+      .toMap
+    NonEmpty.from(map).foreach { invalidContracts =>
+      throw InvalidSerializationVersion(
+        invalid = invalidContracts,
+        protocolVersion = protocolVersion,
+      )
+    }
+  }
 
   /** Creates a view participant data.
     *
@@ -436,7 +478,7 @@ object ViewParticipantData
       protocolVersion: ProtocolVersion,
   ): Either[String, ViewParticipantData] =
     returnLeftWhenInitializationFails(
-      ViewParticipantData.tryCreate(hashOps)(
+      ViewParticipantData.tryCreate(
         coreInputs,
         createdCore,
         createdInSubviewArchivedInCore,
@@ -444,8 +486,7 @@ object ViewParticipantData
         actionDescription,
         rollbackContext,
         salt,
-        protocolVersion,
-      )
+      )(hashOps, protocolVersion, None)
     )
 
   private[this] def returnLeftWhenInitializationFails[A](initialization: => A): Either[String, A] =
@@ -454,9 +495,14 @@ object ViewParticipantData
     } catch {
       case InvalidViewParticipantData(message) => Left(message)
       case SerializationCheckFailed(err) => Left(err.toString)
+      case err: InvalidSerializationVersion => Left(err.getMessage)
     }
 
-  private def fromProtoV30(hashOps: HashOps, dataP: v30.ViewParticipantData)(
+  private def fromProtoV30(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+      dataP: v30.ViewParticipantData,
+  )(
       bytes: ByteString
   ): ParsingResult[ViewParticipantData] = {
     val v30.ViewParticipantData(
@@ -473,7 +519,6 @@ object ViewParticipantData
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV30)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       resolvedKeys <- resolvedKeysP
         .traverse { rkP =>
           for {
@@ -483,7 +528,13 @@ object ViewParticipantData
           } yield (key.unversioned, key.map(_ => resolution.tryToNextGen()))
         }
         .map(_.toMap)
-      viewParticipantData <- fromProto(hashOps, resolvedKeys, actionDescription, rpv, bytes)(
+      viewParticipantData <- fromProto(
+        hashOps,
+        resolvedKeys,
+        actionDescription,
+        protocolVersion,
+        bytes,
+      )(
         saltP,
         coreInputsP,
         createdCoreP,
@@ -495,7 +546,11 @@ object ViewParticipantData
     }
   }
 
-  private def fromProtoV31(hashOps: HashOps, dataP: v31.ViewParticipantData)(
+  private def fromProtoV31(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+      dataP: v31.ViewParticipantData,
+  )(
       bytes: ByteString
   ): ParsingResult[ViewParticipantData] = {
     val v31.ViewParticipantData(
@@ -513,8 +568,13 @@ object ViewParticipantData
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-      viewParticipantData <- fromProto(hashOps, resolvedKeys.toMap, actionDescription, rpv, bytes)(
+      viewParticipantData <- fromProto(
+        hashOps,
+        resolvedKeys.toMap,
+        actionDescription,
+        protocolVersion,
+        bytes,
+      )(
         saltP,
         coreInputsP,
         createdCoreP,
@@ -528,7 +588,7 @@ object ViewParticipantData
       hashOps: HashOps,
       resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
-      rpv: RepresentativeProtocolVersion[ViewParticipantData.type],
+      protocolVersion: ProtocolVersion,
       bytes: ByteString,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
@@ -552,7 +612,7 @@ object ViewParticipantData
         .fromProtoV30(rollbackContextP)
         .leftMap(_.inField("rollbackContext"))
       viewParticipantData <- returnLeftWhenInitializationFails(
-        ViewParticipantData(
+        ViewParticipantData.tryCreate(
           coreInputs = coreInputs,
           createdCore = createdCore,
           createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSet,
@@ -560,7 +620,7 @@ object ViewParticipantData
           actionDescription = actionDescription,
           rollbackContext = rollbackContext,
           salt = salt,
-        )(hashOps, rpv, Some(bytes))
+        )(hashOps, protocolVersion, Some(bytes))
       ).leftMap(ProtoDeserializationError.OtherError.apply)
     } yield viewParticipantData
 
@@ -573,6 +633,13 @@ object ViewParticipantData
 
   /** Indicates an attempt to create an invalid [[ViewParticipantData]]. */
   final case class InvalidViewParticipantData(message: String) extends RuntimeException(message)
+
+  final case class InvalidSerializationVersion(
+      invalid: NonEmpty[Map[LfContractId, LfSerializationVersion]],
+      protocolVersion: ProtocolVersion,
+  ) extends RuntimeException(
+        s"ViewParticipantData contains contracts with serialization versions not supported by protocol version $protocolVersion: $invalid"
+      )
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting

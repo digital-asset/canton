@@ -16,7 +16,8 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.platform.{IndexComponentTest, Party}
+import com.digitalasset.canton.platform.Party
+import com.digitalasset.canton.platform.component.IndexComponentTest
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,

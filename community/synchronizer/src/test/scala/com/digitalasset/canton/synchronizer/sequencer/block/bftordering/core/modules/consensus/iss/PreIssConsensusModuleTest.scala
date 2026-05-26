@@ -192,12 +192,14 @@ class PreIssConsensusModuleTest
     new PreIssConsensusModule[ProgrammableUnitTestEnv](
       OrderingTopologyInfo(
         myId,
-        orderingTopology,
-        failingCryptoProvider,
-        Seq(myId),
+        currentTopology = orderingTopology,
+        currentCryptoProvider = failingCryptoProvider,
+        currentLeaders = Seq(myId),
+        currentBlacklistedNodes = Seq.empty,
         previousTopology = orderingTopology, // not relevant
-        failingCryptoProvider,
-        Seq(myId),
+        previousCryptoProvider = failingCryptoProvider,
+        previousLeaders = Seq(myId),
+        previousBlacklistedNodes = Seq.empty,
       ),
       epochStore,
       None,

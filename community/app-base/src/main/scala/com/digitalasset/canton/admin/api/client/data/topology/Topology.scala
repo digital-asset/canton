@@ -332,10 +332,12 @@ object ListSequencingParametersStateResult {
       value: v30.ListSequencingParametersStateResponse.Result
   ): ParsingResult[ListSequencingParametersStateResult] =
     for {
-      contextProto <- ProtoConverter.required("context", value.context)
-      context <- BaseResult.fromProtoV30(contextProto)
-      itemProto <- ProtoConverter.required("item", value.item)
-      item <- protocol.SequencingParameters.fromProtoV30(itemProto)
+      context <- ProtoConverter.parseRequired(BaseResult.fromProtoV30, "context", value.context)
+      item <- ProtoConverter.parseRequired(
+        protocol.SequencingParameters.fromProtoV30,
+        "item",
+        value.item,
+      )
     } yield ListSequencingParametersStateResult(context, SequencingParameters(item.payload))
 }
 

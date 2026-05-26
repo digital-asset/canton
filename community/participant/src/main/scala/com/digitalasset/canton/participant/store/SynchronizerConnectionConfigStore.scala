@@ -29,6 +29,7 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
@@ -101,9 +102,18 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit]
 
-  /** If no entry exists for the given psid, insert a new config. Otherwise, update the config. The
-    * `transform` method should be minimal to limit the impact of race conditions with other
-    * operations.
+  /** If no entry exists for the given psid, insert a new config. If a config is found:
+    *   - Applies the overrides if defined.
+    *   - Sets the expected psid to `psid`
+    *
+    * @param psid
+    *   Physical synchronizer id of the config
+    * @param insert
+    *   Data to be inserted if no entry is found
+    * @param overrideSequencerConnections
+    *   If defined, will replace the existing connections
+    * @param overridePredecessor
+    *   If defined, will replace de predecessor
     */
   def upsert(
       psid: PhysicalSynchronizerId,
@@ -112,7 +122,8 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
           SynchronizerConnectionConfigStore.Status,
           Option[SynchronizerPredecessor],
       ),
-      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+      overrideSequencerConnections: Option[SequencerConnections] = None,
+      overridePredecessor: Option[SynchronizerPredecessor] = None,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig]

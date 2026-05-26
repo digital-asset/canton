@@ -85,7 +85,7 @@ final case class BlacklistLeaderSelectionPolicyStateWithTopology(
     }
   }
 
-  private def selectLeaders(): SortedSet[BftNodeId] = {
+  def computeBlacklistedNodes(): Seq[BftNodeId] = {
     val config = topology.sequencingParameters.blacklistLeaderSelectionPolicyConfig
     val allBlacklistedNodes: Seq[BftNodeId] = state.blacklist
       .collect { case (node, BlacklistStatus.Blacklisted(_, epochLeftUntilNewTrial)) =>
@@ -95,16 +95,16 @@ final case class BlacklistLeaderSelectionPolicyStateWithTopology(
       .sortBy(x => x._2 -> x._1)
       .reverse
       .map(_._1)
-
-    val blacklistedNodes: Set[BftNodeId] = allBlacklistedNodes
+    allBlacklistedNodes
       .take(config.howManyCanWeBlacklist.howManyCanWeBlacklist(topology))
-      .toSet
-
-    SortedSet.from(topology.nodes.removedAll(blacklistedNodes))
+      .sorted
   }
 
   def computeLeaders(): Seq[BftNodeId] =
     rotateLeaders(selectLeaders(), epochNumber)
+
+  private def selectLeaders(): SortedSet[BftNodeId] =
+    SortedSet.from(topology.nodes.removedAll(computeBlacklistedNodes()))
 }
 
 final case class BlacklistLeaderSelectionPolicyState(
